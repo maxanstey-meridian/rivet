@@ -441,6 +441,9 @@ public static partial class ClientEmitter
                     CollectTypeRefs(arg, names);
                 }
                 break;
+            case TsType.Brand b:
+                names.Add(b.Name);
+                break;
         }
     }
 

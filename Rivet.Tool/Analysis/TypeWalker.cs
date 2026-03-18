@@ -11,6 +11,7 @@ public sealed class TypeWalker
 {
     private readonly IAssemblySymbol _sourceAssembly;
     private readonly Dictionary<string, TsTypeDefinition> _definitions = new();
+    private readonly Dictionary<string, TsType.Brand> _brands = new();
     private readonly HashSet<string> _visiting = new();
 
     public TypeWalker(IAssemblySymbol sourceAssembly)
@@ -19,6 +20,7 @@ public sealed class TypeWalker
     }
 
     public IReadOnlyDictionary<string, TsTypeDefinition> Definitions => _definitions;
+    public IReadOnlyDictionary<string, TsType.Brand> Brands => _brands;
 
     /// <summary>
     /// Finds all [RivetType]-attributed types in the compilation and walks them.
@@ -200,6 +202,15 @@ public sealed class TypeWalker
             if (namedType.TypeKind is TypeKind.Class or TypeKind.Struct
                 && SymbolEqualityComparer.Default.Equals(namedType.ContainingAssembly, _sourceAssembly))
             {
+                // Value Object convention: single property named "Value" → branded type
+                var voInner = TryGetValueObjectInner(namedType);
+                if (voInner is not null)
+                {
+                    var brand = new TsType.Brand(namedType.Name, MapType(voInner));
+                    _brands.TryAdd(namedType.Name, brand);
+                    return brand;
+                }
+
                 WalkType(namedType);
 
                 // Closed generic (e.g. PagedResult<MessageDto>) → Generic node
@@ -239,6 +250,25 @@ public sealed class TypeWalker
                 _ => null,
             }
         };
+    }
+
+    /// <summary>
+    /// Detects Value Object convention: a record with exactly one non-implicit
+    /// property named "Value". Returns the inner type symbol, or null.
+    /// </summary>
+    private static ITypeSymbol? TryGetValueObjectInner(INamedTypeSymbol symbol)
+    {
+        var props = symbol.GetMembers()
+            .OfType<IPropertySymbol>()
+            .Where(p => !p.IsStatic && !p.IsIndexer && !p.IsImplicitlyDeclared)
+            .ToList();
+
+        if (props.Count == 1 && props[0].Name == "Value")
+        {
+            return props[0].Type;
+        }
+
+        return null;
     }
 
     private static bool IsCollectionType(INamedTypeSymbol symbol)

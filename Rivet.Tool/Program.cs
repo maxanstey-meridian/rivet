@@ -20,6 +20,12 @@ static async Task<int> Run(string[] args)
 
     var (projectPath, outputDir, mode, files) = parsed.Value;
 
+    if (mode == "compile" && outputDir is null)
+    {
+        Console.Error.WriteLine("Error: --compile requires --output <dir>.");
+        return 1;
+    }
+
     Compilation compilation;
 
     if (projectPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
@@ -35,7 +41,8 @@ static async Task<int> Run(string[] args)
     var endpoints = EndpointWalker.Walk(compilation, walker);
     var definitions = walker.Definitions.Values.ToList();
 
-    var typesOutput = TypeEmitter.Emit(definitions);
+    var brands = walker.Brands.Values.ToList();
+    var typesOutput = TypeEmitter.Emit(definitions, brands);
     var validatorsOutput = endpoints.Count > 0
         ? ValidatorEmitter.Emit(endpoints)
         : null;
@@ -133,11 +140,6 @@ static async Task<int> Run(string[] args)
             Console.Write(validatorsOutput);
         }
 
-        if (mode == "compile")
-        {
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("Note: --output is required for compile mode.");
-        }
     }
 
     return 0;

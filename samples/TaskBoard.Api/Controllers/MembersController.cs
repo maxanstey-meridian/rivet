@@ -1,13 +1,14 @@
 using Microsoft.AspNetCore.Mvc;
 using Rivet;
+using TaskBoard.Domain;
 
 namespace TaskBoard.Controllers;
 
 [RivetType]
-public sealed record MemberDto(Guid Id, string Name, string Email, string Role);
+public sealed record MemberDto(Guid Id, string Name, Email Email, string Role);
 
 [RivetType]
-public sealed record InviteMemberRequest(string Email, string Role);
+public sealed record InviteMemberRequest(Email Email, string Role);
 
 [RivetType]
 public sealed record InviteMemberResponse(Guid Id);

@@ -55,6 +55,7 @@ generated/rivet/
 | `enum` (with `JsonStringEnumConverter`)                   | `"A" \| "B" \| "C"`                   |
 | `PagedResult<T>` (generic record)                         | `PagedResult<T>`                      |
 | `JsonElement`, `JsonNode`                                 | `unknown`                             |
+| `Email(string Value)` (single-property VO)                | `string & { readonly __brand: "Email" }` |
 
 ## Dependencies
 
@@ -193,7 +194,8 @@ and a generic `PagedResult<T>`.
 samples/TaskBoard.Api/
 ├── Domain/
 │   ├── Priority.cs              # Priority, WorkItemStatus enums
-│   └── Label.cs                 # Label value object
+│   ├── Label.cs                 # Label record (multi-property, emits as object)
+│   └── ValueObjects.cs          # Email, TaskId VOs (single Value property → branded types)
 ├── Application/
 │   ├── Ports/ITaskRepository.cs
 │   ├── CreateTask/              # Command + Result colocated with use case
@@ -249,6 +251,26 @@ handlers and interceptors.
 
 For typed error handling, endpoints with multiple `[ProducesResponseType]` declarations emit a result discriminated
 union type. Set `unwrap: false` globally or per-call to get the full typed result instead of throwing.
+
+## Value objects
+
+Records with a single property named `Value` are detected as value objects and emitted as branded types:
+
+```csharp
+// C# — domain layer, no Rivet attribute needed
+public sealed record Email(string Value);
+public sealed record Uprn(string Value);
+public sealed record Quantity(int Value);
+```
+
+```typescript
+// TypeScript — branded primitives, nominal type safety
+export type Email = string & { readonly __brand: "Email" };
+export type Uprn = string & { readonly __brand: "Uprn" };
+export type Quantity = number & { readonly __brand: "Quantity" };
+```
+
+Multi-property records are emitted as regular object types: `Money(decimal Amount, string Currency)` → `{ amount: number; currency: string }`.
 
 ## Limitations
 
