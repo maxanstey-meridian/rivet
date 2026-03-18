@@ -60,6 +60,7 @@ public static class CompilationHelper
                 public ProducesResponseTypeAttribute(int statusCode) { }
             }
             public interface IActionResult { }
+            public class ActionResult<TValue> { }
         }
         """;
 

@@ -279,7 +279,14 @@ public static partial class EndpointWalker
             return null;
         }
 
-        // If it's IActionResult, we can't infer the type — skip
+        // Unwrap ActionResult<T> → T
+        if (returnType is INamedTypeSymbol actionResult
+            && actionResult.OriginalDefinition.ToDisplayString() is "Microsoft.AspNetCore.Mvc.ActionResult<TValue>")
+        {
+            return typeWalker.MapTypePublic(actionResult.TypeArguments[0]);
+        }
+
+        // If it's IActionResult or non-generic ActionResult, we can't infer the type — skip
         var returnName = returnType.ToDisplayString();
         if (returnName is "Microsoft.AspNetCore.Mvc.IActionResult"
             or "Microsoft.AspNetCore.Mvc.ActionResult")

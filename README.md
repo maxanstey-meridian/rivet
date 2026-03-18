@@ -1,14 +1,21 @@
 # Rivet
 
-End-to-end type safety from .NET to TypeScript. Roslyn reads your C# types and endpoints directly — no OpenAPI schema in
-the middle — and emits a typed TS client with optional runtime validation at the fetch boundary.
+Your C# types are your TypeScript types. No drift, no schema, no codegen config.
 
-Two attributes, one typed client. Flat functions, not HTTP ceremony.
+Rivet reads your .NET sealed records and controller endpoints directly via Roslyn and emits typed TypeScript — both
+shared types and a typed HTTP client — with optional runtime validation at the fetch boundary.
 
-## What it solves
+Two attributes. One command. Full-stack type safety.
 
-Inspired by [tRPC](https://trpc.io) and [oRPC](https://orpc.unnoq.com), which give you end-to-end type safety when your
-server is TypeScript. Rivet gives you the same DX when your server is .NET.
+## Why
+
+[tRPC](https://trpc.io) and [oRPC](https://orpc.unnoq.com) give you end-to-end type safety when your server is
+TypeScript. Rivet gives you the same DX when your server is .NET.
+
+Unlike OpenAPI-based generators (NSwag, Kiota, Kubb), Rivet reads Roslyn's full type graph — nullable annotations,
+sealed records, string enum unions, generic type parameters — and emits strictly richer TS types than any JSON schema
+intermediary can represent. It's also not just an HTTP client generator: any C# type you mark with `[RivetType]` becomes
+a shared TypeScript type, whether or not it's used in an endpoint.
 
 ## What it produces
 
@@ -49,8 +56,8 @@ generated/rivet/
 
 **The CLI tool:**
 
-- .NET 10 SDK
-- `rivet` NuGet package (dotnet tool)
+- .NET 8+ SDK
+- `dotnet-rivet` NuGet package (dotnet tool)
 - Node.js on PATH (only if using `--compile` for typia validators)
 
 ## Quick start
@@ -62,10 +69,7 @@ generated/rivet/
 dotnet add package Rivet.Attributes
 
 # Install the CLI tool
-dotnet tool install --global rivet
-
-# Or install it into a local tool manifest
-dotnet tool install --local rivet
+dotnet tool install --global dotnet-rivet
 ```
 
 ### 2. Mark your types
@@ -218,9 +222,14 @@ compilation, and emit `.ts` files. Same model as `dotnet-ef` or `dotnet-format`.
 
 ## Controller support
 
-Rivet works with standard ASP.NET controllers returning `IActionResult`. Return types are extracted from
-`[ProducesResponseType(typeof(T), 200)]`. Controller `[Route]` prefixes are combined with method routes. Route
-constraints (`{id:guid}`) are stripped automatically.
+Rivet works with standard ASP.NET controllers. Return types are inferred from:
+
+- `[ProducesResponseType(typeof(T), 200)]` — preferred, works with `IActionResult`
+- `ActionResult<T>` — unwrapped automatically
+- `Task<T>` — for minimal API / static method endpoints
+
+Controller `[Route]` prefixes are combined with method routes. Route constraints (`{id:guid}`) are stripped
+automatically. Route params without `[FromRoute]` are matched by name from the template.
 
 Endpoints are grouped by controller into separate client files: `TasksController` → `client/tasks.ts`.
 

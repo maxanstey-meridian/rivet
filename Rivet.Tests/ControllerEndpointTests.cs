@@ -249,4 +249,33 @@ public sealed class ControllerEndpointTests
         // CancellationToken should be skipped
         Assert.DoesNotContain("ct:", client);
     }
+
+    [Fact]
+    public void Controller_ActionResultT_UnwrapsReturnType()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/items/{id}")]
+                public static Task<ActionResult<ItemDto>> Get([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var client = GenerateClient(source);
+
+        Assert.Contains("Promise<RivetResponse<ItemDto>>", client);
+    }
 }
