@@ -55,6 +55,8 @@ generated/rivet/
 | `enum` (with `JsonStringEnumConverter`)                   | `"A" \| "B" \| "C"`                   |
 | `PagedResult<T>` (generic record)                         | `PagedResult<T>`                      |
 | `JsonElement`, `JsonNode`                                 | `unknown`                             |
+| `JsonObject`                                              | `Record<string, unknown>`             |
+| `JsonArray`                                               | `unknown[]`                           |
 | `Email(string Value)` (single-property VO)                | `string & { readonly __brand: "Email" }` |
 
 ## Dependencies

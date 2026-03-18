@@ -140,4 +140,40 @@ public sealed class GenericTypeTests
 
         Assert.Contains("data: unknown | null;", result);
     }
+
+    [Fact]
+    public void JsonObject_MapsToRecord()
+    {
+        var source = """
+            using System.Text.Json.Nodes;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record BranchCase(string Label, JsonObject Condition);
+            """;
+
+        var result = Generate(source);
+
+        Assert.Contains("condition: Record<string, unknown>;", result);
+    }
+
+    [Fact]
+    public void JsonArray_MapsToUnknownArray()
+    {
+        var source = """
+            using System.Text.Json.Nodes;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record BatchRequest(string Name, JsonArray Items);
+            """;
+
+        var result = Generate(source);
+
+        Assert.Contains("items: unknown[];", result);
+    }
 }

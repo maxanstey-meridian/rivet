@@ -174,6 +174,17 @@ public sealed class TypeWalker
                 return primitive;
             }
 
+            // JsonObject → Record<string, unknown>, JsonArray → unknown[]
+            var displayName = namedType.ToDisplayString();
+            if (displayName is "System.Text.Json.Nodes.JsonObject")
+            {
+                return new TsType.Dictionary(new TsType.Primitive("unknown"));
+            }
+            if (displayName is "System.Text.Json.Nodes.JsonArray")
+            {
+                return new TsType.Array(new TsType.Primitive("unknown"));
+            }
+
             // Collections: List<T>, IEnumerable<T>, IReadOnlyList<T>, IList<T>, ICollection<T>, IReadOnlyCollection<T>
             if (IsCollectionType(namedType) && namedType.TypeArguments.Length == 1)
             {
