@@ -81,44 +81,43 @@ dotnet add package Rivet.Attributes
 dotnet tool install --global dotnet-rivet
 ```
 
-### 2. Mark your types
+### 2. Mark your endpoints
+
+`[RivetEndpoint]` is all you need. Request types (`[FromBody]`), response types (`[ProducesResponseType]`), and
+everything they reference (enums, VOs, nested records) are all discovered transitively — no `[RivetType]` required.
+
+`[RivetType]` is only needed for types that aren't reachable from any endpoint (e.g. a shared DTO you want to emit
+without an endpoint).
+
+### 3. Example
 
 ```csharp
-using Rivet;
+// Domain — no attributes needed, discovered transitively
+public enum Priority { Low, Medium, High, Critical }
+public sealed record Email(string Value);  // VO → branded type in TS
 
-// Application-layer types get [RivetType]
-[RivetType]
-public sealed record CreateTaskCommand(
-    string Title,
-    string? Description,
-    Priority Priority,
-    Guid? AssigneeId,
-    List<string> LabelNames);
-
-[RivetType]
+// DTOs — no [RivetType] needed, discovered via the endpoint
+public sealed record CreateTaskCommand(string Title, Priority Priority, Email Author);
 public sealed record CreateTaskResult(Guid Id, DateTime CreatedAt);
 
-// Domain types are discovered transitively — no attribute needed
-public enum Priority { Low, Medium, High, Critical }
-```
-
-### 3. Mark your endpoints
-
-```csharp
-[RivetEndpoint]
-[HttpPost]
-[ProducesResponseType(typeof(CreateTaskResult), StatusCodes.Status201Created)]
-[ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-public async Task<IActionResult> Create(
-    [FromBody] CreateTaskCommand command,
-    CancellationToken ct)
+// Endpoint — this is the only attribute you need
+[Route("api/tasks")]
+public sealed class TasksController : ControllerBase
 {
-    // ...
+    [RivetEndpoint]
+    [HttpPost]
+    [ProducesResponseType(typeof(CreateTaskResult), StatusCodes.Status201Created)]
+    public async Task<IActionResult> Create(
+        [FromBody] CreateTaskCommand command,
+        CancellationToken ct)
+    {
+        // ...
+    }
 }
 ```
 
-`[RivetEndpoint]` is a marker only. HTTP method, route, and return type are read from ASP.NET's own attributes. Route
-params are matched by name from the template. `CancellationToken` and DI params are skipped automatically.
+HTTP method, route, and return type are read from ASP.NET's own attributes. Route params are matched by name from the
+template. `CancellationToken` and DI params are skipped automatically.
 
 ### 4. Generate
 
