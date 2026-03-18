@@ -118,6 +118,29 @@ public sealed class TasksController : ControllerBase
 }
 ```
 
+Generates:
+
+```typescript
+// types.ts
+export type Email = string & { readonly __brand: "Email" };
+export type Priority = "Low" | "Medium" | "High" | "Critical";
+
+export type CreateTaskCommand = {
+  title: string;
+  priority: Priority;
+  author: Email;
+};
+
+export type CreateTaskResult = {
+  id: string;
+  createdAt: string;
+};
+
+// client/tasks.ts
+export const create = (command: CreateTaskCommand): Promise<CreateTaskResult> =>
+  rivetFetch<CreateTaskResult>("POST", `/api/tasks`, { body: command });
+```
+
 HTTP method, route, and return type are read from ASP.NET's own attributes. Route params are matched by name from the
 template. `CancellationToken` and DI params are skipped automatically.
 
