@@ -179,6 +179,13 @@ public static partial class ClientEmitter
             case TsType.Dictionary d:
                 CollectTypeRefs(d.Value, names);
                 break;
+            case TsType.Generic g:
+                names.Add(g.Name);
+                foreach (var arg in g.TypeArguments)
+                {
+                    CollectTypeRefs(arg, names);
+                }
+                break;
         }
     }
 

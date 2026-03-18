@@ -29,7 +29,10 @@ public static class TypeEmitter
 
     private static void EmitDefinition(StringBuilder sb, TsTypeDefinition definition)
     {
-        sb.AppendLine($"export type {definition.Name} = {{");
+        var typeParams = definition.TypeParameters.Count > 0
+            ? $"<{string.Join(", ", definition.TypeParameters)}>"
+            : "";
+        sb.AppendLine($"export type {definition.Name}{typeParams} = {{");
 
         foreach (var prop in definition.Properties)
         {
@@ -56,6 +59,7 @@ public static class TypeEmitter
             TsType.Dictionary d => $"Record<string, {EmitType(d.Value)}>",
             TsType.StringUnion u => string.Join(" | ", u.Members.Select(m => $"\"{m}\"")),
             TsType.TypeRef r => r.Name,
+            TsType.Generic g => $"{g.Name}<{string.Join(", ", g.TypeArguments.Select(EmitType))}>",
             _ => "unknown",
         };
 

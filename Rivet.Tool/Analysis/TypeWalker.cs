@@ -88,10 +88,13 @@ public sealed class TypeWalker
     /// <summary>
     /// Walks a named type, producing a TsTypeDefinition and recursively
     /// discovering any referenced types (records, enums).
+    /// For generic types, walks the unbound (original) definition.
     /// </summary>
     private void WalkType(INamedTypeSymbol symbol)
     {
-        var name = symbol.Name;
+        // For closed generics like PagedResult<MessageDto>, walk the open definition
+        var definition = symbol.IsGenericType ? symbol.OriginalDefinition : symbol;
+        var name = definition.Name;
 
         if (_definitions.ContainsKey(name) || _visiting.Contains(name))
         {
@@ -99,16 +102,21 @@ public sealed class TypeWalker
         }
 
         // Enums are emitted inline as string unions, not as separate definitions
-        if (symbol.TypeKind == TypeKind.Enum)
+        if (definition.TypeKind == TypeKind.Enum)
         {
             return;
         }
 
         _visiting.Add(name);
 
+        // Extract type parameter names (e.g. "T", "TItem")
+        var typeParams = definition.TypeParameters
+            .Select(tp => tp.Name)
+            .ToList();
+
         var properties = new List<TsPropertyDefinition>();
 
-        foreach (var member in symbol.GetMembers().OfType<IPropertySymbol>())
+        foreach (var member in definition.GetMembers().OfType<IPropertySymbol>())
         {
             if (member.IsStatic || member.IsIndexer || member.IsImplicitlyDeclared)
             {
@@ -123,11 +131,17 @@ public sealed class TypeWalker
         }
 
         _visiting.Remove(name);
-        _definitions[name] = new TsTypeDefinition(name, properties);
+        _definitions[name] = new TsTypeDefinition(name, typeParams, properties);
     }
 
     private TsType MapType(ITypeSymbol symbol)
     {
+        // Type parameter (e.g. T in PagedResult<T>) → emit as-is
+        if (symbol is ITypeParameterSymbol typeParam)
+        {
+            return new TsType.Primitive(typeParam.Name);
+        }
+
         // Nullable value type: int? → Nullable<int>
         if (symbol is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
         {
@@ -182,11 +196,19 @@ public sealed class TypeWalker
                 return new TsType.StringUnion(members);
             }
 
-            // Named record/class from source assembly → walk transitively, emit TypeRef
+            // Named record/class from source assembly → walk transitively
             if (namedType.TypeKind is TypeKind.Class or TypeKind.Struct
                 && SymbolEqualityComparer.Default.Equals(namedType.ContainingAssembly, _sourceAssembly))
             {
                 WalkType(namedType);
+
+                // Closed generic (e.g. PagedResult<MessageDto>) → Generic node
+                if (namedType.IsGenericType && !namedType.IsUnboundGenericType)
+                {
+                    var tsArgs = namedType.TypeArguments.Select(MapType).ToList();
+                    return new TsType.Generic(namedType.Name, tsArgs);
+                }
+
                 return new TsType.TypeRef(namedType.Name);
             }
         }
@@ -212,6 +234,8 @@ public sealed class TypeWalker
                 "System.DateTime" => new TsType.Primitive("string"),
                 "System.DateTimeOffset" => new TsType.Primitive("string"),
                 "System.DateOnly" => new TsType.Primitive("string"),
+                "System.Text.Json.JsonElement" => new TsType.Primitive("unknown"),
+                "System.Text.Json.Nodes.JsonNode" => new TsType.Primitive("unknown"),
                 _ => null,
             }
         };

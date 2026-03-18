@@ -93,6 +93,7 @@ public static class CompilationHelper
             MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
             MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Runtime.dll")),
             MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Collections.dll")),
+            MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Text.Json.dll")),
             MetadataReference.CreateFromFile(typeof(RivetTypeAttribute).Assembly.Location),
         ];
     }

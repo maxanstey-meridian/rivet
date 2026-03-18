@@ -25,4 +25,7 @@ public abstract record TsType
 
     /// <summary>Reference to another emitted type by name.</summary>
     public sealed record TypeRef(string Name) : TsType;
+
+    /// <summary>Generic type application: Foo&lt;T, U&gt;.</summary>
+    public sealed record Generic(string Name, IReadOnlyList<TsType> TypeArguments) : TsType;
 }
