@@ -12,7 +12,7 @@ server is TypeScript. Rivet gives you the same DX when your server is .NET.
 
 ## What it produces
 
-```
+``` 
 generated/rivet/
 ├── types.ts                  # export type Foo = { ... }
 ├── rivet.ts                  # configureRivet() + rivetFetch base
@@ -111,13 +111,13 @@ dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet
 ### 5. Use
 
 ```typescript
-import { configureRivet } from "~/generated/rivet/rivet";
+import {configureRivet} from "~/generated/rivet/rivet";
 import * as messages from "~/generated/rivet/client/messages";
 
 // Configure once
 configureRivet({
   baseUrl: "http://localhost:5000",
-  headers: () => ({ Authorization: `Bearer ${token}` }),
+  headers: () => ({Authorization: `Bearer ${token}`}),
 });
 
 // Fully typed — params, body, and return type
@@ -137,6 +137,22 @@ dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --compi
 This compiles [typia](https://typia.io) validators and re-emits the client with runtime type assertions at every fetch
 boundary. If the server sends unexpected data, you get a clear error instead of a silent `undefined` three components
 later.
+
+## Try it
+
+The repo includes a sample ASP.NET project at `samples/TaskBoard.Api/` — two controllers, domain enums, a generic
+`PagedResult<T>`, and application-layer commands. Run Rivet against it:
+
+```bash
+# Preview to stdout
+dotnet run --project Rivet.Tool -- --project samples/TaskBoard.Api/TaskBoard.Api.csproj
+
+# Write to disk
+dotnet run --project Rivet.Tool -- --project samples/TaskBoard.Api/TaskBoard.Api.csproj --output /tmp/rivet-output
+
+# Write to disk + compile typia validators (requires node)
+dotnet run --project Rivet.Tool -- --project samples/TaskBoard.Api/TaskBoard.Api.csproj --output /tmp/rivet-output --compile
+```
 
 ## How it works
 
