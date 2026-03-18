@@ -38,6 +38,7 @@ public static partial class ClientEmitter
               baseUrl: string;
               headers?: () => Record<string, string> | Promise<Record<string, string>>;
               fetch?: typeof fetch;
+              onError?: (error: RivetError) => never;
             };
 
             export class RivetError extends Error {
@@ -46,7 +47,7 @@ public static partial class ClientEmitter
                 public readonly path: string,
                 public readonly status: number,
                 public readonly response: Response,
-                public readonly body: string,
+                public readonly body: unknown,
                 options?: ErrorOptions,
               ) {
                 super(`Rivet: ${method} ${path} returned ${status}`, options);
@@ -58,6 +59,16 @@ public static partial class ClientEmitter
 
             export const configureRivet = (config: RivetConfig): void => {
               _config = config;
+            };
+
+            const parseBody = async (res: Response): Promise<unknown> => {
+              const text = await res.text().catch(() => "");
+              if (!text) return undefined;
+              const ct = res.headers.get("content-type") ?? "";
+              if (ct.includes("application/json")) {
+                try { return JSON.parse(text); } catch { return text; }
+              }
+              return text;
             };
 
             export const rivetFetch = async <T>(
@@ -87,13 +98,17 @@ public static partial class ClientEmitter
                   body: options?.body ? (isFormData ? options.body as BodyInit : JSON.stringify(options.body)) : undefined,
                 });
               } catch (err) {
-                throw new RivetError(method, path, 0, undefined as unknown as Response, "", { cause: err });
+                const error = new RivetError(method, path, 0, undefined as unknown as Response, undefined, { cause: err });
+                if (_config.onError) _config.onError(error);
+                throw error;
               }
               if (!res.ok) {
-                const body = await res.text().catch(() => "");
-                throw new RivetError(method, path, res.status, res, body, {
+                const body = await parseBody(res);
+                const error = new RivetError(method, path, res.status, res, body, {
                   cause: new Error(`HTTP ${res.status}`),
                 });
+                if (_config.onError) _config.onError(error);
+                throw error;
               }
               if (res.status === 204) {
                 return undefined as T;

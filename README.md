@@ -223,8 +223,53 @@ Endpoints are grouped by controller into separate client files: `TasksController
 ## Error handling
 
 Every endpoint function returns `Promise<T>` directly. Non-2xx responses throw a `RivetError` with `status`,
-`response`, `body`, and `cause`. This makes the generated client a drop-in replacement for hand-written fetch wrappers
-— no `.data` unwrapping needed.
+`response`, `body` (parsed JSON when `content-type` is `application/json`, raw string otherwise), and `cause`.
+
+```typescript
+import { RivetError } from "~/generated/rivet/rivet";
+
+try {
+  await tasks.create({ title: "" });
+} catch (err) {
+  if (err instanceof RivetError) {
+    err.status;        // 422
+    err.body?.message; // "Title is required" (parsed from JSON response)
+    err.body?.code;    // "VALIDATION_ERROR"
+  }
+}
+```
+
+### Custom error handling
+
+Use `onError` to intercept errors before they're thrown — useful for remapping to your own error class or triggering
+side effects like session expiry:
+
+```typescript
+configureRivet({
+  baseUrl: "...",
+  onError: (err) => {
+    if (err.status === 401) onSessionExpired();
+    throw new MyApiError(err.status, err.body);
+  },
+});
+```
+
+### Custom fetch
+
+The `fetch` config option accepts any `typeof fetch` — use it for credentials, auth retry, request deduplication:
+
+```typescript
+const authFetch: typeof fetch = async (input, init) => {
+  const res = await fetch(input, { ...init, credentials: "include" });
+  if (res.status === 401) {
+    await refreshToken();
+    return fetch(input, { ...init, credentials: "include" });
+  }
+  return res;
+};
+
+configureRivet({ baseUrl: "...", fetch: authFetch });
+```
 
 ## Value objects
 
