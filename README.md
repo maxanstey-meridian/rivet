@@ -30,7 +30,7 @@ types as a byproduct of endpoint schemas. Rivet inverts this — the types are t
 ```
 generated/rivet/
 ├── types.ts                  # export type Foo = { ... }
-├── rivet.ts                  # configureRivet(), rivetFetch, RivetError, unwrap
+├── rivet.ts                  # configureRivet(), rivetFetch, RivetError
 ├── client/
 │   ├── tasks.ts              # export const list = () => rivetFetch(...)
 │   └── members.ts            # one file per controller
@@ -128,7 +128,7 @@ dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet
 ### 5. Use
 
 ```typescript
-import { configureRivet, unwrap } from "~/generated/rivet/rivet";
+import { configureRivet } from "~/generated/rivet/rivet";
 import * as tasks from "~/generated/rivet/client/tasks";
 
 // Configure once
@@ -137,43 +137,19 @@ configureRivet({
   headers: () => ({ Authorization: `Bearer ${token}` }),
 });
 
-// Default mode (unwrap: true) — throws RivetError on non-2xx
+// Returns T directly — throws RivetError on non-2xx
 const result = await tasks.create({
   title: "Fix the thing",
   priority: "High",
   labelNames: ["bug"],
 });
-console.log(result.data.id); // CreateTaskResult
+console.log(result.id); // CreateTaskResult
 
-// Or use the unwrap helper for a one-liner
-const task = unwrap(await tasks.get(id));
+const task = await tasks.get(id);
+console.log(task.title); // string
 ```
 
-### 6. Typed error responses
-
-Endpoints with multiple `[ProducesResponseType]` emit a result discriminated union:
-
-```typescript
-// Generated automatically from [ProducesResponseType] attributes
-export type GetResult =
-  | { status: 200; data: TaskDetailDto; response: Response }
-  | { status: 404; data: void; response: Response };
-```
-
-Opt out of unwrap per-call or globally to use the typed result:
-
-```typescript
-// Per-call
-const result = await tasks.get(id, { unwrap: false });
-if (result.status === 200) {
-  result.data.title // TaskDetailDto — fully narrowed
-}
-
-// Or globally
-configureRivet({ baseUrl: "...", unwrap: false });
-```
-
-### 7. Optional: runtime validation
+### 6. Optional: runtime validation
 
 ```bash
 dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --compile
@@ -244,12 +220,9 @@ Endpoints are grouped by controller into separate client files: `TasksController
 
 ## Error handling
 
-Every endpoint function returns `Promise<RivetResponse<T>>`. By default (`unwrap: true`), non-2xx responses throw a
-`RivetError` with `status`, `response`, `body`, and `cause` (the underlying fetch error). This works with global error
-handlers and interceptors.
-
-For typed error handling, endpoints with multiple `[ProducesResponseType]` declarations emit a result discriminated
-union type. Set `unwrap: false` globally or per-call to get the full typed result instead of throwing.
+Every endpoint function returns `Promise<T>` directly. Non-2xx responses throw a `RivetError` with `status`,
+`response`, `body`, and `cause`. This makes the generated client a drop-in replacement for hand-written fetch wrappers
+— no `.data` unwrapping needed.
 
 ## Value objects
 

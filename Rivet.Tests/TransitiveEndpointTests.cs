@@ -56,7 +56,7 @@ public sealed class TransitiveEndpointTests
 
         // Client should reference them
         Assert.Contains("request: CreateItemRequest", client);
-        Assert.Contains("Promise<RivetResponse<ItemDto>>", client);
+        Assert.Contains("Promise<ItemDto>", client);
     }
 
     [Fact]

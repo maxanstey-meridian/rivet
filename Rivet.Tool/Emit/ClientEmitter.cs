@@ -38,10 +38,7 @@ public static partial class ClientEmitter
               baseUrl: string;
               headers?: () => Record<string, string> | Promise<Record<string, string>>;
               fetch?: typeof fetch;
-              unwrap?: boolean;
             };
-
-            export type RivetResponse<T> = { status: number; data: T; response: Response };
 
             export class RivetError extends Error {
               constructor(
@@ -57,24 +54,17 @@ public static partial class ClientEmitter
               }
             }
 
-            export const unwrap = <T>(result: RivetResponse<T>): T => {
-              if (result.status >= 200 && result.status < 300) {
-                return result.data;
-              }
-              throw new RivetError("", "", result.status, result.response, JSON.stringify(result.data));
-            };
-
-            let _config: RivetConfig = { baseUrl: "", unwrap: true };
+            let _config: RivetConfig = { baseUrl: "" };
 
             export const configureRivet = (config: RivetConfig): void => {
-              _config = { unwrap: true, ...config };
+              _config = config;
             };
 
             export const rivetFetch = async <T>(
               method: string,
               path: string,
-              options?: { body?: unknown; query?: Record<string, string>; unwrap?: boolean },
-            ): Promise<RivetResponse<T>> => {
+              options?: { body?: unknown; query?: Record<string, string> },
+            ): Promise<T> => {
               const url = new URL(`${_config.baseUrl}${path}`);
               if (options?.query) {
                 for (const [k, v] of Object.entries(options.query)) {
@@ -98,16 +88,16 @@ public static partial class ClientEmitter
               } catch (err) {
                 throw new RivetError(method, path, 0, undefined as unknown as Response, "", { cause: err });
               }
-              const shouldUnwrap = options?.unwrap ?? _config.unwrap ?? true;
-              const data: T = res.status === 204
-                ? (undefined as T)
-                : await res.json();
-              if (shouldUnwrap && !res.ok) {
-                throw new RivetError(method, path, res.status, res, JSON.stringify(data), {
+              if (!res.ok) {
+                const body = await res.text().catch(() => "");
+                throw new RivetError(method, path, res.status, res, body, {
                   cause: new Error(`HTTP ${res.status}`),
                 });
               }
-              return { status: res.status, data, response: res };
+              if (res.status === 204) {
+                return undefined as T;
+              }
+              return (await res.json()) as T;
             };
             """);
 
@@ -127,7 +117,7 @@ public static partial class ClientEmitter
         sb.AppendLine();
 
         // Import rivetFetch + types from shared module
-        sb.AppendLine("import { rivetFetch, type RivetResponse } from \"../rivet.js\";");
+        sb.AppendLine("import { rivetFetch } from \"../rivet.js\";");
 
         // Import validator assertions from build output
         if (validated)
@@ -150,12 +140,6 @@ public static partial class ClientEmitter
         if (referencedTypes.Count > 0)
         {
             sb.AppendLine($"import type {{ {string.Join(", ", referencedTypes.Order())} }} from \"../types.js\";");
-        }
-
-        // Emit result DU types for endpoints with multiple response types
-        foreach (var endpoint in endpoints)
-        {
-            EmitResultType(sb, endpoint);
         }
 
         // Emit each endpoint function
@@ -279,33 +263,6 @@ public static partial class ClientEmitter
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Emits a result DU type if the endpoint has multiple ProducesResponseType declarations.
-    /// </summary>
-    private static void EmitResultType(StringBuilder sb, TsEndpointDefinition endpoint)
-    {
-        if (endpoint.Responses.Count < 2)
-        {
-            return;
-        }
-
-        var typeName = ToPascalCase(SafeFunctionName(endpoint.Name)) + "Result";
-
-        sb.AppendLine();
-        sb.Append($"export type {typeName} =");
-
-        foreach (var response in endpoint.Responses)
-        {
-            var dataType = response.DataType is not null
-                ? TypeEmitter.EmitTypeString(response.DataType)
-                : "void";
-            sb.AppendLine();
-            sb.Append($"  | {{ status: {response.StatusCode}; data: {dataType}; response: Response }}");
-        }
-
-        sb.AppendLine(";");
-    }
-
     private static void EmitEndpoint(StringBuilder sb, TsEndpointDefinition endpoint, bool validated)
     {
         var funcName = SafeFunctionName(endpoint.Name);
@@ -347,15 +304,14 @@ public static partial class ClientEmitter
         if (validated && endpoint.ReturnType is not null)
         {
             var assertName = ValidatorEmitter.GetAssertName(endpoint.ReturnType);
-            sb.AppendLine($"export const {funcName} = async ({paramsStr}): Promise<RivetResponse<{successType}>> => {{");
-            sb.AppendLine($"  const result = await rivetFetch<{fetchGeneric}>(\"{endpoint.HttpMethod}\", `{route}`{optionsStr});");
-            sb.AppendLine($"  result.data = {assertName}(result.data);");
-            sb.AppendLine("  return result;");
+            sb.AppendLine($"export const {funcName} = async ({paramsStr}): Promise<{successType}> => {{");
+            sb.AppendLine($"  const data = await rivetFetch<{fetchGeneric}>(\"{endpoint.HttpMethod}\", `{route}`{optionsStr});");
+            sb.AppendLine($"  return {assertName}(data);");
             sb.AppendLine("};");
         }
         else
         {
-            sb.AppendLine($"export const {funcName} = ({paramsStr}): Promise<RivetResponse<{successType}>> =>");
+            sb.AppendLine($"export const {funcName} = ({paramsStr}): Promise<{successType}> =>");
             sb.AppendLine($"  rivetFetch<{fetchGeneric}>(\"{endpoint.HttpMethod}\", `{route}`{optionsStr});");
         }
     }
