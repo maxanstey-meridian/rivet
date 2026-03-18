@@ -41,6 +41,12 @@ public static class TypeEmitter
         sb.AppendLine("};");
     }
 
+    /// <summary>
+    /// Renders a TsType to its TypeScript string representation.
+    /// Used by both TypeEmitter and ClientEmitter.
+    /// </summary>
+    public static string EmitTypeString(TsType type) => EmitType(type);
+
     private static string EmitType(TsType type) =>
         type switch
         {

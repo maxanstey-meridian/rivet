@@ -13,7 +13,7 @@ public sealed class TypeWalker
     private readonly Dictionary<string, TsTypeDefinition> _definitions = new();
     private readonly HashSet<string> _visiting = new();
 
-    private TypeWalker(IAssemblySymbol sourceAssembly)
+    public TypeWalker(IAssemblySymbol sourceAssembly)
     {
         _sourceAssembly = sourceAssembly;
     }
@@ -22,15 +22,26 @@ public sealed class TypeWalker
 
     /// <summary>
     /// Finds all [RivetType]-attributed types in the compilation and walks them.
+    /// Returns the definitions collected so far.
     /// </summary>
     public static IReadOnlyList<TsTypeDefinition> Walk(Compilation compilation)
+    {
+        var walker = Create(compilation);
+        return [.. walker._definitions.Values];
+    }
+
+    /// <summary>
+    /// Creates a walker and discovers [RivetType]-attributed types.
+    /// Returns the walker instance so endpoint analysis can share it.
+    /// </summary>
+    public static TypeWalker Create(Compilation compilation)
     {
         var walker = new TypeWalker(compilation.Assembly);
         var attributeSymbol = compilation.GetTypeByMetadataName("Rivet.RivetTypeAttribute");
 
         if (attributeSymbol is null)
         {
-            return [];
+            return walker;
         }
 
         var attributedTypes = FindAttributedTypes(compilation, attributeSymbol);
@@ -40,8 +51,14 @@ public sealed class TypeWalker
             walker.WalkType(type);
         }
 
-        return [.. walker._definitions.Values];
+        return walker;
     }
+
+    /// <summary>
+    /// Maps a Roslyn type symbol to its TsType representation.
+    /// Used by EndpointWalker for parameter and return types.
+    /// </summary>
+    public TsType MapTypePublic(ITypeSymbol symbol) => MapType(symbol);
 
     private static IEnumerable<INamedTypeSymbol> FindAttributedTypes(
         Compilation compilation,

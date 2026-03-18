@@ -11,15 +11,60 @@ public static class CompilationHelper
     private static readonly MetadataReference[] CoreReferences = GetCoreReferences();
 
     /// <summary>
+    /// Stub ASP.NET MVC attributes so endpoint tests compile without referencing
+    /// the full Microsoft.AspNetCore.Mvc package.
+    /// </summary>
+    private const string AspNetStubs = """
+        namespace Microsoft.AspNetCore.Mvc
+        {
+            [System.AttributeUsage(System.AttributeTargets.Method)]
+            public class HttpGetAttribute : System.Attribute
+            {
+                public HttpGetAttribute(string template) { }
+            }
+            [System.AttributeUsage(System.AttributeTargets.Method)]
+            public class HttpPostAttribute : System.Attribute
+            {
+                public HttpPostAttribute(string template) { }
+            }
+            [System.AttributeUsage(System.AttributeTargets.Method)]
+            public class HttpPutAttribute : System.Attribute
+            {
+                public HttpPutAttribute(string template) { }
+            }
+            [System.AttributeUsage(System.AttributeTargets.Method)]
+            public class HttpDeleteAttribute : System.Attribute
+            {
+                public HttpDeleteAttribute(string template) { }
+            }
+            [System.AttributeUsage(System.AttributeTargets.Method)]
+            public class HttpPatchAttribute : System.Attribute
+            {
+                public HttpPatchAttribute(string template) { }
+            }
+            [System.AttributeUsage(System.AttributeTargets.Parameter)]
+            public class FromBodyAttribute : System.Attribute { }
+            [System.AttributeUsage(System.AttributeTargets.Parameter)]
+            public class FromQueryAttribute : System.Attribute { }
+            [System.AttributeUsage(System.AttributeTargets.Parameter)]
+            public class FromRouteAttribute : System.Attribute { }
+        }
+        """;
+
+    /// <summary>
     /// Compiles C# source with Rivet.Attributes referenced and nullable enabled.
     /// </summary>
     public static Compilation CreateCompilation(string source)
     {
-        var syntaxTree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest));
+        var syntaxTrees = new[]
+        {
+            CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest)),
+            CSharpSyntaxTree.ParseText(AspNetStubs, new CSharpParseOptions(LanguageVersion.Latest)),
+        };
 
         var compilation = CSharpCompilation.Create(
             "TestAssembly",
-            [syntaxTree],
+            syntaxTrees,
             CoreReferences,
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
@@ -41,7 +86,6 @@ public static class CompilationHelper
 
     private static MetadataReference[] GetCoreReferences()
     {
-        // Reference the runtime assemblies + Rivet.Attributes
         var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
 
         return

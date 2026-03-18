@@ -54,8 +54,18 @@ if (errors.Count > 0)
     return 1;
 }
 
-var definitions = TypeWalker.Walk(compilation);
-var output = TypeEmitter.Emit(definitions);
+var walker = TypeWalker.Create(compilation);
+var endpoints = EndpointWalker.Walk(compilation, walker);
+var definitions = walker.Definitions.Values.ToList();
 
-Console.Write(output);
+Console.WriteLine("=== types.ts ===");
+Console.Write(TypeEmitter.Emit(definitions));
+
+if (endpoints.Count > 0)
+{
+    Console.WriteLine();
+    Console.WriteLine("=== client.ts ===");
+    Console.Write(ClientEmitter.Emit(endpoints, definitions));
+}
+
 return 0;
