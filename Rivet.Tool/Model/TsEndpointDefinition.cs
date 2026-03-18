@@ -27,4 +27,5 @@ public enum ParamSource
     Route,
     Body,
     Query,
+    File,
 }

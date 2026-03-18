@@ -74,7 +74,8 @@ public static partial class ClientEmitter
               const headers: Record<string, string> = {
                 ...(await _config.headers?.()),
               };
-              if (options?.body) {
+              const isFormData = typeof FormData !== "undefined" && options?.body instanceof FormData;
+              if (options?.body && !isFormData) {
                 headers["Content-Type"] = "application/json";
               }
               const f = _config.fetch ?? fetch;
@@ -83,7 +84,7 @@ public static partial class ClientEmitter
                 res = await f(url.toString(), {
                   method,
                   headers,
-                  body: options?.body ? JSON.stringify(options.body) : undefined,
+                  body: options?.body ? (isFormData ? options.body as BodyInit : JSON.stringify(options.body)) : undefined,
                 });
               } catch (err) {
                 throw new RivetError(method, path, 0, undefined as unknown as Response, "", { cause: err });
@@ -281,8 +282,43 @@ public static partial class ClientEmitter
 
         var route = InterpolateRoute(endpoint.RouteTemplate, endpoint.Params);
 
+        var fileParams = endpoint.Params.Where(p => p.Source == ParamSource.File).ToList();
         var bodyParam = endpoint.Params.FirstOrDefault(p => p.Source == ParamSource.Body);
         var queryParams = endpoint.Params.Where(p => p.Source == ParamSource.Query).ToList();
+
+        var fetchGeneric = endpoint.ReturnType is not null ? successType : "void";
+
+        // Multipart (IFormFile) endpoints — emit FormData construction
+        if (fileParams.Count > 0)
+        {
+            sb.AppendLine($"export const {funcName} = async ({paramsStr}): Promise<{successType}> => {{");
+            sb.AppendLine("  const fd = new FormData();");
+            foreach (var fp in fileParams)
+            {
+                sb.AppendLine($"  fd.append(\"{fp.Name}\", {fp.Name});");
+            }
+
+            var multipartOptions = new List<string> { "body: fd" };
+            if (queryParams.Count > 0)
+            {
+                var queryEntries = queryParams.Select(p => $"{p.Name}: String({p.Name})");
+                multipartOptions.Add($"query: {{ {string.Join(", ", queryEntries)} }}");
+            }
+            var multipartOptionsStr = $", {{ {string.Join(", ", multipartOptions)} }}";
+
+            if (validated && endpoint.ReturnType is not null)
+            {
+                var assertName = ValidatorEmitter.GetAssertName(endpoint.ReturnType);
+                sb.AppendLine($"  const data = await rivetFetch<{fetchGeneric}>(\"{endpoint.HttpMethod}\", `{route}`{multipartOptionsStr});");
+                sb.AppendLine($"  return {assertName}(data);");
+            }
+            else
+            {
+                sb.AppendLine($"  return rivetFetch<{fetchGeneric}>(\"{endpoint.HttpMethod}\", `{route}`{multipartOptionsStr});");
+            }
+            sb.AppendLine("};");
+            return;
+        }
 
         var optionsParts = new List<string>();
         if (bodyParam is not null)
@@ -298,8 +334,6 @@ public static partial class ClientEmitter
         var optionsStr = optionsParts.Count > 0
             ? $", {{ {string.Join(", ", optionsParts)} }}"
             : "";
-
-        var fetchGeneric = endpoint.ReturnType is not null ? successType : "void";
 
         if (validated && endpoint.ReturnType is not null)
         {

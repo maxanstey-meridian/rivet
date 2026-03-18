@@ -43,6 +43,9 @@ public sealed record UpdateWorkItemStatusRequest(WorkItemStatus Status);
 [RivetType]
 public sealed record AddCommentRequest(string Body);
 
+[RivetType]
+public sealed record AttachmentResultDto(Guid Id, string FileName, long Size);
+
 [ApiController]
 [Route("api/tasks")]
 public sealed class TasksController(CreateTaskUseCase createTask) : ControllerBase
@@ -112,5 +115,14 @@ public sealed class TasksController(CreateTaskUseCase createTask) : ControllerBa
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         return Ok();
+    }
+
+    [RivetEndpoint]
+    [HttpPost("{id:guid}/attachments")]
+    [ProducesResponseType(typeof(AttachmentResultDto), StatusCodes.Status201Created)]
+    public async Task<IActionResult> Attach(Guid id, IFormFile file, CancellationToken ct)
+    {
+        return StatusCode(StatusCodes.Status201Created,
+            new AttachmentResultDto(Guid.NewGuid(), file.FileName, file.Length));
     }
 }

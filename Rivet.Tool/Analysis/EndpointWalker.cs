@@ -211,15 +211,30 @@ public static partial class EndpointWalker
                 continue;
             }
 
-            var tsType = typeWalker.MapTypePublic(param.Type);
+            // IFormFile maps to the Web API File type — don't walk it through Roslyn
+            var tsType = source == ParamSource.File
+                ? new TsType.Primitive("File")
+                : typeWalker.MapTypePublic(param.Type);
             parameters.Add(new TsEndpointParam(param.Name, tsType, source.Value));
         }
 
         return parameters;
     }
 
+    private static readonly HashSet<string> FormFileTypeNames = new()
+    {
+        "Microsoft.AspNetCore.Http.IFormFile",
+    };
+
     private static ParamSource? ClassifyParam(IParameterSymbol param, HashSet<string> routeParamNames)
     {
+        // IFormFile parameter → File source (before attribute check — IFormFile is the signal)
+        var typeName = param.Type.ToDisplayString();
+        if (FormFileTypeNames.Contains(typeName))
+        {
+            return ParamSource.File;
+        }
+
         // Explicit attribute takes precedence
         foreach (var attr in param.GetAttributes())
         {

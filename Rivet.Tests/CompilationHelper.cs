@@ -62,6 +62,10 @@ public static class CompilationHelper
             public interface IActionResult { }
             public class ActionResult<TValue> { }
         }
+        namespace Microsoft.AspNetCore.Http
+        {
+            public interface IFormFile { }
+        }
         """;
 
     /// <summary>

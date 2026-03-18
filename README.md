@@ -244,11 +244,35 @@ export type Quantity = number & { readonly __brand: "Quantity" };
 
 Multi-property records are emitted as regular object types: `Money(decimal Amount, string Currency)` → `{ amount: number; currency: string }`.
 
+## File uploads
+
+`IFormFile` parameters are detected automatically and emitted as `File` in TypeScript. The generated client constructs
+`FormData` and lets the browser set the correct `Content-Type` with multipart boundary:
+
+```csharp
+[RivetEndpoint]
+[HttpPost("{id:guid}/attachments")]
+[ProducesResponseType(typeof(AttachmentResultDto), StatusCodes.Status201Created)]
+public async Task<IActionResult> Attach(Guid id, IFormFile file, CancellationToken ct)
+{
+    // ...
+}
+```
+
+```typescript
+// Generated
+export const attach = async (id: string, file: File): Promise<AttachmentResultDto> => {
+  const fd = new FormData();
+  fd.append("file", file);
+  return rivetFetch<AttachmentResultDto>("POST", `/api/tasks/${id}/attachments`, { body: fd });
+};
+```
+
 ## Limitations
 
 - Records only — no inheritance, no polymorphism
 - `delete` is renamed to `remove` in generated clients (TS reserved word)
-- No `IFormFile` / multipart — manual escape hatch
+- No `IFormFileCollection` / `List<IFormFile>` — single file only for now
 - No SignalR / WebSocket support
 
 ## License
