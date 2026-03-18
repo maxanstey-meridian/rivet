@@ -74,12 +74,12 @@ public static partial class ClientEmitter
             export const rivetFetch = async <T>(
               method: string,
               path: string,
-              options?: { body?: unknown; query?: Record<string, string> },
+              options?: { body?: unknown; query?: Record<string, unknown> },
             ): Promise<T> => {
               const url = new URL(`${_config.baseUrl}${path}`);
               if (options?.query) {
                 for (const [k, v] of Object.entries(options.query)) {
-                  if (v != null) url.searchParams.set(k, v);
+                  if (v != null) url.searchParams.set(k, String(v));
                 }
               }
               const headers: Record<string, string> = {
@@ -241,12 +241,12 @@ public static partial class ClientEmitter
         sb.AppendLine("const rivetFetch = async <T>(");
         sb.AppendLine("  method: string,");
         sb.AppendLine("  path: string,");
-        sb.AppendLine("  options?: { body?: unknown; query?: Record<string, string> },");
+        sb.AppendLine("  options?: { body?: unknown; query?: Record<string, unknown> },");
         sb.AppendLine("): Promise<T> => {");
         sb.AppendLine("  const url = new URL(`${_config.baseUrl}${path}`);");
         sb.AppendLine("  if (options?.query) {");
         sb.AppendLine("    for (const [k, v] of Object.entries(options.query)) {");
-        sb.AppendLine("      url.searchParams.set(k, v);");
+        sb.AppendLine("      if (v != null) url.searchParams.set(k, String(v));");
         sb.AppendLine("    }");
         sb.AppendLine("  }");
         sb.AppendLine("  const headers: Record<string, string> = {");
@@ -316,7 +316,7 @@ public static partial class ClientEmitter
             var multipartOptions = new List<string> { "body: fd" };
             if (queryParams.Count > 0)
             {
-                var queryEntries = queryParams.Select(p => $"{p.Name}: String({p.Name})");
+                var queryEntries = queryParams.Select(p => $"{p.Name}");
                 multipartOptions.Add($"query: {{ {string.Join(", ", queryEntries)} }}");
             }
             var multipartOptionsStr = $", {{ {string.Join(", ", multipartOptions)} }}";
@@ -342,7 +342,7 @@ public static partial class ClientEmitter
         }
         if (queryParams.Count > 0)
         {
-            var queryEntries = queryParams.Select(p => $"{p.Name}: String({p.Name})");
+            var queryEntries = queryParams.Select(p => $"{p.Name}");
             optionsParts.Add($"query: {{ {string.Join(", ", queryEntries)} }}");
         }
 

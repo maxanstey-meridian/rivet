@@ -136,7 +136,7 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         Assert.Contains("export const listSubmissions = (status: string, page: number): Promise<SubmissionDto[]> =>", client);
-        Assert.Contains("query: { status: String(status), page: String(page) }", client);
+        Assert.Contains("query: { status, page }", client);
     }
 
     [Fact]
