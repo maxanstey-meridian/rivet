@@ -45,7 +45,7 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("""import type { CreateMessageCommand, MessageDto } from "./types.js";""", client);
+        Assert.Contains("""import type { CreateMessageCommand, MessageDto } from "./types/index.js";""", client);
         Assert.Contains("export const createMessage = (id: string, body: CreateMessageCommand): Promise<MessageDto> =>", client);
         Assert.Contains("""rivetFetch<MessageDto>("POST", `/api/submissions/${id}/messages`, { body: body });""", client);
     }

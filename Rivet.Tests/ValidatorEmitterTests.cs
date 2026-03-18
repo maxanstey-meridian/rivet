@@ -44,7 +44,7 @@ public sealed class ValidatorEmitterTests
         var (validators, _, _) = Generate(source);
 
         Assert.Contains("import typia from \"typia\";", validators);
-        Assert.Contains("""import type { MessageDto } from "./types.js";""", validators);
+        Assert.Contains("""import type { MessageDto } from "./types/index.js";""", validators);
         Assert.Contains("export const assertMessageDto = typia.createAssert<MessageDto>();", validators);
     }
 
@@ -218,5 +218,50 @@ public sealed class ValidatorEmitterTests
         Assert.Contains("export const getItem = async", validatedClient);
         Assert.Contains("export const createItem = async", validatedClient);
         Assert.Contains("export const deleteItem = (id: string): Promise<void> =>", validatedClient);
+    }
+
+    [Fact]
+    public void ValidatorEmitter_GenericReturnTypes_DistinctAssertNames()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskListItemDto(Guid Id, string Title);
+            [RivetType]
+            public sealed record MemberDto(Guid Id, string Name);
+            [RivetType]
+            public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Total);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/tasks")]
+                public static Task<PagedResult<TaskListItemDto>> ListTasks()
+                    => throw new NotImplementedException();
+
+                [RivetEndpoint]
+                [HttpGet("/api/members")]
+                public static Task<PagedResult<MemberDto>> ListMembers()
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (validators, _, _) = Generate(source);
+
+        // Distinct assert names for different generic specializations
+        Assert.Contains("export const assertPagedResultTaskListItemDto = typia.createAssert<PagedResult<TaskListItemDto>>();", validators);
+        Assert.Contains("export const assertPagedResultMemberDto = typia.createAssert<PagedResult<MemberDto>>();", validators);
+
+        // All nested type refs are imported
+        Assert.Contains("PagedResult", validators);
+        Assert.Contains("TaskListItemDto", validators);
+        Assert.Contains("MemberDto", validators);
     }
 }

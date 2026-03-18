@@ -2,9 +2,9 @@
 
 ## Current State
 
-Rivet is feature-complete through Phase 4 + VO support. Published to NuGet as `Rivet.Attributes` (0.1.0) and
-`dotnet-rivet` (0.2.0, 0.3.0 pending). Working against CaseBridge's real `.csproj` with 17 types and 5 endpoints. 46
-tests.
+Rivet is feature-complete through Phase 4 + VO support + grouped type emission. Published to NuGet as
+`Rivet.Attributes` (0.1.0) and `dotnet-rivet` (0.2.0, 0.3.0 pending). Working against CaseBridge's real `.csproj` with
+17 types and 5 endpoints. 59 tests.
 
 ### What's shipped
 
@@ -14,6 +14,9 @@ tests.
   ProducesResponseType extraction, reserved word handling (delete → remove), RivetResponse wrapper, RivetError,
   multi-response DU types, unwrap config
 - Typia: validator emission, tsc + ts-patch compilation, validated client re-emission
+- Type grouping: types split into per-namespace files (`types/`), cross-referenced types promoted to `common.ts`,
+  barrel `index.ts` for both `types/` and `client/`. Namespace last segment used as file name, number-suffix on
+  collision. Grouping signal is not yet configurable (future feature).
 - CLI: MSBuildWorkspace with multi-SDK Homebrew discovery, file output, stdout preview, --compile flag
 - NuGet: Rivet.Attributes (netstandard2.0), dotnet-rivet (net8.0, PackAsTool)
 - Sample: TaskBoard.Api with controllers, enums, VOs, generics, colocated commands/results

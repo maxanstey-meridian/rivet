@@ -151,11 +151,11 @@ public static partial class ClientEmitter
             }
         }
 
-        // Import referenced types from types.ts
+        // Import referenced types from types barrel
         var referencedTypes = CollectReferencedTypeNames(endpoints);
         if (referencedTypes.Count > 0)
         {
-            sb.AppendLine($"import type {{ {string.Join(", ", referencedTypes.Order())} }} from \"../types.js\";");
+            sb.AppendLine($"import type {{ {string.Join(", ", referencedTypes.Order())} }} from \"../types/index.js\";");
         }
 
         // Emit each endpoint function
@@ -221,7 +221,7 @@ public static partial class ClientEmitter
         var referencedTypes = CollectReferencedTypeNames(endpoints);
         if (referencedTypes.Count > 0)
         {
-            sb.AppendLine($"import type {{ {string.Join(", ", referencedTypes.Order())} }} from \"./types.js\";");
+            sb.AppendLine($"import type {{ {string.Join(", ", referencedTypes.Order())} }} from \"./types/index.js\";");
             sb.AppendLine();
         }
 
@@ -423,7 +423,7 @@ public static partial class ClientEmitter
         return names;
     }
 
-    private static void CollectTypeRefs(TsType type, HashSet<string> names)
+    internal static void CollectTypeRefs(TsType type, HashSet<string> names)
     {
         switch (type)
         {

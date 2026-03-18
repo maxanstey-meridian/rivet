@@ -43,7 +43,7 @@ static async Task<int> Run(string[] args)
 
     var brands = walker.Brands.Values.ToList();
     var enums = walker.Enums;
-    var typesOutput = TypeEmitter.Emit(definitions, brands, enums);
+    var typeGrouping = TypeGrouper.Group(definitions, brands, enums, walker.TypeNamespaces);
     var validatorsOutput = endpoints.Count > 0
         ? ValidatorEmitter.Emit(endpoints)
         : null;
@@ -52,9 +52,25 @@ static async Task<int> Run(string[] args)
     {
         Directory.CreateDirectory(outputDir);
 
-        var typesPath = Path.Combine(outputDir, "types.ts");
-        await File.WriteAllTextAsync(typesPath, typesOutput);
-        Console.WriteLine($"  types.ts → {typesPath}");
+        // Emit grouped type files into types/ directory
+        var typesDir = Path.Combine(outputDir, "types");
+        Directory.CreateDirectory(typesDir);
+
+        var typeFileNames = new List<string>();
+        foreach (var group in typeGrouping.Groups)
+        {
+            var content = TypeEmitter.EmitGroupFile(group);
+            var filePath = Path.Combine(typesDir, $"{group.FileName}.ts");
+            await File.WriteAllTextAsync(filePath, content);
+            Console.WriteLine($"  types/{group.FileName}.ts → {filePath}");
+            typeFileNames.Add(group.FileName);
+        }
+
+        // Barrel for types/
+        var typesBarrel = TypeEmitter.EmitBarrel(typeFileNames);
+        var typesBarrelPath = Path.Combine(typesDir, "index.ts");
+        await File.WriteAllTextAsync(typesBarrelPath, typesBarrel);
+        Console.WriteLine($"  types/index.ts → {typesBarrelPath}");
 
         // Emit shared rivet.ts
         if (endpoints.Count > 0)
@@ -67,14 +83,22 @@ static async Task<int> Run(string[] args)
             var clientDir = Path.Combine(outputDir, "client");
             Directory.CreateDirectory(clientDir);
 
-            var groups = ClientEmitter.GroupByController(endpoints);
-            foreach (var (controllerName, controllerEndpoints) in groups)
+            var controllerGroups = ClientEmitter.GroupByController(endpoints);
+            var clientFileNames = new List<string>();
+            foreach (var (controllerName, controllerEndpoints) in controllerGroups)
             {
                 var clientContent = ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints);
                 var clientPath = Path.Combine(clientDir, $"{controllerName}.ts");
                 await File.WriteAllTextAsync(clientPath, clientContent);
                 Console.WriteLine($"  client/{controllerName}.ts → {clientPath}");
+                clientFileNames.Add(controllerName);
             }
+
+            // Barrel for client/
+            var clientBarrel = TypeEmitter.EmitBarrel(clientFileNames);
+            var clientBarrelPath = Path.Combine(clientDir, "index.ts");
+            await File.WriteAllTextAsync(clientBarrelPath, clientBarrel);
+            Console.WriteLine($"  client/index.ts → {clientBarrelPath}");
         }
 
         if (validatorsOutput is not null && validatorsOutput.Length > 0)
@@ -103,8 +127,8 @@ static async Task<int> Run(string[] args)
             if (endpoints.Count > 0)
             {
                 var clientDir = Path.Combine(outputDir, "client");
-                var groups = ClientEmitter.GroupByController(endpoints);
-                foreach (var (controllerName, controllerEndpoints) in groups)
+                var controllerGroups = ClientEmitter.GroupByController(endpoints);
+                foreach (var (controllerName, controllerEndpoints) in controllerGroups)
                 {
                     var validatedContent = ClientEmitter.EmitControllerClient(
                         controllerName, controllerEndpoints, validated: true);
@@ -120,13 +144,20 @@ static async Task<int> Run(string[] args)
     else
     {
         // Print to stdout (preview mode)
-        Console.WriteLine("=== types.ts ===");
-        Console.Write(typesOutput);
+        foreach (var group in typeGrouping.Groups)
+        {
+            Console.WriteLine($"=== types/{group.FileName}.ts ===");
+            Console.Write(TypeEmitter.EmitGroupFile(group));
+            Console.WriteLine();
+        }
+
+        Console.WriteLine("=== types/index.ts ===");
+        Console.Write(TypeEmitter.EmitBarrel(typeGrouping.Groups.Select(g => g.FileName).ToList()));
 
         if (endpoints.Count > 0)
         {
-            var groups = ClientEmitter.GroupByController(endpoints);
-            foreach (var (controllerName, controllerEndpoints) in groups)
+            var controllerGroups = ClientEmitter.GroupByController(endpoints);
+            foreach (var (controllerName, controllerEndpoints) in controllerGroups)
             {
                 Console.WriteLine();
                 Console.WriteLine($"=== client/{controllerName}.ts ===");

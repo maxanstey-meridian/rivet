@@ -13,6 +13,7 @@ public sealed class TypeWalker
     private readonly Dictionary<string, TsTypeDefinition> _definitions = new();
     private readonly Dictionary<string, TsType.Brand> _brands = new();
     private readonly Dictionary<string, TsType.StringUnion> _enums = new();
+    private readonly Dictionary<string, string?> _typeNamespaces = new();
     private readonly HashSet<string> _visiting = new();
 
     public TypeWalker(IAssemblySymbol sourceAssembly)
@@ -23,6 +24,7 @@ public sealed class TypeWalker
     public IReadOnlyDictionary<string, TsTypeDefinition> Definitions => _definitions;
     public IReadOnlyDictionary<string, TsType.Brand> Brands => _brands;
     public IReadOnlyDictionary<string, TsType.StringUnion> Enums => _enums;
+    public IReadOnlyDictionary<string, string?> TypeNamespaces => _typeNamespaces;
 
     /// <summary>
     /// Finds all [RivetType]-attributed types in the compilation and walks them.
@@ -136,6 +138,7 @@ public sealed class TypeWalker
 
         _visiting.Remove(name);
         _definitions[name] = new TsTypeDefinition(name, typeParams, properties);
+        _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
     }
 
     private TsType MapType(ITypeSymbol symbol)
@@ -211,6 +214,7 @@ public sealed class TypeWalker
                         .ToList();
 
                     _enums[namedType.Name] = new TsType.StringUnion(members);
+                    _typeNamespaces.TryAdd(namedType.Name, GetNamespaceGroup(namedType));
                 }
 
                 return new TsType.TypeRef(namedType.Name);
@@ -226,6 +230,7 @@ public sealed class TypeWalker
                 {
                     var brand = new TsType.Brand(namedType.Name, MapType(voInner));
                     _brands.TryAdd(namedType.Name, brand);
+                    _typeNamespaces.TryAdd(namedType.Name, GetNamespaceGroup(namedType));
                     return brand;
                 }
 
@@ -327,5 +332,20 @@ public sealed class TypeWalker
         }
 
         return char.ToLowerInvariant(name[0]) + name[1..];
+    }
+
+    /// <summary>
+    /// Gets the last segment of the containing namespace for grouping.
+    /// Returns null for types in the global namespace.
+    /// </summary>
+    private static string? GetNamespaceGroup(INamedTypeSymbol symbol)
+    {
+        var ns = symbol.ContainingNamespace;
+        if (ns is null || ns.IsGlobalNamespace)
+        {
+            return null;
+        }
+
+        return ns.Name;
     }
 }

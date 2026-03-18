@@ -30,13 +30,15 @@ public static class ValidatorEmitter
         sb.AppendLine("import typia from \"typia\";");
 
         // Import the types from types.ts
-        var typeNames = returnTypes
-            .Select(x => GetBaseTypeName(x.TypeStr))
-            .Distinct()
-            .Order()
-            .ToList();
+        var typeRefs = new HashSet<string>();
+        foreach (var endpoint in endpoints.Where(e => e.ReturnType is not null))
+        {
+            ClientEmitter.CollectTypeRefs(endpoint.ReturnType!, typeRefs);
+        }
 
-        sb.AppendLine($"import type {{ {string.Join(", ", typeNames)} }} from \"./types.js\";");
+        var typeNames = typeRefs.Order().ToList();
+
+        sb.AppendLine($"import type {{ {string.Join(", ", typeNames)} }} from \"./types/index.js\";");
         sb.AppendLine();
 
         foreach (var (typeStr, assertName) in returnTypes)
@@ -48,20 +50,21 @@ public static class ValidatorEmitter
     }
 
     /// <summary>
-    /// Gets the assert function name for a return type.
-    /// Arrays get "Array" suffix: assertMessageDto vs assertMessageDtoArray.
+    /// Gets the assert function name for a return type by walking the TsType tree.
     /// </summary>
-    public static string GetAssertName(TsType type) =>
+    public static string GetAssertName(TsType type) => $"assert{GetTypeSuffix(type)}";
+
+    private static string GetTypeSuffix(TsType type) =>
         type switch
         {
-            TsType.Array a => $"assert{GetBaseTypeName(TypeEmitter.EmitTypeString(a.Element))}Array",
-            _ => $"assert{GetBaseTypeName(TypeEmitter.EmitTypeString(type))}",
+            TsType.TypeRef r => r.Name,
+            TsType.Primitive p => char.ToUpperInvariant(p.Name[0]) + p.Name[1..],
+            TsType.Generic g => g.Name + string.Concat(g.TypeArguments.Select(GetTypeSuffix)),
+            TsType.Array a => GetTypeSuffix(a.Element) + "Array",
+            TsType.Nullable n => GetTypeSuffix(n.Inner),
+            TsType.Brand b => b.Name,
+            TsType.Dictionary d => "Record" + GetTypeSuffix(d.Value),
+            TsType.StringUnion => "Union",
+            _ => "Unknown",
         };
-
-    private static string GetBaseTypeName(string typeName)
-    {
-        var name = typeName.TrimEnd('[', ']');
-        var genericIdx = name.IndexOf('<');
-        return genericIdx >= 0 ? name[..genericIdx] : name;
-    }
 }
