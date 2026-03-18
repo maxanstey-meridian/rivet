@@ -12,13 +12,13 @@ server is TypeScript. Rivet gives you the same DX when your server is .NET.
 
 ## What it produces
 
-``` 
+```
 generated/rivet/
 ├── types.ts                  # export type Foo = { ... }
-├── rivet.ts                  # configureRivet() + rivetFetch base
+├── rivet.ts                  # configureRivet(), rivetFetch, RivetError, unwrap
 ├── client/
-│   ├── caseStatuses.ts       # export const list = () => rivetFetch(...)
-│   └── submissions.ts        # one file per controller
+│   ├── tasks.ts              # export const list = () => rivetFetch(...)
+│   └── members.ts            # one file per controller
 ├── validators.ts             # typia source (inert until compiled)
 └── build/                    # (after --compile)
     ├── validators.js          # runtime assertion functions
@@ -75,24 +75,29 @@ using Rivet;
 
 // Application-layer types get [RivetType]
 [RivetType]
-public sealed record CreateMessageCommand(Guid SubmissionId, string Body, MessageVisibility Visibility);
+public sealed record CreateTaskCommand(
+    string Title,
+    string? Description,
+    Priority Priority,
+    Guid? AssigneeId,
+    List<string> LabelNames);
 
 [RivetType]
-public sealed record MessageDto(Guid Id, string Body, string AuthorName, DateTime CreatedAt);
+public sealed record CreateTaskResult(Guid Id, DateTime CreatedAt);
 
 // Domain types are discovered transitively — no attribute needed
-public enum MessageVisibility { Internal, Public }
+public enum Priority { Low, Medium, High, Critical }
 ```
 
 ### 3. Mark your endpoints
 
 ```csharp
 [RivetEndpoint]
-[HttpPost("{id:guid}/messages")]
-[ProducesResponseType(typeof(MessageDto), StatusCodes.Status200OK)]
-public async Task<IActionResult> CreateMessage(
-    Guid id,
-    [FromBody] CreateMessageCommand body,
+[HttpPost]
+[ProducesResponseType(typeof(CreateTaskResult), StatusCodes.Status201Created)]
+[ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+public async Task<IActionResult> Create(
+    [FromBody] CreateTaskCommand command,
     CancellationToken ct)
 {
     // ...
@@ -111,24 +116,52 @@ dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet
 ### 5. Use
 
 ```typescript
-import {configureRivet} from "~/generated/rivet/rivet";
-import * as messages from "~/generated/rivet/client/messages";
+import { configureRivet, unwrap } from "~/generated/rivet/rivet";
+import * as tasks from "~/generated/rivet/client/tasks";
 
 // Configure once
 configureRivet({
   baseUrl: "http://localhost:5000",
-  headers: () => ({Authorization: `Bearer ${token}`}),
+  headers: () => ({ Authorization: `Bearer ${token}` }),
 });
 
-// Fully typed — params, body, and return type
-const msg = await messages.createMessage(submissionId, {
-  submissionId,
-  body: "Hello",
-  visibility: "Public",
+// Default mode (unwrap: true) — throws RivetError on non-2xx
+const result = await tasks.create({
+  title: "Fix the thing",
+  priority: "High",
+  labelNames: ["bug"],
 });
+console.log(result.data.id); // CreateTaskResult
+
+// Or use the unwrap helper for a one-liner
+const task = unwrap(await tasks.get(id));
 ```
 
-### 6. Optional: runtime validation
+### 6. Typed error responses
+
+Endpoints with multiple `[ProducesResponseType]` emit a result discriminated union:
+
+```typescript
+// Generated automatically from [ProducesResponseType] attributes
+export type GetResult =
+  | { status: 200; data: TaskDetailDto; response: Response }
+  | { status: 404; data: void; response: Response };
+```
+
+Opt out of unwrap per-call or globally to use the typed result:
+
+```typescript
+// Per-call
+const result = await tasks.get(id, { unwrap: false });
+if (result.status === 200) {
+  result.data.title // TaskDetailDto — fully narrowed
+}
+
+// Or globally
+configureRivet({ baseUrl: "...", unwrap: false });
+```
+
+### 7. Optional: runtime validation
 
 ```bash
 dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --compile
@@ -140,8 +173,26 @@ later.
 
 ## Try it
 
-The repo includes a sample ASP.NET project at `samples/TaskBoard.Api/` — two controllers, domain enums, a generic
-`PagedResult<T>`, and application-layer commands. Run Rivet against it:
+The repo includes a sample ASP.NET project at `samples/TaskBoard.Api/` — a realistic task board API with two
+controllers, domain enums and value objects (discovered transitively), application-layer commands with colocated results,
+and a generic `PagedResult<T>`.
+
+```
+samples/TaskBoard.Api/
+├── Domain/
+│   ├── Priority.cs              # Priority, WorkItemStatus enums
+│   └── Label.cs                 # Label value object
+├── Application/
+│   ├── Ports/ITaskRepository.cs
+│   ├── CreateTask/              # Command + Result colocated with use case
+│   └── PagedResult.cs           # Generic wrapper
+├── Controllers/
+│   ├── TasksController.cs       # 6 endpoints, colocated DTOs
+│   └── MembersController.cs     # 3 endpoints, colocated DTOs
+└── Program.cs
+```
+
+Run Rivet against it:
 
 ```bash
 # Preview to stdout
@@ -171,13 +222,21 @@ Rivet works with standard ASP.NET controllers returning `IActionResult`. Return 
 `[ProducesResponseType(typeof(T), 200)]`. Controller `[Route]` prefixes are combined with method routes. Route
 constraints (`{id:guid}`) are stripped automatically.
 
-Endpoints are grouped by controller into separate client files: `CaseStatusesController` → `client/caseStatuses.ts`.
+Endpoints are grouped by controller into separate client files: `TasksController` → `client/tasks.ts`.
+
+## Error handling
+
+Every endpoint function returns `Promise<RivetResponse<T>>`. By default (`unwrap: true`), non-2xx responses throw a
+`RivetError` with `status`, `response`, `body`, and `cause` (the underlying fetch error). This works with global error
+handlers and interceptors.
+
+For typed error handling, endpoints with multiple `[ProducesResponseType]` declarations emit a result discriminated
+union type. Set `unwrap: false` globally or per-call to get the full typed result instead of throwing.
 
 ## Limitations
 
 - Records only — no inheritance, no polymorphism
 - `delete` is renamed to `remove` in generated clients (TS reserved word)
-- Single success type per endpoint (first 2xx `ProducesResponseType`)
 - No `IFormFile` / multipart — manual escape hatch
 - No SignalR / WebSocket support
 

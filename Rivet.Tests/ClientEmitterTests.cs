@@ -46,7 +46,7 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         Assert.Contains("""import type { CreateMessageCommand, MessageDto } from "./types.js";""", client);
-        Assert.Contains("export const createMessage = (id: string, body: CreateMessageCommand): Promise<MessageDto> =>", client);
+        Assert.Contains("export const createMessage = (id: string, body: CreateMessageCommand): Promise<RivetResponse<MessageDto>> =>", client);
         Assert.Contains("""rivetFetch<MessageDto>("POST", `/api/submissions/${id}/messages`, { body: body });""", client);
     }
 
@@ -76,7 +76,7 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("export const getSubmission = (id: string): Promise<SubmissionDto> =>", client);
+        Assert.Contains("export const getSubmission = (id: string): Promise<RivetResponse<SubmissionDto>> =>", client);
         Assert.Contains("""rivetFetch<SubmissionDto>("GET", `/api/submissions/${id}`);""", client);
     }
 
@@ -103,7 +103,7 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("export const deleteSubmission = (id: string): Promise<void> =>", client);
+        Assert.Contains("export const deleteSubmission = (id: string): Promise<RivetResponse<void>> =>", client);
         Assert.Contains("""rivetFetch<void>("DELETE", `/api/submissions/${id}`);""", client);
     }
 
@@ -135,7 +135,7 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("export const listSubmissions = (status: string, page: number): Promise<SubmissionDto[]> =>", client);
+        Assert.Contains("export const listSubmissions = (status: string, page: number): Promise<RivetResponse<SubmissionDto[]>> =>", client);
         Assert.Contains("query: { status: String(status), page: String(page) }", client);
     }
 
@@ -171,7 +171,7 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         // Only route param should appear, DI params skipped
-        Assert.Contains("export const getThing = (id: string): Promise<ResultDto> =>", client);
+        Assert.Contains("export const getThing = (id: string): Promise<RivetResponse<ResultDto>> =>", client);
         Assert.DoesNotContain("service:", client);
         Assert.DoesNotContain("ct:", client);
     }
@@ -281,7 +281,7 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         // Matches the spec example from RIVET.md
-        Assert.Contains("export const createMessage = (id: string, body: CreateMessageCommand): Promise<MessageDto> =>", client);
+        Assert.Contains("export const createMessage = (id: string, body: CreateMessageCommand): Promise<RivetResponse<MessageDto>> =>", client);
         Assert.Contains("""rivetFetch<MessageDto>("POST", `/api/submissions/${id}/messages`, { body: body });""", client);
     }
 }

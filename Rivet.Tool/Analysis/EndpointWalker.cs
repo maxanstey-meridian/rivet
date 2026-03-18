@@ -63,11 +63,12 @@ public static partial class EndpointWalker
         fullRoute = StripRouteConstraints(fullRoute);
 
         var parameters = ExtractParams(method, typeWalker, fullRoute);
+        var responses = ExtractAllResponseTypes(method, typeWalker);
         var returnType = ExtractReturnType(method, typeWalker);
         var name = ToCamelCase(method.Name);
         var controllerName = DeriveControllerFileName(method.ContainingType);
 
-        return new TsEndpointDefinition(name, httpMethod, fullRoute, parameters, returnType, controllerName);
+        return new TsEndpointDefinition(name, httpMethod, fullRoute, parameters, returnType, controllerName, responses);
     }
 
     /// <summary>
@@ -314,6 +315,45 @@ public static partial class EndpointWalker
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Extracts all [ProducesResponseType] attributes as typed responses.
+    /// </summary>
+    private static IReadOnlyList<TsResponseType> ExtractAllResponseTypes(
+        IMethodSymbol method,
+        TypeWalker typeWalker)
+    {
+        var responses = new List<TsResponseType>();
+
+        foreach (var attr in method.GetAttributes())
+        {
+            var attrName = attr.AttributeClass?.ToDisplayString();
+            if (attrName is not "Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute")
+            {
+                continue;
+            }
+
+            // ProducesResponseType(typeof(T), statusCode)
+            if (attr.ConstructorArguments.Length >= 2
+                && attr.ConstructorArguments[0].Value is INamedTypeSymbol typeArg
+                && attr.ConstructorArguments[1].Value is int statusCode)
+            {
+                var tsType = typeWalker.MapTypePublic(typeArg);
+                responses.Add(new TsResponseType(statusCode, tsType));
+            }
+            // ProducesResponseType(statusCode) — no body
+            else if (attr.ConstructorArguments.Length == 1
+                && attr.ConstructorArguments[0].Value is int codeOnly)
+            {
+                responses.Add(new TsResponseType(codeOnly, null));
+            }
+        }
+
+        // Sort by status code for consistent output
+        responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
+
+        return responses;
     }
 
     private static IEnumerable<IMethodSymbol> FindAttributedMethods(

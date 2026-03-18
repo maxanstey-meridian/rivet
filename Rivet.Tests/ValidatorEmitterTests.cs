@@ -136,14 +136,14 @@ public sealed class ValidatorEmitterTests
         var (_, client, validatedClient) = Generate(source);
 
         // Unvalidated client: arrow function, no assert
-        Assert.Contains("export const getMessage = (id: string): Promise<MessageDto> =>", client);
+        Assert.Contains("export const getMessage = (id: string): Promise<RivetResponse<MessageDto>> =>", client);
         Assert.DoesNotContain("assertMessageDto", client);
 
         // Validated client: async + assert wrapper
         Assert.Contains("""import { assertMessageDto } from "./build/validators.js";""", validatedClient);
-        Assert.Contains("export const getMessage = async (id: string): Promise<MessageDto> => {", validatedClient);
-        Assert.Contains("const raw = await rivetFetch<MessageDto>", validatedClient);
-        Assert.Contains("return assertMessageDto(raw);", validatedClient);
+        Assert.Contains("export const getMessage = async (id: string): Promise<RivetResponse<MessageDto>> => {", validatedClient);
+        Assert.Contains("const result = await rivetFetch<MessageDto>", validatedClient);
+        Assert.Contains("result.data = assertMessageDto(result.data);", validatedClient);
     }
 
     [Fact]
@@ -169,7 +169,7 @@ public sealed class ValidatorEmitterTests
         var (_, _, validatedClient) = Generate(source);
 
         // Void returns don't get assert wrappers
-        Assert.Contains("export const remove = (id: string): Promise<void> =>", validatedClient);
+        Assert.Contains("export const remove = (id: string): Promise<RivetResponse<void>> =>", validatedClient);
         Assert.DoesNotContain("assert", validatedClient);
     }
 
@@ -217,6 +217,6 @@ public sealed class ValidatorEmitterTests
         // GET and POST get assert wrappers, DELETE doesn't
         Assert.Contains("export const getItem = async", validatedClient);
         Assert.Contains("export const createItem = async", validatedClient);
-        Assert.Contains("export const deleteItem = (id: string): Promise<void> =>", validatedClient);
+        Assert.Contains("export const deleteItem = (id: string): Promise<RivetResponse<void>> =>", validatedClient);
     }
 }

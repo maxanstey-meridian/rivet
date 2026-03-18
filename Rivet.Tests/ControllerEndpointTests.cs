@@ -43,7 +43,7 @@ public sealed class ControllerEndpointTests
         var client = GenerateClient(source);
 
         Assert.Contains("export const get = (", client);
-        Assert.Contains("Promise<ItemDto>", client);
+        Assert.Contains("Promise<RivetResponse<ItemDto>>", client);
         Assert.Contains("""rivetFetch<ItemDto>("GET", `/api/items/${id}`""", client);
     }
 
@@ -180,7 +180,7 @@ public sealed class ControllerEndpointTests
         var client = GenerateClient(source);
 
         // Falls back to Task<ItemDto> return type
-        Assert.Contains("Promise<ItemDto>", client);
+        Assert.Contains("Promise<RivetResponse<ItemDto>>", client);
     }
 
     [Fact]
@@ -208,7 +208,7 @@ public sealed class ControllerEndpointTests
 
         var client = GenerateClient(source);
 
-        Assert.Contains("Promise<void>", client);
+        Assert.Contains("Promise<RivetResponse<void>>", client);
     }
 
     [Fact]
@@ -244,7 +244,7 @@ public sealed class ControllerEndpointTests
         var client = GenerateClient(source);
 
         Assert.Contains("request: CreateItemRequest", client);
-        Assert.Contains("Promise<CreateItemResponse>", client);
+        Assert.Contains("Promise<RivetResponse<CreateItemResponse>>", client);
         Assert.Contains("body: request", client);
         // CancellationToken should be skipped
         Assert.DoesNotContain("ct:", client);

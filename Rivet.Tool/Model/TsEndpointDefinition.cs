@@ -9,7 +9,13 @@ public sealed record TsEndpointDefinition(
     string RouteTemplate,
     IReadOnlyList<TsEndpointParam> Params,
     TsType? ReturnType,
-    string ControllerName);
+    string ControllerName,
+    IReadOnlyList<TsResponseType> Responses);
+
+/// <summary>
+/// A typed response for a given status code.
+/// </summary>
+public sealed record TsResponseType(int StatusCode, TsType? DataType);
 
 /// <summary>
 /// A parameter to a client function.
