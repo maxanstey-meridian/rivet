@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
 using Rivet.Tool.Analysis;
+using Rivet.Tool.Compile;
 using Rivet.Tool.Emit;
 
 return await Run(args);
@@ -27,7 +28,6 @@ static async Task<int> Run(string[] args)
     }
     else
     {
-        // Legacy mode: compile standalone .cs files
         compilation = CompileFiles(parsed.Value.Files);
     }
 
@@ -38,6 +38,11 @@ static async Task<int> Run(string[] args)
     var typesOutput = TypeEmitter.Emit(definitions);
     var clientOutput = endpoints.Count > 0
         ? ClientEmitter.Emit(endpoints, definitions)
+        : null;
+
+    // Generate validators.ts source (inert until compiled)
+    var validatorsOutput = endpoints.Count > 0
+        ? ValidatorEmitter.Emit(endpoints)
         : null;
 
     if (outputDir is not null)
@@ -55,7 +60,39 @@ static async Task<int> Run(string[] args)
             Console.WriteLine($"  client.ts → {clientPath}");
         }
 
+        if (validatorsOutput is not null && validatorsOutput.Length > 0)
+        {
+            var validatorsPath = Path.Combine(outputDir, "validators.ts");
+            await File.WriteAllTextAsync(validatorsPath, validatorsOutput);
+            Console.WriteLine($"  validators.ts → {validatorsPath}");
+        }
+
         Console.WriteLine($"Generated {definitions.Count} types, {endpoints.Count} endpoints.");
+
+        // Compile step: run tsc + typia, then re-emit validated client
+        if (mode == "compile")
+        {
+            Console.WriteLine();
+            Console.WriteLine("Compiling validators...");
+
+            var compileOk = await TypiaCompiler.CompileAsync(outputDir);
+            if (!compileOk)
+            {
+                Console.Error.WriteLine("Typia compilation failed.");
+                return 1;
+            }
+
+            // Re-emit client.ts with validator assertions wired in
+            if (endpoints.Count > 0)
+            {
+                var validatedClient = ClientEmitter.Emit(endpoints, definitions, validated: true);
+                var clientPath = Path.Combine(outputDir, "client.ts");
+                await File.WriteAllTextAsync(clientPath, validatedClient);
+                Console.WriteLine($"  client.ts → {clientPath} (validated)");
+            }
+
+            Console.WriteLine("Compile complete.");
+        }
     }
     else
     {
@@ -68,6 +105,19 @@ static async Task<int> Run(string[] args)
             Console.WriteLine();
             Console.WriteLine("=== client.ts ===");
             Console.Write(clientOutput);
+        }
+
+        if (validatorsOutput is not null && validatorsOutput.Length > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("=== validators.ts ===");
+            Console.Write(validatorsOutput);
+        }
+
+        if (mode == "compile")
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine("Note: --output is required for compile mode.");
         }
     }
 
@@ -181,13 +231,15 @@ static (string ProjectPath, string? OutputDir, string Mode, string[] Files)? Par
             case "--output" or "-o" when i + 1 < args.Length:
                 outputDir = args[++i];
                 break;
+            case "--compile":
+                mode = "compile";
+                break;
             default:
                 files.Add(args[i]);
                 break;
         }
     }
 
-    // If no --project flag, first file arg is the project path
     projectPath ??= files.FirstOrDefault();
 
     if (projectPath is null)
@@ -204,9 +256,10 @@ static void PrintUsage()
     Console.Error.WriteLine();
     Console.Error.WriteLine("Usage:");
     Console.Error.WriteLine("  dotnet run --project Rivet.Tool -- --project <path.csproj> --output <dir>");
-    Console.Error.WriteLine("  dotnet run --project Rivet.Tool -- <file.cs> [file2.cs ...]");
+    Console.Error.WriteLine("  dotnet run --project Rivet.Tool -- <file.cs> [file2.cs ...] [--output <dir>]");
     Console.Error.WriteLine();
     Console.Error.WriteLine("Options:");
     Console.Error.WriteLine("  -p, --project <path>   Path to .csproj file");
     Console.Error.WriteLine("  -o, --output <dir>     Output directory (omit for stdout preview)");
+    Console.Error.WriteLine("  --compile              Also run typia compilation (requires node on PATH)");
 }
