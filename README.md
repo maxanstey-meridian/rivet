@@ -14,8 +14,16 @@ TypeScript. Rivet gives you the same DX when your server is .NET.
 
 Unlike OpenAPI-based generators (NSwag, Kiota, Kubb), Rivet reads Roslyn's full type graph — nullable annotations,
 sealed records, string enum unions, generic type parameters — and emits strictly richer TS types than any JSON schema
-intermediary can represent. It's also not just an HTTP client generator: any C# type you mark with `[RivetType]` becomes
-a shared TypeScript type, whether or not it's used in an endpoint.
+intermediary can represent.
+
+## Shared types, not just HTTP
+
+Rivet isn't just a client generator. Any C# type you mark with `[RivetType]` becomes a TypeScript type — whether or not
+it's used in an endpoint. Commands, results, value objects, DTOs — if your frontend and backend need to agree on a shape,
+mark it once in C# and it appears in `types.ts`. No duplication, no manual sync, no drift.
+
+This is currently impossible in the .NET → TypeScript ecosystem. Existing tools are HTTP-client-first: they generate
+types as a byproduct of endpoint schemas. Rivet inverts this — the types are the primary output, the client is a bonus.
 
 ## What it produces
 

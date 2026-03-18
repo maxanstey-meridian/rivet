@@ -27,7 +27,7 @@
     <PackAsTool>true</PackAsTool>
     <PackRelease>true</PackRelease>
     <PackageId>dotnet-rivet</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Max Anstey</Authors>
     <Description>Roslyn-powered CLI for generating TypeScript types and clients from .NET applications.</Description>
     <PackageTags>dotnet-tool;typescript;roslyn;codegen;aspnetcore</PackageTags>
