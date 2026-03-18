@@ -52,7 +52,7 @@ generated/rivet/
 | `List<T>`, `T[]`, `IEnumerable<T>`, `IReadOnlyList<T>`    | `T[]`                                 |
 | `Dictionary<string, T>`, `IReadOnlyDictionary<string, T>` | `Record<string, T>`                   |
 | `sealed record`                                           | `type { ... }` (transitive discovery) |
-| `enum` (with `JsonStringEnumConverter`)                   | `"A" \| "B" \| "C"`                   |
+| `enum` (with `JsonStringEnumConverter`)                   | `export type Status = "A" \| "B"`     |
 | `PagedResult<T>` (generic record)                         | `PagedResult<T>`                      |
 | `JsonElement`, `JsonNode`                                 | `unknown`                             |
 | `JsonObject`                                              | `Record<string, unknown>`             |

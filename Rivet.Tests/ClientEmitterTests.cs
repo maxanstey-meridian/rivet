@@ -10,7 +10,7 @@ public sealed class ClientEmitterTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var walker = TypeWalker.Create(compilation);
         var endpoints = EndpointWalker.Walk(compilation, walker);
-        var types = TypeEmitter.Emit([.. walker.Definitions.Values]);
+        var types = TypeEmitter.Emit([.. walker.Definitions.Values], enums: walker.Enums);
         var client = ClientEmitter.Emit(endpoints, [.. walker.Definitions.Values]);
         return (types, client);
     }

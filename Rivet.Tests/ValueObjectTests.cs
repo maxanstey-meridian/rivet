@@ -11,7 +11,7 @@ public sealed class ValueObjectTests
         var walker = TypeWalker.Create(compilation);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
-        return TypeEmitter.Emit(definitions, brands);
+        return TypeEmitter.Emit(definitions, brands, walker.Enums);
     }
 
     [Fact]

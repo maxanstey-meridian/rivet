@@ -12,6 +12,7 @@ public sealed class TypeWalker
     private readonly IAssemblySymbol _sourceAssembly;
     private readonly Dictionary<string, TsTypeDefinition> _definitions = new();
     private readonly Dictionary<string, TsType.Brand> _brands = new();
+    private readonly Dictionary<string, TsType.StringUnion> _enums = new();
     private readonly HashSet<string> _visiting = new();
 
     public TypeWalker(IAssemblySymbol sourceAssembly)
@@ -21,6 +22,7 @@ public sealed class TypeWalker
 
     public IReadOnlyDictionary<string, TsTypeDefinition> Definitions => _definitions;
     public IReadOnlyDictionary<string, TsType.Brand> Brands => _brands;
+    public IReadOnlyDictionary<string, TsType.StringUnion> Enums => _enums;
 
     /// <summary>
     /// Finds all [RivetType]-attributed types in the compilation and walks them.
@@ -197,16 +199,21 @@ public sealed class TypeWalker
                 return new TsType.Dictionary(MapType(namedType.TypeArguments[1]));
             }
 
-            // Enum → string union
+            // Enum → named string union type
             if (namedType.TypeKind == TypeKind.Enum)
             {
-                var members = namedType.GetMembers()
-                    .OfType<IFieldSymbol>()
-                    .Where(f => f.HasConstantValue)
-                    .Select(f => f.Name)
-                    .ToList();
+                if (!_enums.ContainsKey(namedType.Name))
+                {
+                    var members = namedType.GetMembers()
+                        .OfType<IFieldSymbol>()
+                        .Where(f => f.HasConstantValue)
+                        .Select(f => f.Name)
+                        .ToList();
 
-                return new TsType.StringUnion(members);
+                    _enums[namedType.Name] = new TsType.StringUnion(members);
+                }
+
+                return new TsType.TypeRef(namedType.Name);
             }
 
             // Named record/class from source assembly → walk transitively
@@ -247,8 +254,9 @@ public sealed class TypeWalker
             SpecialType.System_String => new TsType.Primitive("string"),
             SpecialType.System_Boolean => new TsType.Primitive("boolean"),
             SpecialType.System_Int16 or SpecialType.System_Int32 or SpecialType.System_Int64
+                or SpecialType.System_UInt16 or SpecialType.System_UInt32 or SpecialType.System_UInt64
                 or SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_Decimal
-                or SpecialType.System_Byte => new TsType.Primitive("number"),
+                or SpecialType.System_Byte or SpecialType.System_SByte => new TsType.Primitive("number"),
             // Types identified by metadata name (no SpecialType)
             _ => symbol.ToDisplayString() switch
             {

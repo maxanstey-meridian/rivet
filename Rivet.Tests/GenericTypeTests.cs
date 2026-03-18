@@ -8,8 +8,8 @@ public sealed class GenericTypeTests
     private static string Generate(string source)
     {
         var compilation = CompilationHelper.CreateCompilation(source);
-        var definitions = TypeWalker.Walk(compilation);
-        return TypeEmitter.Emit(definitions);
+        var walker = TypeWalker.Create(compilation);
+        return TypeEmitter.Emit([.. walker.Definitions.Values], enums: walker.Enums);
     }
 
     [Fact]

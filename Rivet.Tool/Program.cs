@@ -42,7 +42,8 @@ static async Task<int> Run(string[] args)
     var definitions = walker.Definitions.Values.ToList();
 
     var brands = walker.Brands.Values.ToList();
-    var typesOutput = TypeEmitter.Emit(definitions, brands);
+    var enums = walker.Enums;
+    var typesOutput = TypeEmitter.Emit(definitions, brands, enums);
     var validatorsOutput = endpoints.Count > 0
         ? ValidatorEmitter.Emit(endpoints)
         : null;

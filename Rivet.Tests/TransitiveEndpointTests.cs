@@ -45,7 +45,7 @@ public sealed class TransitiveEndpointTests
         var endpoints = EndpointWalker.Walk(compilation, walker);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
-        var types = TypeEmitter.Emit(definitions, brands);
+        var types = TypeEmitter.Emit(definitions, brands, walker.Enums);
         var client = ClientEmitter.EmitControllerClient("items", endpoints);
 
         // Types should be discovered transitively via endpoint params/return types
@@ -95,7 +95,7 @@ public sealed class TransitiveEndpointTests
         var endpoints = EndpointWalker.Walk(compilation, walker);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
-        var types = TypeEmitter.Emit(definitions, brands);
+        var types = TypeEmitter.Emit(definitions, brands, walker.Enums);
 
         // PostDto discovered via endpoint
         Assert.Contains("export type PostDto = {", types);
@@ -103,7 +103,7 @@ public sealed class TransitiveEndpointTests
         Assert.Contains("export type AuthorInfo = {", types);
         // Email discovered as branded VO via AuthorInfo
         Assert.Contains("""export type Email = string & { readonly __brand: "Email" };""", types);
-        // Priority discovered as string union via PostDto
-        Assert.Contains(""""Low" | "Medium" | "High"""", types);
+        // Priority discovered as named enum type via PostDto
+        Assert.Contains("""export type Priority = "Low" | "Medium" | "High";""", types);
     }
 }
