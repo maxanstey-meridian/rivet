@@ -119,7 +119,10 @@ static async Task<int> Run(string[] args)
             Console.WriteLine();
             Console.WriteLine("Compiling validators...");
 
-            var compileOk = await TypiaCompiler.CompileAsync(outputDir);
+            var brandOverrides = brands
+                .Select(b => (b.Name, TypeEmitter.EmitTypeString(b.Inner)))
+                .ToList();
+            var compileOk = await TypiaCompiler.CompileAsync(outputDir, brandOverrides);
             if (!compileOk)
             {
                 Console.Error.WriteLine("Typia compilation failed.");

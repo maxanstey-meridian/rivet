@@ -147,7 +147,10 @@ public sealed class ValidatorEmitterTests
         Assert.Contains("""import { assertMessageDto } from "../build/validators.js";""", validatedClient);
         Assert.Contains("export function getMessage(id: string): Promise<MessageDto>;", validatedClient);
         Assert.Contains("export async function getMessage(id: string, opts?: { unwrap?: boolean })", validatedClient);
-        Assert.Contains("if (opts?.unwrap === false) return rivetFetch(", validatedClient);
+        // unwrap: false validates the result too
+        Assert.Contains("if (opts?.unwrap === false) {", validatedClient);
+        Assert.Contains("result.data = assertMessageDto(result.data);", validatedClient);
+        // default path validates directly
         Assert.Contains("const data = await rivetFetch<MessageDto>", validatedClient);
         Assert.Contains("return assertMessageDto(data);", validatedClient);
     }
@@ -224,6 +227,49 @@ public sealed class ValidatorEmitterTests
         Assert.Contains("export async function getItem", validatedClient);
         Assert.Contains("export async function createItem", validatedClient);
         Assert.Contains("export function deleteItem(id: string): Promise<void>;", validatedClient);
+    }
+
+    [Fact]
+    public void ValidatedClient_MultiResponse_ValidatesEachBranch()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDetailDto(Guid Id, string Title);
+            [RivetType]
+            public sealed record NotFoundDto(string Message);
+
+            [RivetClient]
+            [Route("api/tasks")]
+            public sealed class TasksController
+            {
+                [HttpGet("{id:guid}")]
+                [ProducesResponseType(typeof(TaskDetailDto), 200)]
+                [ProducesResponseType(typeof(NotFoundDto), 404)]
+                public Task<IActionResult> Get(Guid id, CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (validators, _, validatedClient) = Generate(source);
+
+        // Validators emitted for both response types
+        Assert.Contains("export const assertTaskDetailDto = typia.createAssert<TaskDetailDto>();", validators);
+        Assert.Contains("export const assertNotFoundDto = typia.createAssert<NotFoundDto>();", validators);
+
+        // Validated client imports both asserters
+        Assert.Contains("""import { assertNotFoundDto, assertTaskDetailDto } from "../build/validators.js";""", validatedClient);
+
+        // Validated client validates each branch by status code
+        Assert.Contains("if (result.status === 200) result.data = assertTaskDetailDto(result.data);", validatedClient);
+        Assert.Contains("if (result.status === 404) result.data = assertNotFoundDto(result.data);", validatedClient);
     }
 
     [Fact]

@@ -12,16 +12,26 @@ public static class TypiaCompiler
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".rivet");
 
-    public static async Task<bool> CompileAsync(string outputDir)
+    public static async Task<bool> CompileAsync(
+        string outputDir,
+        IReadOnlyList<(string Name, string InnerType)>? brandOverrides = null)
     {
         await EnsureNodeDepsAsync();
+        var originals = DebrandTypeFiles(outputDir, brandOverrides);
         GenerateTsConfig(outputDir);
-        var result = await RunTscAsync(outputDir);
-        if (result)
+        try
         {
-            InlineTypiaHelpers(outputDir);
+            var result = await RunTscAsync(outputDir);
+            if (result)
+            {
+                InlineTypiaHelpers(outputDir);
+            }
+            return result;
         }
-        return result;
+        finally
+        {
+            RestoreTypeFiles(originals);
+        }
     }
 
     private static async Task EnsureNodeDepsAsync()
@@ -64,6 +74,68 @@ public static class TypiaCompiler
             {
                 throw new InvalidOperationException("Failed to patch tsc with ts-patch.");
             }
+        }
+    }
+
+    /// <summary>
+    /// Temporarily replaces branded type declarations in type files with plain primitives
+    /// before typia compilation, then restores them after.
+    ///
+    /// Typia resolves types transitively — createAssert&lt;MemberDto&gt;() walks every property,
+    /// including fields typed as branded VOs (e.g. email: Email). But typia rejects branded
+    /// intersections like `string &amp; { readonly __brand: "Email" }` as "nonsensible".
+    /// We can't skip these types because full-graph validation is the whole point.
+    ///
+    /// The fix: during compilation, replace brands with their inner primitive (Email → string).
+    /// This is semantically correct — brands are phantom types with no runtime representation.
+    /// After compilation, the type files are restored to their branded form for consumer code.
+    /// </summary>
+    private static Dictionary<string, string> DebrandTypeFiles(
+        string outputDir,
+        IReadOnlyList<(string Name, string InnerType)>? brandOverrides)
+    {
+        var originals = new Dictionary<string, string>();
+        if (brandOverrides is null or { Count: 0 })
+        {
+            return originals;
+        }
+
+        var typesDir = Path.Combine(outputDir, "types");
+        if (!Directory.Exists(typesDir))
+        {
+            return originals;
+        }
+
+        foreach (var tsFile in Directory.GetFiles(typesDir, "*.ts"))
+        {
+            var content = File.ReadAllText(tsFile);
+            var modified = content;
+
+            foreach (var (name, innerType) in brandOverrides)
+            {
+                // Replace: export type Email = string & { readonly __brand: "Email" };
+                // With:    export type Email = string;
+                modified = System.Text.RegularExpressions.Regex.Replace(
+                    modified,
+                    @$"export type {System.Text.RegularExpressions.Regex.Escape(name)} = .+ & \{{ readonly __brand: ""{System.Text.RegularExpressions.Regex.Escape(name)}"" \}};",
+                    $"export type {name} = {innerType};");
+            }
+
+            if (modified != content)
+            {
+                originals[tsFile] = content;
+                File.WriteAllText(tsFile, modified);
+            }
+        }
+
+        return originals;
+    }
+
+    private static void RestoreTypeFiles(Dictionary<string, string> originals)
+    {
+        foreach (var (path, content) in originals)
+        {
+            File.WriteAllText(path, content);
         }
     }
 

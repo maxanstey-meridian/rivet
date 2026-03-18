@@ -1,4 +1,12 @@
-# Rivet
+<p align="center">
+  <img src="logo.png" alt="Rivet" width="200" />
+  <h1 align="center">Rivet</h1>
+  <p align="center">
+    <a href="https://www.nuget.org/packages/Rivet.Attributes"><img src="https://img.shields.io/nuget/v/Rivet.Attributes?label=Rivet.Attributes" alt="NuGet" /></a>
+    <a href="https://www.nuget.org/packages/dotnet-rivet"><img src="https://img.shields.io/nuget/v/dotnet-rivet?label=dotnet-rivet" alt="NuGet" /></a>
+    <a href="https://github.com/maxdavids/rivet/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License" /></a>
+  </p>
+</p>
 
 Your C# types are your TypeScript types. No drift, no schema, no codegen config.
 
@@ -6,6 +14,22 @@ Rivet reads your .NET sealed records and controller endpoints via Roslyn and emi
 a typed HTTP client — with optional runtime validation at the fetch boundary.
 
 Three attributes. One command. Full-stack type safety.
+
+### Your C# types...
+
+<img src="docs/1-cs-types.png" alt="C# types" width="600" />
+
+### ...become TypeScript types
+
+<img src="docs/2-ts-types.png" alt="Generated TypeScript types" width="600" />
+
+### Your controllers...
+
+<img src="docs/3-controller.png" alt="Controller" width="600" />
+
+### ...become a typed client with runtime validation
+
+<img src="docs/4-client.png" alt="Generated client" width="600" />
 
 ## Why
 
@@ -90,26 +114,10 @@ dotnet tool install --global dotnet-rivet
 ### 2. Mark your types and endpoints
 
 ```csharp
-namespace MyApp.Domain;
+[RivetType]  // explicit — for types not reachable from any endpoint
+public sealed record TaskItem(Guid Id, string Title, Priority Priority, Email Author);
 
-// No attributes needed — discovered transitively via endpoint types
-public enum Priority { Low, Medium, High, Critical }
-public sealed record Email(string Value);  // VO → branded type in TS
-
-// Shared with the frontend but not exposed via any endpoint
-[RivetType]
-public sealed record TaskItem(Guid Id, string Title, Priority Priority, Email Author, DateTime CreatedAt);
-
-namespace MyApp.Contracts;
-
-// No [RivetType] needed — discovered via the endpoint
-public sealed record CreateTaskCommand(string Title, Priority Priority, Email Author);
-public sealed record CreateTaskResult(Guid Id, DateTime CreatedAt);
-
-namespace MyApp.Api;
-
-// [RivetClient] auto-discovers all public HTTP methods on this controller
-[RivetClient]
+[RivetClient] // auto-discovers all public HTTP methods on this controller
 [Route("api/tasks")]
 public sealed class TasksController : ControllerBase
 {
@@ -121,47 +129,6 @@ public sealed class TasksController : ControllerBase
     {
         // ...
     }
-}
-```
-
-Generates:
-
-```typescript
-// types/common.ts — Email, Priority (referenced by both domain.ts and contracts.ts)
-export type Email = string & { readonly __brand: "Email" };
-export type Priority = "Low" | "Medium" | "High" | "Critical";
-
-// types/domain.ts — from MyApp.Domain
-import type {Email, Priority} from "./common.js";
-
-export type TaskItem = {
-  id: string;
-  title: string;
-  priority: Priority;
-  author: Email;
-  createdAt: string;
-};
-
-// types/contracts.ts — from MyApp.Contracts
-import type {Email, Priority} from "./common.js";
-
-export type CreateTaskCommand = {
-  title: string;
-  priority: Priority;
-  author: Email;
-};
-
-export type CreateTaskResult = {
-  id: string;
-  createdAt: string;
-};
-
-// client/tasks.ts
-export function create(command: CreateTaskCommand): Promise<CreateTaskResult>;
-export function create(command: CreateTaskCommand, opts: { unwrap: true }): Promise<CreateTaskResult>;
-export function create(command: CreateTaskCommand, opts: { unwrap: false }): Promise<RivetResult<CreateTaskResult>>;
-export function create(command: CreateTaskCommand, opts?: { unwrap?: boolean }) {
-  return rivetFetch("POST", `/api/tasks`, {body: command, unwrap: opts?.unwrap});
 }
 ```
 

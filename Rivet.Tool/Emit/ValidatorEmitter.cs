@@ -13,9 +13,16 @@ public static class ValidatorEmitter
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyDictionary<string, string> typeFileMap)
     {
-        var returnTypes = endpoints
+        // Collect asserters for primary return types AND all response data types
+        var allTypes = endpoints
             .Where(e => e.ReturnType is not null)
-            .Select(e => (TypeStr: TypeEmitter.EmitTypeString(e.ReturnType!), AssertName: GetAssertName(e.ReturnType!)))
+            .Select(e => e.ReturnType!)
+            .Concat(endpoints.SelectMany(e => e.Responses)
+                .Where(r => r.DataType is not null)
+                .Select(r => r.DataType!));
+
+        var returnTypes = allTypes
+            .Select(t => (TypeStr: TypeEmitter.EmitTypeString(t), AssertName: GetAssertName(t)))
             .DistinctBy(x => x.AssertName)
             .OrderBy(x => x.AssertName)
             .ToList();
@@ -36,6 +43,10 @@ public static class ValidatorEmitter
         foreach (var endpoint in endpoints.Where(e => e.ReturnType is not null))
         {
             TsType.CollectTypeRefs(endpoint.ReturnType!, typeRefs);
+        }
+        foreach (var response in endpoints.SelectMany(e => e.Responses).Where(r => r.DataType is not null))
+        {
+            TsType.CollectTypeRefs(response.DataType!, typeRefs);
         }
 
         var importsByFile = typeRefs

@@ -148,6 +148,9 @@ public static partial class ClientEmitter
             var assertImports = endpoints
                 .Where(e => e.ReturnType is not null)
                 .Select(e => ValidatorEmitter.GetAssertName(e.ReturnType!))
+                .Concat(endpoints.SelectMany(e => e.Responses)
+                    .Where(r => r.DataType is not null)
+                    .Select(r => ValidatorEmitter.GetAssertName(r.DataType!)))
                 .Distinct()
                 .Order()
                 .ToList();
@@ -289,7 +292,26 @@ public static partial class ClientEmitter
         if (validated && endpoint.ReturnType is not null)
         {
             var assertName = ValidatorEmitter.GetAssertName(endpoint.ReturnType);
-            sb.AppendLine($"  if (opts?.unwrap === false) return rivetFetch(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
+            if (endpoint.Responses.Any(r => r.DataType is not null))
+            {
+                sb.AppendLine($"  if (opts?.unwrap === false) {{");
+                sb.AppendLine($"    const result = await rivetFetch(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
+                foreach (var response in endpoint.Responses.Where(r => r.DataType is not null))
+                {
+                    var responseAssert = ValidatorEmitter.GetAssertName(response.DataType!);
+                    sb.AppendLine($"    if (result.status === {response.StatusCode}) result.data = {responseAssert}(result.data);");
+                }
+                sb.AppendLine("    return result;");
+                sb.AppendLine("  }");
+            }
+            else
+            {
+                sb.AppendLine($"  if (opts?.unwrap === false) {{");
+                sb.AppendLine($"    const result = await rivetFetch(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
+                sb.AppendLine($"    result.data = {assertName}(result.data);");
+                sb.AppendLine("    return result;");
+                sb.AppendLine("  }");
+            }
             sb.AppendLine($"  const data = await rivetFetch<{successType}>(\"{endpoint.HttpMethod}\", `{route}`{baseFetchStr});");
             sb.AppendLine($"  return {assertName}(data);");
         }
