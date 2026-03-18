@@ -295,7 +295,7 @@ public static partial class ClientEmitter
             if (endpoint.Responses.Any(r => r.DataType is not null))
             {
                 sb.AppendLine($"  if (opts?.unwrap === false) {{");
-                sb.AppendLine($"    const result = await rivetFetch(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
+                sb.AppendLine($"    const result = await rivetFetch<{resultTypeName}>(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
                 foreach (var response in endpoint.Responses.Where(r => r.DataType is not null))
                 {
                     var responseAssert = ValidatorEmitter.GetAssertName(response.DataType!);
@@ -307,7 +307,7 @@ public static partial class ClientEmitter
             else
             {
                 sb.AppendLine($"  if (opts?.unwrap === false) {{");
-                sb.AppendLine($"    const result = await rivetFetch(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
+                sb.AppendLine($"    const result = await rivetFetch<{resultTypeName}>(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
                 sb.AppendLine($"    result.data = {assertName}(result.data);");
                 sb.AppendLine("    return result;");
                 sb.AppendLine("  }");
@@ -317,7 +317,7 @@ public static partial class ClientEmitter
         }
         else
         {
-            sb.AppendLine($"  return rivetFetch(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
+            sb.AppendLine($"  return rivetFetch<{resultTypeName}>(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
         }
 
         sb.AppendLine("}");

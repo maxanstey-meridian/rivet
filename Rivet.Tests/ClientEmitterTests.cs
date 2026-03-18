@@ -54,7 +54,7 @@ public sealed class ClientEmitterTests
         Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand, opts: { unwrap: true }): Promise<MessageDto>;", client);
         Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand, opts: { unwrap: false }): Promise<RivetResult<MessageDto>>;", client);
         // Implementation body
-        Assert.Contains("""rivetFetch("POST", `/api/submissions/${id}/messages`, { body: body, unwrap: opts?.unwrap });""", client);
+        Assert.Contains("""rivetFetch<RivetResult<MessageDto>>("POST", `/api/submissions/${id}/messages`, { body: body, unwrap: opts?.unwrap });""", client);
     }
 
     [Fact]
@@ -84,7 +84,7 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         Assert.Contains("export function getSubmission(id: string): Promise<SubmissionDto>;", client);
-        Assert.Contains("""rivetFetch("GET", `/api/submissions/${id}`, { unwrap: opts?.unwrap });""", client);
+        Assert.Contains("""rivetFetch<RivetResult<SubmissionDto>>("GET", `/api/submissions/${id}`, { unwrap: opts?.unwrap });""", client);
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public sealed class ClientEmitterTests
 
         Assert.Contains("export function deleteSubmission(id: string): Promise<void>;", client);
         Assert.Contains("export function deleteSubmission(id: string, opts: { unwrap: false }): Promise<RivetResult<void>>;", client);
-        Assert.Contains("""rivetFetch("DELETE", `/api/submissions/${id}`, { unwrap: opts?.unwrap });""", client);
+        Assert.Contains("""rivetFetch<RivetResult<void>>("DELETE", `/api/submissions/${id}`, { unwrap: opts?.unwrap });""", client);
     }
 
     [Fact]
@@ -272,7 +272,7 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand): Promise<MessageDto>;", client);
-        Assert.Contains("""rivetFetch("POST", `/api/submissions/${id}/messages`, { body: body, unwrap: opts?.unwrap });""", client);
+        Assert.Contains("""rivetFetch<RivetResult<MessageDto>>("POST", `/api/submissions/${id}/messages`, { body: body, unwrap: opts?.unwrap });""", client);
     }
 
     [Fact]

@@ -49,7 +49,7 @@ public sealed class ControllerEndpointTests
 
         Assert.Contains("export function get(", client);
         Assert.Contains("Promise<ItemDto>", client);
-        Assert.Contains("""rivetFetch("GET", `/api/items/${id}`""", client);
+        Assert.Contains("\"GET\", `/api/items/${id}`", client);
     }
 
     [Fact]
