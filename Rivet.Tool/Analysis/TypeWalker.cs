@@ -181,30 +181,22 @@ public sealed class TypeWalker
     private static TsType.Primitive? MapPrimitive(INamedTypeSymbol symbol)
     {
         // Special types via Roslyn's built-in classification
-        switch (symbol.SpecialType)
+        return symbol.SpecialType switch
         {
-            case SpecialType.System_String:
-                return new TsType.Primitive("string");
-            case SpecialType.System_Boolean:
-                return new TsType.Primitive("boolean");
-            case SpecialType.System_Int16:
-            case SpecialType.System_Int32:
-            case SpecialType.System_Int64:
-            case SpecialType.System_Single:
-            case SpecialType.System_Double:
-            case SpecialType.System_Decimal:
-            case SpecialType.System_Byte:
-                return new TsType.Primitive("number");
-        }
-
-        // Types identified by metadata name (no SpecialType)
-        return symbol.ToDisplayString() switch
-        {
-            "System.Guid" => new TsType.Primitive("string"),
-            "System.DateTime" => new TsType.Primitive("string"),
-            "System.DateTimeOffset" => new TsType.Primitive("string"),
-            "System.DateOnly" => new TsType.Primitive("string"),
-            _ => null,
+            SpecialType.System_String => new TsType.Primitive("string"),
+            SpecialType.System_Boolean => new TsType.Primitive("boolean"),
+            SpecialType.System_Int16 or SpecialType.System_Int32 or SpecialType.System_Int64
+                or SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_Decimal
+                or SpecialType.System_Byte => new TsType.Primitive("number"),
+            // Types identified by metadata name (no SpecialType)
+            _ => symbol.ToDisplayString() switch
+            {
+                "System.Guid" => new TsType.Primitive("string"),
+                "System.DateTime" => new TsType.Primitive("string"),
+                "System.DateTimeOffset" => new TsType.Primitive("string"),
+                "System.DateOnly" => new TsType.Primitive("string"),
+                _ => null,
+            }
         };
     }
 
@@ -239,12 +231,7 @@ public sealed class TypeWalker
 
     private static string ToCamelCase(string name)
     {
-        if (string.IsNullOrEmpty(name))
-        {
-            return name;
-        }
-
-        if (char.IsLower(name[0]))
+        if (string.IsNullOrEmpty(name) || char.IsLower(name[0]))
         {
             return name;
         }
