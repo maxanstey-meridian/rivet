@@ -205,8 +205,8 @@ static async Task<Compilation> LoadProjectCompilation(string csprojPath)
             continue;
         }
 
-        var msbuildDir = Path.Combine(newest, "MSBuild.dll");
-        if (!File.Exists(msbuildDir))
+        var msbuildDll = Path.Combine(newest, "MSBuild.dll");
+        if (!File.Exists(msbuildDll))
         {
             continue;
         }

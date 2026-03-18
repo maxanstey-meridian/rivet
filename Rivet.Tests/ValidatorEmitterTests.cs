@@ -14,8 +14,8 @@ public sealed class ValidatorEmitterTests
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
         var validators = ValidatorEmitter.Emit(endpoints, typeFileMap);
-        var client = ClientEmitter.Emit(endpoints, definitions, typeFileMap);
-        var validatedClient = ClientEmitter.Emit(endpoints, definitions, typeFileMap, validated: true);
+        var client = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap);
+        var validatedClient = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap, validated: true);
         return (validators, client, validatedClient);
     }
 
@@ -144,7 +144,7 @@ public sealed class ValidatorEmitterTests
         Assert.DoesNotContain("assertMessageDto", client);
 
         // Validated client: async + assert wrapper with unwrap branching
-        Assert.Contains("""import { assertMessageDto } from "./build/validators.js";""", validatedClient);
+        Assert.Contains("""import { assertMessageDto } from "../build/validators.js";""", validatedClient);
         Assert.Contains("export function getMessage(id: string): Promise<MessageDto>;", validatedClient);
         Assert.Contains("export async function getMessage(id: string, opts?: { unwrap?: boolean })", validatedClient);
         Assert.Contains("if (opts?.unwrap === false) return rivetFetch(", validatedClient);

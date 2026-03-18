@@ -35,7 +35,7 @@ public static class ValidatorEmitter
         var typeRefs = new HashSet<string>();
         foreach (var endpoint in endpoints.Where(e => e.ReturnType is not null))
         {
-            ClientEmitter.CollectTypeRefs(endpoint.ReturnType!, typeRefs);
+            TsType.CollectTypeRefs(endpoint.ReturnType!, typeRefs);
         }
 
         var importsByFile = typeRefs

@@ -420,7 +420,8 @@ enums, value objects, application-layer commands with colocated results, and a g
 ```
 samples/TaskBoard.Api/
 ├── Domain/
-│   ├── Priority.cs              # Priority, WorkItemStatus enums
+│   ├── Priority.cs              # Priority enum
+│   ├── WorkItemStatus.cs        # WorkItemStatus enum
 │   ├── Label.cs                 # Label record (multi-property → object type)
 │   └── ValueObjects.cs          # Email, TaskId VOs (single Value → branded types)
 ├── Application/

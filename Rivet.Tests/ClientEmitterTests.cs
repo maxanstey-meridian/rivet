@@ -14,7 +14,7 @@ public sealed class ClientEmitterTests
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
         var types = TypeEmitter.Emit(definitions, enums: walker.Enums);
-        var client = ClientEmitter.Emit(endpoints, definitions, typeFileMap);
+        var client = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap);
         return (types, client);
     }
 
@@ -48,7 +48,7 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("""import type { CreateMessageCommand, MessageDto } from "./types/test.js";""", client);
+        Assert.Contains("""import type { CreateMessageCommand, MessageDto } from "../types/test.js";""", client);
         // Overload signatures
         Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand): Promise<MessageDto>;", client);
         Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand, opts: { unwrap: true }): Promise<MessageDto>;", client);
@@ -223,32 +223,13 @@ public sealed class ClientEmitterTests
     [Fact]
     public void RivetFetchBoilerplate_Emitted()
     {
-        var source = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
+        var rivetBase = ClientEmitter.EmitRivetBase();
 
-            namespace Test;
-
-            [RivetType]
-            public sealed record Dto(string Name);
-
-            public static class Endpoints
-            {
-                [RivetEndpoint]
-                [HttpGet("/api/test")]
-                public static Task<Dto> Test() => throw new NotImplementedException();
-            }
-            """;
-
-        var (_, client) = Generate(source);
-
-        Assert.Contains("export type RivetConfig", client);
-        Assert.Contains("export type RivetResult<T>", client);
-        Assert.Contains("export const configureRivet", client);
-        Assert.Contains("const rivetFetch", client);
-        Assert.Contains("unwrap?: boolean", client);
+        Assert.Contains("export type RivetConfig", rivetBase);
+        Assert.Contains("export type RivetResult<T>", rivetBase);
+        Assert.Contains("export const configureRivet", rivetBase);
+        Assert.Contains("export const rivetFetch", rivetBase);
+        Assert.Contains("unwrap?: boolean", rivetBase);
     }
 
     [Fact]

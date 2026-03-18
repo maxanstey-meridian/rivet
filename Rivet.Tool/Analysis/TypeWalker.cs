@@ -70,25 +70,9 @@ public sealed class TypeWalker
         Compilation compilation,
         INamedTypeSymbol attributeSymbol)
     {
-        return GetAllTypes(compilation.GlobalNamespace)
+        return RoslynExtensions.GetAllTypes(compilation.GlobalNamespace)
             .Where(t => t.GetAttributes().Any(a =>
                 SymbolEqualityComparer.Default.Equals(a.AttributeClass, attributeSymbol)));
-    }
-
-    private static IEnumerable<INamedTypeSymbol> GetAllTypes(INamespaceSymbol ns)
-    {
-        foreach (var type in ns.GetTypeMembers())
-        {
-            yield return type;
-        }
-
-        foreach (var nested in ns.GetNamespaceMembers())
-        {
-            foreach (var type in GetAllTypes(nested))
-            {
-                yield return type;
-            }
-        }
     }
 
     /// <summary>
@@ -129,7 +113,7 @@ public sealed class TypeWalker
                 continue;
             }
 
-            var tsName = ToCamelCase(member.Name);
+            var tsName = Naming.ToCamelCase(member.Name);
             var tsType = MapType(member.Type);
             var isOptional = IsOptionalProperty(member);
 
@@ -322,16 +306,6 @@ public sealed class TypeWalker
         // Nullable affects the type (T | null), not presence.
         // TODO: support default parameter values as optional when needed.
         return false;
-    }
-
-    private static string ToCamelCase(string name)
-    {
-        if (string.IsNullOrEmpty(name) || char.IsLower(name[0]))
-        {
-            return name;
-        }
-
-        return char.ToLowerInvariant(name[0]) + name[1..];
     }
 
     /// <summary>

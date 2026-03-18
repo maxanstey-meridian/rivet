@@ -31,4 +31,36 @@ public abstract record TsType
 
     /// <summary>Branded primitive: string &amp; { readonly __brand: "Email" }.</summary>
     public sealed record Brand(string Name, TsType Inner) : TsType;
+
+    /// <summary>
+    /// Recursively collects all named type references from a TsType tree.
+    /// </summary>
+    public static void CollectTypeRefs(TsType type, HashSet<string> names)
+    {
+        switch (type)
+        {
+            case TypeRef r:
+                names.Add(r.Name);
+                break;
+            case Nullable n:
+                CollectTypeRefs(n.Inner, names);
+                break;
+            case Array a:
+                CollectTypeRefs(a.Element, names);
+                break;
+            case Dictionary d:
+                CollectTypeRefs(d.Value, names);
+                break;
+            case Generic g:
+                names.Add(g.Name);
+                foreach (var arg in g.TypeArguments)
+                {
+                    CollectTypeRefs(arg, names);
+                }
+                break;
+            case Brand b:
+                names.Add(b.Name);
+                break;
+        }
+    }
 }

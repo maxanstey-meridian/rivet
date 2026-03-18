@@ -85,7 +85,7 @@ public static partial class EndpointWalker
         var parameters = ExtractParams(method, typeWalker, fullRoute);
         var responses = ExtractAllResponseTypes(method, typeWalker);
         var returnType = ExtractReturnType(method, typeWalker);
-        var name = ToCamelCase(method.Name);
+        var name = Naming.ToCamelCase(method.Name);
         var controllerName = DeriveControllerFileName(method.ContainingType);
 
         return new TsEndpointDefinition(name, httpMethod, fullRoute, parameters, returnType, controllerName, responses);
@@ -111,7 +111,7 @@ public static partial class EndpointWalker
             name = name[..^"Controller".Length];
         }
 
-        return ToCamelCase(name);
+        return Naming.ToCamelCase(name);
     }
 
     private static (string? HttpMethod, string? Route) ExtractHttpMethodAndRoute(IMethodSymbol method)
@@ -402,7 +402,7 @@ public static partial class EndpointWalker
         Compilation compilation,
         INamedTypeSymbol attributeSymbol)
     {
-        return GetAllTypes(compilation.GlobalNamespace)
+        return RoslynExtensions.GetAllTypes(compilation.GlobalNamespace)
             .SelectMany(t => t.GetMembers().OfType<IMethodSymbol>())
             .Where(m => m.GetAttributes().Any(a =>
                 SymbolEqualityComparer.Default.Equals(a.AttributeClass, attributeSymbol)));
@@ -415,7 +415,7 @@ public static partial class EndpointWalker
         Compilation compilation,
         INamedTypeSymbol clientAttributeSymbol)
     {
-        return GetAllTypes(compilation.GlobalNamespace)
+        return RoslynExtensions.GetAllTypes(compilation.GlobalNamespace)
             .Where(t => t.GetAttributes().Any(a =>
                 SymbolEqualityComparer.Default.Equals(a.AttributeClass, clientAttributeSymbol)))
             .SelectMany(t => t.GetMembers().OfType<IMethodSymbol>())
@@ -430,32 +430,6 @@ public static partial class EndpointWalker
             var name = a.AttributeClass?.ToDisplayString();
             return name is not null && HttpMethodAttributes.Contains(name);
         });
-
-    private static IEnumerable<INamedTypeSymbol> GetAllTypes(INamespaceSymbol ns)
-    {
-        foreach (var type in ns.GetTypeMembers())
-        {
-            yield return type;
-        }
-
-        foreach (var nested in ns.GetNamespaceMembers())
-        {
-            foreach (var type in GetAllTypes(nested))
-            {
-                yield return type;
-            }
-        }
-    }
-
-    private static string ToCamelCase(string name)
-    {
-        if (string.IsNullOrEmpty(name) || char.IsLower(name[0]))
-        {
-            return name;
-        }
-
-        return char.ToLowerInvariant(name[0]) + name[1..];
-    }
 
     /// <summary>
     /// Matches route constraints like {id:guid}, {slug:minlength(3)}, {page:int}

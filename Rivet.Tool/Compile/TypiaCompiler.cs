@@ -100,7 +100,7 @@ public static class TypiaCompiler
                 ]
               },
               "include": [
-                "{{parentRelative}}/types.ts",
+                "{{parentRelative}}/types/*.ts",
                 "{{parentRelative}}/validators.ts"
               ]
             }

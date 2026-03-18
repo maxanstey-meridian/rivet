@@ -13,7 +13,10 @@ public sealed class ControllerEndpointTests
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
-        return ClientEmitter.Emit(endpoints, definitions, typeFileMap);
+        var controllerGroups = ClientEmitter.GroupByController(endpoints);
+        // Emit all controller groups and concatenate for assertion convenience
+        return string.Join("\n", controllerGroups.Select(g =>
+            ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
     }
 
     [Fact]

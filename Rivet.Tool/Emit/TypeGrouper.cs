@@ -73,7 +73,7 @@ public static class TypeGrouper
             var refs = new HashSet<string>();
             foreach (var prop in def.Properties)
             {
-                ClientEmitter.CollectTypeRefs(prop.Type, refs);
+                TsType.CollectTypeRefs(prop.Type, refs);
             }
 
             typeRefs[def.Name] = refs;
@@ -213,7 +213,7 @@ public static class TypeGrouper
 
         foreach (var group in groups.OrderBy(x => x))
         {
-            var baseName = ToCamelCase(group);
+            var baseName = Naming.ToCamelCase(group);
             var fileName = baseName;
             var suffix = 2;
             while (!usedFileNames.Add(fileName))
@@ -228,13 +228,4 @@ public static class TypeGrouper
         return result;
     }
 
-    private static string ToCamelCase(string name)
-    {
-        if (string.IsNullOrEmpty(name) || char.IsLower(name[0]))
-        {
-            return name;
-        }
-
-        return char.ToLowerInvariant(name[0]) + name[1..];
-    }
 }
