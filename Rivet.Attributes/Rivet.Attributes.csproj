@@ -1,9 +1,23 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+
+    <PackageId>Rivet.Attributes</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Max Anstey</Authors>
+    <Description>Marker attributes for Rivet — end-to-end .NET to TypeScript type safety</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/maxanstey-meridian/rivet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/maxanstey-meridian/rivet</RepositoryUrl>
+    <PackageTags>typescript;codegen;roslyn;types</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
 </Project>

@@ -274,8 +274,8 @@ static void PrintUsage()
     Console.Error.WriteLine("Rivet — C# to TypeScript type generator");
     Console.Error.WriteLine();
     Console.Error.WriteLine("Usage:");
-    Console.Error.WriteLine("  dotnet run --project Rivet.Tool -- --project <path.csproj> --output <dir>");
-    Console.Error.WriteLine("  dotnet run --project Rivet.Tool -- <file.cs> [file2.cs ...] [--output <dir>]");
+    Console.Error.WriteLine("  dotnet rivet --project <path.csproj> --output <dir>");
+    Console.Error.WriteLine("  dotnet rivet <file.cs> [file2.cs ...] [--output <dir>]");
     Console.Error.WriteLine();
     Console.Error.WriteLine("Options:");
     Console.Error.WriteLine("  -p, --project <path>   Path to .csproj file");

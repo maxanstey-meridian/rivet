@@ -56,7 +56,7 @@ public static Task<MessageDto> CreateMessage(
     [FromBody] CreateMessageCommand body)
 ```
 
-### TypeScript (output — after `dotnet rivet generate`)
+### TypeScript (output — after `dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet`)
 
 ```typescript
 // generated/rivet/types.ts
@@ -81,7 +81,7 @@ export const createMessage = (
   rivetFetch("POST", `/api/submissions/${id}/messages`, { body });
 ```
 
-### TypeScript (output — after `dotnet rivet compile`)
+### TypeScript (output — after `dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --compile`)
 
 ```typescript
 // generated/rivet/client.ts — same file, now with runtime validation wired in
@@ -136,15 +136,15 @@ Rivet.sln
 | Package | Type | What consumer does |
 |---|---|---|
 | `Rivet.Attributes` | NuGet library | `<PackageReference>` in `.csproj` — adds `[RivetType]`, `[RivetEndpoint]` |
-| `Rivet.Tool` | NuGet dotnet tool | `dotnet tool install rivet` (global or local manifest) |
+| `rivet` | NuGet dotnet tool | `dotnet tool install --global rivet` or `dotnet tool install --local rivet` |
 
-Consumer's `package.json` is never touched. For the compile step (`dotnet rivet compile`), the tool manages its own Node dependencies:
+Consumer's `package.json` is never touched. For the compile step (`dotnet rivet --project <path.csproj> --output <dir> --compile`), the tool manages its own Node dependencies:
 - Requires `node` on PATH (any frontend dev already has this)
 - On first compile, bootstraps `typescript` + `typia` to a tool-local cache (`~/.rivet/`)
 - Pins versions, reuses on subsequent runs
 - Same model as `dotnet-ef` managing its own internal dependencies
 
-### Stage 1 — Roslyn CLI (`dotnet rivet generate`)
+### Stage 1 — Roslyn CLI (`dotnet rivet --project <path.csproj> --output <dir>`)
 
 The CLI opens the target project via `MSBuildWorkspace`, finds attributed symbols, and emits:
 1. **types.ts** — from `[RivetType]` records + transitively referenced types (enums, value objects)
@@ -153,7 +153,7 @@ The CLI opens the target project via `MSBuildWorkspace`, finds attributed symbol
 
 Output goes to a configurable directory (CLI arg or MSBuild property, default `../ui/generated/rivet/`).
 
-### Stage 2 — Typia compile (`dotnet rivet compile`, optional)
+### Stage 2 — Typia compile (`dotnet rivet --project <path.csproj> --output <dir> --compile`, optional)
 
 Compiles validators and re-emits `client.ts` with validation wired into every fetch function:
 
@@ -178,8 +178,8 @@ Consumer project references `Rivet.Attributes` (runtime only — thin marker att
 
 | Command | Requires | Output | Use when |
 |---|---|---|---|
-| `dotnet rivet generate` | .NET SDK only | `types.ts`, `client.ts`, `validators.ts` (source) | Types + client. No Node needed. |
-| `dotnet rivet compile` | Node + tsc + typia | `build/*.js` + `build/*.d.ts` | You want runtime validation. |
+| `dotnet rivet --project <path.csproj> --output <dir>` | .NET SDK only | `types.ts`, `client.ts`, `validators.ts` (source) | Types + client. No Node needed. |
+| `dotnet rivet --project <path.csproj> --output <dir> --compile` | Node + tsc + typia | `build/*.js` + `build/*.d.ts` | You want runtime validation. |
 
 ---
 
@@ -256,7 +256,7 @@ Only attributed params are emitted to the client. This eliminates the hardest pa
 - [ ] Watch mode: MSBuild target that regenerates on build
 - [ ] Source map comments: `// Generated from CreateMessageCommand`
 - [ ] Per-module output splitting (optional, configurable)
-- [ ] README, NuGet package, dotnet tool CLI (`dotnet rivet generate`)
+- [ ] README, NuGet package, dotnet tool CLI (`dotnet rivet --project <path.csproj> --output <dir>`)
 
 **Complexity:** Medium-High. Generics need open vs. closed type parameter tracking in the type walker. Everything else is DX polish.
 
@@ -267,7 +267,7 @@ Only attributed params are emitted to the client. This eliminates the hardest pa
 **What:** Emit `validators.ts` with Typia assertion calls, compile them, and re-emit `client.ts` with validators wired into every fetch function. The client becomes runtime type-safe at the boundary.
 
 - [ ] ValidatorGenerator: emit `validators.ts` with `typia.createAssert<T>()` for each return type used by `[RivetEndpoint]` methods
-- [ ] `dotnet rivet compile` command: bootstrap Node deps to `~/.rivet/`, invoke `tsc` with Typia transformer, output to `build/`
+- [ ] `dotnet rivet --project <path.csproj> --output <dir> --compile`: bootstrap Node deps to `~/.rivet/`, invoke `tsc` with Typia transformer, output to `build/`
 - [ ] Re-emit `client.ts` with validator imports + `assertFoo(raw)` calls wrapping every `rivetFetch` return
 - [ ] Generated `tsconfig.json` in output directory targeting the `build/` folder
 - [ ] Validators import types from sibling `types.ts` — single source of truth

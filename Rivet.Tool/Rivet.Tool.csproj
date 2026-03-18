@@ -5,6 +5,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="/" Link="README.md" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Build.Locator" Version="1.11.2" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.3.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.3.0" />
@@ -19,6 +23,20 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UseAppHost>false</UseAppHost>
+    <PackAsTool>true</PackAsTool>
+    <PackRelease>true</PackRelease>
+    <PackageId>rivet</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Rivet contributors</Authors>
+    <Description>Roslyn-powered CLI for generating TypeScript types and clients from .NET applications.</Description>
+    <PackageTags>dotnet-tool;typescript;roslyn;codegen;aspnetcore</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/maxanstey-meridian/rivet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/maxanstey-meridian/rivet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <ToolCommandName>dotnet-rivet</ToolCommandName>
   </PropertyGroup>
 
 </Project>
