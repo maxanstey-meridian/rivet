@@ -9,7 +9,9 @@ namespace Rivet.Tool.Emit;
 /// </summary>
 public static class ValidatorEmitter
 {
-    public static string Emit(IReadOnlyList<TsEndpointDefinition> endpoints)
+    public static string Emit(
+        IReadOnlyList<TsEndpointDefinition> endpoints,
+        IReadOnlyDictionary<string, string> typeFileMap)
     {
         var returnTypes = endpoints
             .Where(e => e.ReturnType is not null)
@@ -29,16 +31,24 @@ public static class ValidatorEmitter
         sb.AppendLine();
         sb.AppendLine("import typia from \"typia\";");
 
-        // Import the types from types.ts
+        // Import types from their grouped source files
         var typeRefs = new HashSet<string>();
         foreach (var endpoint in endpoints.Where(e => e.ReturnType is not null))
         {
             ClientEmitter.CollectTypeRefs(endpoint.ReturnType!, typeRefs);
         }
 
-        var typeNames = typeRefs.Order().ToList();
+        var importsByFile = typeRefs
+            .Where(t => typeFileMap.ContainsKey(t))
+            .GroupBy(t => typeFileMap[t])
+            .OrderBy(g => g.Key);
 
-        sb.AppendLine($"import type {{ {string.Join(", ", typeNames)} }} from \"./types/index.js\";");
+        foreach (var group in importsByFile)
+        {
+            var names = string.Join(", ", group.Order());
+            sb.AppendLine($"import type {{ {names} }} from \"./types/{group.Key}.js\";");
+        }
+
         sb.AppendLine();
 
         foreach (var (typeStr, assertName) in returnTypes)

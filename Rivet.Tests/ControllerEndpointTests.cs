@@ -44,9 +44,9 @@ public sealed class ControllerEndpointTests
 
         var client = GenerateClient(source);
 
-        Assert.Contains("export const get = (", client);
+        Assert.Contains("export function get(", client);
         Assert.Contains("Promise<ItemDto>", client);
-        Assert.Contains("""rivetFetch<ItemDto>("GET", `/api/items/${id}`""", client);
+        Assert.Contains("""rivetFetch("GET", `/api/items/${id}`""", client);
     }
 
     [Fact]
@@ -298,9 +298,9 @@ public sealed class ControllerEndpointTests
         var client = GenerateClient(source);
 
         // All three HTTP methods discovered without [RivetEndpoint]
-        Assert.Contains("export const get = (", client);
-        Assert.Contains("export const create = (", client);
-        Assert.Contains("export const remove = (", client);
+        Assert.Contains("export function get(", client);
+        Assert.Contains("export function create(", client);
+        Assert.Contains("export function remove(", client);
         // Helper method not included
         Assert.DoesNotContain("helperMethod", client);
     }
@@ -335,8 +335,9 @@ public sealed class ControllerEndpointTests
         var client = GenerateClient(source);
 
         // Should appear exactly once even though it matches both [RivetClient] and [RivetEndpoint]
-        var count = client.Split("export const get").Length - 1;
-        Assert.Equal(1, count);
+        // Implementation signature appears once; overload declarations also contain "export function get"
+        var implCount = client.Split("opts?: { unwrap?: boolean }").Length - 1;
+        Assert.Equal(1, implCount);
     }
 
     [Fact]

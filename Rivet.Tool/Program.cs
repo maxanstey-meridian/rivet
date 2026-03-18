@@ -48,7 +48,7 @@ static async Task<int> Run(string[] args)
     var typeGrouping = TypeGrouper.Group(definitions, brands, enums, walker.TypeNamespaces);
     var typeFileMap = typeGrouping.BuildTypeFileMap();
     var validatorsOutput = endpoints.Count > 0
-        ? ValidatorEmitter.Emit(endpoints)
+        ? ValidatorEmitter.Emit(endpoints, typeFileMap)
         : null;
 
     if (outputDir is not null)

@@ -13,7 +13,7 @@ public sealed class ValidatorEmitterTests
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
-        var validators = ValidatorEmitter.Emit(endpoints);
+        var validators = ValidatorEmitter.Emit(endpoints, typeFileMap);
         var client = ClientEmitter.Emit(endpoints, definitions, typeFileMap);
         var validatedClient = ClientEmitter.Emit(endpoints, definitions, typeFileMap, validated: true);
         return (validators, client, validatedClient);
@@ -46,7 +46,9 @@ public sealed class ValidatorEmitterTests
         var (validators, _, _) = Generate(source);
 
         Assert.Contains("import typia from \"typia\";", validators);
-        Assert.Contains("""import type { MessageDto } from "./types/index.js";""", validators);
+        Assert.Contains("MessageDto", validators);
+        Assert.Contains("from \"./types/", validators);
+        Assert.DoesNotContain("from \"./types/index.js\"", validators);
         Assert.Contains("export const assertMessageDto = typia.createAssert<MessageDto>();", validators);
     }
 
@@ -137,13 +139,15 @@ public sealed class ValidatorEmitterTests
 
         var (_, client, validatedClient) = Generate(source);
 
-        // Unvalidated client: arrow function, no assert
-        Assert.Contains("export const getMessage = (id: string): Promise<MessageDto> =>", client);
+        // Unvalidated client: overloaded function, no assert
+        Assert.Contains("export function getMessage(id: string): Promise<MessageDto>;", client);
         Assert.DoesNotContain("assertMessageDto", client);
 
-        // Validated client: async + assert wrapper
+        // Validated client: async + assert wrapper with unwrap branching
         Assert.Contains("""import { assertMessageDto } from "./build/validators.js";""", validatedClient);
-        Assert.Contains("export const getMessage = async (id: string): Promise<MessageDto> => {", validatedClient);
+        Assert.Contains("export function getMessage(id: string): Promise<MessageDto>;", validatedClient);
+        Assert.Contains("export async function getMessage(id: string, opts?: { unwrap?: boolean })", validatedClient);
+        Assert.Contains("if (opts?.unwrap === false) return rivetFetch(", validatedClient);
         Assert.Contains("const data = await rivetFetch<MessageDto>", validatedClient);
         Assert.Contains("return assertMessageDto(data);", validatedClient);
     }
@@ -170,8 +174,8 @@ public sealed class ValidatorEmitterTests
 
         var (_, _, validatedClient) = Generate(source);
 
-        // Void returns don't get assert wrappers
-        Assert.Contains("export const remove = (id: string): Promise<void> =>", validatedClient);
+        // Void returns don't get assert wrappers — plain function with overloads
+        Assert.Contains("export function remove(id: string): Promise<void>;", validatedClient);
         Assert.DoesNotContain("assert", validatedClient);
     }
 
@@ -217,9 +221,9 @@ public sealed class ValidatorEmitterTests
         Assert.DoesNotContain("assertCreateItemCommand", validators);
 
         // GET and POST get assert wrappers, DELETE doesn't
-        Assert.Contains("export const getItem = async", validatedClient);
-        Assert.Contains("export const createItem = async", validatedClient);
-        Assert.Contains("export const deleteItem = (id: string): Promise<void> =>", validatedClient);
+        Assert.Contains("export async function getItem", validatedClient);
+        Assert.Contains("export async function createItem", validatedClient);
+        Assert.Contains("export function deleteItem(id: string): Promise<void>;", validatedClient);
     }
 
     [Fact]

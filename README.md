@@ -30,10 +30,10 @@ generated/rivet/
 │   ├── common.ts             # types referenced across multiple groups
 │   ├── domain.ts             # types grouped by C# namespace
 │   └── contracts.ts
-├── rivet.ts                  # configureRivet(), rivetFetch, RivetError
+├── rivet.ts                  # configureRivet(), rivetFetch, RivetError, RivetResult
 ├── client/
 │   ├── index.ts              # barrel: export * as tasks, export * as members
-│   ├── tasks.ts              # export const list = () => rivetFetch(...)
+│   ├── tasks.ts              # overloaded functions with typed error responses
 │   └── members.ts            # one file per controller
 ├── validators.ts             # typia source (inert until compiled)
 └── build/                    # (after --compile)
@@ -157,8 +157,12 @@ export type CreateTaskResult = {
 };
 
 // client/tasks.ts
-export const create = (command: CreateTaskCommand): Promise<CreateTaskResult> =>
-  rivetFetch<CreateTaskResult>("POST", `/api/tasks`, {body: command});
+export function create(command: CreateTaskCommand): Promise<CreateTaskResult>;
+export function create(command: CreateTaskCommand, opts: { unwrap: true }): Promise<CreateTaskResult>;
+export function create(command: CreateTaskCommand, opts: { unwrap: false }): Promise<RivetResult<CreateTaskResult>>;
+export function create(command: CreateTaskCommand, opts?: { unwrap?: boolean }) {
+  return rivetFetch("POST", `/api/tasks`, {body: command, unwrap: opts?.unwrap});
+}
 ```
 
 Request types (`[FromBody]`), response types (`[ProducesResponseType]` or typed returns), and everything they reference
@@ -256,8 +260,7 @@ Endpoints are grouped by controller into separate client files: `TasksController
 
 ## Error handling
 
-Every endpoint function returns `Promise<T>` directly. Non-2xx responses throw a `RivetError` with `status`,
-`response`, `body` (parsed JSON when `content-type` is `application/json`, raw string otherwise), and `cause`.
+By default, every endpoint returns `Promise<T>` directly and throws `RivetError` on non-2xx responses:
 
 ```typescript
 import {RivetError} from "~/generated/rivet/rivet";
@@ -273,10 +276,54 @@ try {
 }
 ```
 
+### Typed error responses
+
+Pass `{ unwrap: false }` to get a typed result instead of throwing. For endpoints with multiple
+`[ProducesResponseType]` attributes, Rivet emits a discriminated union you can narrow by status code:
+
+```csharp
+[HttpGet("{id:guid}")]
+[ProducesResponseType(typeof(TaskDetailDto), StatusCodes.Status200OK)]
+[ProducesResponseType(typeof(NotFoundDto), StatusCodes.Status404NotFound)]
+public async Task<IActionResult> Get(Guid id, CancellationToken ct) { ... }
+```
+
+```typescript
+// Generated result DU
+type GetResult =
+  | { status: 200; data: TaskDetailDto; response: Response }
+  | { status: 404; data: NotFoundDto; response: Response };
+
+// Generated overloads
+export function get(id: string): Promise<TaskDetailDto>;
+export function get(id: string, opts: { unwrap: false }): Promise<GetResult>;
+```
+
+```typescript
+// Usage — narrow by status
+const result = await tasks.get(id, {unwrap: false});
+if (result.status === 200) {
+  result.data.title;    // TaskDetailDto
+} else {
+  result.data.message;  // NotFoundDto
+}
+```
+
+For endpoints with a single response type (or none), `unwrap: false` returns `RivetResult<T>`:
+
+```typescript
+const result = await tasks.list({unwrap: false});
+result.status; // number
+result.data;   // TaskListItemDto[]
+```
+
+The default call (`unwrap` omitted or `true`) is unchanged — returns `T` directly, throws on error. Network errors
+always throw regardless of `unwrap`.
+
 ### Custom error handling
 
 Use `onError` to intercept errors before they're thrown — useful for remapping to your own error class or triggering
-side effects like session expiry:
+side effects like session expiry. Only fires in the default (throwing) path, not with `unwrap: false`:
 
 ```typescript
 configureRivet({
@@ -343,11 +390,13 @@ public async Task<IActionResult> Attach(Guid id, IFormFile file, CancellationTok
 
 ```typescript
 // Generated
-export const attach = (id: string, file: File): Promise<AttachmentResultDto> => {
+export function attach(id: string, file: File): Promise<AttachmentResultDto>;
+export function attach(id: string, file: File, opts: { unwrap: false }): Promise<RivetResult<AttachmentResultDto>>;
+export async function attach(id: string, file: File, opts?: { unwrap?: boolean }) {
   const fd = new FormData();
   fd.append("file", file);
-  return rivetFetch<AttachmentResultDto>("POST", `/api/tasks/${id}/attachments`, {body: fd});
-};
+  return rivetFetch("POST", `/api/tasks/${id}/attachments`, {body: fd, unwrap: opts?.unwrap});
+}
 ```
 
 ## How it works

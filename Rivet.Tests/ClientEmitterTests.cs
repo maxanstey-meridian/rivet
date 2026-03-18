@@ -49,8 +49,12 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         Assert.Contains("""import type { CreateMessageCommand, MessageDto } from "./types/test.js";""", client);
-        Assert.Contains("export const createMessage = (id: string, body: CreateMessageCommand): Promise<MessageDto> =>", client);
-        Assert.Contains("""rivetFetch<MessageDto>("POST", `/api/submissions/${id}/messages`, { body: body });""", client);
+        // Overload signatures
+        Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand): Promise<MessageDto>;", client);
+        Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand, opts: { unwrap: true }): Promise<MessageDto>;", client);
+        Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand, opts: { unwrap: false }): Promise<RivetResult<MessageDto>>;", client);
+        // Implementation body
+        Assert.Contains("""rivetFetch("POST", `/api/submissions/${id}/messages`, { body: body, unwrap: opts?.unwrap });""", client);
     }
 
     [Fact]
@@ -79,8 +83,8 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("export const getSubmission = (id: string): Promise<SubmissionDto> =>", client);
-        Assert.Contains("""rivetFetch<SubmissionDto>("GET", `/api/submissions/${id}`);""", client);
+        Assert.Contains("export function getSubmission(id: string): Promise<SubmissionDto>;", client);
+        Assert.Contains("""rivetFetch("GET", `/api/submissions/${id}`, { unwrap: opts?.unwrap });""", client);
     }
 
     [Fact]
@@ -106,8 +110,9 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("export const deleteSubmission = (id: string): Promise<void> =>", client);
-        Assert.Contains("""rivetFetch<void>("DELETE", `/api/submissions/${id}`);""", client);
+        Assert.Contains("export function deleteSubmission(id: string): Promise<void>;", client);
+        Assert.Contains("export function deleteSubmission(id: string, opts: { unwrap: false }): Promise<RivetResult<void>>;", client);
+        Assert.Contains("""rivetFetch("DELETE", `/api/submissions/${id}`, { unwrap: opts?.unwrap });""", client);
     }
 
     [Fact]
@@ -138,7 +143,7 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("export const listSubmissions = (status: string, page: number): Promise<SubmissionDto[]> =>", client);
+        Assert.Contains("export function listSubmissions(status: string, page: number): Promise<SubmissionDto[]>;", client);
         Assert.Contains("query: { status, page }", client);
     }
 
@@ -174,7 +179,7 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         // Only route param should appear, DI params skipped
-        Assert.Contains("export const getThing = (id: string): Promise<ResultDto> =>", client);
+        Assert.Contains("export function getThing(id: string): Promise<ResultDto>;", client);
         Assert.DoesNotContain("service:", client);
         Assert.DoesNotContain("ct:", client);
     }
@@ -211,8 +216,8 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("export const getItem", client);
-        Assert.Contains("export const createItem", client);
+        Assert.Contains("export function getItem", client);
+        Assert.Contains("export function createItem", client);
     }
 
     [Fact]
@@ -240,8 +245,10 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         Assert.Contains("export type RivetConfig", client);
+        Assert.Contains("export type RivetResult<T>", client);
         Assert.Contains("export const configureRivet", client);
         Assert.Contains("const rivetFetch", client);
+        Assert.Contains("unwrap?: boolean", client);
     }
 
     [Fact]
@@ -283,8 +290,81 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        // Matches the spec example from RIVET.md
-        Assert.Contains("export const createMessage = (id: string, body: CreateMessageCommand): Promise<MessageDto> =>", client);
-        Assert.Contains("""rivetFetch<MessageDto>("POST", `/api/submissions/${id}/messages`, { body: body });""", client);
+        Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand): Promise<MessageDto>;", client);
+        Assert.Contains("""rivetFetch("POST", `/api/submissions/${id}/messages`, { body: body, unwrap: opts?.unwrap });""", client);
+    }
+
+    [Fact]
+    public void MultiResponse_EmitsResultDU()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDetailDto(Guid Id, string Title);
+            [RivetType]
+            public sealed record NotFoundDto(string Message);
+
+            [RivetClient]
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet("{id}")]
+                [ProducesResponseType(typeof(TaskDetailDto), StatusCodes.Status200OK)]
+                [ProducesResponseType(typeof(NotFoundDto), StatusCodes.Status404NotFound)]
+                public async Task<IActionResult> Get(Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (_, client) = Generate(source);
+
+        // Result DU type
+        Assert.Contains("export type GetResult =", client);
+        Assert.Contains("{ status: 200; data: TaskDetailDto; response: Response }", client);
+        Assert.Contains("{ status: 404; data: NotFoundDto; response: Response }", client);
+
+        // Overloads use GetResult for unwrap: false
+        Assert.Contains("export function get(id: string): Promise<TaskDetailDto>;", client);
+        Assert.Contains("export function get(id: string, opts: { unwrap: false }): Promise<GetResult>;", client);
+    }
+
+    [Fact]
+    public void SingleResponse_UsesRivetResult()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDetailDto(Guid Id, string Title);
+
+            [RivetClient]
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet("{id}")]
+                [ProducesResponseType(typeof(TaskDetailDto), StatusCodes.Status200OK)]
+                public async Task<IActionResult> Get(Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (_, client) = Generate(source);
+
+        // Single response → no DU, uses RivetResult<T>
+        Assert.DoesNotContain("export type GetResult", client);
+        Assert.Contains("export function get(id: string, opts: { unwrap: false }): Promise<RivetResult<TaskDetailDto>>;", client);
     }
 }

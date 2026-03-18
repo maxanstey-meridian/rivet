@@ -2,17 +2,17 @@
 
 ## Current State
 
-Rivet is feature-complete through Phase 4 + VO support + grouped type emission. Published to NuGet as
+Rivet is feature-complete through Phase 4 + VO support + grouped type emission + typed error responses via overloaded unwrap. Published to NuGet as
 `Rivet.Attributes` (0.1.0) and `dotnet-rivet` (0.2.0, 0.3.0 pending). Working against CaseBridge's real `.csproj` with
-17 types and 5 endpoints. 59 tests.
+17 types and 5 endpoints. 66 tests.
 
 ### What's shipped
 
 - Type walker: primitives, nullables, collections, dictionaries, enums → string unions, nested records (transitive),
   generics, JsonElement/JsonNode → unknown, VOs → branded types
 - Client emitter: per-controller files, route combination, route constraint stripping, implicit route param binding,
-  ProducesResponseType extraction, reserved word handling (delete → remove), RivetResponse wrapper, RivetError,
-  multi-response DU types, unwrap config
+  ProducesResponseType extraction, reserved word handling (delete → remove), RivetError,
+  multi-response DU types via overloaded `function` declarations (unwrap: false returns typed result DU, default throws)
 - Typia: validator emission, tsc + ts-patch compilation, validated client re-emission
 - Type grouping: types split into per-namespace files (`types/`), cross-referenced types promoted to `common.ts`,
   barrel `index.ts` for both `types/` and `client/`. Namespace last segment used as file name, number-suffix on

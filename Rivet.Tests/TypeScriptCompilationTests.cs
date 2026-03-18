@@ -1,0 +1,353 @@
+using System.Diagnostics;
+using Rivet.Tool.Analysis;
+using Rivet.Tool.Emit;
+
+namespace Rivet.Tests;
+
+/// <summary>
+/// Integration tests that generate full TypeScript output and run tsc --noEmit
+/// to verify all imports resolve and types are valid.
+/// </summary>
+public sealed class TypeScriptCompilationTests : IDisposable
+{
+    private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"rivet-test-{Guid.NewGuid():N}");
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_tempDir))
+        {
+            Directory.Delete(_tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GeneratedOutput_PassesTscNoEmit()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace MyApp.Domain
+            {
+                public enum Priority { Low, Medium, High, Critical }
+                public enum WorkItemStatus { Open, InProgress, Done }
+                public sealed record Email(string Value);
+                public sealed record TaskId(Guid Value);
+
+                [RivetType]
+                public sealed record Label(string Name, string Color);
+            }
+
+            namespace MyApp.Contracts
+            {
+                using MyApp.Domain;
+
+                public sealed record CreateTaskCommand(string Title, Priority Priority, Email Author);
+                public sealed record CreateTaskResult(Guid Id, DateTime CreatedAt);
+                public sealed record TaskListItemDto(Guid Id, string Title, Priority Priority, Email Author);
+                public sealed record TaskDetailDto(Guid Id, string Title, Priority Priority, Email Author, List<Label> Labels);
+
+                [RivetType]
+                public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Total);
+            }
+
+            namespace MyApp.Api
+            {
+                using MyApp.Domain;
+                using MyApp.Contracts;
+
+                [RivetClient]
+                [Route("api/tasks")]
+                public sealed class TasksController : ControllerBase
+                {
+                    [HttpGet]
+                    [ProducesResponseType(typeof(PagedResult<TaskListItemDto>), StatusCodes.Status200OK)]
+                    public async Task<IActionResult> List(
+                        [FromQuery] int? page,
+                        [FromQuery] int? pageSize,
+                        CancellationToken ct)
+                        => throw new NotImplementedException();
+
+                    [HttpGet("{id:guid}")]
+                    public async Task<ActionResult<TaskDetailDto>> Get(Guid id, CancellationToken ct)
+                        => throw new NotImplementedException();
+
+                    [HttpPost]
+                    [ProducesResponseType(typeof(CreateTaskResult), StatusCodes.Status201Created)]
+                    public async Task<IActionResult> Create(
+                        [FromBody] CreateTaskCommand command,
+                        CancellationToken ct)
+                        => throw new NotImplementedException();
+
+                    [HttpDelete("{id:guid}")]
+                    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+                        => throw new NotImplementedException();
+
+                    [HttpPost("{id:guid}/attachments")]
+                    [ProducesResponseType(typeof(CreateTaskResult), StatusCodes.Status201Created)]
+                    public async Task<IActionResult> Attach(
+                        Guid id,
+                        IFormFile file,
+                        CancellationToken ct)
+                        => throw new NotImplementedException();
+                }
+
+                [RivetClient]
+                [Route("api/members")]
+                public sealed class MembersController : ControllerBase
+                {
+                    [HttpGet]
+                    [ProducesResponseType(typeof(List<TaskListItemDto>), StatusCodes.Status200OK)]
+                    public async Task<IActionResult> List(CancellationToken ct)
+                        => throw new NotImplementedException();
+                }
+            }
+            """;
+
+        var (exitCode, output) = await GenerateAndTypeCheck(source);
+
+        Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
+    }
+
+    [Fact]
+    public async Task ValidatorsImports_ResolveCorrectly()
+    {
+        // Validators reference types from multiple namespace groups —
+        // this is the exact scenario that was broken when validators
+        // imported from types/index.js (which only exports namespaces).
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace MyApp.Domain
+            {
+                public enum Priority { Low, Medium, High }
+                public sealed record Email(string Value);
+            }
+
+            namespace MyApp.Contracts
+            {
+                using MyApp.Domain;
+
+                public sealed record CreateTaskCommand(string Title, Priority Priority, Email Author);
+                public sealed record CreateTaskResult(Guid Id, DateTime CreatedAt);
+                public sealed record TaskDetailDto(Guid Id, string Title, Priority Priority);
+
+                [RivetType]
+                public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Total);
+            }
+
+            namespace MyApp.Api
+            {
+                using MyApp.Domain;
+                using MyApp.Contracts;
+
+                [RivetClient]
+                [Route("api/tasks")]
+                public sealed class TasksController : ControllerBase
+                {
+                    [HttpGet]
+                    [ProducesResponseType(typeof(PagedResult<TaskDetailDto>), StatusCodes.Status200OK)]
+                    public async Task<IActionResult> List(CancellationToken ct)
+                        => throw new NotImplementedException();
+
+                    [HttpPost]
+                    [ProducesResponseType(typeof(CreateTaskResult), StatusCodes.Status201Created)]
+                    public async Task<IActionResult> Create(
+                        [FromBody] CreateTaskCommand command,
+                        CancellationToken ct)
+                        => throw new NotImplementedException();
+                }
+            }
+            """;
+
+        var (exitCode, output) = await GenerateAndTypeCheck(source);
+
+        Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
+    }
+
+    [Fact]
+    public async Task MultiResponse_OverloadsCompile()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace MyApp.Contracts
+            {
+                public sealed record TaskDetailDto(Guid Id, string Title);
+                public sealed record NotFoundDto(string Message);
+                public sealed record ValidationErrorDto(string[] Errors);
+                public sealed record CreateTaskCommand(string Title);
+                public sealed record CreateTaskResult(Guid Id);
+            }
+
+            namespace MyApp.Api
+            {
+                using MyApp.Contracts;
+
+                [RivetClient]
+                [Route("api/tasks")]
+                public sealed class TasksController : ControllerBase
+                {
+                    [HttpGet("{id:guid}")]
+                    [ProducesResponseType(typeof(TaskDetailDto), StatusCodes.Status200OK)]
+                    [ProducesResponseType(typeof(NotFoundDto), StatusCodes.Status404NotFound)]
+                    public async Task<IActionResult> Get(Guid id, CancellationToken ct)
+                        => throw new NotImplementedException();
+
+                    [HttpPost]
+                    [ProducesResponseType(typeof(CreateTaskResult), StatusCodes.Status201Created)]
+                    [ProducesResponseType(typeof(ValidationErrorDto), StatusCodes.Status400BadRequest)]
+                    [ProducesResponseType(typeof(NotFoundDto), StatusCodes.Status404NotFound)]
+                    public async Task<IActionResult> Create(
+                        [FromBody] CreateTaskCommand command,
+                        CancellationToken ct)
+                        => throw new NotImplementedException();
+
+                    [HttpGet]
+                    [ProducesResponseType(typeof(List<TaskDetailDto>), StatusCodes.Status200OK)]
+                    public async Task<IActionResult> List(CancellationToken ct)
+                        => throw new NotImplementedException();
+
+                    [HttpDelete("{id:guid}")]
+                    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+                        => throw new NotImplementedException();
+                }
+            }
+            """;
+
+        var (exitCode, output) = await GenerateAndTypeCheck(source);
+
+        Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
+    }
+
+    private async Task<(int ExitCode, string Output)> GenerateAndTypeCheck(string csharpSource)
+    {
+        // 1. Compile C# and run Rivet analysis
+        var compilation = CompilationHelper.CreateCompilation(csharpSource);
+        var walker = TypeWalker.Create(compilation);
+        var endpoints = EndpointWalker.Walk(compilation, walker);
+        var definitions = walker.Definitions.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(
+            definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
+
+        // 2. Write all generated files to temp directory
+        Directory.CreateDirectory(_tempDir);
+
+        var typesDir = Path.Combine(_tempDir, "types");
+        Directory.CreateDirectory(typesDir);
+
+        var typeFileNames = new List<string>();
+        foreach (var group in typeGrouping.Groups)
+        {
+            var content = TypeEmitter.EmitGroupFile(group);
+            await File.WriteAllTextAsync(Path.Combine(typesDir, $"{group.FileName}.ts"), content);
+            typeFileNames.Add(group.FileName);
+        }
+
+        var typesBarrel = TypeEmitter.EmitNamespacedBarrel(typeFileNames);
+        await File.WriteAllTextAsync(Path.Combine(typesDir, "index.ts"), typesBarrel);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_tempDir, "rivet.ts"), ClientEmitter.EmitRivetBase());
+
+        var clientDir = Path.Combine(_tempDir, "client");
+        Directory.CreateDirectory(clientDir);
+
+        var controllerGroups = ClientEmitter.GroupByController(endpoints);
+        var clientFileNames = new List<string>();
+        foreach (var (controllerName, controllerEndpoints) in controllerGroups)
+        {
+            var clientContent = ClientEmitter.EmitControllerClient(
+                controllerName, controllerEndpoints, typeFileMap);
+            await File.WriteAllTextAsync(
+                Path.Combine(clientDir, $"{controllerName}.ts"), clientContent);
+            clientFileNames.Add(controllerName);
+        }
+
+        var clientBarrel = TypeEmitter.EmitNamespacedBarrel(clientFileNames);
+        await File.WriteAllTextAsync(Path.Combine(clientDir, "index.ts"), clientBarrel);
+
+        var validators = ValidatorEmitter.Emit(endpoints, typeFileMap);
+        if (!string.IsNullOrEmpty(validators))
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(_tempDir, "validators.ts"), validators);
+        }
+
+        // 3. Stub typia so validators.ts can resolve its import without installing the real package
+        if (!string.IsNullOrEmpty(validators))
+        {
+            var typiaDir = Path.Combine(_tempDir, "node_modules", "typia");
+            Directory.CreateDirectory(typiaDir);
+            await File.WriteAllTextAsync(Path.Combine(typiaDir, "index.d.ts"),
+                "declare const typia: { createAssert<T>(): (input: unknown) => T };\nexport default typia;\n");
+            await File.WriteAllTextAsync(Path.Combine(typiaDir, "package.json"),
+                """{"name": "typia", "main": "index.js", "types": "index.d.ts"}""");
+        }
+
+        // 4. Write tsconfig.json
+        var tsconfig = """
+            {
+              "compilerOptions": {
+                "target": "ES2022",
+                "module": "ES2022",
+                "moduleResolution": "bundler",
+                "strict": true,
+                "skipLibCheck": true,
+                "noEmit": true
+              },
+              "include": ["./**/*.ts"],
+              "exclude": ["node_modules"]
+            }
+            """;
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "tsconfig.json"), tsconfig);
+
+        // 4. Run tsc --noEmit
+        return await RunTscAsync();
+    }
+
+    private async Task<(int ExitCode, string Output)> RunTscAsync()
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "npx",
+            Arguments = $"--yes tsc --noEmit --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
+            WorkingDirectory = _tempDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        using var process = Process.Start(psi)
+            ?? throw new InvalidOperationException("Failed to start tsc");
+
+        var stdout = await process.StandardOutput.ReadToEndAsync();
+        var stderr = await process.StandardError.ReadToEndAsync();
+
+        await process.WaitForExitAsync();
+
+        var output = string.Join("\n",
+            new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+        return (process.ExitCode, output);
+    }
+}

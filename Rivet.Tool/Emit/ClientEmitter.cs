@@ -41,6 +41,8 @@ public static partial class ClientEmitter
               onError?: (error: RivetError) => never;
             };
 
+            export type RivetResult<T> = { status: number; data: T; response: Response };
+
             export class RivetError extends Error {
               constructor(
                 public readonly method: string,
@@ -74,7 +76,7 @@ public static partial class ClientEmitter
             export const rivetFetch = async <T>(
               method: string,
               path: string,
-              options?: { body?: unknown; query?: Record<string, unknown> },
+              options?: { body?: unknown; query?: Record<string, unknown>; unwrap?: boolean },
             ): Promise<T> => {
               const url = new URL(`${_config.baseUrl}${path}`);
               if (options?.query) {
@@ -101,6 +103,10 @@ public static partial class ClientEmitter
                 const error = new RivetError(method, path, 0, undefined as unknown as Response, undefined, { cause: err });
                 if (_config.onError) _config.onError(error);
                 throw error;
+              }
+              if (options?.unwrap === false) {
+                const body = await parseBody(res);
+                return { status: res.status, data: body, response: res } as T;
               }
               if (!res.ok) {
                 const body = await parseBody(res);
@@ -134,7 +140,7 @@ public static partial class ClientEmitter
         sb.AppendLine();
 
         // Import rivetFetch + types from shared module
-        sb.AppendLine("import { rivetFetch } from \"../rivet.js\";");
+        sb.AppendLine("import { rivetFetch, type RivetResult } from \"../rivet.js\";");
 
         // Import validator assertions from build output
         if (validated)
@@ -253,16 +259,28 @@ public static partial class ClientEmitter
         sb.AppendLine("  fetch?: typeof fetch;");
         sb.AppendLine("};");
         sb.AppendLine();
+        sb.AppendLine("export type RivetResult<T> = { status: number; data: T; response: Response };");
+        sb.AppendLine();
         sb.AppendLine("let _config: RivetConfig = { baseUrl: \"\" };");
         sb.AppendLine();
         sb.AppendLine("export const configureRivet = (config: RivetConfig): void => {");
         sb.AppendLine("  _config = config;");
         sb.AppendLine("};");
         sb.AppendLine();
+        sb.AppendLine("const parseBody = async (res: Response): Promise<unknown> => {");
+        sb.AppendLine("  const text = await res.text().catch(() => \"\");");
+        sb.AppendLine("  if (!text) return undefined;");
+        sb.AppendLine("  const ct = res.headers.get(\"content-type\") ?? \"\";");
+        sb.AppendLine("  if (ct.includes(\"application/json\")) {");
+        sb.AppendLine("    try { return JSON.parse(text); } catch { return text; }");
+        sb.AppendLine("  }");
+        sb.AppendLine("  return text;");
+        sb.AppendLine("};");
+        sb.AppendLine();
         sb.AppendLine("const rivetFetch = async <T>(");
         sb.AppendLine("  method: string,");
         sb.AppendLine("  path: string,");
-        sb.AppendLine("  options?: { body?: unknown; query?: Record<string, unknown> },");
+        sb.AppendLine("  options?: { body?: unknown; query?: Record<string, unknown>; unwrap?: boolean },");
         sb.AppendLine("): Promise<T> => {");
         sb.AppendLine("  const url = new URL(`${_config.baseUrl}${path}`);");
         sb.AppendLine("  if (options?.query) {");
@@ -282,6 +300,10 @@ public static partial class ClientEmitter
         sb.AppendLine("    headers,");
         sb.AppendLine("    body: options?.body ? JSON.stringify(options.body) : undefined,");
         sb.AppendLine("  });");
+        sb.AppendLine("  if (options?.unwrap === false) {");
+        sb.AppendLine("    const body = await parseBody(res);");
+        sb.AppendLine("    return { status: res.status, data: body, response: res } as T;");
+        sb.AppendLine("  }");
         sb.AppendLine("  if (!res.ok) {");
         sb.AppendLine("    throw new Error(`Rivet: ${method} ${path} returned ${res.status}`);");
         sb.AppendLine("  }");
@@ -322,68 +344,93 @@ public static partial class ClientEmitter
         var bodyParam = endpoint.Params.FirstOrDefault(p => p.Source == ParamSource.Body);
         var queryParams = endpoint.Params.Where(p => p.Source == ParamSource.Query).ToList();
 
-        var fetchGeneric = endpoint.ReturnType is not null ? successType : "void";
+        // Determine result type for unwrap: false
+        var hasResultDU = endpoint.Responses.Count >= 2;
+        var resultTypeName = hasResultDU
+            ? $"{ToPascalCase(funcName)}Result"
+            : $"RivetResult<{successType}>";
 
-        // Multipart (IFormFile) endpoints — emit FormData construction
+        // Emit result DU type for multi-response endpoints
+        if (hasResultDU)
+        {
+            EmitResultType(sb, resultTypeName, endpoint.Responses);
+        }
+
+        // Overload signatures
+        var optsPrefix = paramsStr.Length > 0 ? $"{paramsStr}, " : "";
+        sb.AppendLine($"export function {funcName}({paramsStr}): Promise<{successType}>;");
+        sb.AppendLine($"export function {funcName}({optsPrefix}opts: {{ unwrap: true }}): Promise<{successType}>;");
+        sb.AppendLine($"export function {funcName}({optsPrefix}opts: {{ unwrap: false }}): Promise<{resultTypeName}>;");
+
+        // Build fetch options
+        var fetchOptionParts = new List<string>();
         if (fileParams.Count > 0)
         {
-            sb.AppendLine($"export const {funcName} = async ({paramsStr}): Promise<{successType}> => {{");
+            fetchOptionParts.Add("body: fd");
+        }
+        else if (bodyParam is not null)
+        {
+            fetchOptionParts.Add($"body: {bodyParam.Name}");
+        }
+        if (queryParams.Count > 0)
+        {
+            var queryEntries = queryParams.Select(p => $"{p.Name}");
+            fetchOptionParts.Add($"query: {{ {string.Join(", ", queryEntries)} }}");
+        }
+
+        var baseFetchStr = fetchOptionParts.Count > 0
+            ? $", {{ {string.Join(", ", fetchOptionParts)} }}"
+            : "";
+
+        fetchOptionParts.Add("unwrap: opts?.unwrap");
+        var fullFetchStr = $", {{ {string.Join(", ", fetchOptionParts)} }}";
+
+        var implReturn = $"Promise<{successType} | {resultTypeName}>";
+        var needsAsync = fileParams.Count > 0 || (validated && endpoint.ReturnType is not null);
+        var asyncKeyword = needsAsync ? "async " : "";
+
+        // Implementation signature
+        sb.AppendLine($"export {asyncKeyword}function {funcName}({optsPrefix}opts?: {{ unwrap?: boolean }}): {implReturn} {{");
+
+        // FormData construction for file uploads
+        if (fileParams.Count > 0)
+        {
             sb.AppendLine("  const fd = new FormData();");
             foreach (var fp in fileParams)
             {
                 sb.AppendLine($"  fd.append(\"{fp.Name}\", {fp.Name});");
             }
-
-            var multipartOptions = new List<string> { "body: fd" };
-            if (queryParams.Count > 0)
-            {
-                var queryEntries = queryParams.Select(p => $"{p.Name}");
-                multipartOptions.Add($"query: {{ {string.Join(", ", queryEntries)} }}");
-            }
-            var multipartOptionsStr = $", {{ {string.Join(", ", multipartOptions)} }}";
-
-            if (validated && endpoint.ReturnType is not null)
-            {
-                var assertName = ValidatorEmitter.GetAssertName(endpoint.ReturnType);
-                sb.AppendLine($"  const data = await rivetFetch<{fetchGeneric}>(\"{endpoint.HttpMethod}\", `{route}`{multipartOptionsStr});");
-                sb.AppendLine($"  return {assertName}(data);");
-            }
-            else
-            {
-                sb.AppendLine($"  return rivetFetch<{fetchGeneric}>(\"{endpoint.HttpMethod}\", `{route}`{multipartOptionsStr});");
-            }
-            sb.AppendLine("};");
-            return;
         }
-
-        var optionsParts = new List<string>();
-        if (bodyParam is not null)
-        {
-            optionsParts.Add($"body: {bodyParam.Name}");
-        }
-        if (queryParams.Count > 0)
-        {
-            var queryEntries = queryParams.Select(p => $"{p.Name}");
-            optionsParts.Add($"query: {{ {string.Join(", ", queryEntries)} }}");
-        }
-
-        var optionsStr = optionsParts.Count > 0
-            ? $", {{ {string.Join(", ", optionsParts)} }}"
-            : "";
 
         if (validated && endpoint.ReturnType is not null)
         {
             var assertName = ValidatorEmitter.GetAssertName(endpoint.ReturnType);
-            sb.AppendLine($"export const {funcName} = async ({paramsStr}): Promise<{successType}> => {{");
-            sb.AppendLine($"  const data = await rivetFetch<{fetchGeneric}>(\"{endpoint.HttpMethod}\", `{route}`{optionsStr});");
+            sb.AppendLine($"  if (opts?.unwrap === false) return rivetFetch(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
+            sb.AppendLine($"  const data = await rivetFetch<{successType}>(\"{endpoint.HttpMethod}\", `{route}`{baseFetchStr});");
             sb.AppendLine($"  return {assertName}(data);");
-            sb.AppendLine("};");
         }
         else
         {
-            sb.AppendLine($"export const {funcName} = ({paramsStr}): Promise<{successType}> =>");
-            sb.AppendLine($"  rivetFetch<{fetchGeneric}>(\"{endpoint.HttpMethod}\", `{route}`{optionsStr});");
+            sb.AppendLine($"  return rivetFetch(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
         }
+
+        sb.AppendLine("}");
+    }
+
+    private static void EmitResultType(
+        StringBuilder sb,
+        string typeName,
+        IReadOnlyList<TsResponseType> responses)
+    {
+        sb.Append($"export type {typeName} =");
+        foreach (var r in responses)
+        {
+            var dataType = r.DataType is not null ? TypeEmitter.EmitTypeString(r.DataType) : "void";
+            sb.AppendLine();
+            sb.Append($"  | {{ status: {r.StatusCode}; data: {dataType}; response: Response }}");
+        }
+        sb.AppendLine(";");
+        sb.AppendLine();
     }
 
     private static string ToPascalCase(string name)
@@ -438,6 +485,14 @@ public static partial class ClientEmitter
             if (endpoint.ReturnType is not null)
             {
                 CollectTypeRefs(endpoint.ReturnType, names);
+            }
+
+            foreach (var response in endpoint.Responses)
+            {
+                if (response.DataType is not null)
+                {
+                    CollectTypeRefs(response.DataType, names);
+                }
             }
         }
 
