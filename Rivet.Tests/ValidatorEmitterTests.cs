@@ -169,7 +169,7 @@ public sealed class ValidatorEmitterTests
         var (_, _, validatedClient) = Generate(source);
 
         // Void returns don't get assert wrappers
-        Assert.Contains("export const delete = (id: string): Promise<void> =>", validatedClient);
+        Assert.Contains("export const remove = (id: string): Promise<void> =>", validatedClient);
         Assert.DoesNotContain("assert", validatedClient);
     }
 

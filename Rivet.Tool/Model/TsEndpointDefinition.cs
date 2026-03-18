@@ -8,7 +8,8 @@ public sealed record TsEndpointDefinition(
     string HttpMethod,
     string RouteTemplate,
     IReadOnlyList<TsEndpointParam> Params,
-    TsType? ReturnType);
+    TsType? ReturnType,
+    string ControllerName);
 
 /// <summary>
 /// A parameter to a client function.

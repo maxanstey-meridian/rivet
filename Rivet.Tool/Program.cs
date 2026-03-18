@@ -36,11 +36,6 @@ static async Task<int> Run(string[] args)
     var definitions = walker.Definitions.Values.ToList();
 
     var typesOutput = TypeEmitter.Emit(definitions);
-    var clientOutput = endpoints.Count > 0
-        ? ClientEmitter.Emit(endpoints, definitions)
-        : null;
-
-    // Generate validators.ts source (inert until compiled)
     var validatorsOutput = endpoints.Count > 0
         ? ValidatorEmitter.Emit(endpoints)
         : null;
@@ -53,11 +48,25 @@ static async Task<int> Run(string[] args)
         await File.WriteAllTextAsync(typesPath, typesOutput);
         Console.WriteLine($"  types.ts → {typesPath}");
 
-        if (clientOutput is not null)
+        // Emit shared rivet.ts
+        if (endpoints.Count > 0)
         {
-            var clientPath = Path.Combine(outputDir, "client.ts");
-            await File.WriteAllTextAsync(clientPath, clientOutput);
-            Console.WriteLine($"  client.ts → {clientPath}");
+            var rivetBasePath = Path.Combine(outputDir, "rivet.ts");
+            await File.WriteAllTextAsync(rivetBasePath, ClientEmitter.EmitRivetBase());
+            Console.WriteLine($"  rivet.ts → {rivetBasePath}");
+
+            // Emit per-controller client files
+            var clientDir = Path.Combine(outputDir, "client");
+            Directory.CreateDirectory(clientDir);
+
+            var groups = ClientEmitter.GroupByController(endpoints);
+            foreach (var (controllerName, controllerEndpoints) in groups)
+            {
+                var clientContent = ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints);
+                var clientPath = Path.Combine(clientDir, $"{controllerName}.ts");
+                await File.WriteAllTextAsync(clientPath, clientContent);
+                Console.WriteLine($"  client/{controllerName}.ts → {clientPath}");
+            }
         }
 
         if (validatorsOutput is not null && validatorsOutput.Length > 0)
@@ -82,13 +91,19 @@ static async Task<int> Run(string[] args)
                 return 1;
             }
 
-            // Re-emit client.ts with validator assertions wired in
+            // Re-emit per-controller clients with validator assertions wired in
             if (endpoints.Count > 0)
             {
-                var validatedClient = ClientEmitter.Emit(endpoints, definitions, validated: true);
-                var clientPath = Path.Combine(outputDir, "client.ts");
-                await File.WriteAllTextAsync(clientPath, validatedClient);
-                Console.WriteLine($"  client.ts → {clientPath} (validated)");
+                var clientDir = Path.Combine(outputDir, "client");
+                var groups = ClientEmitter.GroupByController(endpoints);
+                foreach (var (controllerName, controllerEndpoints) in groups)
+                {
+                    var validatedContent = ClientEmitter.EmitControllerClient(
+                        controllerName, controllerEndpoints, validated: true);
+                    var clientPath = Path.Combine(clientDir, $"{controllerName}.ts");
+                    await File.WriteAllTextAsync(clientPath, validatedContent);
+                    Console.WriteLine($"  client/{controllerName}.ts → {clientPath} (validated)");
+                }
             }
 
             Console.WriteLine("Compile complete.");
@@ -100,11 +115,15 @@ static async Task<int> Run(string[] args)
         Console.WriteLine("=== types.ts ===");
         Console.Write(typesOutput);
 
-        if (clientOutput is not null)
+        if (endpoints.Count > 0)
         {
-            Console.WriteLine();
-            Console.WriteLine("=== client.ts ===");
-            Console.Write(clientOutput);
+            var groups = ClientEmitter.GroupByController(endpoints);
+            foreach (var (controllerName, controllerEndpoints) in groups)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"=== client/{controllerName}.ts ===");
+                Console.Write(ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints));
+            }
         }
 
         if (validatorsOutput is not null && validatorsOutput.Length > 0)

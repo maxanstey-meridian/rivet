@@ -48,6 +48,18 @@ public static class CompilationHelper
             public class FromQueryAttribute : System.Attribute { }
             [System.AttributeUsage(System.AttributeTargets.Parameter)]
             public class FromRouteAttribute : System.Attribute { }
+            [System.AttributeUsage(System.AttributeTargets.Class)]
+            public class RouteAttribute : System.Attribute
+            {
+                public RouteAttribute(string template) { }
+            }
+            [System.AttributeUsage(System.AttributeTargets.Method, AllowMultiple = true)]
+            public class ProducesResponseTypeAttribute : System.Attribute
+            {
+                public ProducesResponseTypeAttribute(System.Type type, int statusCode) { }
+                public ProducesResponseTypeAttribute(int statusCode) { }
+            }
+            public interface IActionResult { }
         }
         """;
 
