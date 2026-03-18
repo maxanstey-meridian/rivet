@@ -16,7 +16,12 @@ public static class TypiaCompiler
     {
         await EnsureNodeDepsAsync();
         GenerateTsConfig(outputDir);
-        return await RunTscAsync(outputDir);
+        var result = await RunTscAsync(outputDir);
+        if (result)
+        {
+            InlineTypiaHelpers(outputDir);
+        }
+        return result;
     }
 
     private static async Task EnsureNodeDepsAsync()
@@ -122,6 +127,89 @@ public static class TypiaCompiler
             new Dictionary<string, string> { ["NODE_PATH"] = nodeModulesPath });
 
         return result;
+    }
+
+    /// <summary>
+    /// Post-processes the compiled validators.js to inline typia's runtime helpers,
+    /// eliminating the need for consumers to install typia as a dependency.
+    /// </summary>
+    private static void InlineTypiaHelpers(string outputDir)
+    {
+        var validatorsPath = Path.Combine(outputDir, "build", "validators.js");
+        if (!File.Exists(validatorsPath))
+        {
+            return;
+        }
+
+        var content = File.ReadAllText(validatorsPath);
+        var original = content;
+
+        // Remove typia internal imports — we'll inline the code
+        content = System.Text.RegularExpressions.Regex.Replace(
+            content,
+            @"import \* as __typia_transform__\w+ from ""typia/lib/internal/[^""]+"";\n?",
+            "");
+
+        // Remove dead `import typia from "typia";` left over from the source
+        content = System.Text.RegularExpressions.Regex.Replace(
+            content,
+            @"import typia from ""typia"";\n?",
+            "");
+
+        if (content == original)
+        {
+            return;
+        }
+
+        // Prepend inlined helpers
+        const string inlinedHelpers = """
+            // Inlined typia runtime helpers — no typia dependency required
+            const __typia_transform__TypeGuardError = (() => {
+              class TypeGuardError extends Error {
+                constructor(props) {
+                  super(
+                    props.message ||
+                    `Error on ${props.method}(): invalid type${props.path ? ` on ${props.path}` : ""}, expect to be ${props.expected}`
+                  );
+                  const proto = new.target.prototype;
+                  if (Object.setPrototypeOf) Object.setPrototypeOf(this, proto);
+                  else this.__proto__ = proto;
+                  this.method = props.method;
+                  this.path = props.path;
+                  this.expected = props.expected;
+                  this.value = props.value;
+                }
+              }
+              return { TypeGuardError };
+            })();
+            const __typia_transform__assertGuard = {
+              _assertGuard: (exceptionable, props, factory) => {
+                if (exceptionable === true) {
+                  if (factory) throw factory(props);
+                  else throw new __typia_transform__TypeGuardError.TypeGuardError(props);
+                }
+                return false;
+              }
+            };
+            const __typia_transform__accessExpressionAsString = (() => {
+              const RESERVED = new Set([
+                "break","case","catch","class","const","continue","debugger","default",
+                "delete","do","else","enum","export","extends","false","finally","for",
+                "function","if","import","in","instanceof","new","null","return","super",
+                "switch","this","throw","true","try","typeof","var","void","while","with",
+              ]);
+              const variable = (str) => !RESERVED.has(str) && /^[a-zA-Z_$][a-zA-Z_$0-9]*$/g.test(str);
+              return {
+                _accessExpressionAsString: (str) => variable(str) ? `.${str}` : `[${JSON.stringify(str)}]`
+              };
+            })();
+
+            """;
+
+        content = inlinedHelpers + content;
+
+        File.WriteAllText(validatorsPath, content);
+        Console.WriteLine("  build/validators.js → inlined typia helpers (zero runtime deps)");
     }
 
     private static async Task<bool> RunProcessAsync(
