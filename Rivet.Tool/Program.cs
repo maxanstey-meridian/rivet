@@ -145,7 +145,44 @@ static async Task<int> Run(string[] args)
 
 static async Task<Compilation> LoadProjectCompilation(string csprojPath)
 {
-    MSBuildLocator.RegisterDefaults();
+    // MSBuildLocator.RegisterDefaults() fails when the tool targets a different
+    // framework than the SDK on PATH (e.g. net8.0 tool, net10 Homebrew SDK).
+    // Probe all known dotnet roots and register the newest MSBuild we can find.
+    var registered = false;
+
+    foreach (var root in GetDotnetRoots())
+    {
+        var sdkDir = Path.Combine(root, "sdk");
+        if (!Directory.Exists(sdkDir))
+        {
+            continue;
+        }
+
+        // Find the newest SDK version directory
+        var newest = Directory.GetDirectories(sdkDir)
+            .OrderByDescending(d => d)
+            .FirstOrDefault();
+
+        if (newest is null)
+        {
+            continue;
+        }
+
+        var msbuildDir = Path.Combine(newest, "MSBuild.dll");
+        if (!File.Exists(msbuildDir))
+        {
+            continue;
+        }
+
+        MSBuildLocator.RegisterMSBuildPath(newest);
+        registered = true;
+        break;
+    }
+
+    if (!registered)
+    {
+        MSBuildLocator.RegisterDefaults();
+    }
 
     using var workspace = MSBuildWorkspace.Create();
 
@@ -281,4 +318,78 @@ static void PrintUsage()
     Console.Error.WriteLine("  -p, --project <path>   Path to .csproj file");
     Console.Error.WriteLine("  -o, --output <dir>     Output directory (omit for stdout preview)");
     Console.Error.WriteLine("  --compile              Also run typia compilation (requires node on PATH)");
+}
+
+static IEnumerable<string> GetDotnetRoots()
+{
+    // Well-known dotnet install locations
+    var candidates = new List<string>
+    {
+        "/usr/local/share/dotnet",
+        "/usr/share/dotnet",
+    };
+
+    // Homebrew: /opt/homebrew/Cellar/dotnet*/*/libexec
+    try
+    {
+        foreach (var dir in Directory.GetDirectories("/opt/homebrew/Cellar", "dotnet*"))
+        {
+            foreach (var version in Directory.GetDirectories(dir))
+            {
+                candidates.Add(Path.Combine(version, "libexec"));
+            }
+        }
+    }
+    catch { }
+
+    foreach (var path in candidates)
+    {
+        if (Directory.Exists(Path.Combine(path, "sdk")))
+        {
+            yield return path;
+        }
+    }
+
+    // Also try resolving from dotnet --info
+    var psi = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = "dotnet",
+        Arguments = "--info",
+        RedirectStandardOutput = true,
+        UseShellExecute = false,
+        CreateNoWindow = true,
+    };
+
+    string? output = null;
+    try
+    {
+        using var process = System.Diagnostics.Process.Start(psi);
+        if (process is not null)
+        {
+            output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+        }
+    }
+    catch { }
+
+    if (output is not null)
+    {
+        foreach (var line in output.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("Base Path:", StringComparison.OrdinalIgnoreCase))
+            {
+                var basePath = trimmed["Base Path:".Length..].Trim().TrimEnd('/');
+                var sdkDir = Path.GetDirectoryName(basePath);
+                if (sdkDir is not null)
+                {
+                    var root = Path.GetDirectoryName(sdkDir);
+                    if (root is not null)
+                    {
+                        yield return root;
+                    }
+                }
+            }
+        }
+    }
 }
