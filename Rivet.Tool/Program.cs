@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -18,6 +19,7 @@ static async Task<int> Run(string[] args)
         return 1;
     }
 
+    var sw = Stopwatch.StartNew();
     var (projectPath, outputDir, mode, files) = parsed.Value;
 
     if (mode == "compile" && outputDir is null)
@@ -44,6 +46,7 @@ static async Task<int> Run(string[] args)
     var brands = walker.Brands.Values.ToList();
     var enums = walker.Enums;
     var typeGrouping = TypeGrouper.Group(definitions, brands, enums, walker.TypeNamespaces);
+    var typeFileMap = typeGrouping.BuildTypeFileMap();
     var validatorsOutput = endpoints.Count > 0
         ? ValidatorEmitter.Emit(endpoints)
         : null;
@@ -67,7 +70,7 @@ static async Task<int> Run(string[] args)
         }
 
         // Barrel for types/
-        var typesBarrel = TypeEmitter.EmitBarrel(typeFileNames);
+        var typesBarrel = TypeEmitter.EmitNamespacedBarrel(typeFileNames);
         var typesBarrelPath = Path.Combine(typesDir, "index.ts");
         await File.WriteAllTextAsync(typesBarrelPath, typesBarrel);
         Console.WriteLine($"  types/index.ts → {typesBarrelPath}");
@@ -87,7 +90,7 @@ static async Task<int> Run(string[] args)
             var clientFileNames = new List<string>();
             foreach (var (controllerName, controllerEndpoints) in controllerGroups)
             {
-                var clientContent = ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints);
+                var clientContent = ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints, typeFileMap);
                 var clientPath = Path.Combine(clientDir, $"{controllerName}.ts");
                 await File.WriteAllTextAsync(clientPath, clientContent);
                 Console.WriteLine($"  client/{controllerName}.ts → {clientPath}");
@@ -95,7 +98,7 @@ static async Task<int> Run(string[] args)
             }
 
             // Barrel for client/
-            var clientBarrel = TypeEmitter.EmitBarrel(clientFileNames);
+            var clientBarrel = TypeEmitter.EmitNamespacedBarrel(clientFileNames);
             var clientBarrelPath = Path.Combine(clientDir, "index.ts");
             await File.WriteAllTextAsync(clientBarrelPath, clientBarrel);
             Console.WriteLine($"  client/index.ts → {clientBarrelPath}");
@@ -108,7 +111,7 @@ static async Task<int> Run(string[] args)
             Console.WriteLine($"  validators.ts → {validatorsPath}");
         }
 
-        Console.WriteLine($"Generated {definitions.Count} types, {endpoints.Count} endpoints.");
+        Console.WriteLine($"Generated {definitions.Count} types, {endpoints.Count} endpoints in {FormatElapsed(sw.Elapsed)}.");
 
         // Compile step: run tsc + typia, then re-emit validated client
         if (mode == "compile")
@@ -131,14 +134,14 @@ static async Task<int> Run(string[] args)
                 foreach (var (controllerName, controllerEndpoints) in controllerGroups)
                 {
                     var validatedContent = ClientEmitter.EmitControllerClient(
-                        controllerName, controllerEndpoints, validated: true);
+                        controllerName, controllerEndpoints, typeFileMap, validated: true);
                     var clientPath = Path.Combine(clientDir, $"{controllerName}.ts");
                     await File.WriteAllTextAsync(clientPath, validatedContent);
                     Console.WriteLine($"  client/{controllerName}.ts → {clientPath} (validated)");
                 }
             }
 
-            Console.WriteLine("Compile complete.");
+            Console.WriteLine($"Compile complete in {FormatElapsed(sw.Elapsed)}.");
         }
     }
     else
@@ -152,7 +155,7 @@ static async Task<int> Run(string[] args)
         }
 
         Console.WriteLine("=== types/index.ts ===");
-        Console.Write(TypeEmitter.EmitBarrel(typeGrouping.Groups.Select(g => g.FileName).ToList()));
+        Console.Write(TypeEmitter.EmitNamespacedBarrel(typeGrouping.Groups.Select(g => g.FileName).ToList()));
 
         if (endpoints.Count > 0)
         {
@@ -161,7 +164,7 @@ static async Task<int> Run(string[] args)
             {
                 Console.WriteLine();
                 Console.WriteLine($"=== client/{controllerName}.ts ===");
-                Console.Write(ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints));
+                Console.Write(ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints, typeFileMap));
             }
         }
 
@@ -339,6 +342,11 @@ static (string ProjectPath, string? OutputDir, string Mode, string[] Files)? Par
 
     return (projectPath, outputDir, mode, files.ToArray());
 }
+
+static string FormatElapsed(TimeSpan elapsed) =>
+    elapsed.TotalSeconds >= 1
+        ? $"{elapsed.TotalSeconds:F2}s"
+        : $"{elapsed.TotalMilliseconds:F0}ms";
 
 static void PrintUsage()
 {

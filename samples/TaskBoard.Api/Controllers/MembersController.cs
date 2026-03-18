@@ -13,11 +13,11 @@ public sealed record InviteMemberRequest(Email Email, string Role);
 [RivetType]
 public sealed record InviteMemberResponse(Guid Id);
 
+[RivetClient]
 [ApiController]
 [Route("api/members")]
 public sealed class MembersController : ControllerBase
 {
-    [RivetEndpoint]
     [HttpGet]
     [ProducesResponseType(typeof(List<MemberDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> List(CancellationToken ct)
@@ -25,7 +25,6 @@ public sealed class MembersController : ControllerBase
         return Ok(new List<MemberDto>());
     }
 
-    [RivetEndpoint]
     [HttpPost]
     [ProducesResponseType(typeof(InviteMemberResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -36,7 +35,6 @@ public sealed class MembersController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, new InviteMemberResponse(Guid.NewGuid()));
     }
 
-    [RivetEndpoint]
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

@@ -11,7 +11,9 @@ public sealed class ControllerEndpointTests
         var walker = TypeWalker.Create(compilation);
         var endpoints = EndpointWalker.Walk(compilation, walker);
         var definitions = walker.Definitions.Values.ToList();
-        return ClientEmitter.Emit(endpoints, definitions);
+        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
+        return ClientEmitter.Emit(endpoints, definitions, typeFileMap);
     }
 
     [Fact]
@@ -248,6 +250,93 @@ public sealed class ControllerEndpointTests
         Assert.Contains("body: request", client);
         // CancellationToken should be skipped
         Assert.DoesNotContain("ct:", client);
+    }
+
+    [Fact]
+    public void RivetClient_AutoDiscoversPublicHttpMethods()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+            [RivetType]
+            public sealed record CreateItemRequest(string Name);
+
+            [RivetClient]
+            [Route("api/items")]
+            public sealed class ItemsController
+            {
+                [HttpGet("{id:guid}")]
+                [ProducesResponseType(typeof(ItemDto), 200)]
+                public Task<IActionResult> Get(Guid id, CancellationToken ct)
+                    => throw new NotImplementedException();
+
+                [HttpPost("")]
+                [ProducesResponseType(typeof(ItemDto), 201)]
+                public Task<IActionResult> Create(
+                    [FromBody] CreateItemRequest request,
+                    CancellationToken ct)
+                    => throw new NotImplementedException();
+
+                [HttpDelete("{id:guid}")]
+                [ProducesResponseType(200)]
+                public Task<IActionResult> Delete(Guid id, CancellationToken ct)
+                    => throw new NotImplementedException();
+
+                // Should NOT be discovered — no HTTP attribute
+                public void HelperMethod() { }
+            }
+            """;
+
+        var client = GenerateClient(source);
+
+        // All three HTTP methods discovered without [RivetEndpoint]
+        Assert.Contains("export const get = (", client);
+        Assert.Contains("export const create = (", client);
+        Assert.Contains("export const remove = (", client);
+        // Helper method not included
+        Assert.DoesNotContain("helperMethod", client);
+    }
+
+    [Fact]
+    public void RivetClient_AndRivetEndpoint_NoDuplicates()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [RivetClient]
+            [Route("api/items")]
+            public sealed class ItemsController
+            {
+                [RivetEndpoint]
+                [HttpGet("{id:guid}")]
+                [ProducesResponseType(typeof(ItemDto), 200)]
+                public Task<IActionResult> Get(Guid id, CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var client = GenerateClient(source);
+
+        // Should appear exactly once even though it matches both [RivetClient] and [RivetEndpoint]
+        var count = client.Split("export const get").Length - 1;
+        Assert.Equal(1, count);
     }
 
     [Fact]

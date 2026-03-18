@@ -18,6 +18,8 @@ Rivet is feature-complete through Phase 4 + VO support + grouped type emission. 
   barrel `index.ts` for both `types/` and `client/`. Namespace last segment used as file name, number-suffix on
   collision. Grouping signal is not yet configurable (future feature).
 - CLI: MSBuildWorkspace with multi-SDK Homebrew discovery, file output, stdout preview, --compile flag
+- `[RivetClient]` class-level attribute: auto-discovers all public methods with HTTP attributes, no per-method
+  `[RivetEndpoint]` needed. Deduplicates with `[RivetEndpoint]` if both present.
 - NuGet: Rivet.Attributes (netstandard2.0), dotnet-rivet (net8.0, PackAsTool)
 - Sample: TaskBoard.Api with controllers, enums, VOs, generics, colocated commands/results
 

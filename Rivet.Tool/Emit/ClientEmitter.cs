@@ -126,6 +126,7 @@ public static partial class ClientEmitter
     public static string EmitControllerClient(
         string controllerName,
         IReadOnlyList<TsEndpointDefinition> endpoints,
+        IReadOnlyDictionary<string, string> typeFileMap,
         bool validated = false)
     {
         var sb = new StringBuilder();
@@ -151,11 +152,20 @@ public static partial class ClientEmitter
             }
         }
 
-        // Import referenced types from types barrel
+        // Import referenced types from their source files
         var referencedTypes = CollectReferencedTypeNames(endpoints);
         if (referencedTypes.Count > 0)
         {
-            sb.AppendLine($"import type {{ {string.Join(", ", referencedTypes.Order())} }} from \"../types/index.js\";");
+            var importsByFile = referencedTypes
+                .Where(t => typeFileMap.ContainsKey(t))
+                .GroupBy(t => typeFileMap[t])
+                .OrderBy(g => g.Key);
+
+            foreach (var group in importsByFile)
+            {
+                var names = string.Join(", ", group.Order());
+                sb.AppendLine($"import type {{ {names} }} from \"../types/{group.Key}.js\";");
+            }
         }
 
         // Emit each endpoint function
@@ -197,6 +207,7 @@ public static partial class ClientEmitter
     public static string Emit(
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyList<TsTypeDefinition> types,
+        IReadOnlyDictionary<string, string> typeFileMap,
         bool validated = false)
     {
         var sb = new StringBuilder();
@@ -221,7 +232,17 @@ public static partial class ClientEmitter
         var referencedTypes = CollectReferencedTypeNames(endpoints);
         if (referencedTypes.Count > 0)
         {
-            sb.AppendLine($"import type {{ {string.Join(", ", referencedTypes.Order())} }} from \"./types/index.js\";");
+            var importsByFile = referencedTypes
+                .Where(t => typeFileMap.ContainsKey(t))
+                .GroupBy(t => typeFileMap[t])
+                .OrderBy(g => g.Key);
+
+            foreach (var group in importsByFile)
+            {
+                var names = string.Join(", ", group.Order());
+                sb.AppendLine($"import type {{ {names} }} from \"./types/{group.Key}.js\";");
+            }
+
             sb.AppendLine();
         }
 

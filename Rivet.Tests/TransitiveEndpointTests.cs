@@ -46,7 +46,8 @@ public sealed class TransitiveEndpointTests
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
         var types = TypeEmitter.Emit(definitions, brands, walker.Enums);
-        var client = ClientEmitter.EmitControllerClient("items", endpoints);
+        var typeFileMap = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces).BuildTypeFileMap();
+        var client = ClientEmitter.EmitControllerClient("items", endpoints, typeFileMap);
 
         // Types should be discovered transitively via endpoint params/return types
         Assert.Contains("export type CreateItemRequest = {", types);

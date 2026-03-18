@@ -10,8 +10,11 @@ public sealed class ClientEmitterTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var walker = TypeWalker.Create(compilation);
         var endpoints = EndpointWalker.Walk(compilation, walker);
-        var types = TypeEmitter.Emit([.. walker.Definitions.Values], enums: walker.Enums);
-        var client = ClientEmitter.Emit(endpoints, [.. walker.Definitions.Values]);
+        var definitions = walker.Definitions.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
+        var types = TypeEmitter.Emit(definitions, enums: walker.Enums);
+        var client = ClientEmitter.Emit(endpoints, definitions, typeFileMap);
         return (types, client);
     }
 
@@ -45,7 +48,7 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("""import type { CreateMessageCommand, MessageDto } from "./types/index.js";""", client);
+        Assert.Contains("""import type { CreateMessageCommand, MessageDto } from "./types/test.js";""", client);
         Assert.Contains("export const createMessage = (id: string, body: CreateMessageCommand): Promise<MessageDto> =>", client);
         Assert.Contains("""rivetFetch<MessageDto>("POST", `/api/submissions/${id}/messages`, { body: body });""", client);
     }

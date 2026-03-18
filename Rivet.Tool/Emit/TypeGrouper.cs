@@ -16,7 +16,35 @@ public static class TypeGrouper
         IReadOnlyDictionary<string, IReadOnlyList<string>> Imports);
 
     public sealed record TypeGroupingResult(
-        IReadOnlyList<TypeFileGroup> Groups);
+        IReadOnlyList<TypeFileGroup> Groups)
+    {
+        /// <summary>
+        /// Builds a lookup from type name to the file name it lives in.
+        /// </summary>
+        public Dictionary<string, string> BuildTypeFileMap()
+        {
+            var map = new Dictionary<string, string>();
+            foreach (var group in Groups)
+            {
+                foreach (var def in group.Definitions)
+                {
+                    map[def.Name] = group.FileName;
+                }
+
+                foreach (var brand in group.Brands)
+                {
+                    map[brand.Name] = group.FileName;
+                }
+
+                foreach (var (name, _) in group.Enums)
+                {
+                    map[name] = group.FileName;
+                }
+            }
+
+            return map;
+        }
+    };
 
     public static TypeGroupingResult Group(
         IReadOnlyList<TsTypeDefinition> definitions,

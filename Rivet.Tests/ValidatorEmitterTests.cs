@@ -11,9 +11,11 @@ public sealed class ValidatorEmitterTests
         var walker = TypeWalker.Create(compilation);
         var endpoints = EndpointWalker.Walk(compilation, walker);
         var definitions = walker.Definitions.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
         var validators = ValidatorEmitter.Emit(endpoints);
-        var client = ClientEmitter.Emit(endpoints, definitions);
-        var validatedClient = ClientEmitter.Emit(endpoints, definitions, validated: true);
+        var client = ClientEmitter.Emit(endpoints, definitions, typeFileMap);
+        var validatedClient = ClientEmitter.Emit(endpoints, definitions, typeFileMap, validated: true);
         return (validators, client, validatedClient);
     }
 

@@ -5,6 +5,16 @@ namespace Rivet.Tests;
 
 public sealed class FormFileTests
 {
+    private static Dictionary<string, string> BuildTypeFileMap(TypeWalker walker)
+    {
+        var typeGrouping = TypeGrouper.Group(
+            walker.Definitions.Values.ToList(),
+            walker.Brands.Values.ToList(),
+            walker.Enums,
+            walker.TypeNamespaces);
+        return typeGrouping.BuildTypeFileMap();
+    }
+
     [Fact]
     public void IFormFile_EmitsFileParam_WithFormData()
     {
@@ -37,7 +47,8 @@ public sealed class FormFileTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var walker = TypeWalker.Create(compilation);
         var endpoints = EndpointWalker.Walk(compilation, walker);
-        var client = ClientEmitter.EmitControllerClient("files", endpoints);
+        var typeFileMap = BuildTypeFileMap(walker);
+        var client = ClientEmitter.EmitControllerClient("files", endpoints, typeFileMap);
 
         // Function signature takes File
         Assert.Contains("file: File", client);
@@ -83,7 +94,8 @@ public sealed class FormFileTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var walker = TypeWalker.Create(compilation);
         var endpoints = EndpointWalker.Walk(compilation, walker);
-        var client = ClientEmitter.EmitControllerClient("tasks", endpoints);
+        var typeFileMap = BuildTypeFileMap(walker);
+        var client = ClientEmitter.EmitControllerClient("tasks", endpoints, typeFileMap);
 
         // Both route param and file param
         Assert.Contains("id: string, file: File", client);
@@ -121,7 +133,8 @@ public sealed class FormFileTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var walker = TypeWalker.Create(compilation);
         var endpoints = EndpointWalker.Walk(compilation, walker);
-        var client = ClientEmitter.EmitControllerClient("avatars", endpoints);
+        var typeFileMap = BuildTypeFileMap(walker);
+        var client = ClientEmitter.EmitControllerClient("avatars", endpoints, typeFileMap);
 
         Assert.Contains("avatar: File", client);
         Assert.Contains("fd.append(\"avatar\", avatar);", client);
