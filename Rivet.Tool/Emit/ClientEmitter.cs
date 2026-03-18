@@ -140,7 +140,11 @@ public static partial class ClientEmitter
         sb.AppendLine();
 
         // Import rivetFetch + types from shared module
-        sb.AppendLine("import { rivetFetch, type RivetResult } from \"../rivet.js\";");
+        var needsRivetError = validated && endpoints.Any(e => e.ReturnType is not null && e.Responses.Any(r => r.DataType is not null));
+        var rivetImports = needsRivetError
+            ? "import { rivetFetch, RivetError, type RivetResult } from \"../rivet.js\";"
+            : "import { rivetFetch, type RivetResult } from \"../rivet.js\";";
+        sb.AppendLine(rivetImports);
 
         // Import validator assertions from build output
         if (validated)
@@ -296,11 +300,14 @@ public static partial class ClientEmitter
             {
                 sb.AppendLine($"  if (opts?.unwrap === false) {{");
                 sb.AppendLine($"    const result = await rivetFetch<{resultTypeName}>(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
-                foreach (var response in endpoint.Responses.Where(r => r.DataType is not null))
+                var responses = endpoint.Responses.Where(r => r.DataType is not null).ToList();
+                for (var i = 0; i < responses.Count; i++)
                 {
-                    var responseAssert = ValidatorEmitter.GetAssertName(response.DataType!);
-                    sb.AppendLine($"    if (result.status === {response.StatusCode}) result.data = {responseAssert}(result.data);");
+                    var responseAssert = ValidatorEmitter.GetAssertName(responses[i].DataType!);
+                    var prefix = i == 0 ? "    if" : "    else if";
+                    sb.AppendLine($"{prefix} (result.status === {responses[i].StatusCode}) result.data = {responseAssert}(result.data);");
                 }
+                sb.AppendLine($"    else throw new RivetError(\"{endpoint.HttpMethod}\", `{route}`, result.status, result.response, result.data);");
                 sb.AppendLine("    return result;");
                 sb.AppendLine("  }");
             }

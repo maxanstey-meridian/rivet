@@ -267,9 +267,10 @@ public sealed class ValidatorEmitterTests
         // Validated client imports both asserters
         Assert.Contains("""import { assertNotFoundDto, assertTaskDetailDto } from "../build/validators.js";""", validatedClient);
 
-        // Validated client validates each branch by status code
+        // Validated client validates each branch by status code, throws on unknown
         Assert.Contains("if (result.status === 200) result.data = assertTaskDetailDto(result.data);", validatedClient);
-        Assert.Contains("if (result.status === 404) result.data = assertNotFoundDto(result.data);", validatedClient);
+        Assert.Contains("else if (result.status === 404) result.data = assertNotFoundDto(result.data);", validatedClient);
+        Assert.Contains("else throw new RivetError(", validatedClient);
     }
 
     [Fact]
