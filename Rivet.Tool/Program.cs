@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis.MSBuild;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Compile;
 using Rivet.Tool.Emit;
+using Rivet.Tool.Model;
 
 return await Run(args);
 
@@ -41,6 +42,21 @@ static async Task<int> Run(string[] args)
 
     var walker = TypeWalker.Create(compilation);
     var endpoints = EndpointWalker.Walk(compilation, walker);
+    var contractEndpoints = ContractWalker.Walk(compilation, walker);
+
+    // Merge: contract endpoints win on (ControllerName, Name) collision
+    var seen = new HashSet<(string, string)>(
+        contractEndpoints.Select(e => (e.ControllerName, e.Name)));
+    var merged = new List<TsEndpointDefinition>(contractEndpoints);
+    foreach (var ep in endpoints)
+    {
+        if (seen.Add((ep.ControllerName, ep.Name)))
+        {
+            merged.Add(ep);
+        }
+    }
+
+    endpoints = merged;
     var definitions = walker.Definitions.Values.ToList();
 
     var brands = walker.Brands.Values.ToList();

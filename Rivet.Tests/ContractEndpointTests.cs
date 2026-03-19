@@ -1,0 +1,511 @@
+using Rivet.Tool.Analysis;
+using Rivet.Tool.Emit;
+using Rivet.Tool.Model;
+
+namespace Rivet.Tests;
+
+public sealed class ContractEndpointTests
+{
+    private static (IReadOnlyList<TsEndpointDefinition> Endpoints, string Client) Generate(string source)
+    {
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var walker = TypeWalker.Create(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker);
+        var definitions = walker.Definitions.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
+        var controllerGroups = ClientEmitter.GroupByController(endpoints);
+        var client = string.Join("\n", controllerGroups.Select(g =>
+            ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
+        return (endpoints, client);
+    }
+
+    [Fact]
+    public void Get_WithInputAndOutput_RouteAndQueryParams()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record GetTaskInput(string Id, string Status, int Page);
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint GetTask =
+                    Endpoint.Get<GetTaskInput, TaskDto>("/api/tasks/{id}");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("getTask", ep.Name);
+        Assert.Equal("GET", ep.HttpMethod);
+        Assert.Equal("/api/tasks/{id}", ep.RouteTemplate);
+        Assert.Equal("tasks", ep.ControllerName);
+
+        // id matched to route, status + page are query
+        Assert.Equal(3, ep.Params.Count);
+        Assert.Equal(ParamSource.Route, ep.Params.First(p => p.Name == "id").Source);
+        Assert.Equal(ParamSource.Query, ep.Params.First(p => p.Name == "status").Source);
+        Assert.Equal(ParamSource.Query, ep.Params.First(p => p.Name == "page").Source);
+
+        Assert.Contains("Promise<TaskDto>", client);
+        Assert.Contains("`/api/tasks/${id}`", client);
+    }
+
+    [Fact]
+    public void Post_WithBody_RouteParamsSeparate()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateCommentInput(string Text);
+
+            [RivetType]
+            public sealed record CommentDto(string Id, string Text);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint CreateComment =
+                    Endpoint.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("POST", ep.HttpMethod);
+
+        // taskId from route template as standalone string param, body from TInput
+        var routeParam = ep.Params.First(p => p.Source == ParamSource.Route);
+        Assert.Equal("taskId", routeParam.Name);
+
+        var bodyParam = ep.Params.First(p => p.Source == ParamSource.Body);
+        Assert.Equal("body", bodyParam.Name);
+
+        Assert.Contains("body: body", client);
+    }
+
+    [Fact]
+    public void Get_OutputOnly_NoInput()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint ListTasks =
+                    Endpoint.Get<TaskDto>("/api/tasks");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("listTasks", ep.Name);
+        Assert.Equal("GET", ep.HttpMethod);
+        Assert.Empty(ep.Params);
+        Assert.Contains("Promise<TaskDto>", client);
+    }
+
+    [Fact]
+    public void Delete_NoTypes_RouteParamInferred()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint DeleteTask =
+                    Endpoint.Delete("/api/tasks/{id}");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("deleteTask", ep.Name);
+        Assert.Equal("DELETE", ep.HttpMethod);
+
+        // Route param inferred from template even without TInput
+        Assert.Single(ep.Params);
+        Assert.Equal("id", ep.Params[0].Name);
+        Assert.Equal(ParamSource.Route, ep.Params[0].Source);
+
+        Assert.Contains("Promise<void>", client);
+    }
+
+    [Fact]
+    public void Returns_ProducesResponseEntry()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record NotFoundDto(string Message);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint GetTask =
+                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                        .Returns<NotFoundDto>(404);
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+
+        // 200 from TOutput + 404 from .Returns
+        Assert.Equal(2, ep.Responses.Count);
+        Assert.Equal(200, ep.Responses[0].StatusCode);
+        Assert.Equal(404, ep.Responses[1].StatusCode);
+    }
+
+    [Fact]
+    public void Status_OverridesSuccessCode()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateInput(string Name);
+
+            [RivetType]
+            public sealed record CreatedDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint CreateTask =
+                    Endpoint.Post<CreateInput, CreatedDto>("/api/tasks")
+                        .Status(201);
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Contains(ep.Responses, r => r.StatusCode == 201 && r.DataType is not null);
+    }
+
+    [Fact]
+    public void MultipleReturns_AllCaptured()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record NotFoundDto(string Message);
+
+            [RivetType]
+            public sealed record ConflictDto(string Reason);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint GetTask =
+                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                        .Returns<NotFoundDto>(404)
+                        .Returns<ConflictDto>(409);
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal(3, ep.Responses.Count);
+        Assert.Equal(200, ep.Responses[0].StatusCode);
+        Assert.Equal(404, ep.Responses[1].StatusCode);
+        Assert.Equal(409, ep.Responses[2].StatusCode);
+    }
+
+    [Fact]
+    public void ContractName_StripsSuffix_CamelCases()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Id);
+
+            [RivetContract]
+            public static class CaseStatusesContract
+            {
+                public static readonly Endpoint GetItem =
+                    Endpoint.Get<ItemDto>("/api/case-statuses");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        Assert.Equal("caseStatuses", endpoints[0].ControllerName);
+    }
+
+    [Fact]
+    public void MixedContract_AndRivetClient_NoControllerNameCollision()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record ProjectDto(string Id, string Name);
+
+            // Contract-sourced
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint ListTasks =
+                    Endpoint.Get<TaskDto>("/api/tasks");
+            }
+
+            // Controller-sourced
+            [RivetClient]
+            [Route("api/projects")]
+            public sealed class ProjectsController
+            {
+                [HttpGet("")]
+                [ProducesResponseType(typeof(ProjectDto), 200)]
+                public Task<IActionResult> List(CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var walker = TypeWalker.Create(compilation);
+        var contractEndpoints = ContractWalker.Walk(compilation, walker);
+        var controllerEndpoints = EndpointWalker.Walk(compilation, walker);
+
+        // Both sources produce endpoints for different controllers
+        Assert.Single(contractEndpoints);
+        Assert.Single(controllerEndpoints);
+        Assert.Equal("tasks", contractEndpoints[0].ControllerName);
+        Assert.Equal("projects", controllerEndpoints[0].ControllerName);
+    }
+
+    [Fact]
+    public void TransitiveTypeDiscovery_FromContractReferencedTypes()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            // NOT marked [RivetType] — should be discovered transitively via contract
+            public sealed record TaskDto(string Id, string Title, StatusDto Status);
+
+            [RivetType]
+            public sealed record StatusDto(string Label);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint GetTask =
+                    Endpoint.Get<TaskDto>("/api/tasks/{id}");
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var walker = TypeWalker.Create(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker);
+
+        Assert.Single(endpoints);
+        // TaskDto should have been walked transitively
+        Assert.True(walker.Definitions.ContainsKey("TaskDto"));
+        Assert.True(walker.Definitions.ContainsKey("StatusDto"));
+    }
+
+    [Fact]
+    public void RouteConstraints_StrippedInContract()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint GetTask =
+                    Endpoint.Get<TaskDto>("/api/tasks/{id:guid}");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        Assert.Equal("/api/tasks/{id}", endpoints[0].RouteTemplate);
+        Assert.DoesNotContain(":guid", client);
+    }
+
+    [Fact]
+    public void Description_ExtractedFromBuilder()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint GetTask =
+                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                        .Description("Retrieve a single task by ID");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        Assert.Equal("Retrieve a single task by ID", endpoints[0].Description);
+    }
+
+    [Fact]
+    public void Description_NullWhenOmitted()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint GetTask =
+                    Endpoint.Get<TaskDto>("/api/tasks/{id}");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        Assert.Null(endpoints[0].Description);
+    }
+
+    [Fact]
+    public void ReturnsDescription_ExtractedFromBuilder()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetType]
+            public sealed record NotFoundDto(string Message);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint GetTask =
+                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                        .Returns<NotFoundDto>(404, "Task not found");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        var notFoundResponse = endpoints[0].Responses.First(r => r.StatusCode == 404);
+        Assert.Equal("Task not found", notFoundResponse.Description);
+
+        // Success response has no description
+        var successResponse = endpoints[0].Responses.First(r => r.StatusCode == 200);
+        Assert.Null(successResponse.Description);
+    }
+
+    [Fact]
+    public void DescriptionAndReturnsDescription_BothWork()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetType]
+            public sealed record NotFoundDto(string Message);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Endpoint GetTask =
+                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                        .Description("Retrieve a task")
+                        .Returns<NotFoundDto>(404, "Task not found");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        Assert.Equal("Retrieve a task", endpoints[0].Description);
+        Assert.Equal("Task not found", endpoints[0].Responses.First(r => r.StatusCode == 404).Description);
+    }
+}

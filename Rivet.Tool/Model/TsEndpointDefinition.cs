@@ -10,12 +10,13 @@ public sealed record TsEndpointDefinition(
     IReadOnlyList<TsEndpointParam> Params,
     TsType? ReturnType,
     string ControllerName,
-    IReadOnlyList<TsResponseType> Responses);
+    IReadOnlyList<TsResponseType> Responses,
+    string? Description = null);
 
 /// <summary>
 /// A typed response for a given status code.
 /// </summary>
-public sealed record TsResponseType(int StatusCode, TsType? DataType);
+public sealed record TsResponseType(int StatusCode, TsType? DataType, string? Description = null);
 
 /// <summary>
 /// A parameter to a client function.

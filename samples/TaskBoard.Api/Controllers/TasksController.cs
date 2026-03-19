@@ -46,6 +46,9 @@ public sealed record AddCommentRequest(string Body);
 [RivetType]
 public sealed record AttachmentResultDto(Guid Id, string FileName, long Size);
 
+[RivetType]
+public sealed record NotFoundDto(string Message);
+
 [ApiController]
 [Route("api/tasks")]
 public sealed class TasksController(CreateTaskUseCase createTask) : ControllerBase
@@ -67,7 +70,7 @@ public sealed class TasksController(CreateTaskUseCase createTask) : ControllerBa
     [RivetEndpoint]
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(TaskDetailDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(NotFoundDto), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Get(Guid id, CancellationToken ct)
     {
         return Ok(default(TaskDetailDto));

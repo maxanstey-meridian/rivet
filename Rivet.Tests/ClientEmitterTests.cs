@@ -306,10 +306,11 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        // Result DU type
+        // Result DU type with catch-all arm
         Assert.Contains("export type GetResult =", client);
         Assert.Contains("{ status: 200; data: TaskDetailDto; response: Response }", client);
         Assert.Contains("{ status: 404; data: NotFoundDto; response: Response }", client);
+        Assert.Contains("{ status: Exclude<number, 200 | 404>; data: unknown; response: Response }", client);
 
         // Overloads use GetResult for unwrap: false
         Assert.Contains("export function get(id: string): Promise<TaskDetailDto>;", client);

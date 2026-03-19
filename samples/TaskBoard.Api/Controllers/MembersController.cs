@@ -13,7 +13,7 @@ public sealed record InviteMemberRequest(Email Email, string Role);
 [RivetType]
 public sealed record InviteMemberResponse(Guid Id);
 
-[RivetClient]
+[RivetImplements(nameof(Contracts.MembersContract))]
 [ApiController]
 [Route("api/members")]
 public sealed class MembersController : ControllerBase

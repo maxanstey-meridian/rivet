@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Rivet.Tool.Model;
 
@@ -9,7 +8,7 @@ namespace Rivet.Tool.Analysis;
 /// parameter bindings, and return type. Supports both minimal API (typed return)
 /// and controller (ProducesResponseType + IActionResult) patterns.
 /// </summary>
-public static partial class EndpointWalker
+public static class EndpointWalker
 {
     private static readonly HashSet<string> HttpMethodAttributes = new()
     {
@@ -206,7 +205,7 @@ public static partial class EndpointWalker
     /// </summary>
     private static string StripRouteConstraints(string route)
     {
-        return RouteConstraintRegex().Replace(route, "{$1}");
+        return RouteParser.StripRouteConstraints(route);
     }
 
     private static IReadOnlyList<TsEndpointParam> ExtractParams(
@@ -216,9 +215,7 @@ public static partial class EndpointWalker
     {
         // Extract route param names from the template for implicit classification
         var routeParamNames = routeTemplate is not null
-            ? RouteParamRegex().Matches(routeTemplate)
-                .Select(m => m.Groups[1].Value)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            ? RouteParser.ParseRouteParamNames(routeTemplate)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var parameters = new List<TsEndpointParam>();
@@ -431,15 +428,4 @@ public static partial class EndpointWalker
             return name is not null && HttpMethodAttributes.Contains(name);
         });
 
-    /// <summary>
-    /// Matches route constraints like {id:guid}, {slug:minlength(3)}, {page:int}
-    /// </summary>
-    [GeneratedRegex(@"\{(\w+):[^}]+\}")]
-    private static partial Regex RouteConstraintRegex();
-
-    /// <summary>
-    /// Matches route params: {id}, {id:guid}, {slug:minlength(3)}
-    /// </summary>
-    [GeneratedRegex(@"\{(\w+)(?::[^}]+)?\}")]
-    private static partial Regex RouteParamRegex();
 }

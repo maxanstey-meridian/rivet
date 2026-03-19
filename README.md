@@ -13,7 +13,7 @@ Your C# types are your TypeScript types. No drift, no schema, no codegen config.
 Rivet reads your .NET sealed records and controller endpoints via Roslyn and emits typed TypeScript — shared types and
 a typed HTTP client — with optional runtime validation at the fetch boundary.
 
-Three attributes. One command. Full-stack type safety.
+Mark your types. Define your endpoints. One command. Full-stack type safety.
 
 ### Your C# types...
 
@@ -91,7 +91,7 @@ let consumers import from `types/index.js` — the grouping is purely for naviga
 
 **Your project:**
 
-- `Rivet.Attributes` NuGet package — three marker attributes, zero dependencies
+- `Rivet.Attributes` NuGet package — marker attributes and contract builders, zero dependencies
 
 **The CLI tool:**
 
@@ -208,6 +208,61 @@ public static class HealthCheck
 
 Both attributes can coexist — if a method matches both `[RivetClient]` (via its class) and `[RivetEndpoint]`, it is
 emitted once.
+
+### Contract-driven endpoints
+
+Instead of annotating controllers, you can define endpoint shapes in a static contract class. The contract is
+declarative — Rivet reads it at generation time, nothing executes at runtime:
+
+```csharp
+[RivetContract]
+public static class MembersContract
+{
+    public static readonly Endpoint List =
+        Endpoint.Get<MemberDto>("/api/members")
+            .Description("List all team members");
+
+    public static readonly Endpoint Invite =
+        Endpoint.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
+            .Description("Invite a new team member")
+            .Status(201)
+            .Returns<InviteMemberResponse>(422, "Validation failed");
+
+    public static readonly Endpoint Remove =
+        Endpoint.Delete("/api/members/{id}")
+            .Description("Remove a team member")
+            .Returns<MemberDto>(404, "Member not found");
+}
+```
+
+This generates the exact same typed client as attribute-based controllers — same overloads, same discriminated unions,
+same validators. Contracts and controller attributes can coexist in the same project; if both define the same endpoint
+(matching controller name + method name), the contract wins.
+
+**Factory methods:** `Endpoint.Get`, `.Post`, `.Put`, `.Patch`, `.Delete` — each with three overloads:
+
+| Overload                                        | Meaning                                |
+|-------------------------------------------------|----------------------------------------|
+| `Endpoint.Get<TInput, TOutput>(route)`          | Input type + output type               |
+| `Endpoint.Get<TOutput>(route)`                  | Output only (no request body/params)   |
+| `Endpoint.Get(route)`                           | No typed input or output               |
+
+**Builder methods:**
+
+| Method                              | Effect                                              |
+|-------------------------------------|-----------------------------------------------------|
+| `.Returns<T>(statusCode)`           | Declare an additional response type for a status     |
+| `.Returns<T>(statusCode, desc)`     | Same, with a human-readable description              |
+| `.Status(code)`                     | Override the default success status code             |
+| `.Description(desc)`                | Endpoint description (for future OpenAPI generation) |
+
+**Parameter classification:** For `GET`/`DELETE`, `TInput` properties are matched by name to route template segments
+(→ route params), with the rest becoming query params. For `POST`/`PUT`/`PATCH`, route params come from the template
+as standalone `string` args, and `TInput` becomes the request body. This matches how ASP.NET controllers work —
+`[FromBody] command` + separate `Guid id` route param.
+
+**Controller naming:** The contract class name maps to the client file: `MembersContract` → `client/members.ts`
+(strips the `Contract` suffix and camelCases, same as `MembersController` → `client/members.ts`).
 
 ### Return type inference
 
@@ -375,14 +430,17 @@ compilation, and emit `.ts` files — similar to `dotnet-ef` or `dotnet-format`.
 2. Finds `[RivetType]` records and transitively discovers all referenced types
 3. Finds `[RivetClient]` classes and `[RivetEndpoint]` methods — reads `[HttpGet]`, `[Route]`,
    `[ProducesResponseType]`, `[FromBody]`, etc.
-4. Groups types by C# namespace, promotes cross-referenced types to `common.ts`
-5. Emits per-controller client files and optionally `validators.ts`
-6. With `--compile`, runs `tsc` with the typia transformer to produce runtime validators
+4. Finds `[RivetContract]` classes and reads their builder chains via Roslyn's semantic model
+5. Merges controller-sourced and contract-sourced endpoints (contract wins on collision)
+6. Groups types by C# namespace, promotes cross-referenced types to `common.ts`
+7. Emits per-controller client files and optionally `validators.ts`
+8. With `--compile`, runs `tsc` with the typia transformer to produce runtime validators
 
 ## Sample project
 
-The repo includes a sample ASP.NET project at `samples/TaskBoard.Api/` — a task board API with two controllers, domain
-enums, value objects, application-layer commands with colocated results, and a generic `PagedResult<T>`.
+The repo includes a sample ASP.NET project at `samples/TaskBoard.Api/` — a task board API demonstrating both
+attribute-based and contract-driven endpoint discovery, domain enums, value objects, application-layer commands with
+colocated results, and a generic `PagedResult<T>`.
 
 ```
 samples/TaskBoard.Api/
@@ -395,9 +453,11 @@ samples/TaskBoard.Api/
 │   ├── Ports/ITaskRepository.cs
 │   ├── CreateTask/              # Command + Result colocated with use case
 │   └── PagedResult.cs           # Generic wrapper
+├── Contracts/
+│   └── MembersContract.cs       # Contract-driven: 3 endpoints with descriptions
 ├── Controllers/
-│   ├── TasksController.cs       # 7 endpoints, colocated DTOs
-│   └── MembersController.cs     # 3 endpoints, colocated DTOs
+│   ├── TasksController.cs       # Attribute-based: 7 endpoints, colocated DTOs
+│   └── MembersController.cs     # Implementation (linked via [RivetImplements])
 └── Program.cs
 ```
 

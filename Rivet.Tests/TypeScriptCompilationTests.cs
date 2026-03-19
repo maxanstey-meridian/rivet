@@ -237,12 +237,109 @@ public sealed class TypeScriptCompilationTests : IDisposable
         Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
     }
 
+    [Fact]
+    public async Task ContractEndpoints_MixedWithControllers_Compile()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace MyApp.Domain
+            {
+                public enum Priority { Low, Medium, High }
+                public sealed record Email(string Value);
+            }
+
+            namespace MyApp.Contracts
+            {
+                using MyApp.Domain;
+
+                public sealed record TaskDetailDto(Guid Id, string Title, Priority Priority, Email Author);
+                public sealed record NotFoundDto(string Message);
+                public sealed record CreateTaskCommand(string Title, Priority Priority);
+                public sealed record CreateTaskResult(Guid Id, DateTime CreatedAt);
+
+                public sealed record MemberDto(Guid Id, string Name, Email Email);
+                public sealed record InviteMemberRequest(Email Email, string Role);
+                public sealed record InviteMemberResponse(Guid Id);
+            }
+
+            namespace MyApp.Api
+            {
+                using MyApp.Contracts;
+
+                // Controller-sourced endpoints (attribute-based)
+                [RivetClient]
+                [Route("api/tasks")]
+                public sealed class TasksController : ControllerBase
+                {
+                    [HttpGet("{id:guid}")]
+                    [ProducesResponseType(typeof(TaskDetailDto), StatusCodes.Status200OK)]
+                    [ProducesResponseType(typeof(NotFoundDto), StatusCodes.Status404NotFound)]
+                    public async Task<IActionResult> Get(Guid id, CancellationToken ct)
+                        => throw new NotImplementedException();
+
+                    [HttpPost]
+                    [ProducesResponseType(typeof(CreateTaskResult), StatusCodes.Status201Created)]
+                    public async Task<IActionResult> Create(
+                        [FromBody] CreateTaskCommand command,
+                        CancellationToken ct)
+                        => throw new NotImplementedException();
+
+                    [HttpDelete("{id:guid}")]
+                    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+                        => throw new NotImplementedException();
+                }
+
+                // Contract-sourced endpoints
+                [RivetContract]
+                public static class MembersContract
+                {
+                    public static readonly Endpoint List =
+                        Endpoint.Get<MemberDto>("/api/members");
+
+                    public static readonly Endpoint Invite =
+                        Endpoint.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
+                            .Status(201)
+                            .Returns<InviteMemberResponse>(422);
+
+                    public static readonly Endpoint Remove =
+                        Endpoint.Delete("/api/members/{id}")
+                            .Returns<MemberDto>(404);
+                }
+            }
+            """;
+
+        var (exitCode, output) = await GenerateAndTypeCheck(source);
+
+        Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
+    }
+
     private async Task<(int ExitCode, string Output)> GenerateAndTypeCheck(string csharpSource)
     {
         // 1. Compile C# and run Rivet analysis
         var compilation = CompilationHelper.CreateCompilation(csharpSource);
         var walker = TypeWalker.Create(compilation);
-        var endpoints = EndpointWalker.Walk(compilation, walker);
+        var controllerEndpoints = EndpointWalker.Walk(compilation, walker);
+        var contractEndpoints = ContractWalker.Walk(compilation, walker);
+
+        // Merge: contract wins on (ControllerName, Name) collision
+        var seen = new HashSet<(string, string)>(
+            contractEndpoints.Select(e => (e.ControllerName, e.Name)));
+        var endpoints = new List<Rivet.Tool.Model.TsEndpointDefinition>(contractEndpoints);
+        foreach (var ep in controllerEndpoints)
+        {
+            if (seen.Add((ep.ControllerName, ep.Name)))
+            {
+                endpoints.Add(ep);
+            }
+        }
+
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(
             definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
@@ -273,10 +370,10 @@ public sealed class TypeScriptCompilationTests : IDisposable
 
         var controllerGroups = ClientEmitter.GroupByController(endpoints);
         var clientFileNames = new List<string>();
-        foreach (var (controllerName, controllerEndpoints) in controllerGroups)
+        foreach (var (controllerName, groupEndpoints) in controllerGroups)
         {
             var clientContent = ClientEmitter.EmitControllerClient(
-                controllerName, controllerEndpoints, typeFileMap);
+                controllerName, groupEndpoints, typeFileMap);
             await File.WriteAllTextAsync(
                 Path.Combine(clientDir, $"{controllerName}.ts"), clientContent);
             clientFileNames.Add(controllerName);

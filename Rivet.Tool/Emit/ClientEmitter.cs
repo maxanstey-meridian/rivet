@@ -140,11 +140,7 @@ public static partial class ClientEmitter
         sb.AppendLine();
 
         // Import rivetFetch + types from shared module
-        var needsRivetError = validated && endpoints.Any(e => e.ReturnType is not null && e.Responses.Any(r => r.DataType is not null));
-        var rivetImports = needsRivetError
-            ? "import { rivetFetch, RivetError, type RivetResult } from \"../rivet.js\";"
-            : "import { rivetFetch, type RivetResult } from \"../rivet.js\";";
-        sb.AppendLine(rivetImports);
+        sb.AppendLine("import { rivetFetch, type RivetResult } from \"../rivet.js\";");
 
         // Import validator assertions from build output
         if (validated)
@@ -307,7 +303,6 @@ public static partial class ClientEmitter
                     var prefix = i == 0 ? "    if" : "    else if";
                     sb.AppendLine($"{prefix} (result.status === {responses[i].StatusCode}) result.data = {responseAssert}(result.data);");
                 }
-                sb.AppendLine($"    else throw new RivetError(\"{endpoint.HttpMethod}\", `{route}`, result.status, result.response, result.data);");
                 sb.AppendLine("    return result;");
                 sb.AppendLine("  }");
             }
@@ -335,6 +330,7 @@ public static partial class ClientEmitter
         string typeName,
         IReadOnlyList<TsResponseType> responses)
     {
+        var statusCodes = string.Join(" | ", responses.Select(r => r.StatusCode));
         sb.Append($"export type {typeName} =");
         foreach (var r in responses)
         {
@@ -342,6 +338,8 @@ public static partial class ClientEmitter
             sb.AppendLine();
             sb.Append($"  | {{ status: {r.StatusCode}; data: {dataType}; response: Response }}");
         }
+        sb.AppendLine();
+        sb.Append($"  | {{ status: Exclude<number, {statusCodes}>; data: unknown; response: Response }}");
         sb.AppendLine(";");
         sb.AppendLine();
     }
