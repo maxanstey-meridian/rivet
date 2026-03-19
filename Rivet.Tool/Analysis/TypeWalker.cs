@@ -130,7 +130,7 @@ public sealed class TypeWalker
         // Type parameter (e.g. T in PagedResult<T>) → emit as-is
         if (symbol is ITypeParameterSymbol typeParam)
         {
-            return new TsType.Primitive(typeParam.Name);
+            return new TsType.TypeParam(typeParam.Name);
         }
 
         // Nullable value type: int? → Nullable<int>

@@ -29,6 +29,9 @@ public abstract record TsType
     /// <summary>Generic type application: Foo&lt;T, U&gt;.</summary>
     public sealed record Generic(string Name, IReadOnlyList<TsType> TypeArguments) : TsType;
 
+    /// <summary>Unresolved generic type parameter: T, TKey, etc.</summary>
+    public sealed record TypeParam(string Name) : TsType;
+
     /// <summary>Branded primitive: string &amp; { readonly __brand: "Email" }.</summary>
     public sealed record Brand(string Name, TsType Inner) : TsType;
 

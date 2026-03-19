@@ -21,7 +21,7 @@ Rivet is feature-complete through Phase 4 + VO support + grouped type emission +
 - `[RivetClient]` class-level attribute: auto-discovers all public methods with HTTP attributes, no per-method
   `[RivetEndpoint]` needed. Deduplicates with `[RivetEndpoint]` if both present.
 - NuGet: Rivet.Attributes (netstandard2.0), dotnet-rivet (net8.0, PackAsTool)
-- Sample: TaskBoard.Api with controllers, enums, VOs, generics, colocated commands/results
+- Samples: AnnotationApi (attribute-based discovery), ContractApi (contract-driven discovery)
 
 ### Known Issues / Polish
 

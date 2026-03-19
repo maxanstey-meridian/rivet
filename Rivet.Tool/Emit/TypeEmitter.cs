@@ -81,6 +81,7 @@ public static class TypeEmitter
         type switch
         {
             TsType.Primitive p => p.Name,
+            TsType.TypeParam tp => tp.Name,
             TsType.Nullable n => $"{EmitType(n.Inner)} | null",
             TsType.Array a => WrapIfCompound(a.Element) + "[]",
             TsType.Dictionary d => $"Record<string, {EmitType(d.Value)}>",

@@ -17,19 +17,19 @@ Mark your types. Define your endpoints. One command. Full-stack type safety.
 
 ### Your C# types...
 
-<img src="docs/1-cs-types.png" alt="C# types" width="600" />
+<img src="docs/hero-cs-types.png" alt="C# types" width="600" />
 
 ### ...become TypeScript types
 
-<img src="docs/2-ts-types.png" alt="Generated TypeScript types" width="600" />
+<img src="docs/hero-ts-types.png" alt="Generated TypeScript types" width="600" />
 
 ### Your controllers...
 
-<img src="docs/3-controller.png" alt="Controller" width="600" />
+<img src="docs/hero-controller.png" alt="Controller" width="600" />
 
 ### ...become a typed client with runtime validation
 
-<img src="docs/4-client.png" alt="Generated client" width="600" />
+<img src="docs/hero-client.png" alt="Generated client" width="600" />
 
 ## Why
 
@@ -436,42 +436,57 @@ compilation, and emit `.ts` files — similar to `dotnet-ef` or `dotnet-format`.
 7. Emits per-controller client files and optionally `validators.ts`
 8. With `--compile`, runs `tsc` with the typia transformer to produce runtime validators
 
-## Sample project
+## Sample projects
 
-The repo includes a sample ASP.NET project at `samples/TaskBoard.Api/` — a task board API demonstrating both
-attribute-based and contract-driven endpoint discovery, domain enums, value objects, application-layer commands with
-colocated results, and a generic `PagedResult<T>`.
+The repo includes two sample ASP.NET projects demonstrating both discovery mechanisms:
+
+### `samples/AnnotationApi/` — Attribute-based discovery
+
+Uses `[RivetEndpoint]` and `[ProducesResponseType]` annotations on controllers. Domain enums, value objects,
+application-layer commands with colocated results, and a generic `PagedResult<T>`.
 
 ```
-samples/TaskBoard.Api/
+samples/AnnotationApi/
 ├── Domain/
 │   ├── Priority.cs              # Priority enum
 │   ├── WorkItemStatus.cs        # WorkItemStatus enum
 │   ├── Label.cs                 # Label record (multi-property → object type)
 │   └── ValueObjects.cs          # Email, TaskId VOs (single Value → branded types)
 ├── Application/
-│   ├── Ports/ITaskRepository.cs
 │   ├── CreateTask/              # Command + Result colocated with use case
 │   └── PagedResult.cs           # Generic wrapper
-├── Contracts/
-│   └── MembersContract.cs       # Contract-driven: 3 endpoints with descriptions
 ├── Controllers/
-│   ├── TasksController.cs       # Attribute-based: 7 endpoints, colocated DTOs
-│   └── MembersController.cs     # Implementation (linked via [RivetImplements])
+│   └── TasksController.cs       # 7 endpoints with colocated DTOs
 └── Program.cs
 ```
 
-Run Rivet against it:
+### `samples/ContractApi/` — Contract-driven discovery
+
+Uses `[RivetContract]` classes with builder chains. Endpoint metadata (descriptions, security, status codes)
+lives in the contract, not on controllers.
+
+```
+samples/ContractApi/
+├── Domain/
+│   └── ValueObjects.cs          # Email VO (single Value → branded type)
+├── Contracts/
+│   └── MembersContract.cs       # 4 endpoints with descriptions + security
+├── Controllers/
+│   └── MembersController.cs     # Implementation
+└── Program.cs
+```
+
+Run Rivet against either:
 
 ```bash
 # Preview to stdout
-dotnet run --project Rivet.Tool -- --project samples/TaskBoard.Api/TaskBoard.Api.csproj
+dotnet run --project Rivet.Tool -- --project samples/AnnotationApi/AnnotationApi.csproj
 
 # Write to disk
-dotnet run --project Rivet.Tool -- --project samples/TaskBoard.Api/TaskBoard.Api.csproj --output /tmp/rivet-output
+dotnet run --project Rivet.Tool -- --project samples/AnnotationApi/AnnotationApi.csproj --output /tmp/rivet-output
 
 # Write to disk + compile typia validators (requires Node.js)
-dotnet run --project Rivet.Tool -- --project samples/TaskBoard.Api/TaskBoard.Api.csproj --output /tmp/rivet-output --compile
+dotnet run --project Rivet.Tool -- --project samples/AnnotationApi/AnnotationApi.csproj --output /tmp/rivet-output --compile
 ```
 
 ## Limitations

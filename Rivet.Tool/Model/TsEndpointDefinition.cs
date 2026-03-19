@@ -11,7 +11,13 @@ public sealed record TsEndpointDefinition(
     TsType? ReturnType,
     string ControllerName,
     IReadOnlyList<TsResponseType> Responses,
-    string? Description = null);
+    string? Description = null,
+    EndpointSecurity? Security = null);
+
+/// <summary>
+/// Security metadata for an endpoint. null = inherit CLI default.
+/// </summary>
+public sealed record EndpointSecurity(bool IsAnonymous, string? Scheme = null);
 
 /// <summary>
 /// A typed response for a given status code.

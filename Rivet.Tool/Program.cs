@@ -12,16 +12,16 @@ return await Run(args);
 
 static async Task<int> Run(string[] args)
 {
-    var parsed = ParseArgs(args);
+    var options = ParseArgs(args);
 
-    if (parsed is null)
+    if (options is null)
     {
         PrintUsage();
         return 1;
     }
 
     var sw = Stopwatch.StartNew();
-    var (projectPath, outputDir, mode, files) = parsed.Value;
+    var (projectPath, outputDir, mode, files) = (options.ProjectPath, options.OutputDir, options.Mode, options.Files);
 
     if (mode == "compile" && outputDir is null)
     {
@@ -37,7 +37,7 @@ static async Task<int> Run(string[] args)
     }
     else
     {
-        compilation = CompileFiles(parsed.Value.Files);
+        compilation = CompileFiles(options.Files);
     }
 
     var walker = TypeWalker.Create(compilation);
@@ -127,6 +127,16 @@ static async Task<int> Run(string[] args)
             Console.WriteLine($"  validators.ts → {validatorsPath}");
         }
 
+        // OpenAPI spec
+        if (options.OpenApiPath is not null)
+        {
+            var securityConfig = SecurityParser.Parse(options.DefaultSecurity);
+            var openApiJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, securityConfig);
+            var openApiFilePath = Path.Combine(outputDir, options.OpenApiPath);
+            await File.WriteAllTextAsync(openApiFilePath, openApiJson);
+            Console.WriteLine($"  {options.OpenApiPath} → {openApiFilePath}");
+        }
+
         Console.WriteLine($"Generated {definitions.Count} types, {endpoints.Count} endpoints in {FormatElapsed(sw.Elapsed)}.");
 
         // Compile step: run tsc + typia, then re-emit validated client
@@ -192,6 +202,15 @@ static async Task<int> Run(string[] args)
             Console.WriteLine();
             Console.WriteLine("=== validators.ts ===");
             Console.Write(validatorsOutput);
+        }
+
+        if (options.OpenApiPath is not null)
+        {
+            var securityConfig = SecurityParser.Parse(options.DefaultSecurity);
+            var openApiJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, securityConfig);
+            Console.WriteLine();
+            Console.WriteLine($"=== {options.OpenApiPath} ===");
+            Console.Write(openApiJson);
         }
 
     }
@@ -321,7 +340,7 @@ static Compilation CompileFiles(string[] paths)
     return compilation;
 }
 
-static (string ProjectPath, string? OutputDir, string Mode, string[] Files)? ParseArgs(string[] args)
+static RivetOptions? ParseArgs(string[] args)
 {
     if (args.Length == 0)
     {
@@ -331,6 +350,8 @@ static (string ProjectPath, string? OutputDir, string Mode, string[] Files)? Par
     string? projectPath = null;
     string? outputDir = null;
     var mode = "generate";
+    string? openApiPath = null;
+    string? defaultSecurity = null;
     var files = new List<string>();
 
     for (var i = 0; i < args.Length; i++)
@@ -346,6 +367,14 @@ static (string ProjectPath, string? OutputDir, string Mode, string[] Files)? Par
             case "--compile":
                 mode = "compile";
                 break;
+            case "--openapi":
+                openApiPath = i + 1 < args.Length && !args[i + 1].StartsWith('-')
+                    ? args[++i]
+                    : "openapi.json";
+                break;
+            case "--security" when i + 1 < args.Length:
+                defaultSecurity = args[++i];
+                break;
             default:
                 files.Add(args[i]);
                 break;
@@ -359,7 +388,7 @@ static (string ProjectPath, string? OutputDir, string Mode, string[] Files)? Par
         return null;
     }
 
-    return (projectPath, outputDir, mode, files.ToArray());
+    return new RivetOptions(projectPath, outputDir, mode, files.ToArray(), openApiPath, defaultSecurity);
 }
 
 static string FormatElapsed(TimeSpan elapsed) =>
@@ -379,6 +408,8 @@ static void PrintUsage()
     Console.Error.WriteLine("  -p, --project <path>   Path to .csproj file");
     Console.Error.WriteLine("  -o, --output <dir>     Output directory (omit for stdout preview)");
     Console.Error.WriteLine("  --compile              Also run typia compilation (requires node on PATH)");
+    Console.Error.WriteLine("  --openapi [file]       Emit OpenAPI 3.1 JSON spec (default: openapi.json)");
+    Console.Error.WriteLine("  --security <spec>      Default security scheme (bearer, bearer:jwt, cookie:name, apikey:in:name)");
 }
 
 static IEnumerable<string> GetDotnetRoots()
@@ -454,3 +485,7 @@ static IEnumerable<string> GetDotnetRoots()
         }
     }
 }
+
+sealed record RivetOptions(
+    string ProjectPath, string? OutputDir, string Mode, string[] Files,
+    string? OpenApiPath = null, string? DefaultSecurity = null);

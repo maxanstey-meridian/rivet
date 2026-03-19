@@ -119,10 +119,12 @@ public static class ContractWalker
             tOutput = root.TypeArgs[0];
         }
 
-        // Process chained calls: .Returns<T>(statusCode[, description]), .Status(statusCode), .Description(desc)
+        // Process chained calls: .Returns<T>(statusCode[, description]), .Status(statusCode), .Description(desc),
+        // .Anonymous(), .Secure(scheme)
         var responses = new List<TsResponseType>();
         int? successStatusOverride = null;
         string? endpointDescription = null;
+        EndpointSecurity? security = null;
 
         for (var i = 1; i < chain.Count; i++)
         {
@@ -139,6 +141,14 @@ public static class ContractWalker
             else if (call.MethodName == "Description" && call.DescriptionArg is not null)
             {
                 endpointDescription = call.DescriptionArg;
+            }
+            else if (call.MethodName == "Anonymous")
+            {
+                security = new EndpointSecurity(true);
+            }
+            else if (call.MethodName == "Secure" && call.DescriptionArg is not null)
+            {
+                security = new EndpointSecurity(false, call.DescriptionArg);
             }
         }
 
@@ -161,7 +171,7 @@ public static class ContractWalker
 
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
 
-        return new TsEndpointDefinition(name, httpMethod, route, parameters, returnType, controllerName, responses, endpointDescription);
+        return new TsEndpointDefinition(name, httpMethod, route, parameters, returnType, controllerName, responses, endpointDescription, security);
     }
 
     private static int DefaultSuccessCode(string httpMethod) =>

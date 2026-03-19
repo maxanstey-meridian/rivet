@@ -19,10 +19,18 @@ public static class MembersContract
         Endpoint.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
             .Description("Invite a new team member")
             .Status(201)
-            .Returns<InviteMemberResponse>(422, "Validation failed");
+            .Returns<InviteMemberResponse>(422, "Validation failed")
+            .Secure("admin");
 
     public static readonly Endpoint Remove =
         Endpoint.Delete("/api/members/{id}")
             .Description("Remove a team member")
-            .Returns<MemberDto>(404, "Member not found");
+            .Returns<MemberDto>(404, "Member not found")
+            .Secure("admin");
+
+    public static readonly Endpoint Health =
+        Endpoint.Get("/api/health")
+            .Description("Health check")
+            .Status(200)
+            .Anonymous();
 }

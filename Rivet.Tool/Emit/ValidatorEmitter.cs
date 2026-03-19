@@ -80,6 +80,7 @@ public static class ValidatorEmitter
         {
             TsType.TypeRef r => r.Name,
             TsType.Primitive p => char.ToUpperInvariant(p.Name[0]) + p.Name[1..],
+            TsType.TypeParam tp => char.ToUpperInvariant(tp.Name[0]) + tp.Name[1..],
             TsType.Generic g => g.Name + string.Concat(g.TypeArguments.Select(GetTypeSuffix)),
             TsType.Array a => GetTypeSuffix(a.Element) + "Array",
             TsType.Nullable n => GetTypeSuffix(n.Inner),
