@@ -72,6 +72,8 @@ internal static class CSharpWriter
         var sb = new StringBuilder();
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using Rivet;");
+        sb.AppendLine("using Endpoint = Rivet.Endpoint;");
+        sb.AppendLine("using EndpointBuilder = Rivet.EndpointBuilder;");
         sb.AppendLine();
         sb.AppendLine($"namespace {ns};");
         sb.AppendLine();

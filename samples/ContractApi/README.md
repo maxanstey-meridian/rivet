@@ -1,10 +1,12 @@
 # Contract-driven sample
 
-Demonstrates Rivet's contract-driven endpoint definitions using `[RivetContract]` — declarative endpoint
-shapes that Rivet reads at generation time, with nothing executing at runtime.
+Demonstrates Rivet's contract-driven endpoint definitions using `[RivetContract]` with typed
+`EndpointBuilder<T>` fields. Contracts are pure Rivet (no ASP.NET dependency). Controllers use
+`.Invoke()` for type-safe execution — the compiler enforces input/output types.
 
-Features shown: `[RivetContract]`, `.Description()`, `.Returns<T>(status, desc)`, `.Status()`,
-`.Anonymous()`, `.Secure()`, branded value objects, and `[RivetImplements]` to link controllers to contracts.
+Features shown: `[RivetContract]`, `EndpointBuilder<T>.Invoke()`, `.Description()`,
+`.Returns<T>(status, desc)`, `.Status()`, `.Anonymous()`, `.Secure()`, branded value objects,
+and `RivetResult<T>.ToActionResult()` as the framework bridge.
 
 ## Run
 
