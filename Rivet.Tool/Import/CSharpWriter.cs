@@ -70,19 +70,13 @@ internal static class CSharpWriter
     public static string WriteContract(GeneratedContract contract, string ns)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
-        sb.AppendLine("using System.Threading;");
-        sb.AppendLine("using System.Threading.Tasks;");
-        sb.AppendLine("using Microsoft.AspNetCore.Http;");
-        sb.AppendLine("using Microsoft.AspNetCore.Mvc;");
         sb.AppendLine("using Rivet;");
         sb.AppendLine();
         sb.AppendLine($"namespace {ns};");
         sb.AppendLine();
         sb.AppendLine("[RivetContract]");
-        sb.AppendLine($"[Route(\"{contract.RoutePrefix}\")]");
-        sb.AppendLine($"public abstract class {contract.ClassName} : ControllerBase");
+        sb.AppendLine($"public static class {contract.ClassName}");
         sb.AppendLine("{");
 
         for (var i = 0; i < contract.Fields.Count; i++)
@@ -92,73 +86,111 @@ internal static class CSharpWriter
                 sb.AppendLine();
             }
 
-            WriteAbstractMethod(sb, contract.Fields[i]);
+            WriteEndpointField(sb, contract.Fields[i]);
         }
 
         sb.AppendLine("}");
         return sb.ToString();
     }
 
-    private static void WriteAbstractMethod(StringBuilder sb, GeneratedEndpointField field)
+    private static void WriteEndpointField(StringBuilder sb, GeneratedEndpointField field)
     {
-        // HTTP method attribute with optional route suffix
-        var httpAttr = field.MethodRoute is not null
-            ? $"[Http{field.HttpMethod}(\"{field.MethodRoute}\")]"
-            : $"[Http{field.HttpMethod}]";
-        sb.AppendLine($"    {httpAttr}");
+        // Field type: EndpointBuilder<TIn, TOut>, EndpointBuilder<TOut>, or EndpointBuilder
+        var fieldType = BuildFieldType(field.InputType, field.OutputType);
+        sb.Append($"    public static readonly {fieldType} {field.FieldName} =");
+        sb.AppendLine();
 
-        // ProducesResponseType for success
-        if (field.OutputType is not null)
+        // Factory call
+        var typeArgs = BuildTypeArgs(field.InputType, field.OutputType);
+        sb.Append($"        Endpoint.{field.HttpMethod}{typeArgs}(\"{field.Route}\")");
+
+        // Builder chain
+        var chainCalls = BuildChainCalls(field);
+
+        if (chainCalls.Count == 0)
         {
-            var statusCode = field.SuccessStatus ?? 200;
-            sb.AppendLine($"    [ProducesResponseType(typeof({field.OutputType}), {statusCode})]");
-        }
-        else if (field.SuccessStatus is not null)
-        {
-            sb.AppendLine($"    [ProducesResponseType({field.SuccessStatus})]");
+            sb.AppendLine(";");
+            return;
         }
 
-        // ProducesResponseType for errors
+        sb.AppendLine();
+
+        for (var i = 0; i < chainCalls.Count; i++)
+        {
+            var terminator = i == chainCalls.Count - 1 ? ";" : "";
+            sb.AppendLine($"            {chainCalls[i]}{terminator}");
+        }
+    }
+
+    private static string BuildFieldType(string? inputType, string? outputType)
+    {
+        if (inputType is not null && outputType is not null)
+        {
+            return $"EndpointBuilder<{inputType}, {outputType}>";
+        }
+
+        if (outputType is not null)
+        {
+            return $"EndpointBuilder<{outputType}>";
+        }
+
+        return "EndpointBuilder";
+    }
+
+    private static string BuildTypeArgs(string? inputType, string? outputType)
+    {
+        if (inputType is not null && outputType is not null)
+        {
+            return $"<{inputType}, {outputType}>";
+        }
+
+        if (outputType is not null)
+        {
+            return $"<{outputType}>";
+        }
+
+        return "";
+    }
+
+    private static List<string> BuildChainCalls(GeneratedEndpointField field)
+    {
+        var calls = new List<string>();
+
+        if (field.Description is not null)
+        {
+            calls.Add($".Description(\"{EscapeString(field.Description)}\")");
+        }
+
+        if (field.SuccessStatus is not null)
+        {
+            calls.Add($".Status({field.SuccessStatus})");
+        }
+
         foreach (var error in field.ErrorResponses)
         {
-            if (error.TypeName is not null)
+            if (error.Description is not null)
             {
-                sb.AppendLine($"    [ProducesResponseType(typeof({error.TypeName}), {error.StatusCode})]");
+                calls.Add($".Returns<{error.TypeName}>({error.StatusCode}, \"{EscapeString(error.Description)}\")");
             }
             else
             {
-                sb.AppendLine($"    [ProducesResponseType({error.StatusCode})]");
+                calls.Add($".Returns<{error.TypeName}>({error.StatusCode})");
             }
         }
 
-        // Method signature
-        var methodParams = BuildMethodParams(field);
-        sb.AppendLine($"    public abstract Task<IActionResult> {field.FieldName}({methodParams});");
-    }
-
-    private static string BuildMethodParams(GeneratedEndpointField field)
-    {
-        var parts = new List<string>();
-
-        // Route parameters
-        foreach (var param in field.MethodParams)
+        if (field.IsAnonymous)
         {
-            if (param.IsBody)
-            {
-                parts.Add($"[FromBody] {param.CSharpType} {param.Name}");
-            }
-            else
-            {
-                parts.Add($"{param.CSharpType} {param.Name}");
-            }
+            calls.Add(".Anonymous()");
+        }
+        else if (field.SecurityScheme is not null)
+        {
+            calls.Add($".Secure(\"{field.SecurityScheme}\")");
         }
 
-        parts.Add("CancellationToken ct");
-
-        return string.Join(", ", parts);
+        return calls;
     }
 
-    internal static string EscapeString(string value)
+    private static string EscapeString(string value)
     {
         return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
     }
@@ -168,27 +200,21 @@ internal static class CSharpWriter
 
 internal sealed record GeneratedContract(
     string ClassName,
-    string RoutePrefix,
     IReadOnlyList<GeneratedEndpointField> Fields);
 
 internal sealed record GeneratedEndpointField(
     string FieldName,
     string HttpMethod,
     string Route,
-    string? MethodRoute,
     string? InputType,
     string? OutputType,
     string? Description,
     int? SuccessStatus,
     IReadOnlyList<GeneratedErrorResponse> ErrorResponses,
-    IReadOnlyList<GeneratedMethodParam> MethodParams);
-
-internal sealed record GeneratedMethodParam(
-    string Name,
-    string CSharpType,
-    bool IsBody);
+    bool IsAnonymous,
+    string? SecurityScheme);
 
 internal sealed record GeneratedErrorResponse(
     int StatusCode,
-    string? TypeName,
+    string TypeName,
     string? Description);

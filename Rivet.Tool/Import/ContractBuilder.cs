@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Rivet.Tool.Import;
 
 /// <summary>
-/// Maps OpenAPI paths to v2 abstract contract class intermediates grouped by tag.
+/// Maps OpenAPI paths to v1 static contract class intermediates grouped by tag.
 /// </summary>
 internal static class ContractBuilder
 {
@@ -19,8 +19,7 @@ internal static class ContractBuilder
         string? globalSecurityScheme,
         List<string> warnings)
     {
-        // Collect all operations grouped by tag
-        var groups = new Dictionary<string, List<(string Route, string HttpMethod, JsonElement Operation)>>();
+        var groups = new Dictionary<string, List<GeneratedEndpointField>>();
 
         foreach (var path in paths.EnumerateObject())
         {
@@ -34,7 +33,10 @@ internal static class ContractBuilder
                 }
 
                 var operation = method.Value;
+                var httpMethod = method.Name;
                 var tag = ExtractTag(operation) ?? "Default";
+                var field = BuildEndpointField(
+                    httpMethod, route, operation, tag, globalSecurityScheme, warnings);
 
                 if (!groups.TryGetValue(tag, out var list))
                 {
@@ -42,34 +44,22 @@ internal static class ContractBuilder
                     groups[tag] = list;
                 }
 
-                list.Add((route, method.Name, operation));
+                list.Add(field);
             }
         }
 
-        var contracts = new List<GeneratedContract>();
-
-        foreach (var (tag, operations) in groups.OrderBy(g => g.Key))
-        {
-            var routes = operations.Select(o => o.Route).ToList();
-            var routePrefix = ComputeCommonRoutePrefix(routes);
-
-            var fields = operations
-                .Select(o => BuildEndpointField(
-                    o.HttpMethod, o.Route, routePrefix, o.Operation, tag, warnings))
-                .ToList();
-
-            contracts.Add(new GeneratedContract($"{tag}Contract", routePrefix, fields));
-        }
-
-        return contracts;
+        return groups
+            .OrderBy(g => g.Key)
+            .Select(g => new GeneratedContract($"{g.Key}Contract", g.Value))
+            .ToList();
     }
 
     private static GeneratedEndpointField BuildEndpointField(
         string httpMethod,
         string route,
-        string routePrefix,
         JsonElement operation,
         string tag,
+        string? globalSecurityScheme,
         List<string> warnings)
     {
         var operationId = operation.TryGetProperty("operationId", out var opId)
@@ -82,101 +72,22 @@ internal static class ContractBuilder
             ? summary.GetString()
             : null;
 
-        // Compute method-level route suffix
-        var methodRoute = ComputeMethodRoute(route, routePrefix);
-
         // Resolve input type (requestBody)
         var inputType = ResolveInputType(operation, warnings);
 
         // Resolve output type (lowest 2xx response with JSON content)
         var (outputType, successStatus) = ResolveOutputType(operation, warnings);
 
-        // Error responses (include void errors too for [ProducesResponseType(statusCode)])
+        // Error responses
         var errorResponses = ResolveErrorResponses(operation, warnings);
 
-        // Build method parameters: route params + body param
-        var methodParams = BuildMethodParams(httpMethod, route, routePrefix, inputType, operation, warnings);
+        // Security
+        var (isAnonymous, securityScheme) = ResolveSecurity(operation, globalSecurityScheme);
 
         return new GeneratedEndpointField(
-            fieldName, method, route, methodRoute, inputType, outputType,
-            description, successStatus, errorResponses, methodParams);
-    }
-
-    private static IReadOnlyList<GeneratedMethodParam> BuildMethodParams(
-        string httpMethod,
-        string route,
-        string routePrefix,
-        string? inputType,
-        JsonElement operation,
-        List<string> warnings)
-    {
-        var parameters = new List<GeneratedMethodParam>();
-
-        // Extract path parameters from OpenAPI operation or route template
-        var pathParams = ExtractPathParams(operation, route, warnings);
-        foreach (var (name, type) in pathParams)
-        {
-            parameters.Add(new GeneratedMethodParam(name, type, false));
-        }
-
-        // Body parameter
-        if (inputType is not null)
-        {
-            parameters.Add(new GeneratedMethodParam("body", inputType, true));
-        }
-
-        return parameters;
-    }
-
-    private static List<(string Name, string CSharpType)> ExtractPathParams(
-        JsonElement operation,
-        string route,
-        List<string> warnings)
-    {
-        var result = new List<(string, string)>();
-
-        // Try to get typed params from the OpenAPI parameters array
-        if (operation.TryGetProperty("parameters", out var paramsArray))
-        {
-            foreach (var param in paramsArray.EnumerateArray())
-            {
-                if (param.TryGetProperty("in", out var inEl) && inEl.GetString() == "path")
-                {
-                    var name = param.GetProperty("name").GetString()!;
-                    var type = "string";
-
-                    if (param.TryGetProperty("schema", out var schema))
-                    {
-                        type = SchemaMapper.ResolveCSharpType(schema, warnings);
-                    }
-
-                    result.Add((name, type));
-                }
-            }
-        }
-
-        // If no parameters array, extract from route template
-        if (result.Count == 0)
-        {
-            var segments = route.Split('/');
-            foreach (var segment in segments)
-            {
-                if (segment.StartsWith('{') && segment.EndsWith('}'))
-                {
-                    var name = segment[1..^1];
-                    // Strip route constraints like {id:guid}
-                    var colonIdx = name.IndexOf(':');
-                    if (colonIdx >= 0)
-                    {
-                        name = name[..colonIdx];
-                    }
-
-                    result.Add((name, "string"));
-                }
-            }
-        }
-
-        return result;
+            fieldName, method, route, inputType, outputType,
+            description, successStatus, errorResponses,
+            isAnonymous, securityScheme);
     }
 
     private static string? ResolveInputType(JsonElement operation, List<string> warnings)
@@ -242,7 +153,10 @@ internal static class ContractBuilder
             }
         }
 
-        return (outputType, successCode);
+        // Only emit .Status() if non-200
+        var statusOverride = successCode != 200 ? successCode : null;
+
+        return (outputType, statusOverride);
     }
 
     private static IReadOnlyList<GeneratedErrorResponse> ResolveErrorResponses(
@@ -263,89 +177,51 @@ internal static class ContractBuilder
                 continue;
             }
 
-            string? typeName = null;
-            var description = resp.Value.TryGetProperty("description", out var desc)
-                ? desc.GetString()
-                : null;
-
+            // Only include if the response has a typed schema
             if (resp.Value.TryGetProperty("content", out var content)
                 && content.TryGetProperty("application/json", out var json)
                 && json.TryGetProperty("schema", out var schema))
             {
-                typeName = SchemaMapper.ResolveCSharpType(schema, warnings);
-            }
+                var typeName = SchemaMapper.ResolveCSharpType(schema, warnings);
+                var description = resp.Value.TryGetProperty("description", out var desc)
+                    ? desc.GetString()
+                    : null;
 
-            errors.Add(new GeneratedErrorResponse(code, typeName, description));
+                errors.Add(new GeneratedErrorResponse(code, typeName, description));
+            }
         }
 
         return errors;
     }
 
-    /// <summary>
-    /// Compute the longest common route prefix across all routes in a tag group.
-    /// </summary>
-    internal static string ComputeCommonRoutePrefix(IReadOnlyList<string> routes)
+    private static (bool IsAnonymous, string? Scheme) ResolveSecurity(
+        JsonElement operation,
+        string? globalSecurityScheme)
     {
-        if (routes.Count == 0)
+        if (!operation.TryGetProperty("security", out var security))
         {
-            return "";
+            // No operation-level security — use global default
+            return globalSecurityScheme is not null
+                ? (false, globalSecurityScheme)
+                : (false, null);
         }
 
-        var segmentSets = routes
-            .Select(r => r.Split('/', StringSplitOptions.RemoveEmptyEntries)
-                .Where(s => !s.StartsWith('{'))
-                .ToArray())
-            .ToList();
-
-        var minLen = segmentSets.Min(s => s.Length);
-        var commonCount = 0;
-
-        for (var i = 0; i < minLen; i++)
+        // Empty array → anonymous
+        if (security.GetArrayLength() == 0)
         {
-            var segment = segmentSets[0][i];
-            if (segmentSets.All(s => s[i] == segment))
+            return (true, null);
+        }
+
+        // First security requirement object
+        foreach (var req in security.EnumerateArray())
+        {
+            foreach (var scheme in req.EnumerateObject())
             {
-                commonCount++;
-            }
-            else
-            {
-                break;
+                return (false, scheme.Name);
             }
         }
 
-        if (commonCount == 0)
-        {
-            return "";
-        }
-
-        return string.Join("/", segmentSets[0].Take(commonCount));
-    }
-
-    /// <summary>
-    /// Compute the method-level route suffix by stripping the common prefix.
-    /// Returns null if the route exactly matches the prefix.
-    /// </summary>
-    private static string? ComputeMethodRoute(string fullRoute, string routePrefix)
-    {
-        var prefixWithSlash = "/" + routePrefix;
-
-        if (fullRoute == prefixWithSlash || fullRoute == routePrefix)
-        {
-            return null;
-        }
-
-        // Strip prefix
-        var suffix = fullRoute;
-        if (suffix.StartsWith(prefixWithSlash))
-        {
-            suffix = suffix[(prefixWithSlash.Length + 1)..]; // +1 for trailing /
-        }
-        else if (suffix.StartsWith(routePrefix))
-        {
-            suffix = suffix[(routePrefix.Length + 1)..];
-        }
-
-        return suffix.Length > 0 ? suffix : null;
+        return (false, null);
     }
 
     private static string DeriveFieldName(

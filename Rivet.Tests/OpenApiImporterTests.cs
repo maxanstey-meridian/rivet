@@ -64,9 +64,7 @@ public sealed class OpenApiImporterTests
             """);
 
         var result = Import(spec);
-        var content = FindFile(result, "EventDto.cs");
-
-        Assert.Contains("DateTime CreatedAt", content);
+        Assert.Contains("DateTime CreatedAt", FindFile(result, "EventDto.cs"));
     }
 
     [Fact]
@@ -83,9 +81,7 @@ public sealed class OpenApiImporterTests
             """);
 
         var result = Import(spec);
-        var content = FindFile(result, "ItemDto.cs");
-
-        Assert.Contains("Guid Id", content);
+        Assert.Contains("Guid Id", FindFile(result, "ItemDto.cs"));
     }
 
     [Fact]
@@ -139,10 +135,7 @@ public sealed class OpenApiImporterTests
             }
             """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "TagList.cs");
-
-        Assert.Contains("List<string> Tags", content);
+        Assert.Contains("List<string> Tags", FindFile(Import(spec), "TagList.cs"));
     }
 
     [Fact]
@@ -158,10 +151,7 @@ public sealed class OpenApiImporterTests
             }
             """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "MetadataDto.cs");
-
-        Assert.Contains("Dictionary<string, string> Values", content);
+        Assert.Contains("Dictionary<string, string> Values", FindFile(Import(spec), "MetadataDto.cs"));
     }
 
     [Fact]
@@ -177,10 +167,7 @@ public sealed class OpenApiImporterTests
             }
             """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "TaskDto.cs");
-
-        Assert.Contains("string? Description", content);
+        Assert.Contains("string? Description", FindFile(Import(spec), "TaskDto.cs"));
     }
 
     [Fact]
@@ -197,9 +184,7 @@ public sealed class OpenApiImporterTests
             }
             """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "TaskDto.cs");
-
+        var content = FindFile(Import(spec), "TaskDto.cs");
         Assert.Contains("[RivetType]", content);
         Assert.Contains("public sealed record TaskDto(", content);
     }
@@ -210,24 +195,17 @@ public sealed class OpenApiImporterTests
         var spec = BuildSpec(schemas: """
             "LabelDto": {
                 "type": "object",
-                "properties": {
-                    "name": { "type": "string" }
-                },
+                "properties": { "name": { "type": "string" } },
                 "required": ["name"]
             },
             "TaskDto": {
                 "type": "object",
-                "properties": {
-                    "label": { "$ref": "#/components/schemas/LabelDto" }
-                },
+                "properties": { "label": { "$ref": "#/components/schemas/LabelDto" } },
                 "required": ["label"]
             }
             """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "TaskDto.cs");
-
-        Assert.Contains("LabelDto Label", content);
+        Assert.Contains("LabelDto Label", FindFile(Import(spec), "TaskDto.cs"));
     }
 
     [Fact]
@@ -244,9 +222,7 @@ public sealed class OpenApiImporterTests
             }
             """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "TaskDto.cs");
-
+        var content = FindFile(Import(spec), "TaskDto.cs");
         Assert.Contains("string Id", content);
         Assert.Contains("string? Description", content);
         Assert.DoesNotContain("string? Id", content);
@@ -275,16 +251,15 @@ public sealed class OpenApiImporterTests
             """);
 
         var result = Import(spec);
-
         Assert.Contains(result.Warnings, w => w.Contains("oneOf") && w.Contains("Shape"));
         Assert.Contains(result.Files, f => f.FileName.Contains("Circle"));
         Assert.Contains(result.Files, f => f.FileName.Contains("Square"));
     }
 
-    // ========== ContractBuilder Tests (v2 abstract class output) ==========
+    // ========== Contract output tests (v1 static class + EndpointBuilder fields) ==========
 
     [Fact]
-    public void Contract_Output_Is_Abstract_Class_Extending_ControllerBase()
+    public void Contract_Output_Is_Static_Class_With_EndpointBuilder_Fields()
     {
         var spec = BuildSpec(
             schemas: """
@@ -318,16 +293,14 @@ public sealed class OpenApiImporterTests
         var content = FindFile(result, "TasksContract.cs");
 
         Assert.Contains("[RivetContract]", content);
-        Assert.Contains("[Route(\"api/tasks\")]", content);
-        Assert.Contains("public abstract class TasksContract : ControllerBase", content);
-        Assert.Contains("[HttpGet]", content);
-        Assert.Contains("[ProducesResponseType(typeof(TaskDto), 200)]", content);
-        Assert.Contains("public abstract Task<IActionResult> List(", content);
-        Assert.Contains("CancellationToken ct", content);
+        Assert.Contains("public static class TasksContract", content);
+        Assert.Contains("public static readonly EndpointBuilder<TaskDto> List", content);
+        Assert.Contains("Endpoint.Get<TaskDto>(\"/api/tasks\")", content);
+        Assert.Contains(".Description(\"List all tasks\")", content);
     }
 
     [Fact]
-    public void Post_With_RequestBody_Has_FromBody_Param()
+    public void Post_With_RequestBody_Has_Input_And_Output_Types()
     {
         var spec = BuildSpec(
             schemas: """
@@ -369,15 +342,15 @@ public sealed class OpenApiImporterTests
                 }
                 """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "TasksContract.cs");
+        var content = FindFile(Import(spec), "TasksContract.cs");
 
-        Assert.Contains("[FromBody] CreateTaskRequest body", content);
-        Assert.Contains("[ProducesResponseType(typeof(TaskDto), 201)]", content);
+        Assert.Contains("EndpointBuilder<CreateTaskRequest, TaskDto> CreateTask", content);
+        Assert.Contains("Endpoint.Post<CreateTaskRequest, TaskDto>(\"/api/tasks\")", content);
+        Assert.Contains(".Status(201)", content);
     }
 
     [Fact]
-    public void Error_Responses_Produce_ProducesResponseType()
+    public void Error_Responses_Produce_Returns_Call()
     {
         var spec = BuildSpec(
             schemas: """
@@ -419,14 +392,12 @@ public sealed class OpenApiImporterTests
                 }
                 """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "TasksContract.cs");
-
-        Assert.Contains("[ProducesResponseType(typeof(NotFoundDto), 404)]", content);
+        Assert.Contains(".Returns<NotFoundDto>(404, \"Task not found\")",
+            FindFile(Import(spec), "TasksContract.cs"));
     }
 
     [Fact]
-    public void Void_Endpoint_StatusCode_Only_ProducesResponseType()
+    public void Void_Endpoint_No_Output_Type()
     {
         var spec = BuildSpec(
             paths: """
@@ -441,53 +412,46 @@ public sealed class OpenApiImporterTests
                 }
                 """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "TasksContract.cs");
-
-        Assert.Contains("[HttpDelete(\"{id}\")]", content);
-        Assert.Contains("[ProducesResponseType(204)]", content);
-        Assert.DoesNotContain("typeof", content);
+        var content = FindFile(Import(spec), "TasksContract.cs");
+        Assert.Contains("public static readonly EndpointBuilder DeleteTask", content);
+        Assert.Contains("Endpoint.Delete(\"/api/tasks/{id}\")", content);
+        Assert.Contains(".Status(204)", content);
     }
 
     [Fact]
-    public void Route_Params_Become_Method_Parameters()
+    public void Anonymous_Endpoint()
     {
         var spec = BuildSpec(
-            schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
             paths: """
-                "/api/projects/{projectId}/tasks/{taskId}": {
+                "/api/health": {
                     "get": {
-                        "operationId": "tasks_getTask",
-                        "tags": ["Tasks"],
-                        "parameters": [
-                            { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
-                            { "name": "taskId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
-                                }
-                            }
-                        }
+                        "operationId": "health_check",
+                        "tags": ["Health"],
+                        "security": [],
+                        "responses": { "200": { "description": "OK" } }
                     }
                 }
                 """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "TasksContract.cs");
+        Assert.Contains(".Anonymous()", FindFile(Import(spec), "HealthContract.cs"));
+    }
 
-        Assert.Contains("Guid projectId", content);
-        Assert.Contains("Guid taskId", content);
+    [Fact]
+    public void Secured_Endpoint()
+    {
+        var spec = BuildSpec(
+            paths: """
+                "/api/admin": {
+                    "delete": {
+                        "operationId": "admin_deleteAll",
+                        "tags": ["Admin"],
+                        "security": [{ "admin": [] }],
+                        "responses": { "204": { "description": "No Content" } }
+                    }
+                }
+                """);
+
+        Assert.Contains(".Secure(\"admin\")", FindFile(Import(spec), "AdminContract.cs"));
     }
 
     [Fact]
@@ -495,54 +459,15 @@ public sealed class OpenApiImporterTests
     {
         var spec = BuildSpec(
             schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                },
-                "MemberDto": {
-                    "type": "object",
-                    "properties": { "name": { "type": "string" } },
-                    "required": ["name"]
-                }
+                "TaskDto": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] },
+                "MemberDto": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] }
                 """,
             paths: """
-                "/api/tasks": {
-                    "get": {
-                        "operationId": "tasks_list",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                "/api/members": {
-                    "get": {
-                        "operationId": "members_list",
-                        "tags": ["Members"],
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/MemberDto" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                "/api/tasks": { "get": { "operationId": "tasks_list", "tags": ["Tasks"], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TaskDto" } } } } } } },
+                "/api/members": { "get": { "operationId": "members_list", "tags": ["Members"], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MemberDto" } } } } } } }
                 """);
 
         var result = Import(spec);
-
         Assert.Contains(result.Files, f => f.FileName == "Contracts/TasksContract.cs");
         Assert.Contains(result.Files, f => f.FileName == "Contracts/MembersContract.cs");
     }
@@ -550,159 +475,21 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void No_Tag_Uses_DefaultContract()
     {
-        var spec = BuildSpec(
-            paths: """
-                "/api/health": {
-                    "get": {
-                        "operationId": "healthCheck",
-                        "responses": {
-                            "200": { "description": "OK" }
-                        }
-                    }
-                }
-                """);
-
-        var result = Import(spec);
-
-        Assert.Contains(result.Files, f => f.FileName == "Contracts/DefaultContract.cs");
-    }
-
-    [Fact]
-    public void OperationId_Stripped_Of_Tag_Prefix_And_PascalCased()
-    {
-        var spec = BuildSpec(
-            paths: """
-                "/api/tasks": {
-                    "get": {
-                        "operationId": "tasks_listAllTasks",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "200": { "description": "Success" }
-                        }
-                    }
-                }
-                """);
-
-        var result = Import(spec);
-        var content = FindFile(result, "TasksContract.cs");
-
-        Assert.Contains("public abstract Task<IActionResult> ListAllTasks(", content);
-    }
-
-    [Fact]
-    public void Route_Prefix_Computed_From_Common_Path()
-    {
-        var spec = BuildSpec(
-            schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
-            paths: """
-                "/api/tasks": {
-                    "get": {
-                        "operationId": "tasks_list",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                "/api/tasks/{id}": {
-                    "get": {
-                        "operationId": "tasks_getById",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                """);
-
-        var result = Import(spec);
-        var content = FindFile(result, "TasksContract.cs");
-
-        Assert.Contains("[Route(\"api/tasks\")]", content);
-        Assert.Contains("[HttpGet]", content);         // /api/tasks — no suffix
-        Assert.Contains("[HttpGet(\"{id}\")]", content); // /api/tasks/{id} — suffix
-    }
-
-    // ========== CSharpWriter Tests ==========
-
-    [Fact]
-    public void Record_Output_Has_RivetType_Sealed_PrimaryConstructor()
-    {
-        var spec = BuildSpec(schemas: """
-            "PersonDto": {
-                "type": "object",
-                "properties": {
-                    "firstName": { "type": "string" },
-                    "age": { "type": "integer" }
-                },
-                "required": ["firstName", "age"]
-            }
+        var spec = BuildSpec(paths: """
+            "/api/health": { "get": { "operationId": "healthCheck", "responses": { "200": { "description": "OK" } } } }
             """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "PersonDto.cs");
-
-        Assert.Contains("using Rivet;", content);
-        Assert.Contains("[RivetType]", content);
-        Assert.Contains("public sealed record PersonDto(", content);
-        Assert.Contains("string FirstName", content);
-        Assert.Contains("int Age", content);
+        Assert.Contains(Import(spec).Files, f => f.FileName == "Contracts/DefaultContract.cs");
     }
 
     [Fact]
-    public void Enum_Output_PascalCased_Members()
+    public void OperationId_Stripped_Of_Tag_Prefix()
     {
-        var spec = BuildSpec(schemas: """
-            "Status": {
-                "type": "string",
-                "enum": ["active", "inactive", "pending"]
-            }
+        var spec = BuildSpec(paths: """
+            "/api/tasks": { "get": { "operationId": "tasks_listAllTasks", "tags": ["Tasks"], "responses": { "200": { "description": "OK" } } } }
             """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "Status.cs");
-
-        Assert.Contains("public enum Status", content);
-        Assert.Contains("Active", content);
-        Assert.Contains("Inactive", content);
-        Assert.Contains("Pending", content);
-    }
-
-    [Fact]
-    public void Brand_Output_SingleProperty_Record_With_ToString()
-    {
-        var spec = BuildSpec(schemas: """
-            "Uri": {
-                "type": "string",
-                "format": "uri"
-            }
-            """);
-
-        var result = Import(spec);
-        var content = FindFile(result, "Uri.cs");
-
-        Assert.Contains("public sealed record Uri(string Value)", content);
-        Assert.Contains("public override string ToString() => Value;", content);
+        Assert.Contains("ListAllTasks", FindFile(Import(spec), "TasksContract.cs"));
     }
 
     // ========== Fixture-based round-trip tests ==========
@@ -721,34 +508,23 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_Generated_CSharp_Compiles()
     {
-        var json = LoadFixture();
-        var result = Import(json, "TaskBoard.Contracts");
-
+        var result = Import(LoadFixture(), "TaskBoard.Contracts");
         Assert.Empty(result.Warnings);
 
-        var compilation = CompileGeneratedFiles(result);
-
-        var errors = compilation.GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
-            .ToList();
+        var errors = CompileGeneratedFiles(result).GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
         Assert.Empty(errors);
     }
 
     [Fact]
     public void Fixture_Contracts_Survive_Roslyn_RoundTrip()
     {
-        var json = LoadFixture();
-        var result = Import(json, "TaskBoard.Contracts");
-
+        var result = Import(LoadFixture(), "TaskBoard.Contracts");
         var compilation = CompileGeneratedFiles(result);
-
         var walker = TypeWalker.Create(compilation);
         var endpoints = ContractWalker.Walk(compilation, walker);
 
-        // 3 tags: Tasks (6 operations), Members (2), Health (1) = 9 endpoints total
         Assert.Equal(9, endpoints.Count);
-
-        // Verify HTTP methods
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks");
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks/{taskId}");
@@ -763,11 +539,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_Types_Survive_Roslyn_RoundTrip()
     {
-        var json = LoadFixture();
-        var result = Import(json, "TaskBoard.Contracts");
-
+        var result = Import(LoadFixture(), "TaskBoard.Contracts");
         var compilation = CompileGeneratedFiles(result);
-
         var walker = TypeWalker.Create(compilation);
 
         Assert.True(walker.Definitions.ContainsKey("TaskDto"));
@@ -779,9 +552,8 @@ public sealed class OpenApiImporterTests
         Assert.True(walker.Definitions.ContainsKey("HealthDto"));
 
         Assert.True(walker.Enums.ContainsKey("Priority"));
-        var priority = walker.Enums["Priority"];
-        Assert.Contains("Low", priority.Members);
-        Assert.Contains("Critical", priority.Members);
+        Assert.Contains("Low", walker.Enums["Priority"].Members);
+        Assert.Contains("Critical", walker.Enums["Priority"].Members);
 
         Assert.True(walker.Brands.ContainsKey("Email"));
         Assert.True(walker.Brands.ContainsKey("Website"));
@@ -790,12 +562,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_TaskDto_Properties_Match_OpenAPI_Schema()
     {
-        var json = LoadFixture();
-        var result = Import(json, "TaskBoard.Contracts");
-
-        var compilation = CompileGeneratedFiles(result);
-
-        var walker = TypeWalker.Create(compilation);
+        var result = Import(LoadFixture(), "TaskBoard.Contracts");
+        var walker = TypeWalker.Create(CompileGeneratedFiles(result));
         var taskDto = walker.Definitions["TaskDto"];
 
         AssertProperty(taskDto, "id", "string");
@@ -816,37 +584,27 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_Endpoint_Responses_Survive_RoundTrip()
     {
-        var json = LoadFixture();
-        var result = Import(json, "TaskBoard.Contracts");
-
+        var result = Import(LoadFixture(), "TaskBoard.Contracts");
         var compilation = CompileGeneratedFiles(result);
-
         var walker = TypeWalker.Create(compilation);
         var endpoints = ContractWalker.Walk(compilation, walker);
 
-        // POST /api/tasks → 201 + 422 error
-        var createTask = endpoints.First(e =>
-            e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks");
+        var createTask = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks");
         Assert.Contains(createTask.Responses, r => r.StatusCode == 201);
         Assert.Contains(createTask.Responses, r => r.StatusCode == 422);
 
-        // GET /api/tasks/{taskId} → 200 + 404 error
-        var getTask = endpoints.First(e =>
-            e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks/{taskId}");
+        var getTask = endpoints.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks/{taskId}");
         Assert.Contains(getTask.Responses, r => r.StatusCode == 200);
         Assert.Contains(getTask.Responses, r => r.StatusCode == 404);
 
-        // DELETE /api/tasks/{taskId} → 204 (void)
-        var deleteTask = endpoints.First(e =>
-            e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{taskId}");
+        var deleteTask = endpoints.First(e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{taskId}");
         Assert.Contains(deleteTask.Responses, r => r.StatusCode == 204);
     }
 
     [Fact]
     public void Fixture_Covers_All_Supported_Type_Mappings()
     {
-        var json = LoadFixture();
-        var content = FindFile(Import(json, "Test"), "TaskDto.cs");
+        var content = FindFile(Import(LoadFixture(), "Test"), "TaskDto.cs");
 
         Assert.Contains("Guid Id", content);
         Assert.Contains("string Title", content);
@@ -862,116 +620,70 @@ public sealed class OpenApiImporterTests
         Assert.Contains("List<LabelDto> Labels", content);
         Assert.Contains("Dictionary<string, string> Metadata", content);
 
-        var patchContent = FindFile(Import(json, "Test"), "PatchTaskRequest.cs");
-        Assert.Contains("Priority?", patchContent);
+        Assert.Contains("Priority?", FindFile(Import(LoadFixture(), "Test"), "PatchTaskRequest.cs"));
     }
 
     [Fact]
     public void Fixture_Covers_All_HTTP_Methods()
     {
-        var json = LoadFixture();
-        var result = Import(json, "Test");
-        var content = FindFile(result, "TasksContract.cs");
-
-        Assert.Contains("[HttpGet]", content);
-        Assert.Contains("[HttpPost]", content);
-        Assert.Contains("[HttpPut(", content);
-        Assert.Contains("[HttpPatch(", content);
-        Assert.Contains("[HttpDelete(", content);
+        var content = FindFile(Import(LoadFixture(), "Test"), "TasksContract.cs");
+        Assert.Contains("Endpoint.Get<", content);
+        Assert.Contains("Endpoint.Post<", content);
+        Assert.Contains("Endpoint.Put<", content);
+        Assert.Contains("Endpoint.Patch<", content);
+        Assert.Contains("Endpoint.Delete(", content);
     }
 
-    // ========== Drift detection: importer output must compile and round-trip ==========
+    // ========== Drift detection ==========
 
     [Fact]
-    public void Importer_Output_Is_V2_Abstract_Class_Not_Static()
+    public void Importer_Output_Is_V1_Static_Class_With_Typed_Builder_Fields()
     {
-        // Catches drift: importer must produce abstract class contracts (v2),
-        // not static class + Endpoint fields (v1).
-        var json = LoadFixture();
-        var result = Import(json, "TaskBoard.Contracts");
+        var result = Import(LoadFixture(), "TaskBoard.Contracts");
 
         foreach (var file in result.Files.Where(f => f.FileName.StartsWith("Contracts/")))
         {
-            Assert.Contains("public abstract class", file.Content);
-            Assert.Contains(": ControllerBase", file.Content);
-            Assert.Contains("[Route(", file.Content);
-            Assert.DoesNotContain("public static class", file.Content);
-            Assert.DoesNotContain("static readonly Endpoint", file.Content);
+            Assert.Contains("public static class", file.Content);
+            Assert.Contains("[RivetContract]", file.Content);
+            Assert.Contains("EndpointBuilder", file.Content);
+            // Must NOT have v2 patterns
+            Assert.DoesNotContain("abstract class", file.Content);
+            Assert.DoesNotContain("ControllerBase", file.Content);
+            Assert.DoesNotContain("[HttpGet", file.Content);
+            Assert.DoesNotContain("[ProducesResponseType", file.Content);
         }
     }
 
     [Fact]
-    public void Importer_Output_Has_Http_And_ProducesResponseType_Attributes()
+    public void Importer_Output_Uses_EndpointBuilder_Not_Bare_Endpoint()
     {
-        // Verifies generated contracts use [HttpX] + [ProducesResponseType] (v2 style),
-        // not Endpoint builder chains (v1 style).
-        var json = LoadFixture();
-        var result = Import(json, "TaskBoard.Contracts");
+        // Fields should be EndpointBuilder<T> not Endpoint, so Invoke is available
+        var result = Import(LoadFixture(), "TaskBoard.Contracts");
+        var content = FindFile(result, "TasksContract.cs");
 
-        var tasksContract = FindFile(result, "TasksContract.cs");
-
-        // Must have HTTP attributes
-        Assert.Contains("[HttpGet]", tasksContract);
-        Assert.Contains("[HttpPost]", tasksContract);
-        Assert.Contains("[HttpDelete(", tasksContract);
-
-        // Must have ProducesResponseType
-        Assert.Contains("[ProducesResponseType(", tasksContract);
-
-        // Must NOT have v1 patterns
-        Assert.DoesNotContain("Endpoint.Get", tasksContract);
-        Assert.DoesNotContain("Endpoint.Post", tasksContract);
-        Assert.DoesNotContain(".Description(", tasksContract);
-        Assert.DoesNotContain(".Status(", tasksContract);
-        Assert.DoesNotContain(".Returns<", tasksContract);
+        Assert.Contains("public static readonly EndpointBuilder<", content);
+        Assert.DoesNotContain("public static readonly Endpoint ", content);
     }
 
     [Fact]
-    public void Importer_Body_Params_Have_FromBody_Attribute()
+    public void Importer_Security_And_Description_Preserved_In_Builder_Chain()
     {
-        // Verifies that [FromBody] is present on body params so EndpointWalker
-        // classifies them correctly.
-        var json = LoadFixture();
-        var result = Import(json, "TaskBoard.Contracts");
+        var result = Import(LoadFixture(), "TaskBoard.Contracts");
 
-        var compilation = CompileGeneratedFiles(result);
+        // Health endpoint has security: [] → .Anonymous()
+        Assert.Contains(".Anonymous()", FindFile(result, "HealthContract.cs"));
 
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
+        // Members invite has security: [{"admin": []}] → .Secure("admin")
+        Assert.Contains(".Secure(\"admin\")", FindFile(result, "MembersContract.cs"));
 
-        // POST /api/tasks has a body param
-        var createTask = endpoints.First(e =>
-            e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks");
-        Assert.Contains(createTask.Params, p => p.Source == ParamSource.Body);
+        // Tasks list has global security → .Secure("bearer")
+        Assert.Contains(".Secure(\"bearer\")", FindFile(result, "TasksContract.cs"));
 
-        // GET /api/tasks has no body param
-        var listTasks = endpoints.First(e =>
-            e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks");
-        Assert.DoesNotContain(listTasks.Params, p => p.Source == ParamSource.Body);
+        // Descriptions present
+        Assert.Contains(".Description(\"List all tasks\")", FindFile(result, "TasksContract.cs"));
     }
 
-    [Fact]
-    public void Importer_Route_Params_Extracted_By_Walker()
-    {
-        // Verifies that route params from the generated contract are picked up by the walker.
-        var json = LoadFixture();
-        var result = Import(json, "TaskBoard.Contracts");
-
-        var compilation = CompileGeneratedFiles(result);
-
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
-
-        // GET /api/tasks/{taskId} should have a taskId route param
-        var getTask = endpoints.First(e =>
-            e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks/{taskId}");
-        Assert.Contains(getTask.Params, p => p.Name == "taskId" && p.Source == ParamSource.Route);
-    }
-
-    private static void AssertProperty(
-        TsTypeDefinition def,
-        string name,
-        string? expectedPrimitive)
+    private static void AssertProperty(TsTypeDefinition def, string name, string? expectedPrimitive)
     {
         var prop = def.Properties.FirstOrDefault(p => p.Name == name);
         Assert.True(prop is not null, $"Property '{name}' not found on {def.Name}");

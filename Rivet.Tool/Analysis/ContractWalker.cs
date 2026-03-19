@@ -37,6 +37,32 @@ public static class ContractWalker
 
             var controllerName = DeriveControllerName(type);
 
+            // Abstract class contract: read HTTP attributes from abstract methods
+            if (type.IsAbstract && !type.IsStatic)
+            {
+                foreach (var member in type.GetMembers())
+                {
+                    if (member is not IMethodSymbol method || !method.IsAbstract)
+                    {
+                        continue;
+                    }
+
+                    if (!EndpointWalker.HasHttpMethodAttribute(method))
+                    {
+                        continue;
+                    }
+
+                    var endpoint = BuildEndpointFromMethod(method, controllerName, typeWalker);
+                    if (endpoint is not null)
+                    {
+                        endpoints.Add(endpoint);
+                    }
+                }
+
+                continue;
+            }
+
+            // Static class contract: read Endpoint fields from builder chain
             foreach (var member in type.GetMembers())
             {
                 if (member is not IFieldSymbol field)
@@ -44,7 +70,7 @@ public static class ContractWalker
                     continue;
                 }
 
-                if (!SymbolEqualityComparer.Default.Equals(field.Type, endpointType))
+                if (!IsRivetEndpointField(field.Type, endpointType))
                 {
                     continue;
                 }
@@ -58,6 +84,39 @@ public static class ContractWalker
         }
 
         return endpoints;
+    }
+
+    /// <summary>
+    /// Builds an endpoint definition from an abstract method with HTTP attributes.
+    /// Uses EndpointWalker's extraction logic with contract-style controller name derivation.
+    /// </summary>
+    private static TsEndpointDefinition? BuildEndpointFromMethod(
+        IMethodSymbol method,
+        string controllerName,
+        TypeWalker typeWalker)
+    {
+        var (httpMethod, methodRoute) = EndpointWalker.ExtractHttpMethodAndRoute(method);
+        if (httpMethod is null)
+        {
+            return null;
+        }
+
+        var classRoute = EndpointWalker.ExtractControllerRoute(method.ContainingType);
+        var fullRoute = EndpointWalker.CombineRoutes(classRoute, methodRoute);
+
+        if (fullRoute is null)
+        {
+            return null;
+        }
+
+        fullRoute = RouteParser.StripRouteConstraints(fullRoute);
+
+        var parameters = EndpointWalker.ExtractParams(method, typeWalker, fullRoute);
+        var responses = EndpointWalker.ExtractAllResponseTypes(method, typeWalker);
+        var returnType = EndpointWalker.ExtractReturnType(method, typeWalker);
+        var name = Naming.ToCamelCase(method.Name);
+
+        return new TsEndpointDefinition(name, httpMethod, fullRoute, parameters, returnType, controllerName, responses);
     }
 
     private static TsEndpointDefinition? BuildEndpointFromField(
@@ -243,6 +302,27 @@ public static class ContractWalker
         }
 
         return parameters;
+    }
+
+    /// <summary>
+    /// Accepts Endpoint fields (v1 legacy) and EndpointBuilder fields (v1 typed).
+    /// </summary>
+    private static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? endpointType)
+    {
+        if (endpointType is not null && SymbolEqualityComparer.Default.Equals(fieldType, endpointType))
+        {
+            return true;
+        }
+
+        // EndpointBuilder, EndpointBuilder<TOutput>, EndpointBuilder<TInput, TOutput>
+        if (fieldType is INamedTypeSymbol named
+            && named.Name == "EndpointBuilder"
+            && named.ContainingNamespace?.ToDisplayString() == "Rivet")
+        {
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
