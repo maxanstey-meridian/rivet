@@ -27,8 +27,7 @@ public sealed record Email(string Value);    // → branded: string & { __brand:
 
 public sealed record Label(string Name, string Color);
 
-// DTOs — [RivetType] for types not reachable from any endpoint
-[RivetType]
+// DTOs — discovered transitively from endpoint signatures
 public sealed record CreateTaskCommand(
     string Title,
     string? Description,
@@ -36,7 +35,6 @@ public sealed record CreateTaskCommand(
     Guid? AssigneeId,
     List<string> LabelNames);
 
-[RivetType]
 public sealed record CreateTaskResult(Guid Id, DateTime CreatedAt);
 ```
 
@@ -69,7 +67,7 @@ public sealed class TasksController(CreateTaskUseCase createTask) : ControllerBa
 }
 ```
 
-Request types (`[FromBody]`), response types (`[ProducesResponseType]` or typed returns), and everything they reference (enums, VOs, nested records) are discovered transitively — `[RivetType]` is only needed for types not reachable from any endpoint.
+All types are discovered transitively — request types (`[FromBody]`), response types (`[ProducesResponseType]` or typed returns), and everything they reference (enums, VOs, nested records). `[RivetType]` is only needed for types that aren't reachable from any endpoint or contract (e.g., a shared DTO used only in frontend logic).
 
 ## 3. Generate
 

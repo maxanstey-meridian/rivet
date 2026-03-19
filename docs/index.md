@@ -23,7 +23,7 @@ features:
     details: "Roslyn reads nullable annotations, sealed records, string enum unions, generic type parameters — richer types than any JSON schema intermediary."
   - icon: 📦
     title: Types are the primary output
-    details: "Any C# type marked with [RivetType] becomes a TypeScript type — whether or not it appears in an endpoint. Commands, results, value objects, DTOs."
+    details: "Every type reachable from an endpoint or contract is emitted automatically — records, enums, value objects, generics. No annotations needed on DTOs."
 ---
 
 <div class="vp-doc" style="max-width: 800px; margin: 0 auto; padding: 0 1.5rem 2rem;">
@@ -174,6 +174,6 @@ export function remove(id: string): Promise<void>;
 
 <p>Unlike OpenAPI-based generators (NSwag, Kiota, Kubb), Rivet reads Roslyn's full type graph — nullable annotations, sealed records, string enum unions, generic type parameters — and produces richer TypeScript types than any JSON schema intermediary can represent.</p>
 
-<p>Rivet is not just a client generator. Any C# type marked with <code>[RivetType]</code> becomes a TypeScript type — whether or not it appears in an endpoint. Commands, results, value objects, DTOs — if your frontend and backend need to agree on a shape, mark it once in C# and it appears in your generated types.</p>
+<p>Rivet is not just a client generator. Every type reachable from an endpoint or contract — records, enums, value objects, generics — is emitted automatically. No per-type annotations needed. For types that aren't reachable from any endpoint (shared frontend-only DTOs), <code>[RivetType]</code> opts them in explicitly.</p>
 
 </div>

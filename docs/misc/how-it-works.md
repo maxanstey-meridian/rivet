@@ -28,7 +28,7 @@ A CLI tool (like `dotnet-ef` or `dotnet-format`) can do all of this. You run it 
 ```
 
 1. Opens your `.csproj` via Roslyn's `MSBuildWorkspace`
-2. Finds `[RivetType]` records and transitively discovers all referenced types
+2. Discovers all types transitively from endpoint/contract signatures (plus any explicitly marked `[RivetType]`)
 3. Finds `[RivetClient]` classes and `[RivetEndpoint]` methods — reads `[HttpGet]`, `[Route]`, `[ProducesResponseType]`, `[FromBody]`, etc.
 4. Finds `[RivetContract]` classes and reads their `RouteDefinition<T>` chains via Roslyn's semantic model
 5. Merges controller-sourced and contract-sourced endpoints (contract wins on collision)

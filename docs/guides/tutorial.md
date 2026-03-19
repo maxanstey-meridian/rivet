@@ -86,9 +86,8 @@ public static class UsersContract
             .Description("Upload a profile picture");
 }
 
-// --- DTOs (colocated with the contract) ---
+// --- DTOs (colocated with the contract, discovered transitively) ---
 
-[RivetType]
 public sealed record UserDto(
     UserId Id,
     string Name,
@@ -96,19 +95,14 @@ public sealed record UserDto(
     Role Role,
     string? AvatarUrl);
 
-[RivetType]
 public sealed record CreateUserRequest(string Name, Email Email, Role Role);
 
-[RivetType]
 public sealed record CreateUserResponse(UserId Id);
 
-[RivetType]
 public sealed record UpdateUserRequest(string Name, Role Role);
 
-[RivetType]
 public sealed record FileUploadResult(string Id, string FileName, string ContentType, long SizeBytes);
 
-[RivetType]
 public sealed record ErrorDto(string Code, string Message);
 ```
 

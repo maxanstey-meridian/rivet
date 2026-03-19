@@ -4,14 +4,16 @@ Rivet provides four marker attributes. All are in the `Rivet.Attributes` NuGet p
 
 ## `[RivetType]`
 
-Marks a type for TypeScript emission. Only needed for types **not reachable** from any endpoint — if a type is used as a request body, response type, or property of such a type, it's discovered transitively.
+Explicitly opts a type into TypeScript emission. **You usually don't need this** — types referenced by endpoints (via `[FromBody]`, `[ProducesResponseType]`, typed returns) and contracts (via `RouteDefinition<T>` generics) are discovered transitively, including everything they reference (nested records, enums, value objects).
 
 ```csharp
+// This type is NOT referenced by any endpoint or contract,
+// but we want it in the generated TypeScript anyway
 [RivetType]
-public sealed record TaskItem(Guid Id, string Title, Priority Priority);
+public sealed record DomainEvent(string Type, Guid AggregateId, DateTime OccurredAt);
 ```
 
-Use when you want to share a type between frontend and backend that isn't part of any API endpoint (e.g., a domain event shape, a shared enum, a config DTO).
+Use when a type isn't reachable from any endpoint or contract — e.g., a domain event shape, a shared DTO consumed only by frontend logic, or a generic wrapper that's only instantiated outside endpoint signatures.
 
 ## `[RivetClient]`
 

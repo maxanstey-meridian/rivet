@@ -29,7 +29,7 @@ dotnet rivet --from-openapi openapi.json --namespace TaskBoard.Contracts --outpu
 ```
 output/
 ├── Types/
-│   ├── TaskDto.cs              # sealed record with [RivetType]
+│   ├── TaskDto.cs              # sealed record
 │   ├── CreateTaskRequest.cs
 │   └── Priority.cs             # enum
 ├── Domain/
@@ -41,7 +41,7 @@ output/
 
 ### What it generates
 
-- **Sealed records** for object schemas, with `[RivetType]` attributes
+- **Sealed records** for object schemas (no `[RivetType]` needed — they're discovered transitively from the generated contracts)
 - **Enums** for string enums
 - **Branded value objects** for string types with semantic formats (`email`, `uri`, etc.)
 - **Static contract classes** (v1 style) with `RouteDefinition<T>` builder chains
