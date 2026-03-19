@@ -78,8 +78,8 @@ public async Task<IActionResult> List(CancellationToken ct)
         return await db.Members.ToListAsync(ct); // must return List<MemberDto>
     })).ToActionResult();
 
-// Works with minimal APIs too — --check verifies coverage for MapGet/MapPost/etc.
-app.MapGet("/api/members", async (AppDb db, CancellationToken ct) =>
+// Works with minimal APIs too — .Route avoids duplicating the route string
+app.MapGet(MembersContract.List.Route, async (AppDb db, CancellationToken ct) =>
     (await MembersContract.List.Invoke(async () =>
     {
         return await db.Members.ToListAsync(ct);
@@ -152,6 +152,22 @@ public static class TasksContract
         Define.Get<List<TaskDto>>("/api/tasks")
             .Description("List all tasks");
 }
+```
+
+## List your routes
+
+```bash
+dotnet rivet --project Api.csproj --routes
+```
+
+```
+  Method  Route                      Handler
+  ──────  ─────────────────────────  ───────
+  GET     /api/members               members.list
+  POST    /api/members               members.invite
+  DELETE  /api/members/{id}          members.remove
+  PUT     /api/members/{id}/role     members.updateRole
+4 route(s).
 ```
 
 ## Documentation

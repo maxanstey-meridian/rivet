@@ -11,8 +11,16 @@ public sealed class RouteDefinition<TInput, TOutput>
 {
     private int _successStatus;
 
-    internal RouteDefinition(int defaultStatus = 200)
+    /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
+    public string Method { get; }
+
+    /// <summary>The route template from the contract definition.</summary>
+    public string Route { get; }
+
+    internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
     {
+        Method = method;
+        Route = route;
         _successStatus = defaultStatus;
     }
 
@@ -48,8 +56,16 @@ public sealed class RouteDefinition<TOutput>
 {
     private int _successStatus;
 
-    internal RouteDefinition(int defaultStatus = 200)
+    /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
+    public string Method { get; }
+
+    /// <summary>The route template from the contract definition.</summary>
+    public string Route { get; }
+
+    internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
     {
+        Method = method;
+        Route = route;
         _successStatus = defaultStatus;
     }
 
@@ -86,8 +102,16 @@ public sealed class InputRouteDefinition<TInput>
 {
     private int _successStatus;
 
-    internal InputRouteDefinition(int defaultStatus = 200)
+    /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
+    public string Method { get; }
+
+    /// <summary>The route template from the contract definition.</summary>
+    public string Route { get; }
+
+    internal InputRouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
     {
+        Method = method;
+        Route = route;
         _successStatus = defaultStatus;
     }
 
@@ -123,8 +147,16 @@ public sealed class RouteDefinition
 {
     private int _successStatus;
 
-    internal RouteDefinition(int defaultStatus = 200)
+    /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
+    public string Method { get; }
+
+    /// <summary>The route template from the contract definition.</summary>
+    public string Route { get; }
+
+    internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
     {
+        Method = method;
+        Route = route;
         _successStatus = defaultStatus;
     }
 
@@ -145,7 +177,7 @@ public sealed class RouteDefinition
     /// Convert to an input-only endpoint (accepts a body, returns void).
     /// </summary>
     public InputRouteDefinition<TInput> Accepts<TInput>()
-        => new InputRouteDefinition<TInput>(_successStatus);
+        => new InputRouteDefinition<TInput>(Method, Route, _successStatus);
 
     /// <summary>
     /// Execute the endpoint handler (void — no typed output).

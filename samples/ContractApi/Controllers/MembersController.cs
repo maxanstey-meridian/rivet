@@ -70,4 +70,11 @@ public static class RivetExtensions
 
     public static IActionResult ToActionResult(this RivetResult result)
         => new StatusCodeResult(result.StatusCode);
+
+    // Minimal API bridge
+    public static IResult ToResult<T>(this RivetResult<T> result)
+        => Results.Json(result.Data, statusCode: result.StatusCode);
+
+    public static IResult ToResult(this RivetResult result)
+        => Results.StatusCode(result.StatusCode);
 }

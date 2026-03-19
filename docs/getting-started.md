@@ -170,6 +170,7 @@ console.log(result.createdAt); // string
 
 ## Next steps
 
+- Follow the [tutorial](/guides/tutorial) — build a minimal API from scratch with contracts, branded VOs, file uploads, and a typed client
 - Add [runtime validation](/guides/runtime-validation) with `--compile` for type assertions at the network boundary
 - Define [contracts](/guides/contracts) for a decoupled API surface with compile-time enforcement
 - Generate an [OpenAPI spec](/guides/openapi-emission) alongside your TypeScript output

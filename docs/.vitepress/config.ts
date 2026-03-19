@@ -29,6 +29,7 @@ export default defineConfig({
       {
         text: "Guides",
         items: [
+          { text: "Tutorial: Zero to Typed Client", link: "/guides/tutorial" },
           { text: "Contracts", link: "/guides/contracts" },
           { text: "Contract Coverage", link: "/guides/contract-coverage" },
           { text: "Runtime Validation", link: "/guides/runtime-validation" },

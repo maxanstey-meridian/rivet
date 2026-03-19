@@ -6,6 +6,9 @@
 
 ```bash
 # Standalone — exits with code 1 if any warnings
+dotnet rivet --project Api.csproj --check --quiet
+
+# Standalone with codegen preview
 dotnet rivet --project Api.csproj --check
 
 # Combined with generation — check + generate in one pass
@@ -64,10 +67,10 @@ public sealed class MembersController : ControllerBase
 }
 ```
 
-**Minimal APIs** — walks up through the lambda to the `MapGet`/`MapPost`/etc. call to extract the HTTP method and route:
+**Minimal APIs** — walks up through the lambda to the `MapGet`/`MapPost`/etc. call to extract the HTTP method and route. Use `.Route` to avoid duplicating the route string:
 
 ```csharp
-app.MapGet("/api/members", async (AppDb db, CancellationToken ct) =>
+app.MapGet(MembersContract.List.Route, async (AppDb db, CancellationToken ct) =>
     (await MembersContract.List.Invoke(async () =>
     {
         return await db.Members.ToListAsync(ct);
@@ -78,10 +81,23 @@ Both are checked automatically — no extra configuration needed.
 
 ## CI usage
 
-`--check` without `--output` exits with code 1 if any warnings are found, making it easy to add to CI:
+`--check` without `--output` exits with code 1 if any warnings are found, making it easy to add to CI. Use `--quiet` (`-q`) to suppress codegen preview output:
 
 ```bash
-dotnet rivet --project Api.csproj --check
+dotnet rivet --project Api.csproj --check --quiet
+```
+
+Prints a coverage summary to stderr:
+
+```
+Coverage: 79/79 endpoints covered. All OK.
+```
+
+Or with warnings:
+
+```
+warning: [MissingImplementation] MembersContract.UpdateRole: expected PUT /api/members/{id}/role, got (none)
+Coverage: 78/79 endpoints covered, 0 mismatch(es), 1 missing.
 ```
 
 Combined with `--output`, warnings are reported but the exit code reflects generation success — the check is advisory.

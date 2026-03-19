@@ -16,6 +16,7 @@ Rivet detects which mode to run based on the flags provided:
 | `--project` + `--compile` | Forward + typia runtime validators |
 | `--project` + `--openapi` | Forward + OpenAPI 3.1 JSON spec |
 | `--project` + `--check` | Verify contract coverage against implementations |
+| `--project` + `--routes` | List all discovered endpoints |
 | `--from-openapi` | Reverse: OpenAPI → C# contracts + DTOs |
 
 ## Flags
@@ -28,6 +29,8 @@ Rivet detects which mode to run based on the flags provided:
 | `--openapi` | | Emit OpenAPI 3.1 JSON alongside TS output |
 | `--security <scheme>` | | Security scheme for OpenAPI spec |
 | `--check` | | Verify contract coverage (missing implementations, route/method mismatches) |
+| `--routes` | | List all discovered endpoints (method, route, handler) |
+| `--quiet` | `-q` | Suppress codegen preview output (useful with `--check`) |
 | `--from-openapi <path>` | | Path to OpenAPI 3.1 JSON spec to import |
 | `--namespace <ns>` | | C# namespace for imported contracts/types |
 
@@ -76,13 +79,36 @@ dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --opena
 
 ```bash
 # Check that all contract endpoints have matching implementations
+dotnet rivet --project path/to/Api.csproj --check --quiet
+
+# Check with codegen preview
 dotnet rivet --project path/to/Api.csproj --check
 
 # Check + generate (both run together)
 dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --check
 ```
 
-Reports missing implementations, HTTP method mismatches, and route mismatches. Exits with code 1 if any warnings are found (standalone mode without `--output`).
+Reports missing implementations, HTTP method mismatches, and route mismatches. Prints a coverage summary (e.g. `Coverage: 79/79 endpoints covered. All OK.`). Exits with code 1 if any warnings are found (standalone mode without `--output`).
+
+### Route list
+
+```bash
+# List all endpoints (like php artisan route:list)
+dotnet rivet --project path/to/Api.csproj --routes
+```
+
+Output:
+
+```
+  Method  Route                   Handler
+  ──────  ──────────────────────  ───────
+  GET     /api/health             members.health
+  GET     /api/members            members.list
+  POST    /api/members            members.invite
+  DELETE  /api/members/{id}       members.remove
+  PUT     /api/members/{id}/role  members.updateRole
+5 route(s).
+```
 
 ### Reverse pipeline (OpenAPI import)
 

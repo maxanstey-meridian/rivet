@@ -126,8 +126,13 @@ public static class TypeGrouper
             }
         } while (changed);
 
-        // Build file name mapping with collision handling
-        var groupToFileName = BuildFileNames(typeToGroup.Values.Distinct());
+        // Merge namespace groups that map to the same camelCase file name
+        // e.g. "CaseBridge.Common" and "CaseBridge.Shared.Common" both → "common"
+        var mergedGroups = MergeGroupsByFileName(typeToGroup);
+
+        // Build file name mapping (no collisions after merge)
+        var groupToFileName = mergedGroups.Values.Distinct()
+            .ToDictionary(g => g, g => Naming.ToCamelCase(g));
 
         // Partition types into groups
         var groupDefs = new Dictionary<string, List<TsTypeDefinition>>();
@@ -143,17 +148,17 @@ public static class TypeGrouper
 
         foreach (var def in definitions)
         {
-            groupDefs[typeToGroup[def.Name]].Add(def);
+            groupDefs[mergedGroups[typeToGroup[def.Name]]].Add(def);
         }
 
         foreach (var brand in brands)
         {
-            groupBrands[typeToGroup[brand.Name]].Add(brand);
+            groupBrands[mergedGroups[typeToGroup[brand.Name]]].Add(brand);
         }
 
         foreach (var (name, union) in enums)
         {
-            groupEnums[typeToGroup[name]].Add(new(name, union));
+            groupEnums[mergedGroups[typeToGroup[name]]].Add(new(name, union));
         }
 
         // Build imports for each group
@@ -171,12 +176,18 @@ public static class TypeGrouper
 
                 foreach (var refName in refs)
                 {
-                    if (!typeToGroup.TryGetValue(refName, out var refGroup) || refGroup == group)
+                    if (!typeToGroup.TryGetValue(refName, out var rawRefGroup))
                     {
                         continue;
                     }
 
-                    var refFile = groupToFileName[refGroup];
+                    var refMergedGroup = mergedGroups[rawRefGroup];
+                    if (refMergedGroup == group)
+                    {
+                        continue;
+                    }
+
+                    var refFile = groupToFileName[refMergedGroup];
                     if (!imports.TryGetValue(refFile, out var list))
                     {
                         list = new();
@@ -206,26 +217,31 @@ public static class TypeGrouper
         return new TypeGroupingResult(groups);
     }
 
-    private static Dictionary<string, string> BuildFileNames(IEnumerable<string> groups)
+    /// <summary>
+    /// Merges namespace groups that map to the same camelCase file name.
+    /// Returns a mapping from original group name to the canonical (first) group name.
+    /// e.g. if "CaseBridge.Common" and "CaseBridge.Shared.Common" both → "common",
+    /// all types from both end up in one file.
+    /// </summary>
+    private static Dictionary<string, string> MergeGroupsByFileName(Dictionary<string, string> typeToGroup)
     {
-        var result = new Dictionary<string, string>();
-        var usedFileNames = new HashSet<string>();
-
-        foreach (var group in groups.OrderBy(x => x))
+        // Map each file name to the first group that claims it (canonical group)
+        var fileNameToCanonical = new Dictionary<string, string>();
+        foreach (var group in typeToGroup.Values.Distinct().OrderBy(x => x))
         {
-            var baseName = Naming.ToCamelCase(group);
-            var fileName = baseName;
-            var suffix = 2;
-            while (!usedFileNames.Add(fileName))
-            {
-                fileName = $"{baseName}{suffix}";
-                suffix++;
-            }
-
-            result[group] = fileName;
+            var fileName = Naming.ToCamelCase(group);
+            fileNameToCanonical.TryAdd(fileName, group);
         }
 
-        return result;
+        // Map every group to its canonical group
+        var groupToCanonical = new Dictionary<string, string>();
+        foreach (var group in typeToGroup.Values.Distinct())
+        {
+            var fileName = Naming.ToCamelCase(group);
+            groupToCanonical[group] = fileNameToCanonical[fileName];
+        }
+
+        return groupToCanonical;
     }
 
 }

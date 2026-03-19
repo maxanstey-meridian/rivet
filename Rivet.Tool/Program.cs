@@ -59,6 +59,20 @@ static async Task<int> Run(string[] args)
             Console.Error.WriteLine($"warning: [{w.Kind}] {w.ContractName}.{w.FieldName}: expected {w.Expected}, got {w.Actual}");
         }
 
+        var totalFields = contractEndpoints.Count;
+        var missingCount = coverageWarnings.Count(w => w.Kind == CoverageWarningKind.MissingImplementation);
+        var coveredCount = totalFields - missingCount;
+        var mismatchCount = coverageWarnings.Count - missingCount;
+
+        if (coverageWarnings.Count == 0)
+        {
+            Console.Error.WriteLine($"Coverage: {coveredCount}/{totalFields} endpoints covered. All OK.");
+        }
+        else
+        {
+            Console.Error.WriteLine($"Coverage: {coveredCount}/{totalFields} endpoints covered, {mismatchCount} mismatch(es), {missingCount} missing.");
+        }
+
         if (coverageWarnings.Count > 0 && outputDir is null)
         {
             return 1;
@@ -78,6 +92,13 @@ static async Task<int> Run(string[] args)
     }
 
     endpoints = merged;
+
+    if (options.Routes)
+    {
+        PrintRoutes(merged);
+        return 0;
+    }
+
     var definitions = walker.Definitions.Values.ToList();
 
     var brands = walker.Brands.Values.ToList();
@@ -194,7 +215,7 @@ static async Task<int> Run(string[] args)
             Console.WriteLine($"Compile complete in {FormatElapsed(sw.Elapsed)}.");
         }
     }
-    else
+    else if (!options.Quiet)
     {
         // Print to stdout (preview mode)
         foreach (var group in typeGrouping.Groups)
@@ -376,6 +397,8 @@ static RivetOptions? ParseArgs(string[] args)
     string? fromOpenApiPath = null;
     string? importNamespace = null;
     var check = false;
+    var quiet = false;
+    var routes = false;
     var files = new List<string>();
 
     for (var i = 0; i < args.Length; i++)
@@ -408,6 +431,12 @@ static RivetOptions? ParseArgs(string[] args)
             case "--check":
                 check = true;
                 break;
+            case "--quiet" or "-q":
+                quiet = true;
+                break;
+            case "--routes":
+                routes = true;
+                break;
             default:
                 files.Add(args[i]);
                 break;
@@ -419,7 +448,7 @@ static RivetOptions? ParseArgs(string[] args)
     {
         return new RivetOptions(
             fromOpenApiPath, outputDir, mode, files.ToArray(),
-            openApiPath, defaultSecurity, fromOpenApiPath, importNamespace, check);
+            openApiPath, defaultSecurity, fromOpenApiPath, importNamespace, check, quiet, routes);
     }
 
     projectPath ??= files.FirstOrDefault();
@@ -429,7 +458,7 @@ static RivetOptions? ParseArgs(string[] args)
         return null;
     }
 
-    return new RivetOptions(projectPath, outputDir, mode, files.ToArray(), openApiPath, defaultSecurity, Check: check);
+    return new RivetOptions(projectPath, outputDir, mode, files.ToArray(), openApiPath, defaultSecurity, Check: check, Quiet: quiet, Routes: routes);
 }
 
 static int RunImport(RivetOptions options)
@@ -470,6 +499,44 @@ static int RunImport(RivetOptions options)
     return 0;
 }
 
+static void PrintRoutes(IReadOnlyList<TsEndpointDefinition> endpoints)
+{
+    var sorted = endpoints
+        .OrderBy(e => e.RouteTemplate)
+        .ThenBy(e => e.HttpMethod)
+        .ToList();
+
+    // Column widths
+    var methodLabel = "Method";
+    var routeLabel = "Route";
+    var handlerLabel = "Handler";
+    var methodWidth = Math.Max(methodLabel.Length, sorted.Max(e => e.HttpMethod.Length));
+    var routeWidth = Math.Max(routeLabel.Length, sorted.Max(e => e.RouteTemplate.Length));
+
+    Console.WriteLine($"  {methodLabel.PadRight(methodWidth)}  {routeLabel.PadRight(routeWidth)}  {handlerLabel}");
+    Console.WriteLine($"  {"".PadRight(methodWidth, '─')}  {"".PadRight(routeWidth, '─')}  {"".PadRight(handlerLabel.Length, '─')}");
+
+    foreach (var ep in sorted)
+    {
+        var method = ep.HttpMethod.PadRight(methodWidth);
+        var route = ep.RouteTemplate.PadRight(routeWidth);
+        var methodColor = ep.HttpMethod switch
+        {
+            "GET" => "\x1b[32m",     // green
+            "POST" => "\x1b[33m",    // yellow
+            "PUT" => "\x1b[34m",     // blue
+            "PATCH" => "\x1b[36m",   // cyan
+            "DELETE" => "\x1b[31m",  // red
+            _ => "",
+        };
+        var coloredRoute = System.Text.RegularExpressions.Regex.Replace(
+            route, @"\{[^}]+\}", m => $"\x1b[33m{m.Value}\x1b[0m");
+        Console.WriteLine($"  {methodColor}{method}\x1b[0m  {coloredRoute}  \x1b[90m{ep.ControllerName}.{ep.Name}\x1b[0m");
+    }
+
+    Console.Error.WriteLine($"{sorted.Count} route(s).");
+}
+
 static string FormatElapsed(TimeSpan elapsed) =>
     elapsed.TotalSeconds >= 1
         ? $"{elapsed.TotalSeconds:F2}s"
@@ -493,6 +560,8 @@ static void PrintUsage()
     Console.Error.WriteLine("  --from-openapi <spec.json> Import OpenAPI spec → C# contracts + DTOs");
     Console.Error.WriteLine("  --namespace <ns>           Namespace for generated C# files (default: Generated)");
     Console.Error.WriteLine("  --check                    Verify contract coverage (missing impls, route/method mismatches)");
+    Console.Error.WriteLine("  --routes                   List all discovered endpoints (method, route, handler)");
+    Console.Error.WriteLine("  -q, --quiet                Suppress codegen output (useful with --check)");
 }
 
 static IEnumerable<string> GetDotnetRoots()
@@ -573,4 +642,6 @@ sealed record RivetOptions(
     string ProjectPath, string? OutputDir, string Mode, string[] Files,
     string? OpenApiPath = null, string? DefaultSecurity = null,
     string? FromOpenApiPath = null, string? ImportNamespace = null,
-    bool Check = false);
+    bool Check = false,
+    bool Quiet = false,
+    bool Routes = false);
