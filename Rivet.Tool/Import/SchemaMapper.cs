@@ -143,6 +143,7 @@ internal static class SchemaMapper
             {
                 "date-time" => "DateTime",
                 "guid" or "uuid" => "Guid",
+                "binary" => "IFormFile",
                 _ => "string",
             };
         }

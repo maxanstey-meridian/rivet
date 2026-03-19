@@ -102,16 +102,30 @@ internal static class ContractBuilder
             return null;
         }
 
-        if (!content.TryGetProperty("application/json", out var json))
+        // JSON body — standard path
+        if (content.TryGetProperty("application/json", out var json)
+            && json.TryGetProperty("schema", out var jsonSchema))
         {
-            return null;
+            return SchemaMapper.ResolveCSharpType(jsonSchema, warnings);
         }
 
-        if (!json.TryGetProperty("schema", out var schema))
+        // multipart/form-data — file upload path
+        if (content.TryGetProperty("multipart/form-data", out var multipart)
+            && multipart.TryGetProperty("schema", out var multipartSchema))
         {
-            return null;
+            return ResolveMultipartInputType(multipartSchema, warnings);
         }
 
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves a multipart/form-data schema to an input type name.
+    /// The schema is typically a $ref to a named schema whose binary properties
+    /// are already mapped to IFormFile by SchemaMapper.
+    /// </summary>
+    private static string? ResolveMultipartInputType(JsonElement schema, List<string> warnings)
+    {
         return SchemaMapper.ResolveCSharpType(schema, warnings);
     }
 

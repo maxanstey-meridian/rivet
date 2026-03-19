@@ -3,14 +3,16 @@ using TaskBoard.Domain;
 
 namespace TaskBoard.Application.CreateTask;
 
+/// TS: { title: string; description: string | null; priority: Priority; assigneeId: string | null; labelNames: string[] }
 [RivetType]
 public sealed record CreateTaskCommand(
     string Title,
-    string? Description,
-    Priority Priority,
-    Guid? AssigneeId,
-    List<string> LabelNames);
+    string? Description,       // → string | null
+    Priority Priority,          // → "Low" | "Medium" | "High" | "Critical"
+    Guid? AssigneeId,           // → string | null
+    List<string> LabelNames);   // → string[]
 
+/// TS: { id: string; createdAt: string }
 [RivetType]
 public sealed record CreateTaskResult(Guid Id, DateTime CreatedAt);
 

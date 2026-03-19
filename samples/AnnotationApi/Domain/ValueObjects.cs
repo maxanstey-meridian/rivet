@@ -1,12 +1,12 @@
 namespace TaskBoard.Domain;
 
-/// <summary>Unique identifier for a task — branded in TS output.</summary>
+/// TS: string & { readonly __brand: "TaskId" } — single-property record → branded primitive
 public sealed record TaskId(Guid Value)
 {
     public override string ToString() => Value.ToString();
 }
 
-/// <summary>Email address value object.</summary>
+/// TS: string & { readonly __brand: "Email" } — single-property record → branded primitive
 public sealed record Email(string Value)
 {
     public override string ToString() => Value;

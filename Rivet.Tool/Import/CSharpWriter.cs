@@ -12,6 +12,10 @@ internal static class CSharpWriter
         var sb = new StringBuilder();
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
+        if (record.Properties.Any(p => p.CSharpType is "IFormFile" or "IFormFile?"))
+        {
+            sb.AppendLine("using Microsoft.AspNetCore.Http;");
+        }
         sb.AppendLine("using Rivet;");
         sb.AppendLine();
         sb.AppendLine($"namespace {ns};");

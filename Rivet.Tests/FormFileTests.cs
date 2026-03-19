@@ -15,6 +15,17 @@ public sealed class FormFileTests
         return typeGrouping.BuildTypeFileMap();
     }
 
+    private static string GenerateContractClient(string source)
+    {
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var walker = TypeWalker.Create(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker);
+        var typeFileMap = BuildTypeFileMap(walker);
+        var controllerGroups = ClientEmitter.GroupByController(endpoints);
+        return string.Join("\n", controllerGroups.Select(g =>
+            ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
+    }
+
     [Fact]
     public void IFormFile_EmitsFileParam_WithFormData()
     {
@@ -139,5 +150,102 @@ public sealed class FormFileTests
         Assert.Contains("avatar: File", client);
         Assert.Contains("fd.append(\"avatar\", avatar);", client);
         Assert.Contains("Promise<void>", client);
+    }
+
+    [Fact]
+    public void Contract_IFormFile_InTInput_EmitsFormData()
+    {
+        var source = """
+            using System;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record FileUploadRequest(IFormFile File);
+
+            [RivetType]
+            public sealed record FileUploadResult(Guid Id, string FileName);
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly EndpointBuilder<FileUploadRequest, FileUploadResult> Upload =
+                    Endpoint.Post<FileUploadRequest, FileUploadResult>("/api/files");
+            }
+            """;
+
+        var client = GenerateContractClient(source);
+
+        // Should detect IFormFile in TInput and emit File param + FormData
+        Assert.Contains("file: File", client);
+        Assert.Contains("const fd = new FormData();", client);
+        Assert.Contains("fd.append(\"file\", file);", client);
+        Assert.Contains("body: fd", client);
+        Assert.Contains("Promise<FileUploadResult>", client);
+    }
+
+    [Fact]
+    public void Contract_IFormFile_WithRouteParam_EmitsFormData()
+    {
+        var source = """
+            using System;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record AttachRequest(IFormFile File);
+
+            [RivetType]
+            public sealed record AttachmentResult(Guid Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly EndpointBuilder<AttachRequest, AttachmentResult> Attach =
+                    Endpoint.Post<AttachRequest, AttachmentResult>("/api/tasks/{id}/attachments");
+            }
+            """;
+
+        var client = GenerateContractClient(source);
+
+        // Route param + file param
+        Assert.Contains("id: string, file: File", client);
+        Assert.Contains("const fd = new FormData();", client);
+        Assert.Contains("fd.append(\"file\", file);", client);
+        Assert.Contains("${id}", client);
+        Assert.Contains("Promise<AttachmentResult>", client);
+    }
+
+    [Fact]
+    public void Contract_BareIFormFile_AsTInput_EmitsFormData()
+    {
+        var source = """
+            using System;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record AvatarResult(Guid Id);
+
+            [RivetContract]
+            public static class AvatarsContract
+            {
+                public static readonly EndpointBuilder<IFormFile, AvatarResult> Upload =
+                    Endpoint.Post<IFormFile, AvatarResult>("/api/avatars");
+            }
+            """;
+
+        var client = GenerateContractClient(source);
+
+        // Direct IFormFile as TInput — emits File param
+        Assert.Contains("file: File", client);
+        Assert.Contains("const fd = new FormData();", client);
+        Assert.Contains("Promise<AvatarResult>", client);
     }
 }

@@ -9,13 +9,19 @@ Two styles — both generate the same TypeScript output.
 A `[RivetContract]` static class with `EndpointBuilder<T>` fields. No ASP.NET dependency — pure Rivet types.
 
 ```csharp
+using Rivet;
+using Endpoint = Rivet.Endpoint;         // alias to avoid ASP.NET name collision
+using EndpointBuilder = Rivet.EndpointBuilder;
+
 [RivetContract]
 public static class MembersContract
 {
+    // GET /api/members → List<MemberDto>
     public static readonly EndpointBuilder<List<MemberDto>> List =
         Endpoint.Get<List<MemberDto>>("/api/members")
             .Description("List all team members");
 
+    // POST /api/members — typed input + output, 201 default, 422 on validation failure
     public static readonly EndpointBuilder<InviteMemberRequest, InviteMemberResponse> Invite =
         Endpoint.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
             .Description("Invite a new team member")
@@ -23,12 +29,39 @@ public static class MembersContract
             .Returns<InviteMemberResponse>(422, "Validation failed")
             .Secure("admin");
 
+    // DELETE /api/members/{id} — no typed I/O, 404 response declared
     public static readonly EndpointBuilder Remove =
         Endpoint.Delete("/api/members/{id}")
             .Description("Remove a team member")
             .Returns<MemberDto>(404, "Member not found")
             .Secure("admin");
+
+    // GET /api/health — no auth required
+    public static readonly EndpointBuilder Health =
+        Endpoint.Get("/api/health")
+            .Description("Health check")
+            .Anonymous();
 }
+```
+
+This generates the same typed client as annotation-based controllers:
+
+```typescript
+// Generated client/members.ts
+
+export function list(): Promise<MemberDto[]>;
+export function list(opts: { unwrap: false }): Promise<RivetResult<MemberDto[]>>;
+
+export type InviteResult =
+  | { status: 201; data: InviteMemberResponse; response: Response }
+  | { status: 422; data: InviteMemberResponse; response: Response };
+
+export function invite(body: InviteMemberRequest): Promise<InviteMemberResponse>;
+export function invite(body: InviteMemberRequest, opts: { unwrap: false }): Promise<InviteResult>;
+
+export function remove(id: string): Promise<void>;
+
+export function health(): Promise<void>;
 ```
 
 ### Using contracts at runtime with `.Invoke()`
@@ -43,7 +76,7 @@ public sealed class MembersController : ControllerBase
     public async Task<IActionResult> List(CancellationToken ct)
         => (await MembersContract.List.Invoke(async () =>
         {
-            // Must return List<MemberDto> — compile error if wrong
+            // Must return List<MemberDto> — compiler enforced
             return new List<MemberDto>();
         })).ToActionResult();
 
@@ -54,6 +87,13 @@ public sealed class MembersController : ControllerBase
         {
             // req is InviteMemberRequest, must return InviteMemberResponse
             return new InviteMemberResponse(Guid.NewGuid());
+        })).ToActionResult();
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Remove(Guid id, CancellationToken ct)
+        => (await MembersContract.Remove.Invoke(async () =>
+        {
+            // void endpoint — no return value
         })).ToActionResult();
 }
 ```

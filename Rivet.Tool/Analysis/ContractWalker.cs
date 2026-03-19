@@ -254,11 +254,40 @@ public static class ContractWalker
                 parameters.Add(new TsEndpointParam(paramName, new TsType.Primitive("string"), ParamSource.Route));
             }
 
-            // TInput = the body param as a whole
             if (tInput is not null)
             {
-                var tsType = typeWalker.MapType(tInput);
-                parameters.Add(new TsEndpointParam("body", tsType, ParamSource.Body));
+                // Check if TInput itself is IFormFile
+                if (IsFormFileType(tInput))
+                {
+                    parameters.Add(new TsEndpointParam("file", new TsType.Primitive("File"), ParamSource.File));
+                }
+                // Check if TInput is a record containing IFormFile properties
+                else if (HasFormFileProperty(tInput))
+                {
+                    foreach (var member in tInput.GetMembers())
+                    {
+                        if (member is not IPropertySymbol prop || prop.IsImplicitlyDeclared)
+                        {
+                            continue;
+                        }
+
+                        if (IsFormFileType(prop.Type))
+                        {
+                            parameters.Add(new TsEndpointParam(
+                                Naming.ToCamelCase(prop.Name),
+                                new TsType.Primitive("File"),
+                                ParamSource.File));
+                        }
+                        // Non-file properties on a file upload record are skipped —
+                        // FormData doesn't carry typed JSON alongside the file
+                    }
+                }
+                else
+                {
+                    // Normal body param
+                    var tsType = typeWalker.MapType(tInput);
+                    parameters.Add(new TsEndpointParam("body", tsType, ParamSource.Body));
+                }
             }
         }
         else
@@ -303,6 +332,13 @@ public static class ContractWalker
 
         return parameters;
     }
+
+    private static bool IsFormFileType(ITypeSymbol type) =>
+        type.ToDisplayString() is "Microsoft.AspNetCore.Http.IFormFile";
+
+    private static bool HasFormFileProperty(ITypeSymbol type) =>
+        type.GetMembers().OfType<IPropertySymbol>()
+            .Any(p => !p.IsImplicitlyDeclared && IsFormFileType(p.Type));
 
     /// <summary>
     /// Accepts Endpoint fields (v1 legacy) and EndpointBuilder fields (v1 typed).

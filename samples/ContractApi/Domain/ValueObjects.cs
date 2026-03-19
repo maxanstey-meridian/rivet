@@ -1,6 +1,6 @@
 namespace TaskBoard.Domain;
 
-/// <summary>Email address value object.</summary>
+/// TS: string & { readonly __brand: "Email" } — single-property record → branded primitive
 public sealed record Email(string Value)
 {
     public override string ToString() => Value;

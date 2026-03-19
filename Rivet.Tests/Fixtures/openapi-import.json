@@ -152,6 +152,31 @@
         }
       }
     },
+    "/api/tasks/{taskId}/attachments": {
+      "post": {
+        "operationId": "tasks_attach",
+        "tags": ["Tasks"],
+        "summary": "Attach a file to a task",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/AttachFileRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AttachmentDto" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/members": {
       "get": {
         "operationId": "members_list",
@@ -301,6 +326,23 @@
           "email": { "$ref": "#/components/schemas/Email" }
         },
         "required": ["name", "email"]
+      },
+      "AttachFileRequest": {
+        "type": "object",
+        "properties": {
+          "file": { "type": "string", "format": "binary" },
+          "description": { "type": "string" }
+        },
+        "required": ["file"]
+      },
+      "AttachmentDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "fileName": { "type": "string" },
+          "size": { "type": "integer" }
+        },
+        "required": ["id", "fileName", "size"]
       },
       "NotFoundDto": {
         "type": "object",

@@ -10,7 +10,8 @@ By default, every endpoint returns `Promise<T>` directly and throws `RivetError`
 import { RivetError } from "~/generated/rivet/rivet";
 
 try {
-  await tasks.create({ title: "" });
+  await tasks.create({ title: "", description: null, priority: "High",
+    assigneeId: null, labelNames: [] });
 } catch (err) {
   if (err instanceof RivetError) {
     err.status;        // 422
@@ -39,9 +40,9 @@ Pass `{ unwrap: false }` to get a typed result instead of throwing.
 For endpoints with a single `[ProducesResponseType]`, you get `RivetResult<T>`:
 
 ```typescript
-const result = await tasks.list({ unwrap: false });
+const result = await tasks.list(1, 20, null, { unwrap: false });
 result.status; // number
-result.data;   // TaskListItemDto[]
+result.data;   // PagedResult<TaskListItemDto>
 ```
 
 ### Multiple response types (discriminated union)
@@ -56,12 +57,12 @@ public async Task<IActionResult> Get(Guid id, CancellationToken ct) { ... }
 ```
 
 ```typescript
-// Generated result type
-type GetResult =
+// Generated — discriminated union with status code narrowing
+export type GetResult =
   | { status: 200; data: TaskDetailDto; response: Response }
-  | { status: 404; data: NotFoundDto; response: Response };
+  | { status: 404; data: NotFoundDto; response: Response }
+  | { status: Exclude<number, 200 | 404>; data: unknown; response: Response };
 
-// Generated overloads
 export function get(id: string): Promise<TaskDetailDto>;
 export function get(id: string, opts: { unwrap: false }): Promise<GetResult>;
 ```
@@ -71,7 +72,7 @@ export function get(id: string, opts: { unwrap: false }): Promise<GetResult>;
 const result = await tasks.get(id, { unwrap: false });
 if (result.status === 200) {
   result.data.title;    // TaskDetailDto
-} else {
+} else if (result.status === 404) {
   result.data.message;  // NotFoundDto
 }
 ```

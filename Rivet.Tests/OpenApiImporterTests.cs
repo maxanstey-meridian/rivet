@@ -524,13 +524,14 @@ public sealed class OpenApiImporterTests
         var walker = TypeWalker.Create(compilation);
         var endpoints = ContractWalker.Walk(compilation, walker);
 
-        Assert.Equal(9, endpoints.Count);
+        Assert.Equal(10, endpoints.Count);
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks");
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks/{taskId}");
         Assert.Contains(endpoints, e => e.HttpMethod == "PUT" && e.RouteTemplate == "/api/tasks/{taskId}");
         Assert.Contains(endpoints, e => e.HttpMethod == "PATCH" && e.RouteTemplate == "/api/tasks/{taskId}");
         Assert.Contains(endpoints, e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{taskId}");
+        Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks/{taskId}/attachments");
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/members");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/members");
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/health");
@@ -546,6 +547,8 @@ public sealed class OpenApiImporterTests
         Assert.True(walker.Definitions.ContainsKey("TaskDto"));
         Assert.True(walker.Definitions.ContainsKey("LabelDto"));
         Assert.True(walker.Definitions.ContainsKey("CreateTaskRequest"));
+        Assert.True(walker.Definitions.ContainsKey("AttachFileRequest"));
+        Assert.True(walker.Definitions.ContainsKey("AttachmentDto"));
         Assert.True(walker.Definitions.ContainsKey("NotFoundDto"));
         Assert.True(walker.Definitions.ContainsKey("ValidationErrorDto"));
         Assert.True(walker.Definitions.ContainsKey("MemberDto"));
@@ -632,6 +635,94 @@ public sealed class OpenApiImporterTests
         Assert.Contains("Endpoint.Put<", content);
         Assert.Contains("Endpoint.Patch<", content);
         Assert.Contains("Endpoint.Delete(", content);
+    }
+
+    // ========== File upload (multipart/form-data) tests ==========
+
+    [Fact]
+    public void Multipart_FormData_Binary_Property_Maps_To_IFormFile()
+    {
+        var result = Import(LoadFixture(), "Test");
+        var content = FindFile(result, "AttachFileRequest.cs");
+
+        Assert.Contains("IFormFile File", content);
+        Assert.Contains("using Microsoft.AspNetCore.Http;", content);
+        Assert.Contains("string? Description", content);
+    }
+
+    [Fact]
+    public void Multipart_Endpoint_Uses_Request_As_InputType()
+    {
+        var content = FindFile(Import(LoadFixture(), "Test"), "TasksContract.cs");
+
+        Assert.Contains("EndpointBuilder<AttachFileRequest, AttachmentDto> Attach", content);
+        Assert.Contains("Endpoint.Post<AttachFileRequest, AttachmentDto>(\"/api/tasks/{taskId}/attachments\")", content);
+    }
+
+    [Fact]
+    public void Multipart_RoundTrip_Produces_File_Param()
+    {
+        var result = Import(LoadFixture(), "TaskBoard.Contracts");
+        var compilation = CompileGeneratedFiles(result);
+        var walker = TypeWalker.Create(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker);
+
+        var attach = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks/{taskId}/attachments");
+        Assert.Contains(attach.Params, p => p.Source == ParamSource.File && p.Name == "file");
+    }
+
+    [Fact]
+    public void Standalone_Multipart_Binary_Maps_To_IFormFile()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "UploadRequest": {
+                    "type": "object",
+                    "properties": {
+                        "document": { "type": "string", "format": "binary" }
+                    },
+                    "required": ["document"]
+                },
+                "UploadResult": {
+                    "type": "object",
+                    "properties": { "url": { "type": "string" } },
+                    "required": ["url"]
+                }
+                """,
+            paths: """
+                "/api/uploads": {
+                    "post": {
+                        "operationId": "uploads_create",
+                        "tags": ["Uploads"],
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "multipart/form-data": {
+                                    "schema": { "$ref": "#/components/schemas/UploadRequest" }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "201": {
+                                "description": "Created",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/UploadResult" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var result = Import(spec);
+        var record = FindFile(result, "UploadRequest.cs");
+        Assert.Contains("IFormFile Document", record);
+        Assert.Contains("using Microsoft.AspNetCore.Http;", record);
+
+        var contract = FindFile(result, "UploadsContract.cs");
+        Assert.Contains("EndpointBuilder<UploadRequest, UploadResult>", contract);
     }
 
     // ========== Drift detection ==========
