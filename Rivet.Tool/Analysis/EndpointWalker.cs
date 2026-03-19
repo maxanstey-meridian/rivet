@@ -79,7 +79,7 @@ public static class EndpointWalker
         }
 
         // Strip route constraints: {id:guid} → {id}
-        fullRoute = StripRouteConstraints(fullRoute);
+        fullRoute = RouteParser.StripRouteConstraints(fullRoute);
 
         var parameters = ExtractParams(method, typeWalker, fullRoute);
         var responses = ExtractAllResponseTypes(method, typeWalker);
@@ -113,7 +113,7 @@ public static class EndpointWalker
         return Naming.ToCamelCase(name);
     }
 
-    private static (string? HttpMethod, string? Route) ExtractHttpMethodAndRoute(IMethodSymbol method)
+    internal static (string? HttpMethod, string? Route) ExtractHttpMethodAndRoute(IMethodSymbol method)
     {
         foreach (var attr in method.GetAttributes())
         {
@@ -150,7 +150,7 @@ public static class EndpointWalker
     /// <summary>
     /// Reads [Route("...")] from the containing controller class.
     /// </summary>
-    private static string? ExtractControllerRoute(INamedTypeSymbol? containingType)
+    internal static string? ExtractControllerRoute(INamedTypeSymbol? containingType)
     {
         if (containingType is null)
         {
@@ -173,7 +173,7 @@ public static class EndpointWalker
     /// Combines controller route prefix with method route segment.
     /// e.g. "api/case-statuses" + "{id:guid}" → "/api/case-statuses/{id:guid}"
     /// </summary>
-    private static string? CombineRoutes(string? controllerRoute, string? methodRoute)
+    internal static string? CombineRoutes(string? controllerRoute, string? methodRoute)
     {
         // If method route starts with / it's absolute — use as-is
         if (methodRoute is not null && methodRoute.StartsWith('/'))
@@ -200,15 +200,7 @@ public static class EndpointWalker
         return combined;
     }
 
-    /// <summary>
-    /// Strips route constraints: {id:guid} → {id}, {slug:minlength(3)} → {slug}
-    /// </summary>
-    private static string StripRouteConstraints(string route)
-    {
-        return RouteParser.StripRouteConstraints(route);
-    }
-
-    private static IReadOnlyList<TsEndpointParam> ExtractParams(
+    internal static IReadOnlyList<TsEndpointParam> ExtractParams(
         IMethodSymbol method,
         TypeWalker typeWalker,
         string? routeTemplate)
@@ -231,7 +223,7 @@ public static class EndpointWalker
             // IFormFile maps to the Web API File type — don't walk it through Roslyn
             var tsType = source == ParamSource.File
                 ? new TsType.Primitive("File")
-                : typeWalker.MapTypePublic(param.Type);
+                : typeWalker.MapType(param.Type);
             parameters.Add(new TsEndpointParam(param.Name, tsType, source.Value));
         }
 
@@ -280,13 +272,13 @@ public static class EndpointWalker
     /// Extracts return type. Tries ProducesResponseType(typeof(T), 200) first (controllers),
     /// then falls back to method return type (minimal API).
     /// </summary>
-    private static TsType? ExtractReturnType(IMethodSymbol method, TypeWalker typeWalker)
+    internal static TsType? ExtractReturnType(IMethodSymbol method, TypeWalker typeWalker)
     {
         // Try ProducesResponseType first (controller pattern)
         var producesType = ExtractProducesResponseType(method);
         if (producesType is not null)
         {
-            return typeWalker.MapTypePublic(producesType);
+            return typeWalker.MapType(producesType);
         }
 
         // Fall back to method return type (minimal API pattern)
@@ -315,7 +307,7 @@ public static class EndpointWalker
         if (returnType is INamedTypeSymbol actionResult
             && actionResult.OriginalDefinition.ToDisplayString() is "Microsoft.AspNetCore.Mvc.ActionResult<TValue>")
         {
-            return typeWalker.MapTypePublic(actionResult.TypeArguments[0]);
+            return typeWalker.MapType(actionResult.TypeArguments[0]);
         }
 
         // If it's IActionResult or non-generic ActionResult, we can't infer the type — skip
@@ -326,7 +318,7 @@ public static class EndpointWalker
             return null;
         }
 
-        return typeWalker.MapTypePublic(returnType);
+        return typeWalker.MapType(returnType);
     }
 
     /// <summary>
@@ -359,7 +351,7 @@ public static class EndpointWalker
     /// <summary>
     /// Extracts all [ProducesResponseType] attributes as typed responses.
     /// </summary>
-    private static IReadOnlyList<TsResponseType> ExtractAllResponseTypes(
+    internal static IReadOnlyList<TsResponseType> ExtractAllResponseTypes(
         IMethodSymbol method,
         TypeWalker typeWalker)
     {
@@ -378,7 +370,7 @@ public static class EndpointWalker
                 && attr.ConstructorArguments[0].Value is INamedTypeSymbol typeArg
                 && attr.ConstructorArguments[1].Value is int statusCode)
             {
-                var tsType = typeWalker.MapTypePublic(typeArg);
+                var tsType = typeWalker.MapType(typeArg);
                 responses.Add(new TsResponseType(statusCode, tsType));
             }
             // ProducesResponseType(statusCode) — no body
@@ -421,7 +413,7 @@ public static class EndpointWalker
                 && HasHttpMethodAttribute(m));
     }
 
-    private static bool HasHttpMethodAttribute(IMethodSymbol method) =>
+    internal static bool HasHttpMethodAttribute(IMethodSymbol method) =>
         method.GetAttributes().Any(a =>
         {
             var name = a.AttributeClass?.ToDisplayString();

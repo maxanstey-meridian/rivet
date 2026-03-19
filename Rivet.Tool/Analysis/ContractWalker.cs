@@ -190,7 +190,7 @@ public static class ContractWalker
             var call = chain[i];
             if (call.MethodName == "Returns" && call.TypeArgs.Count == 1 && call.StatusCodeArg is not null)
             {
-                var tsType = typeWalker.MapTypePublic(call.TypeArgs[0]);
+                var tsType = typeWalker.MapType(call.TypeArgs[0]);
                 responses.Add(new TsResponseType(call.StatusCodeArg.Value, tsType, call.DescriptionArg));
             }
             else if (call.MethodName == "Status" && call.StatusCodeArg is not null)
@@ -212,7 +212,7 @@ public static class ContractWalker
         }
 
         // Build return type from TOutput
-        TsType? returnType = tOutput is not null ? typeWalker.MapTypePublic(tOutput) : null;
+        TsType? returnType = tOutput is not null ? typeWalker.MapType(tOutput) : null;
 
         // Build params based on HTTP method and TInput
         var parameters = BuildParams(httpMethod, route, tInput, typeWalker);
@@ -257,7 +257,7 @@ public static class ContractWalker
             // TInput = the body param as a whole
             if (tInput is not null)
             {
-                var tsType = typeWalker.MapTypePublic(tInput);
+                var tsType = typeWalker.MapType(tInput);
                 parameters.Add(new TsEndpointParam("body", tsType, ParamSource.Body));
             }
         }
@@ -283,7 +283,7 @@ public static class ContractWalker
                         continue;
                     }
 
-                    var tsType = typeWalker.MapTypePublic(prop.Type);
+                    var tsType = typeWalker.MapType(prop.Type);
                     var source = routeParamNames.Contains(prop.Name)
                         ? ParamSource.Route
                         : ParamSource.Query;

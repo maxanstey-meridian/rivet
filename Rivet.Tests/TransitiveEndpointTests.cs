@@ -45,8 +45,9 @@ public sealed class TransitiveEndpointTests
         var endpoints = EndpointWalker.Walk(compilation, walker);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
-        var types = TypeEmitter.Emit(definitions, brands, walker.Enums);
-        var typeFileMap = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces).BuildTypeFileMap();
+        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
+        var types = string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
+        var typeFileMap = grouping.BuildTypeFileMap();
         var client = ClientEmitter.EmitControllerClient("items", endpoints, typeFileMap);
 
         // Types should be discovered transitively via endpoint params/return types
@@ -96,7 +97,8 @@ public sealed class TransitiveEndpointTests
         var endpoints = EndpointWalker.Walk(compilation, walker);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
-        var types = TypeEmitter.Emit(definitions, brands, walker.Enums);
+        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
+        var types = string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
 
         // PostDto discovered via endpoint
         Assert.Contains("export type PostDto = {", types);

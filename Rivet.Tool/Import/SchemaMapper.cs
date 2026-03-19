@@ -97,7 +97,7 @@ internal static class SchemaMapper
                 "boolean" => "bool",
                 "array" => ResolveArrayType(schema, warnings),
                 "object" => ResolveObjectType(schema, warnings),
-                _ => "object",
+                _ => WarnAndFallback(warnings, $"Unsupported JSON Schema type '{type}'"),
             };
         }
 
@@ -125,7 +125,13 @@ internal static class SchemaMapper
             }
         }
 
-        return "object";
+        return WarnAndFallback(warnings, "Schema could not be resolved to a C# type");
+    }
+
+    private static string WarnAndFallback(List<string> warnings, string reason)
+    {
+        warnings.Add($"{reason} — mapped to 'JsonElement'.");
+        return "System.Text.Json.JsonElement";
     }
 
     private static string ResolveStringType(JsonElement schema)
@@ -172,7 +178,7 @@ internal static class SchemaMapper
             return $"List<{itemType}>";
         }
 
-        return "List<object>";
+        return $"List<{WarnAndFallback(warnings, "Array schema missing 'items'")}>";
     }
 
     private static string ResolveObjectType(JsonElement schema, List<string> warnings)
@@ -186,10 +192,10 @@ internal static class SchemaMapper
         // Inline object with properties → unsupported
         if (schema.TryGetProperty("properties", out _))
         {
-            warnings.Add("Inline anonymous object encountered — mapped to 'object'.");
+            return WarnAndFallback(warnings, "Inline anonymous object encountered");
         }
 
-        return "object";
+        return WarnAndFallback(warnings, "Unstructured object schema");
     }
 
     private static bool IsStringEnum(JsonElement schema)
@@ -275,7 +281,7 @@ internal static class SchemaMapper
         var members = new List<string>();
         foreach (var member in schema.GetProperty("enum").EnumerateArray())
         {
-            members.Add(ToPascalCase(member.GetString()!));
+            members.Add(Naming.ToPascalCaseFromSegments(member.GetString()!));
         }
 
         return new GeneratedEnum(name, members);
@@ -283,15 +289,10 @@ internal static class SchemaMapper
 
     private static GeneratedBrand MapBrand(string name, JsonElement schema)
     {
-        var format = schema.GetProperty("format").GetString()!;
-        var innerType = format switch
-        {
-            "date-time" => "DateTime",
-            "guid" or "uuid" => "Guid",
-            _ => "string",
-        };
-
-        return new GeneratedBrand(name, innerType);
+        // All BrandFormats (email, uri, url, uri-reference) map to string.
+        // Non-string brands (date-time, guid) are not in BrandFormats and
+        // won't reach here — they're resolved inline by ResolveCSharpType.
+        return new GeneratedBrand(name, "string");
     }
 
     private static GeneratedRecord MapRecord(string name, JsonElement schema, List<string> warnings)
@@ -311,7 +312,7 @@ internal static class SchemaMapper
         {
             foreach (var prop in props.EnumerateObject())
             {
-                var propName = ToPascalCase(prop.Name);
+                var propName = Naming.ToPascalCaseFromSegments(prop.Name);
                 var isRequired = requiredSet.Contains(prop.Name);
                 var csharpType = ResolveCSharpType(prop.Value, warnings);
 
@@ -344,7 +345,6 @@ internal static class SchemaMapper
     /// </summary>
     private static JsonElement CloneWithType(JsonElement original, string type)
     {
-        using var doc = JsonDocument.Parse("{}");
         using var ms = new System.IO.MemoryStream();
         using (var writer = new Utf8JsonWriter(ms))
         {
@@ -365,26 +365,9 @@ internal static class SchemaMapper
             writer.WriteEndObject();
         }
 
-        return JsonDocument.Parse(ms.ToArray()).RootElement;
+        return JsonSerializer.Deserialize<JsonElement>(ms.ToArray());
     }
 
-    internal static string ToPascalCase(string input)
-    {
-        if (string.IsNullOrEmpty(input))
-        {
-            return input;
-        }
-
-        // Already PascalCase
-        if (char.IsUpper(input[0]) && !input.Contains('_') && !input.Contains('-'))
-        {
-            return input;
-        }
-
-        var parts = input.Split(['_', '-', ' '], StringSplitOptions.RemoveEmptyEntries);
-        return string.Concat(parts.Select(p =>
-            char.ToUpperInvariant(p[0]) + p[1..]));
-    }
 }
 
 // --- Intermediate types ---

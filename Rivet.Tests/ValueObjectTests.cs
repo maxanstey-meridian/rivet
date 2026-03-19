@@ -11,7 +11,8 @@ public sealed class ValueObjectTests
         var walker = TypeWalker.Create(compilation);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
-        return TypeEmitter.Emit(definitions, brands, walker.Enums);
+        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
+        return string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
     }
 
     [Fact]

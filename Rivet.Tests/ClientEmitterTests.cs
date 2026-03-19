@@ -11,9 +11,10 @@ public sealed class ClientEmitterTests
         var walker = TypeWalker.Create(compilation);
         var endpoints = EndpointWalker.Walk(compilation, walker);
         var definitions = walker.Definitions.Values.ToList();
-        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var brands = walker.Brands.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
-        var types = TypeEmitter.Emit(definitions, enums: walker.Enums);
+        var types = string.Concat(typeGrouping.Groups.Select(TypeEmitter.EmitGroupFile));
         var client = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap);
         return (types, client);
     }

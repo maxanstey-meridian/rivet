@@ -4,7 +4,7 @@
 
 Rivet is feature-complete through Phase 4 + VO support + grouped type emission + typed error responses via overloaded unwrap. Published to NuGet as
 `Rivet.Attributes` (0.1.0) and `dotnet-rivet` (0.2.0, 0.3.0 pending). Working against CaseBridge's real `.csproj` with
-17 types and 5 endpoints. 66 tests.
+17 types and 5 endpoints. 169 tests.
 
 ### What's shipped
 
@@ -17,9 +17,14 @@ Rivet is feature-complete through Phase 4 + VO support + grouped type emission +
 - Type grouping: types split into per-namespace files (`types/`), cross-referenced types promoted to `common.ts`,
   barrel `index.ts` for both `types/` and `client/`. Namespace last segment used as file name, number-suffix on
   collision. Grouping signal is not yet configurable (future feature).
-- CLI: MSBuildWorkspace with multi-SDK Homebrew discovery, file output, stdout preview, --compile flag
+- Contract style: `[RivetContract] public static class` with `EndpointBuilder<T>` fields, `.Invoke()` for type-safe
+  runtime execution, `RivetResult<T>` for framework-agnostic returns
+- Coverage checker: `--check` flag verifies contract implementations — detects missing `.Invoke()` call sites,
+  HTTP method mismatches, and route mismatches. Supports both ASP.NET controllers and minimal API (`MapGet`/etc.)
+- CLI: MSBuildWorkspace with multi-SDK Homebrew discovery, file output, stdout preview, --compile flag, --check flag
 - `[RivetClient]` class-level attribute: auto-discovers all public methods with HTTP attributes, no per-method
   `[RivetEndpoint]` needed. Deduplicates with `[RivetEndpoint]` if both present.
+- OpenAPI 3.1 emission: `--openapi` flag, monomorphised generics, $ref integrity, SecurityConfig support
 - NuGet: Rivet.Attributes (netstandard2.0), dotnet-rivet (net8.0, PackAsTool)
 - Samples: AnnotationApi (attribute-based discovery), ContractApi (contract-driven discovery)
 

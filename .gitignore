@@ -5,3 +5,8 @@ obj/
 *.suo
 .idea/
 Solution1/
+
+# Docs
+docs/node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/

@@ -275,7 +275,8 @@ public static class OpenApiEmitter
 
             TsType.Brand b => MapTsTypeToJsonSchema(b.Inner),
 
-            // TypeParam should be resolved before reaching here; fallback to object
+            TsType.TypeParam tp => FallbackTypeParam(tp),
+
             _ => new Dictionary<string, object> { ["type"] = "object" },
         };
     }
@@ -289,6 +290,12 @@ public static class OpenApiEmitter
                 ["type"] = "string",
                 ["format"] = "binary",
             };
+        }
+
+        if (p.Name == "unknown")
+        {
+            Console.Error.WriteLine("warning: 'unknown' type (JsonElement/JsonNode) in OpenAPI schema — emitting as untyped");
+            return new Dictionary<string, object>();
         }
 
         return new Dictionary<string, object>
@@ -317,6 +324,12 @@ public static class OpenApiEmitter
                 new Dictionary<string, object> { ["type"] = "null" },
             },
         };
+    }
+
+    private static Dictionary<string, object> FallbackTypeParam(TsType.TypeParam tp)
+    {
+        Console.Error.WriteLine($"warning: unresolved type parameter '{tp.Name}' in OpenAPI schema — emitting as object");
+        return new Dictionary<string, object> { ["type"] = "object" };
     }
 
     private static string MonomorphisedName(TsType.Generic g)
@@ -499,6 +512,7 @@ public static class OpenApiEmitter
         }
 
         // Transitively collect refs from referenced definitions
+        var enqueued = new HashSet<string>(names);
         var queue = new Queue<string>(names);
         while (queue.Count > 0)
         {
@@ -518,7 +532,7 @@ public static class OpenApiEmitter
                 {
                     foreach (var n in names)
                     {
-                        if (!queue.Contains(n))
+                        if (enqueued.Add(n))
                         {
                             queue.Enqueue(n);
                         }
@@ -609,13 +623,5 @@ public static class OpenApiEmitter
         };
     }
 
-    private static string UpperFirst(string s)
-    {
-        if (string.IsNullOrEmpty(s) || char.IsUpper(s[0]))
-        {
-            return s;
-        }
-
-        return char.ToUpperInvariant(s[0]) + s[1..];
-    }
+    private static string UpperFirst(string s) => Naming.ToPascalCase(s);
 }

@@ -64,7 +64,7 @@ public sealed class TypeWalker
     /// Maps a Roslyn type symbol to its TsType representation.
     /// Used by EndpointWalker for parameter and return types.
     /// </summary>
-    public TsType MapTypePublic(ITypeSymbol symbol) => MapType(symbol);
+    public TsType MapType(ITypeSymbol symbol) => MapTypeCore(symbol);
 
     private static IEnumerable<INamedTypeSymbol> FindAttributedTypes(
         Compilation compilation,
@@ -114,7 +114,7 @@ public sealed class TypeWalker
             }
 
             var tsName = Naming.ToCamelCase(member.Name);
-            var tsType = MapType(member.Type);
+            var tsType = MapTypeCore(member.Type);
             var isOptional = IsOptionalProperty(member);
 
             properties.Add(new TsPropertyDefinition(tsName, tsType, isOptional));
@@ -125,7 +125,7 @@ public sealed class TypeWalker
         _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
     }
 
-    private TsType MapType(ITypeSymbol symbol)
+    private TsType MapTypeCore(ITypeSymbol symbol)
     {
         // Type parameter (e.g. T in PagedResult<T>) → emit as-is
         if (symbol is ITypeParameterSymbol typeParam)
@@ -136,7 +136,7 @@ public sealed class TypeWalker
         // Nullable value type: int? → Nullable<int>
         if (symbol is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
         {
-            var inner = MapType(nullable.TypeArguments[0]);
+            var inner = MapTypeCore(nullable.TypeArguments[0]);
             return new TsType.Nullable(inner);
         }
 
@@ -144,14 +144,14 @@ public sealed class TypeWalker
         if (symbol.NullableAnnotation == NullableAnnotation.Annotated
             && symbol is not INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T })
         {
-            var inner = MapType(symbol.WithNullableAnnotation(NullableAnnotation.NotAnnotated));
+            var inner = MapTypeCore(symbol.WithNullableAnnotation(NullableAnnotation.NotAnnotated));
             return new TsType.Nullable(inner);
         }
 
         // Array T[]
         if (symbol is IArrayTypeSymbol arrayType)
         {
-            return new TsType.Array(MapType(arrayType.ElementType));
+            return new TsType.Array(MapTypeCore(arrayType.ElementType));
         }
 
         if (symbol is INamedTypeSymbol namedType)
@@ -177,13 +177,13 @@ public sealed class TypeWalker
             // Collections: List<T>, IEnumerable<T>, IReadOnlyList<T>, IList<T>, ICollection<T>, IReadOnlyCollection<T>
             if (IsCollectionType(namedType) && namedType.TypeArguments.Length == 1)
             {
-                return new TsType.Array(MapType(namedType.TypeArguments[0]));
+                return new TsType.Array(MapTypeCore(namedType.TypeArguments[0]));
             }
 
             // Dictionary<string, T>
             if (IsDictionaryType(namedType) && namedType.TypeArguments.Length == 2)
             {
-                return new TsType.Dictionary(MapType(namedType.TypeArguments[1]));
+                return new TsType.Dictionary(MapTypeCore(namedType.TypeArguments[1]));
             }
 
             // Enum → named string union type
@@ -212,7 +212,7 @@ public sealed class TypeWalker
                 var voInner = TryGetValueObjectInner(namedType);
                 if (voInner is not null)
                 {
-                    var brand = new TsType.Brand(namedType.Name, MapType(voInner));
+                    var brand = new TsType.Brand(namedType.Name, MapTypeCore(voInner));
                     _brands.TryAdd(namedType.Name, brand);
                     _typeNamespaces.TryAdd(namedType.Name, GetNamespaceGroup(namedType));
                     return brand;
@@ -223,7 +223,7 @@ public sealed class TypeWalker
                 // Closed generic (e.g. PagedResult<MessageDto>) → Generic node
                 if (namedType.IsGenericType && !namedType.IsUnboundGenericType)
                 {
-                    var tsArgs = namedType.TypeArguments.Select(MapType).ToList();
+                    var tsArgs = namedType.TypeArguments.Select(MapTypeCore).ToList();
                     return new TsType.Generic(namedType.Name, tsArgs);
                 }
 

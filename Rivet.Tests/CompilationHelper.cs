@@ -81,6 +81,21 @@ public static class CompilationHelper
                 public const int Status409Conflict = 409;
             }
         }
+        namespace Microsoft.AspNetCore.Builder
+        {
+            public static class EndpointRouteBuilderExtensions
+            {
+                public static void MapGet(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app, string pattern, System.Delegate handler) { }
+                public static void MapPost(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app, string pattern, System.Delegate handler) { }
+                public static void MapPut(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app, string pattern, System.Delegate handler) { }
+                public static void MapDelete(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app, string pattern, System.Delegate handler) { }
+                public static void MapPatch(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app, string pattern, System.Delegate handler) { }
+            }
+        }
+        namespace Microsoft.AspNetCore.Routing
+        {
+            public interface IEndpointRouteBuilder { }
+        }
         """;
 
     /// <summary>

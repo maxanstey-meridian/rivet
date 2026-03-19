@@ -9,7 +9,10 @@ public sealed class GenericTypeTests
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var walker = TypeWalker.Create(compilation);
-        return TypeEmitter.Emit([.. walker.Definitions.Values], enums: walker.Enums);
+        var definitions = walker.Definitions.Values.ToList();
+        var brands = walker.Brands.Values.ToList();
+        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
+        return string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
     }
 
     [Fact]

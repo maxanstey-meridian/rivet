@@ -51,6 +51,20 @@ static async Task<int> Run(string[] args)
     var endpoints = EndpointWalker.Walk(compilation, walker);
     var contractEndpoints = ContractWalker.Walk(compilation, walker);
 
+    if (options.Check)
+    {
+        var coverageWarnings = CoverageChecker.Check(compilation, contractEndpoints);
+        foreach (var w in coverageWarnings)
+        {
+            Console.Error.WriteLine($"warning: [{w.Kind}] {w.ContractName}.{w.FieldName}: expected {w.Expected}, got {w.Actual}");
+        }
+
+        if (coverageWarnings.Count > 0 && outputDir is null)
+        {
+            return 1;
+        }
+    }
+
     // Merge: contract endpoints win on (ControllerName, Name) collision
     var seen = new HashSet<(string, string)>(
         contractEndpoints.Select(e => (e.ControllerName, e.Name)));
@@ -361,6 +375,7 @@ static RivetOptions? ParseArgs(string[] args)
     string? defaultSecurity = null;
     string? fromOpenApiPath = null;
     string? importNamespace = null;
+    var check = false;
     var files = new List<string>();
 
     for (var i = 0; i < args.Length; i++)
@@ -390,6 +405,9 @@ static RivetOptions? ParseArgs(string[] args)
             case "--namespace" when i + 1 < args.Length:
                 importNamespace = args[++i];
                 break;
+            case "--check":
+                check = true;
+                break;
             default:
                 files.Add(args[i]);
                 break;
@@ -401,7 +419,7 @@ static RivetOptions? ParseArgs(string[] args)
     {
         return new RivetOptions(
             fromOpenApiPath, outputDir, mode, files.ToArray(),
-            openApiPath, defaultSecurity, fromOpenApiPath, importNamespace);
+            openApiPath, defaultSecurity, fromOpenApiPath, importNamespace, check);
     }
 
     projectPath ??= files.FirstOrDefault();
@@ -411,7 +429,7 @@ static RivetOptions? ParseArgs(string[] args)
         return null;
     }
 
-    return new RivetOptions(projectPath, outputDir, mode, files.ToArray(), openApiPath, defaultSecurity);
+    return new RivetOptions(projectPath, outputDir, mode, files.ToArray(), openApiPath, defaultSecurity, Check: check);
 }
 
 static int RunImport(RivetOptions options)
@@ -474,6 +492,7 @@ static void PrintUsage()
     Console.Error.WriteLine("  --security <spec>          Default security scheme (bearer, bearer:jwt, cookie:name, apikey:in:name)");
     Console.Error.WriteLine("  --from-openapi <spec.json> Import OpenAPI spec → C# contracts + DTOs");
     Console.Error.WriteLine("  --namespace <ns>           Namespace for generated C# files (default: Generated)");
+    Console.Error.WriteLine("  --check                    Verify contract coverage (missing impls, route/method mismatches)");
 }
 
 static IEnumerable<string> GetDotnetRoots()
@@ -553,4 +572,5 @@ static IEnumerable<string> GetDotnetRoots()
 sealed record RivetOptions(
     string ProjectPath, string? OutputDir, string Mode, string[] Files,
     string? OpenApiPath = null, string? DefaultSecurity = null,
-    string? FromOpenApiPath = null, string? ImportNamespace = null);
+    string? FromOpenApiPath = null, string? ImportNamespace = null,
+    bool Check = false);

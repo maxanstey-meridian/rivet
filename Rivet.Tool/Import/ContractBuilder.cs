@@ -67,7 +67,7 @@ internal static class ContractBuilder
             : null;
 
         var fieldName = DeriveFieldName(operationId, httpMethod, route, tag);
-        var method = SchemaMapper.ToPascalCase(httpMethod);
+        var method = Naming.ToPascalCaseFromSegments(httpMethod);
         var description = operation.TryGetProperty("summary", out var summary)
             ? summary.GetString()
             : null;
@@ -237,9 +237,9 @@ internal static class ContractBuilder
 
         var segments = route.Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Where(s => !s.StartsWith('{'))
-            .Select(SchemaMapper.ToPascalCase);
+            .Select(Naming.ToPascalCaseFromSegments);
 
-        return SchemaMapper.ToPascalCase(httpMethod) + string.Concat(segments);
+        return Naming.ToPascalCaseFromSegments(httpMethod) + string.Concat(segments);
     }
 
     private static string StripTagPrefix(string operationId, string tag)
@@ -257,11 +257,11 @@ internal static class ContractBuilder
             if (operationId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
                 var stripped = operationId[prefix.Length..];
-                return SchemaMapper.ToPascalCase(stripped);
+                return Naming.ToPascalCaseFromSegments(stripped);
             }
         }
 
-        return SchemaMapper.ToPascalCase(operationId);
+        return Naming.ToPascalCaseFromSegments(operationId);
     }
 
     private static string? ExtractTag(JsonElement operation)
@@ -276,6 +276,6 @@ internal static class ContractBuilder
             return null;
         }
 
-        return SchemaMapper.ToPascalCase(tags[0].GetString()!);
+        return Naming.ToPascalCaseFromSegments(tags[0].GetString()!);
     }
 }

@@ -38,7 +38,7 @@ public static partial class ClientEmitter
               baseUrl: string;
               headers?: () => Record<string, string> | Promise<Record<string, string>>;
               fetch?: typeof fetch;
-              onError?: (error: RivetError) => never;
+              onError?: (error: RivetError) => void;
             };
 
             export type RivetResult<T> = { status: number; data: T; response: Response };
@@ -234,7 +234,7 @@ public static partial class ClientEmitter
         // Determine result type for unwrap: false
         var hasResultDU = endpoint.Responses.Count >= 2;
         var resultTypeName = hasResultDU
-            ? $"{ToPascalCase(funcName)}Result"
+            ? $"{Naming.ToPascalCase(funcName)}Result"
             : $"RivetResult<{successType}>";
 
         // Emit result DU type for multi-response endpoints
@@ -342,16 +342,6 @@ public static partial class ClientEmitter
         sb.Append($"  | {{ status: Exclude<number, {statusCodes}>; data: unknown; response: Response }}");
         sb.AppendLine(";");
         sb.AppendLine();
-    }
-
-    private static string ToPascalCase(string name)
-    {
-        if (string.IsNullOrEmpty(name) || char.IsUpper(name[0]))
-        {
-            return name;
-        }
-
-        return char.ToUpperInvariant(name[0]) + name[1..];
     }
 
     private static string SafeFunctionName(string name)

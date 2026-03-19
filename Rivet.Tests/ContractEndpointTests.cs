@@ -508,4 +508,250 @@ public sealed class ContractEndpointTests
         Assert.Equal("Retrieve a task", endpoints[0].Description);
         Assert.Equal("Task not found", endpoints[0].Responses.First(r => r.StatusCode == 404).Description);
     }
+
+    // --- Abstract base class contract tests ---
+
+    private static (IReadOnlyList<TsEndpointDefinition> Endpoints, string Client) GenerateWithBothWalkers(string source)
+    {
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var walker = TypeWalker.Create(compilation);
+        var contractEndpoints = ContractWalker.Walk(compilation, walker);
+        var annotationEndpoints = EndpointWalker.Walk(compilation, walker);
+
+        // Merge: contract wins on collision (same as Program.cs)
+        var seen = new HashSet<(string, string)>(
+            contractEndpoints.Select(e => (e.ControllerName, e.Name)));
+        var merged = new List<TsEndpointDefinition>(contractEndpoints);
+        foreach (var ep in annotationEndpoints)
+        {
+            if (seen.Add((ep.ControllerName, ep.Name)))
+            {
+                merged.Add(ep);
+            }
+        }
+
+        var definitions = walker.Definitions.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
+        var controllerGroups = ClientEmitter.GroupByController(merged);
+        var client = string.Join("\n", controllerGroups.Select(g =>
+            ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
+        return (merged, client);
+    }
+
+    [Fact]
+    public void AbstractContract_Get_ExtractsEndpoint()
+    {
+        var source = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetContract]
+            [Route("api/tasks")]
+            public abstract class TasksContract : ControllerBase
+            {
+                [HttpGet]
+                [ProducesResponseType(typeof(TaskDto), 200)]
+                public abstract Task<IActionResult> List(CancellationToken ct);
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("list", ep.Name);
+        Assert.Equal("GET", ep.HttpMethod);
+        Assert.Equal("/api/tasks", ep.RouteTemplate);
+        Assert.Equal("tasks", ep.ControllerName);
+        Assert.Contains("Promise<TaskDto>", client);
+    }
+
+    [Fact]
+    public void AbstractContract_Post_WithBodyAndRouteParams()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateCommentInput(string Text);
+
+            [RivetType]
+            public sealed record CommentDto(string Id, string Text);
+
+            [RivetContract]
+            [Route("api/tasks")]
+            public abstract class TasksContract : ControllerBase
+            {
+                [HttpPost("{taskId}/comments")]
+                [ProducesResponseType(typeof(CommentDto), 201)]
+                public abstract Task<IActionResult> CreateComment(
+                    Guid taskId,
+                    [FromBody] CreateCommentInput body,
+                    CancellationToken ct);
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("POST", ep.HttpMethod);
+        Assert.Equal("/api/tasks/{taskId}/comments", ep.RouteTemplate);
+
+        var routeParam = ep.Params.First(p => p.Source == ParamSource.Route);
+        Assert.Equal("taskId", routeParam.Name);
+
+        var bodyParam = ep.Params.First(p => p.Source == ParamSource.Body);
+        Assert.Equal("body", bodyParam.Name);
+    }
+
+    [Fact]
+    public void AbstractContract_MultipleResponses()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetContract]
+            [Route("api/tasks")]
+            public abstract class TasksContract : ControllerBase
+            {
+                [HttpGet("{id}")]
+                [ProducesResponseType(typeof(TaskDto), 200)]
+                [ProducesResponseType(404)]
+                public abstract Task<IActionResult> GetById(Guid id, CancellationToken ct);
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal(2, ep.Responses.Count);
+        Assert.Equal(200, ep.Responses[0].StatusCode);
+        Assert.Equal(404, ep.Responses[1].StatusCode);
+    }
+
+    [Fact]
+    public void AbstractContract_ControllerInherits_NoDeduplication()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetContract]
+            [Route("api/tasks")]
+            public abstract class TasksContract : ControllerBase
+            {
+                [HttpGet]
+                [ProducesResponseType(typeof(TaskDto), 200)]
+                public abstract Task<IActionResult> List(CancellationToken ct);
+            }
+
+            // Controller inherits — Rivet should only see the contract, not the controller
+            public sealed class TasksController : TasksContract
+            {
+                public override Task<IActionResult> List(CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (endpoints, _) = GenerateWithBothWalkers(source);
+
+        // Only one endpoint — from the contract. Controller not discovered (no [RivetClient])
+        Assert.Single(endpoints);
+        Assert.Equal("tasks", endpoints[0].ControllerName);
+    }
+
+    [Fact]
+    public void AbstractContract_NameStripsSuffix()
+    {
+        var source = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Id);
+
+            [RivetContract]
+            [Route("api/case-statuses")]
+            public abstract class CaseStatusesContract : ControllerBase
+            {
+                [HttpGet]
+                [ProducesResponseType(typeof(ItemDto), 200)]
+                public abstract Task<IActionResult> List(CancellationToken ct);
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        Assert.Equal("caseStatuses", endpoints[0].ControllerName);
+    }
+
+    [Fact]
+    public void AbstractContract_RouteConstraints_Stripped()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            [Route("api/tasks")]
+            public abstract class TasksContract : ControllerBase
+            {
+                [HttpGet("{id:guid}")]
+                [ProducesResponseType(typeof(TaskDto), 200)]
+                public abstract Task<IActionResult> GetById(Guid id, CancellationToken ct);
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        Assert.Equal("/api/tasks/{id}", endpoints[0].RouteTemplate);
+        Assert.DoesNotContain(":guid", client);
+    }
 }
