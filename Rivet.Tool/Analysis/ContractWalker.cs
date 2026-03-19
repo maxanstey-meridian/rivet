@@ -185,6 +185,7 @@ public static class ContractWalker
         int? successStatusOverride = null;
         string? endpointDescription = null;
         EndpointSecurity? security = null;
+        var acceptsFile = false;
 
         for (var i = 1; i < chain.Count; i++)
         {
@@ -192,6 +193,10 @@ public static class ContractWalker
             if (call.MethodName == "Accepts" && call.TypeArgs.Count == 1)
             {
                 tInput = call.TypeArgs[0];
+            }
+            else if (call.MethodName == "AcceptsFile")
+            {
+                acceptsFile = true;
             }
             else if (call.MethodName == "Returns" && call.TypeArgs.Count == 1 && call.StatusCodeArg is not null)
             {
@@ -220,7 +225,7 @@ public static class ContractWalker
         TsType? returnType = tOutput is not null ? typeWalker.MapType(tOutput) : null;
 
         // Build params based on HTTP method and TInput
-        var parameters = BuildParams(httpMethod, route, tInput, typeWalker);
+        var parameters = BuildParams(httpMethod, route, tInput, typeWalker, acceptsFile);
 
         // Add success response to responses list if we have TOutput
         if (returnType is not null)
@@ -245,7 +250,8 @@ public static class ContractWalker
         string httpMethod,
         string route,
         ITypeSymbol? tInput,
-        TypeWalker typeWalker)
+        TypeWalker typeWalker,
+        bool acceptsFile = false)
     {
         var routeParamNames = RouteParser.ParseRouteParamNames(route);
         var parameters = new List<TsEndpointParam>();
@@ -257,6 +263,12 @@ public static class ContractWalker
             foreach (var paramName in routeParamNames)
             {
                 parameters.Add(new TsEndpointParam(paramName, new TsType.Primitive("string"), ParamSource.Route));
+            }
+
+            // .AcceptsFile() on the contract — add a File param
+            if (acceptsFile)
+            {
+                parameters.Add(new TsEndpointParam("file", new TsType.Primitive("File"), ParamSource.File));
             }
 
             if (tInput is not null)

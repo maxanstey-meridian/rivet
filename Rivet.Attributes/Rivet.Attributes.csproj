@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
 
     <PackageId>Rivet.Attributes</PackageId>
-    <Version>0.18.0</Version>
+    <Version>0.20.0</Version>
     <Authors>Max Anstey</Authors>
     <Description>Marker attributes for Rivet — end-to-end .NET to TypeScript type safety</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

@@ -17,7 +17,7 @@
 ## Install
 
 ```bash
-dotnet add package Rivet.Attributes
+dotnet add package Rivet.Attributes --version "*"
 dotnet tool install --global dotnet-rivet
 ```
 

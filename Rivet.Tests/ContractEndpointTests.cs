@@ -754,4 +754,78 @@ public sealed class ContractEndpointTests
         Assert.Equal("/api/tasks/{id}", endpoints[0].RouteTemplate);
         Assert.DoesNotContain(":guid", client);
     }
+
+    [Fact]
+    public void AcceptsFile_GeneratesFileParam()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record FileResult(string Id, string FileName);
+
+            [RivetContract]
+            public static class UploadsContract
+            {
+                public static readonly RouteDefinition<FileResult> Upload =
+                    Define.Post<FileResult>("/api/files")
+                        .AcceptsFile()
+                        .Description("Upload a file");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("upload", ep.Name);
+        Assert.Equal("POST", ep.HttpMethod);
+
+        // Should have a file param
+        Assert.Single(ep.Params);
+        Assert.Equal("file", ep.Params[0].Name);
+        Assert.Equal(ParamSource.File, ep.Params[0].Source);
+
+        // Client should use FormData
+        Assert.Contains("file: File", client);
+        Assert.Contains("FormData", client);
+    }
+
+    [Fact]
+    public void AcceptsFile_WithRouteParams_GeneratesBoth()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record AvatarResult(string Url);
+
+            [RivetContract]
+            public static class UsersContract
+            {
+                public static readonly RouteDefinition<AvatarResult> UploadAvatar =
+                    Define.Post<AvatarResult>("/api/users/{id}/avatar")
+                        .AcceptsFile()
+                        .Description("Upload a profile picture");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+
+        // Route param + file param
+        Assert.Equal(2, ep.Params.Count);
+        Assert.Equal("id", ep.Params[0].Name);
+        Assert.Equal(ParamSource.Route, ep.Params[0].Source);
+        Assert.Equal("file", ep.Params[1].Name);
+        Assert.Equal(ParamSource.File, ep.Params[1].Source);
+
+        Assert.Contains("id: string, file: File", client);
+    }
 }

@@ -29,6 +29,20 @@ All builder methods return the definition for chaining.
 | `.Anonymous()` | Marks endpoint as not requiring authentication |
 | `.Secure(scheme)` | Sets a named security scheme for the endpoint |
 | `.Accepts<T>()` | Convert void definition to input-only (accepts body, returns void) |
+| `.AcceptsFile()` | Mark endpoint as accepting a file upload (generates `File` param with `FormData`) |
+
+## Runtime properties
+
+| Property | Type | Description |
+|---|---|---|
+| `.Route` | `string` | The route template from the contract definition |
+| `.Method` | `string` | The HTTP method (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) |
+
+Useful for minimal API registration and tooling:
+
+```csharp
+app.MapGet(MembersContract.List.Route, async () => ...);
+```
 
 ## `.Invoke()` — runtime execution
 

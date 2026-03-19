@@ -16,7 +16,7 @@ The generated client is re-emitted to call these validators at every fetch bound
 ## Command
 
 ```bash
-dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --compile
+dotnet rivet --project path/to/Api.csproj --output ./generated --compile
 ```
 
 ## Output structure

@@ -76,7 +76,7 @@ The generated C# files compile immediately and work with the existing Rivet pipe
 dotnet rivet --from-openapi spec.json --namespace MyApp.Contracts --output ./src/Contracts/
 
 # Step 2: Generate TS from the imported contracts
-dotnet rivet --project MyApp.csproj --output ../ui/generated/rivet
+dotnet rivet --project MyApp.csproj --output ./generated
 ```
 
 The compiler enforces that your implementations match the imported contracts. When the upstream spec changes, re-run the import and fix what the compiler flags.

@@ -5,7 +5,7 @@ Generate an OpenAPI 3.1 JSON spec alongside your TypeScript output. Your C# type
 ## Command
 
 ```bash
-dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --openapi
+dotnet rivet --project path/to/Api.csproj --output ./generated --openapi
 ```
 
 This produces everything the normal forward pipeline does (types, client, validators) **plus** an `openapi.json` file.

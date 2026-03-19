@@ -63,16 +63,16 @@ dotnet rivet --from-openapi spec.json --namespace MyApp.Contracts
 
 ```bash
 # Generate TS types + client
-dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet
+dotnet rivet --project path/to/Api.csproj --output ./generated
 
 # Generate with runtime validators
-dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --compile
+dotnet rivet --project path/to/Api.csproj --output ./generated --compile
 
 # Generate with OpenAPI spec
-dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --openapi
+dotnet rivet --project path/to/Api.csproj --output ./generated --openapi
 
 # Generate with OpenAPI spec + security
-dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --openapi --security bearer
+dotnet rivet --project path/to/Api.csproj --output ./generated --openapi --security bearer
 ```
 
 ### Contract coverage check
@@ -85,7 +85,7 @@ dotnet rivet --project path/to/Api.csproj --check --quiet
 dotnet rivet --project path/to/Api.csproj --check
 
 # Check + generate (both run together)
-dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet --check
+dotnet rivet --project path/to/Api.csproj --output ./generated --check
 ```
 
 Reports missing implementations, HTTP method mismatches, and route mismatches. Prints a coverage summary (e.g. `Coverage: 79/79 endpoints covered. All OK.`). Exits with code 1 if any warnings are found (standalone mode without `--output`).

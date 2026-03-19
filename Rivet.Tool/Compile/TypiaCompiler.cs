@@ -184,7 +184,7 @@ public static class TypiaCompiler
     private static async Task<bool> RunTscAsync(string outputDir)
     {
         var buildDir = Path.Combine(outputDir, "build");
-        var tsconfigPath = Path.Combine(buildDir, "tsconfig.json");
+        var tsconfigPath = Path.GetFullPath(Path.Combine(buildDir, "tsconfig.json"));
 
         // Use the patched tsc directly from our managed node_modules
         var tscPath = Path.Combine(RivetHome, "node_modules", ".bin", "tsc");

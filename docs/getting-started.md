@@ -6,7 +6,7 @@ The happy path: annotate your C# types, generate TypeScript, use the typed clien
 
 ```bash
 # Add the attributes to your API project
-dotnet add package Rivet.Attributes
+dotnet add package Rivet.Attributes --version "*"
 
 # Install the CLI tool
 dotnet tool install --global dotnet-rivet
@@ -74,7 +74,7 @@ Request types (`[FromBody]`), response types (`[ProducesResponseType]` or typed 
 ## 3. Generate
 
 ```bash
-dotnet rivet --project path/to/Api.csproj --output ../ui/generated/rivet
+dotnet rivet --project path/to/Api.csproj --output ./generated
 ```
 
 ## 4. What it produces

@@ -83,6 +83,12 @@ public sealed class RouteDefinition<TOutput>
     public RouteDefinition<TOutput> Secure(string scheme) => this;
 
     /// <summary>
+    /// Marks this endpoint as accepting a file upload (multipart/form-data).
+    /// The generated TS client will accept a File parameter.
+    /// </summary>
+    public RouteDefinition<TOutput> AcceptsFile() => this;
+
+    /// <summary>
     /// Execute the endpoint handler with type-safe output.
     /// </summary>
     public async Task<RivetResult<TOutput>> Invoke(Func<Task<TOutput>> handler)

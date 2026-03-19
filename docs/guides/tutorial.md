@@ -19,7 +19,7 @@ A user management API with five endpoints showcasing lists, single-item gets, up
 ```bash
 dotnet new webapi -n UserApi --no-openapi
 cd UserApi
-dotnet add package Rivet.Attributes
+dotnet add package Rivet.Attributes --version "*"
 ```
 
 ## 2. Define your domain
@@ -73,7 +73,7 @@ public static class UsersContract
             .Description("Create a new user")
             .Returns<ErrorDto>(422, "Validation failed");
 
-    public static readonly RouteDefinition Update =
+    public static readonly InputRouteDefinition<UpdateUserRequest> Update =
         Define.Put("/api/users/{id}")
             .Accepts<UpdateUserRequest>()
             .Status(204)
@@ -82,6 +82,7 @@ public static class UsersContract
 
     public static readonly RouteDefinition<FileUploadResult> UploadAvatar =
         Define.Post<FileUploadResult>("/api/users/{id}/avatar")
+            .AcceptsFile()
             .Description("Upload a profile picture");
 }
 
@@ -126,6 +127,7 @@ Use `.Route` from the contract — no route strings to keep in sync:
 // Program.cs
 using Rivet;
 using UserApi.Contracts;
+using UserApi.Domain;
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
@@ -193,7 +195,7 @@ Every handler uses the contract's `.Invoke()` — the compiler enforces the retu
 ## 5. Generate the TypeScript client
 
 ```bash
-dotnet rivet --project UserApi.csproj --output ../ui/generated/rivet
+dotnet rivet --project UserApi.csproj --output ./generated
 ```
 
 ## 6. What you get
@@ -267,7 +269,7 @@ export function create(body: CreateUserRequest, opts: { unwrap: false }): Promis
 
 export function update(id: string, body: UpdateUserRequest): Promise<void>;
 
-export function uploadAvatar(id: string, file: File): Promise<FileUploadResult>;
+export function uploadAvatar(id: string, file: File): Promise<FileUploadResult>;  // .AcceptsFile() → File param
 ```
 :::
 
