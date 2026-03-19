@@ -12,6 +12,8 @@
 
 [oRPC](https://orpc.unnoq.com) gives you this when your server is TypeScript. Rivet gives you the same DX when your server is .NET — richer types than an OpenAPI generator, because it reads Roslyn's full type graph instead of a JSON schema intermediary.
 
+> **New here?** Follow the [**Tutorial: Zero to Typed Client**](https://maxanstey-meridian.github.io/rivet/guides/tutorial) — `dotnet new webapi` to a fully typed TS client in under 5 minutes.
+
 ## Install
 
 ```bash
