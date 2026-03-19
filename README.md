@@ -8,10 +8,15 @@
   </p>
 </p>
 
-Your C# types are your TypeScript types. No drift, no schema, no codegen config.
+End-to-end type safety between .NET and TypeScript. No drift, no schema files, no codegen config.
 
-Rivet reads your .NET sealed records and controller endpoints via Roslyn and emits typed TypeScript — shared types and
-a typed HTTP client — with optional runtime validation at the fetch boundary.
+Rivet works in three modes — use whichever fits your team:
+
+| Source of truth | Command | What it produces |
+|---|---|---|
+| **C# contracts** | `dotnet rivet --project Api.csproj` | TS types, typed client, validators, OpenAPI spec |
+| **C# controllers** | `dotnet rivet --project Api.csproj` | Same — contracts and controllers are interchangeable |
+| **OpenAPI spec** | `dotnet rivet --from-openapi spec.json` | C# contracts + DTOs (feed back into row 1) |
 
 Mark your types. Define your endpoints. One command. Full-stack type safety.
 
@@ -211,27 +216,67 @@ emitted once.
 
 ### Contract-driven endpoints
 
-Instead of annotating controllers, you can define endpoint shapes in a static contract class. The contract is
-declarative — Rivet reads it at generation time, nothing executes at runtime:
+Instead of annotating controllers, you can define endpoint shapes in a static contract class. Rivet reads it at
+generation time for TS codegen, and your controllers use `.Invoke()` for type-safe execution at runtime:
 
 ```csharp
+// Contract — pure Rivet, no ASP.NET dependency
 [RivetContract]
 public static class MembersContract
 {
-    public static readonly Endpoint List =
-        Endpoint.Get<MemberDto>("/api/members")
+    public static readonly EndpointBuilder<List<MemberDto>> List =
+        Endpoint.Get<List<MemberDto>>("/api/members")
             .Description("List all team members");
 
-    public static readonly Endpoint Invite =
+    public static readonly EndpointBuilder<InviteMemberRequest, InviteMemberResponse> Invite =
         Endpoint.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
             .Description("Invite a new team member")
             .Status(201)
-            .Returns<InviteMemberResponse>(422, "Validation failed");
+            .Returns<InviteMemberResponse>(422, "Validation failed")
+            .Secure("admin");
 
-    public static readonly Endpoint Remove =
+    public static readonly EndpointBuilder Remove =
         Endpoint.Delete("/api/members/{id}")
             .Description("Remove a team member")
-            .Returns<MemberDto>(404, "Member not found");
+            .Returns<MemberDto>(404, "Member not found")
+            .Secure("admin");
+}
+
+// Controller — thin wrapper, compiler enforces input/output types
+[Route("api/members")]
+public sealed class MembersController : ControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(CancellationToken ct)
+        => (await MembersContract.List.Invoke(async () =>
+        {
+            // Must return List<MemberDto> — compile error if wrong
+            return new List<MemberDto>();
+        })).ToActionResult();
+
+    [HttpPost]
+    public async Task<IActionResult> Invite(
+        [FromBody] InviteMemberRequest request, CancellationToken ct)
+        => (await MembersContract.Invite.Invoke(request, async req =>
+        {
+            // req is InviteMemberRequest, must return InviteMemberResponse
+            return new InviteMemberResponse(Guid.NewGuid());
+        })).ToActionResult();
+}
+```
+
+`Invoke` returns `RivetResult<T>` — a framework-agnostic result with status code and typed data. You provide a
+one-liner bridge to convert it to your framework's response type:
+
+```csharp
+// Write once per project
+public static class RivetExtensions
+{
+    public static IActionResult ToActionResult<T>(this RivetResult<T> result)
+        => new ObjectResult(result.Data) { StatusCode = result.StatusCode };
+
+    public static IActionResult ToActionResult(this RivetResult result)
+        => new StatusCodeResult(result.StatusCode);
 }
 ```
 
@@ -254,7 +299,10 @@ same validators. Contracts and controller attributes can coexist in the same pro
 | `.Returns<T>(statusCode)`           | Declare an additional response type for a status     |
 | `.Returns<T>(statusCode, desc)`     | Same, with a human-readable description              |
 | `.Status(code)`                     | Override the default success status code             |
-| `.Description(desc)`                | Endpoint description (for future OpenAPI generation) |
+| `.Description(desc)`                | Endpoint description (emitted to OpenAPI)            |
+| `.Anonymous()`                      | Marks endpoint as not requiring authentication       |
+| `.Secure(scheme)`                   | Sets a named security scheme for the endpoint        |
+| `.Invoke(handler)`                  | Runtime: executes handler, returns `RivetResult<T>`  |
 
 **Parameter classification:** For `GET`/`DELETE`, `TInput` properties are matched by name to route template segments
 (→ route params), with the rest becoming query params. For `POST`/`PUT`/`PATCH`, route params come from the template
@@ -426,15 +474,27 @@ export async function attach(id: string, file: File, opts?: { unwrap?: boolean }
 Rivet is a CLI tool (not a source generator) that uses Roslyn's `MSBuildWorkspace` to open your project, analyse the
 compilation, and emit `.ts` files — similar to `dotnet-ef` or `dotnet-format`.
 
+### Forward pipeline: C# → TypeScript
+
 1. Opens your `.csproj` via `MSBuildWorkspace`
 2. Finds `[RivetType]` records and transitively discovers all referenced types
 3. Finds `[RivetClient]` classes and `[RivetEndpoint]` methods — reads `[HttpGet]`, `[Route]`,
    `[ProducesResponseType]`, `[FromBody]`, etc.
-4. Finds `[RivetContract]` classes and reads their builder chains via Roslyn's semantic model
+4. Finds `[RivetContract]` classes and reads their `EndpointBuilder<T>` chains via Roslyn's semantic model
 5. Merges controller-sourced and contract-sourced endpoints (contract wins on collision)
 6. Groups types by C# namespace, promotes cross-referenced types to `common.ts`
-7. Emits per-controller client files and optionally `validators.ts`
+7. Emits per-controller client files and optionally `validators.ts` and `openapi.json`
 8. With `--compile`, runs `tsc` with the typia transformer to produce runtime validators
+
+### Reverse pipeline: OpenAPI → C#
+
+1. Parses an OpenAPI 3.1 JSON spec
+2. Maps `#/components/schemas` to C# types (sealed records, enums, branded VOs)
+3. Groups `#/paths` operations by tag into `[RivetContract]` static classes
+4. Emits `.cs` files that feed directly into the forward pipeline
+
+This is useful when another team owns the API — import their spec, get C# contracts, and the compiler
+tells you what broke when the upstream spec changes.
 
 ## Sample projects
 
@@ -460,19 +520,19 @@ samples/AnnotationApi/
 └── Program.cs
 ```
 
-### `samples/ContractApi/` — Contract-driven discovery
+### `samples/ContractApi/` — Contract-driven discovery with `Invoke`
 
-Uses `[RivetContract]` classes with builder chains. Endpoint metadata (descriptions, security, status codes)
-lives in the contract, not on controllers.
+Uses `[RivetContract]` static classes with typed `EndpointBuilder<T>` fields. Controllers use `.Invoke()` for
+compile-time type safety. Includes the `RivetExtensions` bridge (`ToActionResult()`).
 
 ```
 samples/ContractApi/
 ├── Domain/
 │   └── ValueObjects.cs          # Email VO (single Value → branded type)
 ├── Contracts/
-│   └── MembersContract.cs       # 4 endpoints with descriptions + security
+│   └── MembersContract.cs       # 4 endpoints with descriptions + security + EndpointBuilder<T>
 ├── Controllers/
-│   └── MembersController.cs     # Implementation
+│   └── MembersController.cs     # Implementation using .Invoke() + ToActionResult()
 └── Program.cs
 ```
 
@@ -501,6 +561,9 @@ OpenAPI spec (source of truth)
   → TS types + client (existing)
 ```
 
+This is useful when another team owns the API — import their spec, get typed contracts, and the compiler tells you
+what broke when the upstream spec changes. Re-run the import, rebuild, fix what the compiler flags.
+
 ### Usage
 
 ```bash
@@ -525,7 +588,7 @@ output/
 ├── Domain/
 │   └── Email.cs                # branded value object
 └── Contracts/
-    ├── TasksContract.cs        # [RivetContract] with Endpoint builder chains
+    ├── TasksContract.cs        # [RivetContract] with EndpointBuilder<T> fields
     └── MembersContract.cs
 ```
 
@@ -552,6 +615,19 @@ output/
 Unsupported features (`allOf`/`oneOf`/`anyOf`, discriminator, inline anonymous objects, etc.) produce a warning and are
 skipped. The generated contracts and types compile immediately and work with the existing Rivet pipeline — run the
 standard `dotnet rivet --project` command to produce the TypeScript output.
+
+## CLI reference
+
+| Flags | What it does |
+|---|---|
+| `--project Api.csproj -o dir` | C# → TS types + typed client |
+| `--project Api.csproj -o dir --compile` | Above + typia runtime validators |
+| `--project Api.csproj -o dir --openapi` | Above + OpenAPI 3.1 JSON spec |
+| `--project Api.csproj -o dir --openapi --security bearer` | Above + security scheme in spec |
+| `--from-openapi spec.json --namespace Ns` | OpenAPI → C# contracts + DTOs (stdout preview) |
+| `--from-openapi spec.json --namespace Ns -o dir` | OpenAPI → C# contracts + DTOs (written to disk) |
+
+Omit `--output` on any command to preview to stdout without writing files.
 
 ## Limitations
 

@@ -60,7 +60,7 @@ Rivet has several interconnected pipelines. Changes to one often require updates
 1. **C# → TS** (forward): Roslyn reads `[RivetContract]`/`[RivetClient]` classes → `ContractWalker`/`EndpointWalker` → `TsEndpointDefinition` + `TsTypeDefinition` model → emitters (TypeEmitter, ClientEmitter, ValidatorEmitter, OpenApiEmitter)
 2. **OpenAPI → C#** (import): JSON spec → `OpenApiImporter` → `SchemaMapper` + `ContractBuilder` → `CSharpWriter` → generated `.cs` files that feed back into pipeline 1
 
-### Contract style: v1 pure (current)
+### Contract style
 
 Contracts are `[RivetContract] public static class` with `EndpointBuilder<T>` fields. **Not** abstract classes, **not** ASP.NET-coupled. The `EndpointBuilder<T>.Invoke()` method provides type-safe runtime execution. `RivetResult<T>` is framework-agnostic; the consumer provides a `ToActionResult()` bridge.
 
@@ -79,11 +79,11 @@ ASP.NET name collisions: generated contracts must include `using Endpoint = Rive
 **If you change the importer (`Rivet.Tool/Import/`):**
 - Fixture round-trip tests — generated C# must compile AND survive `ContractWalker` → endpoints.
 - `samples/ContractApi/` — should reflect what the importer would generate.
-- Drift detection tests — verify v1 output, no v2 patterns, typed builder fields.
+- Drift detection tests — verify static class output, typed builder fields, no abstract class patterns.
 
 **If you change `ContractWalker` or `EndpointWalker`:**
 - `OpenApiEmitterTests` — all use contracts/endpoints via walkers.
-- `ContractEndpointTests` — tests both v1 static class and v2 abstract class paths.
+- `ContractEndpointTests` — tests static class contracts and (legacy) abstract class contracts.
 - Importer round-trip tests — generated contracts must be walkable.
 
 **If you change the OpenAPI emitter:**
