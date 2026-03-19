@@ -51,6 +51,64 @@ After writing or editing code, check LSP diagnostics. Fix type errors and missin
 - **Non-obvious only** — things you can't derive from reading the current code, CLAUDE.md, or git history. No duplication.
 - **Remove resolved items** — if future work gets implemented or a gotcha gets fixed, clean it up.
 
+## Rivet architecture — moving parts and cross-cutting concerns
+
+Rivet has several interconnected pipelines. Changes to one often require updates to others. **Before considering a task done, walk this checklist.**
+
+### The two pipelines
+
+1. **C# → TS** (forward): Roslyn reads `[RivetContract]`/`[RivetClient]` classes → `ContractWalker`/`EndpointWalker` → `TsEndpointDefinition` + `TsTypeDefinition` model → emitters (TypeEmitter, ClientEmitter, ValidatorEmitter, OpenApiEmitter)
+2. **OpenAPI → C#** (import): JSON spec → `OpenApiImporter` → `SchemaMapper` + `ContractBuilder` → `CSharpWriter` → generated `.cs` files that feed back into pipeline 1
+
+### Contract style: v1 pure (current)
+
+Contracts are `[RivetContract] public static class` with `EndpointBuilder<T>` fields. **Not** abstract classes, **not** ASP.NET-coupled. The `EndpointBuilder<T>.Invoke()` method provides type-safe runtime execution. `RivetResult<T>` is framework-agnostic; the consumer provides a `ToActionResult()` bridge.
+
+ASP.NET name collisions: generated contracts must include `using Endpoint = Rivet.Endpoint;` and `using EndpointBuilder = Rivet.EndpointBuilder;` aliases.
+
+### What to check after changes
+
+**If you change `Rivet.Attributes` (Endpoint, EndpointBuilder, RivetResult, attributes):**
+- `ContractWalker` — reads these types via Roslyn. Field type filter must match.
+- `EndpointWalker` — reads `[RivetClient]` classes, shares code with ContractWalker.
+- `OpenApiEmitter` — emits from the model, not directly from attributes, but verify tests.
+- `CSharpWriter` — generates code that uses these types. Must stay in sync.
+- `samples/ContractApi/` — must build and demonstrate current patterns.
+- Run **all** tests, not just the ones for the file you changed.
+
+**If you change the importer (`Rivet.Tool/Import/`):**
+- Fixture round-trip tests — generated C# must compile AND survive `ContractWalker` → endpoints.
+- `samples/ContractApi/` — should reflect what the importer would generate.
+- Drift detection tests — verify v1 output, no v2 patterns, typed builder fields.
+
+**If you change `ContractWalker` or `EndpointWalker`:**
+- `OpenApiEmitterTests` — all use contracts/endpoints via walkers.
+- `ContractEndpointTests` — tests both v1 static class and v2 abstract class paths.
+- Importer round-trip tests — generated contracts must be walkable.
+
+**If you change the OpenAPI emitter:**
+- Forward direction: C# contracts → OpenAPI JSON. Test with `OpenApiEmitterTests`.
+- The importer is the reverse direction and is independent, but the type mappings should be consistent (what the emitter outputs, the importer should be able to consume).
+
+**If you change type mappings (SchemaMapper, TypeWalker, TsType):**
+- Both directions must stay consistent. If you add a type mapping in SchemaMapper (OpenAPI → C#), check whether the reverse mapping exists in OpenApiEmitter (C# → OpenAPI).
+- `Rivet.Tests/Fixtures/openapi-import.json` is the comprehensive fixture — it should exercise every supported type.
+
+### Staleness hotspots
+
+These are the things that have gone stale before:
+- `Rivet.slnx` — project references (deleted projects left behind).
+- `samples/ContractApi/` — contract style drifted from what the importer generates.
+- `README.md` — feature docs lagging behind implementation.
+- Importer test assertions — checking string patterns that don't match the current output format.
+
+### Testing requirements
+
+- **Always add tests for new functionality.** No exceptions.
+- **Fixture round-trip tests are mandatory** for importer changes: OpenAPI JSON → import → compile → Roslyn walker → verify endpoints + types survive.
+- **Run the full test suite** (`dotnet test`) before declaring done, not just filtered tests.
+- **Build the samples** (`dotnet build samples/ContractApi/ContractApi.csproj`) — they catch real-world issues (name collisions, missing usings) that unit tests miss.
+
 ## How to work with me
 
 - **Default mode is rubber-ducking.** No code changes unless I give an imperative instruction.
