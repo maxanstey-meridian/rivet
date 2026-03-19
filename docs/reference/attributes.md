@@ -54,14 +54,14 @@ Use when only some methods on a class should be exposed, or for standalone endpo
 
 Marks a class as an endpoint contract. Two styles:
 
-**Static class (v1)** — with `EndpointBuilder<T>` fields:
+**Static class (v1)** — with `RouteDefinition<T>` fields:
 
 ```csharp
 [RivetContract]
 public static class MembersContract
 {
-    public static readonly EndpointBuilder<List<MemberDto>> List =
-        Endpoint.Get<List<MemberDto>>("/api/members")
+    public static readonly RouteDefinition<List<MemberDto>> List =
+        Define.Get<List<MemberDto>>("/api/members")
             .Description("List all team members");
 }
 ```

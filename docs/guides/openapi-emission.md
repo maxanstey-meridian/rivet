@@ -33,13 +33,13 @@ dotnet rivet --project Api.csproj -o dir --openapi --security apikey:header:X-Ap
 On contract endpoints, use `.Anonymous()` and `.Secure(scheme)` to control per-endpoint security:
 
 ```csharp
-public static readonly EndpointBuilder<List<MemberDto>> List =
-    Endpoint.Get<List<MemberDto>>("/api/members")
+public static readonly RouteDefinition<List<MemberDto>> List =
+    Define.Get<List<MemberDto>>("/api/members")
         .Description("List all team members")
         .Anonymous();  // no auth required
 
-public static readonly EndpointBuilder<InviteMemberRequest, InviteMemberResponse> Invite =
-    Endpoint.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
+public static readonly RouteDefinition<InviteMemberRequest, InviteMemberResponse> Invite =
+    Define.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
         .Description("Invite a new team member")
         .Secure("admin");  // requires admin scheme
 ```

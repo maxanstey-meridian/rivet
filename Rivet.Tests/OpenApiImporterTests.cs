@@ -256,10 +256,10 @@ public sealed class OpenApiImporterTests
         Assert.Contains(result.Files, f => f.FileName.Contains("Square"));
     }
 
-    // ========== Contract output tests (v1 static class + EndpointBuilder fields) ==========
+    // ========== Contract output tests (v1 static class + RouteDefinition fields) ==========
 
     [Fact]
-    public void Contract_Output_Is_Static_Class_With_EndpointBuilder_Fields()
+    public void Contract_Output_Is_Static_Class_With_RouteDefinition_Fields()
     {
         var spec = BuildSpec(
             schemas: """
@@ -294,8 +294,8 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains("[RivetContract]", content);
         Assert.Contains("public static class TasksContract", content);
-        Assert.Contains("public static readonly EndpointBuilder<TaskDto> List", content);
-        Assert.Contains("Endpoint.Get<TaskDto>(\"/api/tasks\")", content);
+        Assert.Contains("public static readonly RouteDefinition<TaskDto> List", content);
+        Assert.Contains("Define.Get<TaskDto>(\"/api/tasks\")", content);
         Assert.Contains(".Description(\"List all tasks\")", content);
     }
 
@@ -344,8 +344,8 @@ public sealed class OpenApiImporterTests
 
         var content = FindFile(Import(spec), "TasksContract.cs");
 
-        Assert.Contains("EndpointBuilder<CreateTaskRequest, TaskDto> CreateTask", content);
-        Assert.Contains("Endpoint.Post<CreateTaskRequest, TaskDto>(\"/api/tasks\")", content);
+        Assert.Contains("RouteDefinition<CreateTaskRequest, TaskDto> CreateTask", content);
+        Assert.Contains("Define.Post<CreateTaskRequest, TaskDto>(\"/api/tasks\")", content);
         Assert.Contains(".Status(201)", content);
     }
 
@@ -413,8 +413,8 @@ public sealed class OpenApiImporterTests
                 """);
 
         var content = FindFile(Import(spec), "TasksContract.cs");
-        Assert.Contains("public static readonly EndpointBuilder DeleteTask", content);
-        Assert.Contains("Endpoint.Delete(\"/api/tasks/{id}\")", content);
+        Assert.Contains("public static readonly RouteDefinition DeleteTask", content);
+        Assert.Contains("Define.Delete(\"/api/tasks/{id}\")", content);
         Assert.Contains(".Status(204)", content);
     }
 
@@ -630,11 +630,11 @@ public sealed class OpenApiImporterTests
     public void Fixture_Covers_All_HTTP_Methods()
     {
         var content = FindFile(Import(LoadFixture(), "Test"), "TasksContract.cs");
-        Assert.Contains("Endpoint.Get<", content);
-        Assert.Contains("Endpoint.Post<", content);
-        Assert.Contains("Endpoint.Put<", content);
-        Assert.Contains("Endpoint.Patch<", content);
-        Assert.Contains("Endpoint.Delete(", content);
+        Assert.Contains("Define.Get<", content);
+        Assert.Contains("Define.Post<", content);
+        Assert.Contains("Define.Put<", content);
+        Assert.Contains("Define.Patch<", content);
+        Assert.Contains("Define.Delete(", content);
     }
 
     // ========== File upload (multipart/form-data) tests ==========
@@ -655,8 +655,8 @@ public sealed class OpenApiImporterTests
     {
         var content = FindFile(Import(LoadFixture(), "Test"), "TasksContract.cs");
 
-        Assert.Contains("EndpointBuilder<AttachFileRequest, AttachmentDto> Attach", content);
-        Assert.Contains("Endpoint.Post<AttachFileRequest, AttachmentDto>(\"/api/tasks/{taskId}/attachments\")", content);
+        Assert.Contains("RouteDefinition<AttachFileRequest, AttachmentDto> Attach", content);
+        Assert.Contains("Define.Post<AttachFileRequest, AttachmentDto>(\"/api/tasks/{taskId}/attachments\")", content);
     }
 
     [Fact]
@@ -722,7 +722,7 @@ public sealed class OpenApiImporterTests
         Assert.Contains("using Microsoft.AspNetCore.Http;", record);
 
         var contract = FindFile(result, "UploadsContract.cs");
-        Assert.Contains("EndpointBuilder<UploadRequest, UploadResult>", contract);
+        Assert.Contains("RouteDefinition<UploadRequest, UploadResult>", contract);
     }
 
     // ========== Drift detection ==========
@@ -736,7 +736,7 @@ public sealed class OpenApiImporterTests
         {
             Assert.Contains("public static class", file.Content);
             Assert.Contains("[RivetContract]", file.Content);
-            Assert.Contains("EndpointBuilder", file.Content);
+            Assert.Contains("RouteDefinition", file.Content);
             // Must NOT have v2 patterns
             Assert.DoesNotContain("abstract class", file.Content);
             Assert.DoesNotContain("ControllerBase", file.Content);
@@ -746,14 +746,14 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Importer_Output_Uses_EndpointBuilder_Not_Bare_Endpoint()
+    public void Importer_Output_Uses_RouteDefinition_Not_Bare_Define()
     {
-        // Fields should be EndpointBuilder<T> not Endpoint, so Invoke is available
+        // Fields should be RouteDefinition<T> not Define, so Invoke is available
         var result = Import(LoadFixture(), "TaskBoard.Contracts");
         var content = FindFile(result, "TasksContract.cs");
 
-        Assert.Contains("public static readonly EndpointBuilder<", content);
-        Assert.DoesNotContain("public static readonly Endpoint ", content);
+        Assert.Contains("public static readonly RouteDefinition<", content);
+        Assert.DoesNotContain("public static readonly Define ", content);
     }
 
     [Fact]

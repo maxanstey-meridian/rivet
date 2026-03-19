@@ -6,39 +6,37 @@ Two styles — both generate the same TypeScript output.
 
 ## Static class contracts (v1)
 
-A `[RivetContract]` static class with `EndpointBuilder<T>` fields. No ASP.NET dependency — pure Rivet types.
+A `[RivetContract]` static class with `RouteDefinition<T>` fields. No ASP.NET dependency — pure Rivet types.
 
 ```csharp
 using Rivet;
-using Endpoint = Rivet.Endpoint;         // alias to avoid ASP.NET name collision
-using EndpointBuilder = Rivet.EndpointBuilder;
 
 [RivetContract]
 public static class MembersContract
 {
     // GET /api/members → List<MemberDto>
-    public static readonly EndpointBuilder<List<MemberDto>> List =
-        Endpoint.Get<List<MemberDto>>("/api/members")
+    public static readonly RouteDefinition<List<MemberDto>> List =
+        Define.Get<List<MemberDto>>("/api/members")
             .Description("List all team members");
 
     // POST /api/members — typed input + output, 201 default, 422 on validation failure
-    public static readonly EndpointBuilder<InviteMemberRequest, InviteMemberResponse> Invite =
-        Endpoint.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
+    public static readonly RouteDefinition<InviteMemberRequest, InviteMemberResponse> Invite =
+        Define.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
             .Description("Invite a new team member")
             .Status(201)
             .Returns<InviteMemberResponse>(422, "Validation failed")
             .Secure("admin");
 
     // DELETE /api/members/{id} — no typed I/O, 404 response declared
-    public static readonly EndpointBuilder Remove =
-        Endpoint.Delete("/api/members/{id}")
+    public static readonly RouteDefinition Remove =
+        Define.Delete("/api/members/{id}")
             .Description("Remove a team member")
             .Returns<MemberDto>(404, "Member not found")
             .Secure("admin");
 
     // GET /api/health — no auth required
-    public static readonly EndpointBuilder Health =
-        Endpoint.Get("/api/health")
+    public static readonly RouteDefinition Health =
+        Define.Get("/api/health")
             .Description("Health check")
             .Anonymous();
 }
@@ -187,4 +185,4 @@ Both styles generate the same TypeScript output. Contracts and controller attrib
 
 `[RivetContract]`, `[RivetClient]`, and `[RivetEndpoint]` can all coexist in the same project. Rivet merges the discovered endpoints and deduplicates — if a contract and a controller annotation define the same endpoint (same controller name + method name), the contract definition wins.
 
-See the [Endpoint Builder](/reference/endpoint-builder) reference for the full builder API, and the [sample projects](https://github.com/maxanstey-meridian/rivet/tree/main/samples) for working examples.
+See the [Route Definition](/reference/endpoint-builder) reference for the full builder API, and the [sample projects](https://github.com/maxanstey-meridian/rivet/tree/main/samples) for working examples.

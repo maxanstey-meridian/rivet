@@ -4,30 +4,30 @@ using System.Threading.Tasks;
 namespace Rivet;
 
 /// <summary>
-/// Builder for endpoints with both input and output types.
+/// Route definition for endpoints with both input and output types.
 /// Roslyn reads the chain at generation time. Invoke provides type-safe runtime execution.
 /// </summary>
-public sealed class EndpointBuilder<TInput, TOutput>
+public sealed class RouteDefinition<TInput, TOutput>
 {
     private int _successStatus;
 
-    internal EndpointBuilder(int defaultStatus = 200)
+    internal RouteDefinition(int defaultStatus = 200)
     {
         _successStatus = defaultStatus;
     }
 
-    public EndpointBuilder<TInput, TOutput> Returns<TResponse>(int statusCode) => this;
-    public EndpointBuilder<TInput, TOutput> Returns<TResponse>(int statusCode, string description) => this;
+    public RouteDefinition<TInput, TOutput> Returns<TResponse>(int statusCode) => this;
+    public RouteDefinition<TInput, TOutput> Returns<TResponse>(int statusCode, string description) => this;
 
-    public EndpointBuilder<TInput, TOutput> Status(int statusCode)
+    public RouteDefinition<TInput, TOutput> Status(int statusCode)
     {
         _successStatus = statusCode;
         return this;
     }
 
-    public EndpointBuilder<TInput, TOutput> Description(string description) => this;
-    public EndpointBuilder<TInput, TOutput> Anonymous() => this;
-    public EndpointBuilder<TInput, TOutput> Secure(string scheme) => this;
+    public RouteDefinition<TInput, TOutput> Description(string description) => this;
+    public RouteDefinition<TInput, TOutput> Anonymous() => this;
+    public RouteDefinition<TInput, TOutput> Secure(string scheme) => this;
 
     /// <summary>
     /// Execute the endpoint handler with type-safe input and output.
@@ -38,33 +38,33 @@ public sealed class EndpointBuilder<TInput, TOutput>
         return new RivetResult<TOutput>(_successStatus, result);
     }
 
-    public static implicit operator Endpoint(EndpointBuilder<TInput, TOutput> _) => default!;
+    public static implicit operator Define(RouteDefinition<TInput, TOutput> _) => default!;
 }
 
 /// <summary>
-/// Builder for endpoints with output only (no input type).
+/// Route definition for endpoints with output only (no input type).
 /// </summary>
-public sealed class EndpointBuilder<TOutput>
+public sealed class RouteDefinition<TOutput>
 {
     private int _successStatus;
 
-    internal EndpointBuilder(int defaultStatus = 200)
+    internal RouteDefinition(int defaultStatus = 200)
     {
         _successStatus = defaultStatus;
     }
 
-    public EndpointBuilder<TOutput> Returns<TResponse>(int statusCode) => this;
-    public EndpointBuilder<TOutput> Returns<TResponse>(int statusCode, string description) => this;
+    public RouteDefinition<TOutput> Returns<TResponse>(int statusCode) => this;
+    public RouteDefinition<TOutput> Returns<TResponse>(int statusCode, string description) => this;
 
-    public EndpointBuilder<TOutput> Status(int statusCode)
+    public RouteDefinition<TOutput> Status(int statusCode)
     {
         _successStatus = statusCode;
         return this;
     }
 
-    public EndpointBuilder<TOutput> Description(string description) => this;
-    public EndpointBuilder<TOutput> Anonymous() => this;
-    public EndpointBuilder<TOutput> Secure(string scheme) => this;
+    public RouteDefinition<TOutput> Description(string description) => this;
+    public RouteDefinition<TOutput> Anonymous() => this;
+    public RouteDefinition<TOutput> Secure(string scheme) => this;
 
     /// <summary>
     /// Execute the endpoint handler with type-safe output.
@@ -75,33 +75,77 @@ public sealed class EndpointBuilder<TOutput>
         return new RivetResult<TOutput>(_successStatus, result);
     }
 
-    public static implicit operator Endpoint(EndpointBuilder<TOutput> _) => default!;
+    public static implicit operator Define(RouteDefinition<TOutput> _) => default!;
 }
 
 /// <summary>
-/// Builder for endpoints with no typed input or output.
+/// Route definition for endpoints with input only (no typed output — e.g. PUT/PATCH returning 204).
+/// Chain from void definition via .Accepts&lt;T&gt;().
 /// </summary>
-public sealed class EndpointBuilder
+public sealed class InputRouteDefinition<TInput>
 {
     private int _successStatus;
 
-    internal EndpointBuilder(int defaultStatus = 200)
+    internal InputRouteDefinition(int defaultStatus = 200)
     {
         _successStatus = defaultStatus;
     }
 
-    public EndpointBuilder Returns<TResponse>(int statusCode) => this;
-    public EndpointBuilder Returns<TResponse>(int statusCode, string description) => this;
+    public InputRouteDefinition<TInput> Returns<TResponse>(int statusCode) => this;
+    public InputRouteDefinition<TInput> Returns<TResponse>(int statusCode, string description) => this;
 
-    public EndpointBuilder Status(int statusCode)
+    public InputRouteDefinition<TInput> Status(int statusCode)
     {
         _successStatus = statusCode;
         return this;
     }
 
-    public EndpointBuilder Description(string description) => this;
-    public EndpointBuilder Anonymous() => this;
-    public EndpointBuilder Secure(string scheme) => this;
+    public InputRouteDefinition<TInput> Description(string description) => this;
+    public InputRouteDefinition<TInput> Anonymous() => this;
+    public InputRouteDefinition<TInput> Secure(string scheme) => this;
+
+    /// <summary>
+    /// Execute the endpoint handler with type-safe input (void output).
+    /// </summary>
+    public async Task<RivetResult> Invoke(TInput input, Func<TInput, Task> handler)
+    {
+        await handler(input);
+        return new RivetResult(_successStatus);
+    }
+
+    public static implicit operator Define(InputRouteDefinition<TInput> _) => default!;
+}
+
+/// <summary>
+/// Route definition for endpoints with no typed input or output.
+/// </summary>
+public sealed class RouteDefinition
+{
+    private int _successStatus;
+
+    internal RouteDefinition(int defaultStatus = 200)
+    {
+        _successStatus = defaultStatus;
+    }
+
+    public RouteDefinition Returns<TResponse>(int statusCode) => this;
+    public RouteDefinition Returns<TResponse>(int statusCode, string description) => this;
+
+    public RouteDefinition Status(int statusCode)
+    {
+        _successStatus = statusCode;
+        return this;
+    }
+
+    public RouteDefinition Description(string description) => this;
+    public RouteDefinition Anonymous() => this;
+    public RouteDefinition Secure(string scheme) => this;
+
+    /// <summary>
+    /// Convert to an input-only endpoint (accepts a body, returns void).
+    /// </summary>
+    public InputRouteDefinition<TInput> Accepts<TInput>()
+        => new InputRouteDefinition<TInput>(_successStatus);
 
     /// <summary>
     /// Execute the endpoint handler (void — no typed output).
@@ -112,5 +156,5 @@ public sealed class EndpointBuilder
         return new RivetResult(_successStatus);
     }
 
-    public static implicit operator Endpoint(EndpointBuilder _) => default!;
+    public static implicit operator Define(RouteDefinition _) => default!;
 }

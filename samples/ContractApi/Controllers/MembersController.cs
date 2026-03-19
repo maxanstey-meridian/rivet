@@ -13,6 +13,9 @@ public sealed record InviteMemberRequest(Domain.Email Email, string Role, string
 [RivetType]
 public sealed record InviteMemberResponse(Guid Id);
 
+[RivetType]
+public sealed record UpdateRoleRequest(string Role);
+
 [Route("api/members")]
 public sealed class MembersController : ControllerBase
 {
@@ -38,6 +41,14 @@ public sealed class MembersController : ControllerBase
         => (await MembersContract.Remove.Invoke(async () =>
         {
             // void endpoint — no return value
+        })).ToActionResult();
+
+    [HttpPut("{id:guid}/role")]
+    public async Task<IActionResult> UpdateRole(
+        Guid id, [FromBody] UpdateRoleRequest request, CancellationToken ct)
+        => (await MembersContract.UpdateRole.Invoke(request, async req =>
+        {
+            // void — input only, 204
         })).ToActionResult();
 
     [HttpGet("/api/health")]

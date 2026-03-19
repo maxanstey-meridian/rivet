@@ -171,8 +171,8 @@ public sealed class FormFileTests
             [RivetContract]
             public static class FilesContract
             {
-                public static readonly EndpointBuilder<FileUploadRequest, FileUploadResult> Upload =
-                    Endpoint.Post<FileUploadRequest, FileUploadResult>("/api/files");
+                public static readonly RouteDefinition<FileUploadRequest, FileUploadResult> Upload =
+                    Define.Post<FileUploadRequest, FileUploadResult>("/api/files");
             }
             """;
 
@@ -205,8 +205,8 @@ public sealed class FormFileTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly EndpointBuilder<AttachRequest, AttachmentResult> Attach =
-                    Endpoint.Post<AttachRequest, AttachmentResult>("/api/tasks/{id}/attachments");
+                public static readonly RouteDefinition<AttachRequest, AttachmentResult> Attach =
+                    Define.Post<AttachRequest, AttachmentResult>("/api/tasks/{id}/attachments");
             }
             """;
 
@@ -236,8 +236,8 @@ public sealed class FormFileTests
             [RivetContract]
             public static class AvatarsContract
             {
-                public static readonly EndpointBuilder<IFormFile, AvatarResult> Upload =
-                    Endpoint.Post<IFormFile, AvatarResult>("/api/avatars");
+                public static readonly RouteDefinition<IFormFile, AvatarResult> Upload =
+                    Define.Post<IFormFile, AvatarResult>("/api/avatars");
             }
             """;
 

@@ -35,7 +35,7 @@ output/
 ├── Domain/
 │   └── Email.cs                # branded value object
 └── Contracts/
-    ├── TasksContract.cs        # [RivetContract] with EndpointBuilder<T> fields
+    ├── TasksContract.cs        # [RivetContract] with RouteDefinition<T> fields
     └── MembersContract.cs
 ```
 
@@ -44,7 +44,7 @@ output/
 - **Sealed records** for object schemas, with `[RivetType]` attributes
 - **Enums** for string enums
 - **Branded value objects** for string types with semantic formats (`email`, `uri`, etc.)
-- **Static contract classes** (v1 style) with `EndpointBuilder<T>` builder chains
+- **Static contract classes** (v1 style) with `RouteDefinition<T>` builder chains
 - Operations grouped by tag into separate contract classes
 
 ## Supported schema subset

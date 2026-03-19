@@ -30,7 +30,7 @@ A CLI tool (like `dotnet-ef` or `dotnet-format`) can do all of this. You run it 
 1. Opens your `.csproj` via Roslyn's `MSBuildWorkspace`
 2. Finds `[RivetType]` records and transitively discovers all referenced types
 3. Finds `[RivetClient]` classes and `[RivetEndpoint]` methods — reads `[HttpGet]`, `[Route]`, `[ProducesResponseType]`, `[FromBody]`, etc.
-4. Finds `[RivetContract]` classes and reads their `EndpointBuilder<T>` chains via Roslyn's semantic model
+4. Finds `[RivetContract]` classes and reads their `RouteDefinition<T>` chains via Roslyn's semantic model
 5. Merges controller-sourced and contract-sourced endpoints (contract wins on collision)
 6. Groups types by C# namespace, promotes cross-referenced types to `common.ts`
 7. Emits per-controller client files and optionally `validators.ts` and `openapi.json`
@@ -42,7 +42,7 @@ A CLI tool (like `dotnet-ef` or `dotnet-format`) can do all of this. You run it 
 openapi.json
   → OpenApiImporter (parser)
   → SchemaMapper (JSON Schema → C# types)
-  → ContractBuilder (operations → EndpointBuilder chains)
+  → ContractBuilder (operations → RouteDefinition chains)
   → CSharpWriter
   → .cs files
 ```

@@ -36,9 +36,10 @@ public static class CoverageChecker
     {
         // Step 1 — Build contract field symbol → endpoint map
         var contractAttr = compilation.GetTypeByMetadataName("Rivet.RivetContractAttribute");
+        var defineType = compilation.GetTypeByMetadataName("Rivet.Define");
         var endpointType = compilation.GetTypeByMetadataName("Rivet.Endpoint");
 
-        if (contractAttr is null || endpointType is null)
+        if (contractAttr is null || (defineType is null && endpointType is null))
         {
             return [];
         }
@@ -55,7 +56,7 @@ public static class CoverageChecker
 
             if (type.IsAbstract && !type.IsStatic)
             {
-                continue; // Abstract class contracts don't use EndpointBuilder fields
+                continue; // Abstract class contracts don't use RouteDefinition fields
             }
 
             var controllerName = DeriveControllerName(type);
@@ -67,7 +68,7 @@ public static class CoverageChecker
                     continue;
                 }
 
-                if (!IsRivetEndpointField(field.Type, endpointType))
+                if (!IsRivetEndpointField(field.Type, defineType, endpointType))
                 {
                     continue;
                 }
@@ -291,15 +292,20 @@ public static class CoverageChecker
         return Naming.ToCamelCase(name);
     }
 
-    private static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? endpointType)
+    private static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? defineType, INamedTypeSymbol? endpointType)
     {
+        if (defineType is not null && SymbolEqualityComparer.Default.Equals(fieldType, defineType))
+        {
+            return true;
+        }
+
         if (endpointType is not null && SymbolEqualityComparer.Default.Equals(fieldType, endpointType))
         {
             return true;
         }
 
         if (fieldType is INamedTypeSymbol named
-            && named.Name == "EndpointBuilder"
+            && named.Name is "RouteDefinition" or "InputRouteDefinition" or "EndpointBuilder" or "InputEndpointBuilder"
             && named.ContainingNamespace?.ToDisplayString() == "Rivet")
         {
             return true;

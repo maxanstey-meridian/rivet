@@ -30,6 +30,7 @@ export default defineConfig({
         text: "Guides",
         items: [
           { text: "Contracts", link: "/guides/contracts" },
+          { text: "Contract Coverage", link: "/guides/contract-coverage" },
           { text: "Runtime Validation", link: "/guides/runtime-validation" },
           { text: "OpenAPI Emission", link: "/guides/openapi-emission" },
           { text: "OpenAPI Import", link: "/guides/openapi-import" },
@@ -44,7 +45,7 @@ export default defineConfig({
           { text: "Type Mapping", link: "/reference/type-mapping" },
           { text: "Attributes", link: "/reference/attributes" },
           { text: "Client Configuration", link: "/reference/client-config" },
-          { text: "Endpoint Builder", link: "/reference/endpoint-builder" },
+          { text: "Route Definition", link: "/reference/endpoint-builder" },
         ],
       },
       {

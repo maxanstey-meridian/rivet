@@ -7,7 +7,7 @@ namespace Rivet.Tool.Analysis;
 
 /// <summary>
 /// Discovers [RivetContract]-attributed static classes and extracts endpoint definitions
-/// from their static readonly Endpoint fields by reading the builder chain via Roslyn operations.
+/// from their static readonly RouteDefinition fields by reading the builder chain via Roslyn operations.
 /// </summary>
 public static class ContractWalker
 {
@@ -19,8 +19,9 @@ public static class ContractWalker
             return [];
         }
 
+        var defineType = compilation.GetTypeByMetadataName("Rivet.Define");
         var endpointType = compilation.GetTypeByMetadataName("Rivet.Endpoint");
-        if (endpointType is null)
+        if (defineType is null && endpointType is null)
         {
             return [];
         }
@@ -70,7 +71,7 @@ public static class ContractWalker
                     continue;
                 }
 
-                if (!IsRivetEndpointField(field.Type, endpointType))
+                if (!IsRivetEndpointField(field.Type, defineType, endpointType))
                 {
                     continue;
                 }
@@ -150,7 +151,7 @@ public static class ContractWalker
             return null;
         }
 
-        // The root call is the factory method: Endpoint.Get<TInput, TOutput>("/route")
+        // The root call is the factory method: Define.Get<TInput, TOutput>("/route")
         var root = chain[0];
         var httpMethod = root.MethodName.ToUpperInvariant();
         var route = root.RouteArg;
@@ -178,8 +179,8 @@ public static class ContractWalker
             tOutput = root.TypeArgs[0];
         }
 
-        // Process chained calls: .Returns<T>(statusCode[, description]), .Status(statusCode), .Description(desc),
-        // .Anonymous(), .Secure(scheme)
+        // Process chained calls: .Accepts<T>(), .Returns<T>(statusCode[, description]),
+        // .Status(statusCode), .Description(desc), .Anonymous(), .Secure(scheme)
         var responses = new List<TsResponseType>();
         int? successStatusOverride = null;
         string? endpointDescription = null;
@@ -188,7 +189,11 @@ public static class ContractWalker
         for (var i = 1; i < chain.Count; i++)
         {
             var call = chain[i];
-            if (call.MethodName == "Returns" && call.TypeArgs.Count == 1 && call.StatusCodeArg is not null)
+            if (call.MethodName == "Accepts" && call.TypeArgs.Count == 1)
+            {
+                tInput = call.TypeArgs[0];
+            }
+            else if (call.MethodName == "Returns" && call.TypeArgs.Count == 1 && call.StatusCodeArg is not null)
             {
                 var tsType = typeWalker.MapType(call.TypeArgs[0]);
                 responses.Add(new TsResponseType(call.StatusCodeArg.Value, tsType, call.DescriptionArg));
@@ -341,18 +346,23 @@ public static class ContractWalker
             .Any(p => !p.IsImplicitlyDeclared && IsFormFileType(p.Type));
 
     /// <summary>
-    /// Accepts Endpoint fields (v1 legacy) and EndpointBuilder fields (v1 typed).
+    /// Accepts Endpoint fields (v1 legacy), RouteDefinition fields (current),
+    /// and EndpointBuilder/InputEndpointBuilder fields (old name, backwards compat).
     /// </summary>
-    private static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? endpointType)
+    private static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? defineType, INamedTypeSymbol? endpointType)
     {
+        if (defineType is not null && SymbolEqualityComparer.Default.Equals(fieldType, defineType))
+        {
+            return true;
+        }
+
         if (endpointType is not null && SymbolEqualityComparer.Default.Equals(fieldType, endpointType))
         {
             return true;
         }
 
-        // EndpointBuilder, EndpointBuilder<TOutput>, EndpointBuilder<TInput, TOutput>
         if (fieldType is INamedTypeSymbol named
-            && named.Name == "EndpointBuilder"
+            && named.Name is "RouteDefinition" or "InputRouteDefinition" or "EndpointBuilder" or "InputEndpointBuilder"
             && named.ContainingNamespace?.ToDisplayString() == "Rivet")
         {
             return true;
@@ -448,7 +458,7 @@ public static class ContractWalker
         // For factory calls (Get/Post/etc): first string = route, no description
         // For .Returns(statusCode, description): first string = description
         // For .Description(desc): first string = description
-        var isFactoryCall = method.ContainingType?.Name == "Endpoint";
+        var isFactoryCall = method.ContainingType?.Name is "Define" or "Endpoint";
         string? routeArg = isFactoryCall ? stringArgs.FirstOrDefault() : null;
         string? descriptionArg = isFactoryCall ? null : stringArgs.FirstOrDefault();
 

@@ -76,8 +76,6 @@ internal static class CSharpWriter
         var sb = new StringBuilder();
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using Rivet;");
-        sb.AppendLine("using Endpoint = Rivet.Endpoint;");
-        sb.AppendLine("using EndpointBuilder = Rivet.EndpointBuilder;");
         sb.AppendLine();
         sb.AppendLine($"namespace {ns};");
         sb.AppendLine();
@@ -101,14 +99,14 @@ internal static class CSharpWriter
 
     private static void WriteEndpointField(StringBuilder sb, GeneratedEndpointField field)
     {
-        // Field type: EndpointBuilder<TIn, TOut>, EndpointBuilder<TOut>, or EndpointBuilder
+        // Field type: RouteDefinition<TIn, TOut>, RouteDefinition<TOut>, or RouteDefinition
         var fieldType = BuildFieldType(field.InputType, field.OutputType);
         sb.Append($"    public static readonly {fieldType} {field.FieldName} =");
         sb.AppendLine();
 
         // Factory call
         var typeArgs = BuildTypeArgs(field.InputType, field.OutputType);
-        sb.Append($"        Endpoint.{field.HttpMethod}{typeArgs}(\"{field.Route}\")");
+        sb.Append($"        Define.{field.HttpMethod}{typeArgs}(\"{field.Route}\")");
 
         // Builder chain
         var chainCalls = BuildChainCalls(field);
@@ -132,15 +130,15 @@ internal static class CSharpWriter
     {
         if (inputType is not null && outputType is not null)
         {
-            return $"EndpointBuilder<{inputType}, {outputType}>";
+            return $"RouteDefinition<{inputType}, {outputType}>";
         }
 
         if (outputType is not null)
         {
-            return $"EndpointBuilder<{outputType}>";
+            return $"RouteDefinition<{outputType}>";
         }
 
-        return "EndpointBuilder";
+        return "RouteDefinition";
     }
 
     private static string BuildTypeArgs(string? inputType, string? outputType)

@@ -300,16 +300,16 @@ public sealed class TypeScriptCompilationTests : IDisposable
                 [RivetContract]
                 public static class MembersContract
                 {
-                    public static readonly Endpoint List =
-                        Endpoint.Get<MemberDto>("/api/members");
+                    public static readonly Define List =
+                        Define.Get<MemberDto>("/api/members");
 
-                    public static readonly Endpoint Invite =
-                        Endpoint.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
+                    public static readonly Define Invite =
+                        Define.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
                             .Status(201)
                             .Returns<InviteMemberResponse>(422);
 
-                    public static readonly Endpoint Remove =
-                        Endpoint.Delete("/api/members/{id}")
+                    public static readonly Define Remove =
+                        Define.Delete("/api/members/{id}")
                             .Returns<MemberDto>(404);
                 }
             }

@@ -1,24 +1,24 @@
-# Endpoint Builder API
+# Route Definition API
 
-The `Endpoint` class and `EndpointBuilder<T>` types are used in [static class contracts](/guides/contracts) to define endpoint shapes.
+The `Define` class and `RouteDefinition<T>` types are used in [static class contracts](/guides/contracts) to define endpoint shapes.
 
 ## Factory methods
 
 | Method | Signature | Description |
 |---|---|---|
-| `Endpoint.Get` | `<TInput, TOutput>(route)` | GET with input + output types |
+| `Define.Get` | `<TInput, TOutput>(route)` | GET with input + output types |
 | | `<TOutput>(route)` | GET with output only |
 | | `(route)` | GET with no typed I/O |
-| `Endpoint.Post` | `<TInput, TOutput>(route)` | POST with input + output types |
+| `Define.Post` | `<TInput, TOutput>(route)` | POST with input + output types |
 | | `<TOutput>(route)` | POST with output only |
 | | `(route)` | POST with no typed I/O |
-| `Endpoint.Put` | Same overloads as Post | |
-| `Endpoint.Patch` | Same overloads as Post | |
-| `Endpoint.Delete` | Same overloads as Post | |
+| `Define.Put` | Same overloads as Post | |
+| `Define.Patch` | Same overloads as Post | |
+| `Define.Delete` | Same overloads as Post | |
 
 ## Builder methods
 
-All builder methods return the builder for chaining.
+All builder methods return the definition for chaining.
 
 | Method | Description |
 |---|---|
@@ -28,16 +28,17 @@ All builder methods return the builder for chaining.
 | `.Description(desc)` | Endpoint description, emitted to the OpenAPI spec |
 | `.Anonymous()` | Marks endpoint as not requiring authentication |
 | `.Secure(scheme)` | Sets a named security scheme for the endpoint |
+| `.Accepts<T>()` | Convert void definition to input-only (accepts body, returns void) |
 
 ## `.Invoke()` — runtime execution
 
-`.Invoke()` executes a handler function and returns `RivetResult<T>`. The compiler enforces that the handler's input/output types match the builder's generic parameters.
+`.Invoke()` executes a handler function and returns `RivetResult<T>`. The compiler enforces that the handler's input/output types match the definition's generic parameters.
 
 ### Without input
 
 ```csharp
-public static readonly EndpointBuilder<List<MemberDto>> List =
-    Endpoint.Get<List<MemberDto>>("/api/members");
+public static readonly RouteDefinition<List<MemberDto>> List =
+    Define.Get<List<MemberDto>>("/api/members");
 
 // Usage
 var result = await MembersContract.List.Invoke(async () =>
@@ -49,14 +50,29 @@ var result = await MembersContract.List.Invoke(async () =>
 ### With input
 
 ```csharp
-public static readonly EndpointBuilder<InviteMemberRequest, InviteMemberResponse> Invite =
-    Endpoint.Post<InviteMemberRequest, InviteMemberResponse>("/api/members");
+public static readonly RouteDefinition<InviteMemberRequest, InviteMemberResponse> Invite =
+    Define.Post<InviteMemberRequest, InviteMemberResponse>("/api/members");
 
 // Usage
 var result = await MembersContract.Invite.Invoke(request, async req =>
 {
     // req is InviteMemberRequest, must return InviteMemberResponse
     return new InviteMemberResponse(Guid.NewGuid());
+});
+```
+
+### Input only (void output)
+
+```csharp
+public static readonly InputRouteDefinition<UpdateRoleRequest> UpdateRole =
+    Define.Put("/api/members/{id}/role")
+        .Accepts<UpdateRoleRequest>()
+        .Status(204);
+
+// Usage — typed input, void output
+var result = await MembersContract.UpdateRole.Invoke(request, async req =>
+{
+    // req is UpdateRoleRequest, no return value
 });
 ```
 

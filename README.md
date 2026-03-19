@@ -10,7 +10,7 @@
 
 **End-to-end type safety between .NET and TypeScript.** No drift, no schema files, no codegen config.
 
-[tRPC](https://trpc.io) gives you this when your server is TypeScript. Rivet gives you the same DX when your server is .NET — richer types than an OpenAPI generator, because it reads Roslyn's full type graph instead of a JSON schema intermediary.
+[oRPC](https://orpc.unnoq.com) gives you this when your server is TypeScript. Rivet gives you the same DX when your server is .NET — richer types than an OpenAPI generator, because it reads Roslyn's full type graph instead of a JSON schema intermediary.
 
 ## Install
 
@@ -65,8 +65,8 @@ const result = await tasks.get(id, { unwrap: false });   // → GetResult (no th
 [RivetContract]
 public static class MembersContract
 {
-    public static readonly EndpointBuilder<List<MemberDto>> List =
-        Endpoint.Get<List<MemberDto>>("/api/members")
+    public static readonly RouteDefinition<List<MemberDto>> List =
+        Define.Get<List<MemberDto>>("/api/members")
             .Description("List all team members");
 }
 
@@ -148,8 +148,8 @@ public sealed record TaskDto(Guid Id, string Title, Priority Priority);
 [RivetContract]
 public static class TasksContract
 {
-    public static readonly EndpointBuilder<List<TaskDto>> List =
-        Endpoint.Get<List<TaskDto>>("/api/tasks")
+    public static readonly RouteDefinition<List<TaskDto>> List =
+        Define.Get<List<TaskDto>>("/api/tasks")
             .Description("List all tasks");
 }
 ```

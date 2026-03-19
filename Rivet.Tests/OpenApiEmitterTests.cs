@@ -46,8 +46,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<GetTaskInput, TaskDto>("/api/tasks/{id}")
+                public static readonly Define GetTask =
+                    Define.Get<GetTaskInput, TaskDto>("/api/tasks/{id}")
                         .Description("Retrieve a single task by ID");
             }
             """;
@@ -104,8 +104,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint CreateTask =
-                    Endpoint.Post<CreateTaskInput, TaskDto>("/api/tasks");
+                public static readonly Define CreateTask =
+                    Define.Post<CreateTaskInput, TaskDto>("/api/tasks");
             }
             """;
 
@@ -140,8 +140,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<NotFoundDto>(404, "Task not found");
             }
             """;
@@ -172,8 +172,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint DeleteTask =
-                    Endpoint.Delete("/api/tasks/{id}")
+                public static readonly Define DeleteTask =
+                    Define.Delete("/api/tasks/{id}")
                         .Status(204);
             }
             """;
@@ -238,8 +238,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}");
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -273,8 +273,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}");
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -309,8 +309,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class PeopleContract
             {
-                public static readonly Endpoint GetPerson =
-                    Endpoint.Get<PersonDto>("/api/people/{id}");
+                public static readonly Define GetPerson =
+                    Define.Get<PersonDto>("/api/people/{id}");
             }
             """;
 
@@ -370,8 +370,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}");
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -410,8 +410,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class HealthContract
             {
-                public static readonly Endpoint Health =
-                    Endpoint.Get<StatusDto>("/api/health")
+                public static readonly Define Health =
+                    Define.Get<StatusDto>("/api/health")
                         .Anonymous();
             }
             """;
@@ -446,8 +446,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class AdminContract
             {
-                public static readonly Endpoint DeleteAll =
-                    Endpoint.Delete("/api/admin/tasks")
+                public static readonly Define DeleteAll =
+                    Define.Delete("/api/admin/tasks")
                         .Status(204)
                         .Secure("admin");
             }
@@ -477,8 +477,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}");
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -512,8 +512,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
                         .Description("Get a task")
                         .Returns<NotFoundDto>(404, "Task not found");
             }
@@ -606,16 +606,16 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
                         .Description("Get a task")
                         .Returns<NotFoundDto>(404, "Not found");
 
-                public static readonly Endpoint CreateTask =
-                    Endpoint.Post<TaskDto, TaskDto>("/api/tasks");
+                public static readonly Define CreateTask =
+                    Define.Post<TaskDto, TaskDto>("/api/tasks");
 
-                public static readonly Endpoint DeleteTask =
-                    Endpoint.Delete("/api/tasks/{id}")
+                public static readonly Define DeleteTask =
+                    Define.Delete("/api/tasks/{id}")
                         .Status(204);
             }
             """;
@@ -735,8 +735,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<NotFoundDto>(404, "Not found");
             }
             """;

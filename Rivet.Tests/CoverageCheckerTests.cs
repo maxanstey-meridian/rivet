@@ -25,20 +25,20 @@ public sealed class CoverageCheckerTests
         [RivetContract]
         public static class TasksContract
         {
-            public static readonly EndpointBuilder<TaskDto> ListTasks =
-                Endpoint.Get<TaskDto>("/api/tasks");
+            public static readonly RouteDefinition<TaskDto> ListTasks =
+                Define.Get<TaskDto>("/api/tasks");
 
-            public static readonly EndpointBuilder<CreateTaskInput, TaskDto> CreateTask =
-                Endpoint.Post<CreateTaskInput, TaskDto>("/api/tasks");
+            public static readonly RouteDefinition<CreateTaskInput, TaskDto> CreateTask =
+                Define.Post<CreateTaskInput, TaskDto>("/api/tasks");
 
-            public static readonly EndpointBuilder<UpdateTaskInput, TaskDto> UpdateTask =
-                Endpoint.Put<UpdateTaskInput, TaskDto>("/api/tasks/{id}");
+            public static readonly RouteDefinition<UpdateTaskInput, TaskDto> UpdateTask =
+                Define.Put<UpdateTaskInput, TaskDto>("/api/tasks/{id}");
 
-            public static readonly EndpointBuilder<PatchTaskInput, TaskDto> PatchTask =
-                Endpoint.Patch<PatchTaskInput, TaskDto>("/api/tasks/{id}");
+            public static readonly RouteDefinition<PatchTaskInput, TaskDto> PatchTask =
+                Define.Patch<PatchTaskInput, TaskDto>("/api/tasks/{id}");
 
-            public static readonly EndpointBuilder RemoveTask =
-                Endpoint.Delete("/api/tasks/{id}");
+            public static readonly RouteDefinition RemoveTask =
+                Define.Delete("/api/tasks/{id}");
         }
         """;
 
@@ -53,8 +53,8 @@ public sealed class CoverageCheckerTests
         [RivetContract]
         public static class MembersContract
         {
-            public static readonly EndpointBuilder<MemberDto> ListMembers =
-                Endpoint.Get<MemberDto>("/api/members");
+            public static readonly RouteDefinition<MemberDto> ListMembers =
+                Define.Get<MemberDto>("/api/members");
         }
         """;
 
@@ -669,8 +669,8 @@ public sealed class CoverageCheckerTests
             [RivetContract]
             public static class ActionsContract
             {
-                public static readonly EndpointBuilder RunAction =
-                    Endpoint.Post("/api/actions/run");
+                public static readonly RouteDefinition RunAction =
+                    Define.Post("/api/actions/run");
             }
             """;
 
@@ -715,8 +715,8 @@ public sealed class CoverageCheckerTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly EndpointBuilder<MyInput, MyOutput> CreateItem =
-                    Endpoint.Post<MyInput, MyOutput>("/api/items");
+                public static readonly RouteDefinition<MyInput, MyOutput> CreateItem =
+                    Define.Post<MyInput, MyOutput>("/api/items");
             }
             """;
 
@@ -756,8 +756,8 @@ public sealed class CoverageCheckerTests
 
             public static class NotAContract
             {
-                public static readonly EndpointBuilder<string> SomeField =
-                    Endpoint.Get<string>("/api/whatever");
+                public static readonly RouteDefinition<string> SomeField =
+                    Define.Get<string>("/api/whatever");
             }
 
             public sealed class SomeService

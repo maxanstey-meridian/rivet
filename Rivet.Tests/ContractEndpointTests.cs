@@ -37,8 +37,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<GetTaskInput, TaskDto>("/api/tasks/{id}");
+                public static readonly Define GetTask =
+                    Define.Get<GetTaskInput, TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -78,8 +78,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint CreateComment =
-                    Endpoint.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments");
+                public static readonly Define CreateComment =
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments");
             }
             """;
 
@@ -113,8 +113,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint ListTasks =
-                    Endpoint.Get<TaskDto>("/api/tasks");
+                public static readonly Define ListTasks =
+                    Define.Get<TaskDto>("/api/tasks");
             }
             """;
 
@@ -139,8 +139,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint DeleteTask =
-                    Endpoint.Delete("/api/tasks/{id}");
+                public static readonly Define DeleteTask =
+                    Define.Delete("/api/tasks/{id}");
             }
             """;
 
@@ -176,8 +176,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<NotFoundDto>(404);
             }
             """;
@@ -210,8 +210,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint CreateTask =
-                    Endpoint.Post<CreateInput, CreatedDto>("/api/tasks")
+                public static readonly Define CreateTask =
+                    Define.Post<CreateInput, CreatedDto>("/api/tasks")
                         .Status(201);
             }
             """;
@@ -243,8 +243,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<NotFoundDto>(404)
                         .Returns<ConflictDto>(409);
             }
@@ -274,8 +274,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class CaseStatusesContract
             {
-                public static readonly Endpoint GetItem =
-                    Endpoint.Get<ItemDto>("/api/case-statuses");
+                public static readonly Define GetItem =
+                    Define.Get<ItemDto>("/api/case-statuses");
             }
             """;
 
@@ -307,8 +307,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint ListTasks =
-                    Endpoint.Get<TaskDto>("/api/tasks");
+                public static readonly Define ListTasks =
+                    Define.Get<TaskDto>("/api/tasks");
             }
 
             // Controller-sourced
@@ -352,8 +352,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}");
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -381,8 +381,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id:guid}");
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -407,8 +407,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
                         .Description("Retrieve a single task by ID");
             }
             """;
@@ -433,8 +433,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}");
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -461,8 +461,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<NotFoundDto>(404, "Task not found");
             }
             """;
@@ -495,8 +495,8 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Endpoint GetTask =
-                    Endpoint.Get<TaskDto>("/api/tasks/{id}")
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
                         .Description("Retrieve a task")
                         .Returns<NotFoundDto>(404, "Task not found");
             }
