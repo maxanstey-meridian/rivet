@@ -84,6 +84,41 @@ public static class CompilationHelper
         """;
 
     /// <summary>
+    /// Compiles multiple C# source files, each as a separate syntax tree.
+    /// Use when sources contain file-scoped namespace declarations.
+    /// </summary>
+    public static Compilation CreateCompilationFromMultiple(string[] sources)
+    {
+        var trees = new List<SyntaxTree>();
+        foreach (var source in sources)
+        {
+            trees.Add(CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest)));
+        }
+
+        trees.Add(CSharpSyntaxTree.ParseText(AspNetStubs, new CSharpParseOptions(LanguageVersion.Latest)));
+
+        var compilation = CSharpCompilation.Create(
+            "TestAssembly",
+            trees,
+            CoreReferences,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        if (errors.Count > 0)
+        {
+            var messages = string.Join("\n", errors.Select(e => e.ToString()));
+            throw new InvalidOperationException($"Test source has compilation errors:\n{messages}");
+        }
+
+        return compilation;
+    }
+
+    /// <summary>
     /// Compiles C# source with Rivet.Attributes referenced and nullable enabled.
     /// </summary>
     public static Compilation CreateCompilation(string source)

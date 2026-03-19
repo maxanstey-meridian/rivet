@@ -489,6 +489,70 @@ dotnet run --project Rivet.Tool -- --project samples/AnnotationApi/AnnotationApi
 dotnet run --project Rivet.Tool -- --project samples/AnnotationApi/AnnotationApi.csproj --output /tmp/rivet-output --compile
 ```
 
+## OpenAPI import
+
+Rivet can also work in reverse: given an OpenAPI 3.1 JSON spec, generate C# `[RivetContract]` classes and `sealed record`
+DTOs that feed into the existing pipeline. One source of truth, both C# and TS generated, no drift.
+
+```
+OpenAPI spec (source of truth)
+  → C# contracts + DTOs (generated, checked in)
+  → Roslyn walker (existing)
+  → TS types + client (existing)
+```
+
+### Usage
+
+```bash
+# Preview to stdout
+dotnet rivet --from-openapi openapi.json --namespace TaskBoard.Contracts
+
+# Write to disk
+dotnet rivet --from-openapi openapi.json --namespace TaskBoard.Contracts --output ./src/Contracts/
+
+# With default security scheme
+dotnet rivet --from-openapi openapi.json --namespace TaskBoard.Contracts --output ./src/ --security bearer
+```
+
+### Output structure
+
+```
+output/
+├── Types/
+│   ├── TaskDto.cs              # sealed record with [RivetType]
+│   ├── CreateTaskRequest.cs
+│   └── Priority.cs             # enum
+├── Domain/
+│   └── Email.cs                # branded value object
+└── Contracts/
+    ├── TasksContract.cs        # [RivetContract] with Endpoint builder chains
+    └── MembersContract.cs
+```
+
+### Supported subset
+
+| JSON Schema                             | C#                      |
+|-----------------------------------------|-------------------------|
+| `string`                                | `string`                |
+| `string` + `format: date-time`          | `DateTime`              |
+| `string` + `format: guid` / `uuid`      | `Guid`                  |
+| `string` + `format: email`, `uri`, etc. | Branded value object    |
+| `string` + `enum: [...]`                | `enum`                  |
+| `integer` / `integer` + `format: int32` | `int`                   |
+| `integer` + `format: int64`             | `long`                  |
+| `number` / `number` + `format: double`  | `double`                |
+| `number` + `format: float`              | `float`                 |
+| `boolean`                               | `bool`                  |
+| `array` + `items`                       | `List<T>`               |
+| `object` + `properties`                 | `sealed record`         |
+| `object` + `additionalProperties`       | `Dictionary<string, T>` |
+| `$ref`                                  | Named type reference    |
+| Nullable (`type: ["string", "null"]`)   | `T?`                    |
+
+Unsupported features (`allOf`/`oneOf`/`anyOf`, discriminator, inline anonymous objects, etc.) produce a warning and are
+skipped. The generated contracts and types compile immediately and work with the existing Rivet pipeline — run the
+standard `dotnet rivet --project` command to produce the TypeScript output.
+
 ## Limitations
 
 - Records only — no inheritance, no polymorphism

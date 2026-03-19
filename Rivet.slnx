@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/samples/">
-    <Project Path="samples/TaskBoard.Api/TaskBoard.Api.csproj" />
+    <Project Path="samples/AnnotationApi/AnnotationApi.csproj" />
+    <Project Path="samples/ContractApi/ContractApi.csproj" />
   </Folder>
   <Project Path="Rivet.Attributes/Rivet.Attributes.csproj" />
   <Project Path="Rivet.Tests/Rivet.Tests.csproj" />

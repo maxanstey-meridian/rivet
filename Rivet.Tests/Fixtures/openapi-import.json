@@ -1,0 +1,357 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TaskBoard API",
+    "version": "1.0.0"
+  },
+  "security": [{ "bearer": [] }],
+  "paths": {
+    "/api/tasks": {
+      "get": {
+        "operationId": "tasks_list",
+        "tags": ["Tasks"],
+        "summary": "List all tasks",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/TaskDto" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "tasks_create",
+        "tags": ["Tasks"],
+        "summary": "Create a new task",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateTaskRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TaskDto" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationErrorDto" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}": {
+      "get": {
+        "operationId": "tasks_getById",
+        "tags": ["Tasks"],
+        "summary": "Retrieve a single task by ID",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TaskDto" }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/NotFoundDto" }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "tasks_update",
+        "tags": ["Tasks"],
+        "summary": "Update a task",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateTaskRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TaskDto" }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/NotFoundDto" }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "tasks_patch",
+        "tags": ["Tasks"],
+        "summary": "Partially update a task",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PatchTaskRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TaskDto" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "tasks_delete",
+        "tags": ["Tasks"],
+        "summary": "Delete a task",
+        "responses": {
+          "204": { "description": "No Content" }
+        }
+      }
+    },
+    "/api/members": {
+      "get": {
+        "operationId": "members_list",
+        "tags": ["Members"],
+        "summary": "List all members",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/MemberDto" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "members_invite",
+        "tags": ["Members"],
+        "summary": "Invite a new member",
+        "security": [{ "admin": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/InviteMemberRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MemberDto" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "health_check",
+        "tags": ["Health"],
+        "summary": "Health check",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthDto" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "TaskDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "priority": { "$ref": "#/components/schemas/Priority" },
+          "score": { "type": "number" },
+          "rating": { "type": "number", "format": "float" },
+          "viewCount": { "type": "integer" },
+          "totalBytes": { "type": "integer", "format": "int64" },
+          "isArchived": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "assigneeEmail": { "$ref": "#/components/schemas/Email" },
+          "labels": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/LabelDto" }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        },
+        "required": [
+          "id", "title", "priority", "score", "rating",
+          "viewCount", "totalBytes", "isArchived", "createdAt",
+          "assigneeEmail", "labels", "metadata"
+        ]
+      },
+      "LabelDto": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "color": { "type": "string" }
+        },
+        "required": ["name", "color"]
+      },
+      "CreateTaskRequest": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "priority": { "$ref": "#/components/schemas/Priority" }
+        },
+        "required": ["title", "priority"]
+      },
+      "UpdateTaskRequest": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "priority": { "$ref": "#/components/schemas/Priority" }
+        },
+        "required": ["title", "priority"]
+      },
+      "PatchTaskRequest": {
+        "type": "object",
+        "properties": {
+          "title": { "type": ["string", "null"] },
+          "priority": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/Priority" },
+              { "type": "null" }
+            ]
+          }
+        }
+      },
+      "MemberDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "email": { "$ref": "#/components/schemas/Email" },
+          "website": { "$ref": "#/components/schemas/Website" }
+        },
+        "required": ["id", "name", "email"]
+      },
+      "InviteMemberRequest": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "email": { "$ref": "#/components/schemas/Email" }
+        },
+        "required": ["name", "email"]
+      },
+      "NotFoundDto": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" }
+        },
+        "required": ["message"]
+      },
+      "ValidationErrorDto": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "required": ["message", "errors"]
+      },
+      "HealthDto": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" }
+        },
+        "required": ["status"]
+      },
+      "Priority": {
+        "type": "string",
+        "enum": ["low", "medium", "high", "critical"]
+      },
+      "Email": {
+        "type": "string",
+        "format": "email"
+      },
+      "Website": {
+        "type": "string",
+        "format": "uri"
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "admin": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis.MSBuild;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Compile;
 using Rivet.Tool.Emit;
+using Rivet.Tool.Import;
 using Rivet.Tool.Model;
 
 return await Run(args);
@@ -18,6 +19,12 @@ static async Task<int> Run(string[] args)
     {
         PrintUsage();
         return 1;
+    }
+
+    // Import mode: OpenAPI → C# contracts
+    if (options.FromOpenApiPath is not null)
+    {
+        return RunImport(options);
     }
 
     var sw = Stopwatch.StartNew();
@@ -352,6 +359,8 @@ static RivetOptions? ParseArgs(string[] args)
     var mode = "generate";
     string? openApiPath = null;
     string? defaultSecurity = null;
+    string? fromOpenApiPath = null;
+    string? importNamespace = null;
     var files = new List<string>();
 
     for (var i = 0; i < args.Length; i++)
@@ -375,10 +384,24 @@ static RivetOptions? ParseArgs(string[] args)
             case "--security" when i + 1 < args.Length:
                 defaultSecurity = args[++i];
                 break;
+            case "--from-openapi" when i + 1 < args.Length:
+                fromOpenApiPath = args[++i];
+                break;
+            case "--namespace" when i + 1 < args.Length:
+                importNamespace = args[++i];
+                break;
             default:
                 files.Add(args[i]);
                 break;
         }
+    }
+
+    // Import mode doesn't need a project path
+    if (fromOpenApiPath is not null)
+    {
+        return new RivetOptions(
+            fromOpenApiPath, outputDir, mode, files.ToArray(),
+            openApiPath, defaultSecurity, fromOpenApiPath, importNamespace);
     }
 
     projectPath ??= files.FirstOrDefault();
@@ -389,6 +412,44 @@ static RivetOptions? ParseArgs(string[] args)
     }
 
     return new RivetOptions(projectPath, outputDir, mode, files.ToArray(), openApiPath, defaultSecurity);
+}
+
+static int RunImport(RivetOptions options)
+{
+    var json = File.ReadAllText(options.FromOpenApiPath!);
+    var importOptions = new ImportOptions(
+        options.ImportNamespace ?? "Generated",
+        options.DefaultSecurity);
+    var result = OpenApiImporter.Import(json, importOptions);
+
+    foreach (var warning in result.Warnings)
+    {
+        Console.Error.WriteLine($"warning: {warning}");
+    }
+
+    if (options.OutputDir is not null)
+    {
+        foreach (var file in result.Files)
+        {
+            var path = Path.Combine(options.OutputDir, file.FileName);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, file.Content);
+            Console.WriteLine($"  {file.FileName} → {path}");
+        }
+
+        Console.WriteLine($"Generated {result.Files.Count} file(s).");
+    }
+    else
+    {
+        // Preview to stdout
+        foreach (var file in result.Files)
+        {
+            Console.WriteLine($"// === {file.FileName} ===");
+            Console.WriteLine(file.Content);
+        }
+    }
+
+    return 0;
 }
 
 static string FormatElapsed(TimeSpan elapsed) =>
@@ -403,13 +464,16 @@ static void PrintUsage()
     Console.Error.WriteLine("Usage:");
     Console.Error.WriteLine("  dotnet rivet --project <path.csproj> --output <dir>");
     Console.Error.WriteLine("  dotnet rivet <file.cs> [file2.cs ...] [--output <dir>]");
+    Console.Error.WriteLine("  dotnet rivet --from-openapi <spec.json> --namespace <ns> [--output <dir>]");
     Console.Error.WriteLine();
     Console.Error.WriteLine("Options:");
-    Console.Error.WriteLine("  -p, --project <path>   Path to .csproj file");
-    Console.Error.WriteLine("  -o, --output <dir>     Output directory (omit for stdout preview)");
-    Console.Error.WriteLine("  --compile              Also run typia compilation (requires node on PATH)");
-    Console.Error.WriteLine("  --openapi [file]       Emit OpenAPI 3.1 JSON spec (default: openapi.json)");
-    Console.Error.WriteLine("  --security <spec>      Default security scheme (bearer, bearer:jwt, cookie:name, apikey:in:name)");
+    Console.Error.WriteLine("  -p, --project <path>       Path to .csproj file");
+    Console.Error.WriteLine("  -o, --output <dir>         Output directory (omit for stdout preview)");
+    Console.Error.WriteLine("  --compile                  Also run typia compilation (requires node on PATH)");
+    Console.Error.WriteLine("  --openapi [file]           Emit OpenAPI 3.1 JSON spec (default: openapi.json)");
+    Console.Error.WriteLine("  --security <spec>          Default security scheme (bearer, bearer:jwt, cookie:name, apikey:in:name)");
+    Console.Error.WriteLine("  --from-openapi <spec.json> Import OpenAPI spec → C# contracts + DTOs");
+    Console.Error.WriteLine("  --namespace <ns>           Namespace for generated C# files (default: Generated)");
 }
 
 static IEnumerable<string> GetDotnetRoots()
@@ -488,4 +552,5 @@ static IEnumerable<string> GetDotnetRoots()
 
 sealed record RivetOptions(
     string ProjectPath, string? OutputDir, string Mode, string[] Files,
-    string? OpenApiPath = null, string? DefaultSecurity = null);
+    string? OpenApiPath = null, string? DefaultSecurity = null,
+    string? FromOpenApiPath = null, string? ImportNamespace = null);
