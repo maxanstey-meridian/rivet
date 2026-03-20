@@ -124,7 +124,7 @@ export function create(
 Full output structure:
 
 ```
-generated/rivet/
+generated/
 ├── types/
 │   ├── index.ts              # barrel: export * as common, export * as domain, ...
 │   ├── common.ts             # types referenced across multiple groups
@@ -145,8 +145,8 @@ Types are split by C# namespace. Types referenced across multiple groups are pro
 ## 5. Use
 
 ```typescript
-import { configureRivet } from "~/generated/rivet/rivet";
-import { tasks } from "~/generated/rivet/client";
+import { configureRivet } from "~/generated/rivet";
+import { tasks } from "~/generated/client";
 
 // Configure once at app startup
 configureRivet({

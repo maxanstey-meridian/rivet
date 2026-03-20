@@ -8,12 +8,12 @@
 | `int`, `long`, `decimal`, `double`, `uint`, `ulong` | `number` | `type: number` |
 | `bool` | `boolean` | `type: boolean` |
 | `DateTime`, `DateTimeOffset`, `DateOnly` | `string` | `type: string` |
-| `T?` (nullable value/ref) | `T \| null` | `type: ["<base>", "null"]` |
+| `T?` (nullable value/ref) | `T \| null` | `nullable: true` |
 | `List<T>`, `T[]`, `IEnumerable<T>`, `IReadOnlyList<T>` | `T[]` | `type: array, items: {...}` |
 | `Dictionary<string, T>`, `IReadOnlyDictionary<string, T>` | `Record<string, T>` | `type: object, additionalProperties: {...}` |
 | `sealed record` | `type { ... }` (transitive discovery, including project references) | `type: object, properties: {...}` |
 | `enum` (with `JsonStringEnumConverter`) | `type Status = "A" \| "B"` | `type: string, enum: [...]` |
-| `PagedResult<T>` (generic record) | `PagedResult<T>` | Monomorphised: `PagedResultOfT` |
+| `PagedResult<T>` (generic record) | `PagedResult<T>` | Monomorphised: `PagedResultT` |
 | `JsonElement`, `JsonNode` | `unknown` | `{}` |
 | `JsonObject` | `Record<string, unknown>` | `type: object` |
 | `JsonArray` | `unknown[]` | `type: array` |
@@ -68,13 +68,13 @@ Multi-property records are emitted as regular object types: `Money(decimal Amoun
 
 > **Note:** Empty `properties: {}` is treated the same as absent `properties` — the OpenAPI library does not distinguish them. Both produce `Dictionary<string, JsonElement>`.
 | `$ref` | Named type reference |
-| Nullable (`type: ["string", "null"]`) | `T?` |
+| Nullable (`nullable: true`) | `T?` |
 
 ## Generic type monomorphisation
 
 In the OpenAPI spec, generic types are monomorphised — each concrete instantiation becomes its own schema. For example:
 
-- `PagedResult<TaskDto>` → `PagedResultOfTaskDto`
-- `PagedResult<MemberDto>` → `PagedResultOfMemberDto`
+- `PagedResult<TaskDto>` → `PagedResultTaskDto`
+- `PagedResult<MemberDto>` → `PagedResultMemberDto`
 
 In TypeScript, the generic is preserved as `PagedResult<T>` with a type parameter.

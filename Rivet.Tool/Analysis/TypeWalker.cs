@@ -116,9 +116,12 @@ public sealed class TypeWalker
             return;
         }
 
-        // Enums are emitted inline as string unions, not as separate definitions
+        // Enums referenced transitively are added to _enums in MapTypeCore.
+        // If an enum is the root entry point (via [RivetType]), walk it through
+        // MapTypeCore so it gets registered, then return — no TsTypeDefinition needed.
         if (definition.TypeKind == TypeKind.Enum)
         {
+            MapTypeCore(definition);
             return;
         }
 

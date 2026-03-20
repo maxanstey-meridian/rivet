@@ -79,6 +79,8 @@ app.MapGet(MembersContract.List.Route, async (AppDb db, CancellationToken ct) =>
 
 Both are checked automatically — no extra configuration needed.
 
+> **Note:** Route validation for minimal APIs only works with literal string routes passed to `MapGet`/`MapPost`/etc. If you use `.Route` from a contract field (e.g., `MembersContract.List.Route`), only the HTTP method is checked — the route value is a runtime property reference that can't be resolved statically.
+
 ## CI usage
 
 `--check` without `--output` exits with code 1 if any warnings are found, making it easy to add to CI. Use `--quiet` (`-q`) to suppress codegen preview output:

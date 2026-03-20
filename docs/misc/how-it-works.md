@@ -47,7 +47,7 @@ openapi.json
   → .cs files
 ```
 
-1. Parses an OpenAPI 3.1 JSON spec
+1. Parses an OpenAPI 3.x JSON spec
 2. Maps `#/components/schemas` to C# types (sealed records, enums, branded VOs)
 3. Groups `#/paths` operations by tag into `[RivetContract]` static classes
 4. Emits `.cs` files that feed directly into the forward pipeline

@@ -1,6 +1,6 @@
 # OpenAPI Import
 
-Start from an OpenAPI 3.1 JSON spec, generate C# contracts and DTOs, then feed them into the normal Rivet pipeline to produce TypeScript output.
+Start from an OpenAPI 3.x JSON spec, generate C# contracts and DTOs, then feed them into the normal Rivet pipeline to produce TypeScript output.
 
 ```
 OpenAPI spec (source of truth)
@@ -18,7 +18,7 @@ This is useful when another team owns the API — import their spec, get typed c
 dotnet rivet --from-openapi openapi.json --namespace TaskBoard.Contracts
 
 # Write to disk
-dotnet rivet --from-openapi openapi.json --namespace TaskBoard.Contracts --output ./src/Contracts/
+dotnet rivet --from-openapi openapi.json --namespace TaskBoard.Contracts --output ./src/
 
 # With default security scheme
 dotnet rivet --from-openapi openapi.json --namespace TaskBoard.Contracts --output ./src/ --security bearer
@@ -71,7 +71,7 @@ The generated C# files compile immediately and work with the existing Rivet pipe
 
 ```bash
 # Step 1: Import OpenAPI → C#
-dotnet rivet --from-openapi spec.json --namespace MyApp.Contracts --output ./src/Contracts/
+dotnet rivet --from-openapi spec.json --namespace MyApp.Contracts --output ./src/
 
 # Step 2: Generate TS from the imported contracts
 dotnet rivet --project MyApp.csproj --output ./generated

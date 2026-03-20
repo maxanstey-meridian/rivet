@@ -1,6 +1,6 @@
 # OpenAPI Emission
 
-Generate an OpenAPI 3.1 JSON spec alongside your TypeScript output. Your C# types and endpoints become a standards-compliant API spec — useful for documentation tools, API gateways, and external consumers.
+Generate an OpenAPI 3.0 JSON spec alongside your TypeScript output. Your C# types and endpoints become a standards-compliant API spec — useful for documentation tools, API gateways, and external consumers.
 
 ## Command
 
@@ -57,14 +57,14 @@ The generated `openapi.json` includes:
 
 ### Type representation
 
-- Generic types are monomorphised: `PagedResult<TaskDto>` becomes `PagedResultOfTaskDto` in the schema
+- Generic types are monomorphised: `PagedResult<TaskDto>` becomes `PagedResultTaskDto` in the schema
 - Branded value objects (single-property records) are unwrapped to their inner primitive type (e.g., `Email` becomes `type: string`)
 - Enums are `type: string` with `enum: [...]`
-- Nullable types use `type: ["string", "null"]`
+- Nullable types use `nullable: true`
 
 ## Viewing the spec
 
-The generated `openapi.json` works with any OpenAPI 3.1 tool:
+The generated `openapi.json` works with any OpenAPI 3.0 tool:
 
 - [Swagger Editor](https://editor.swagger.io) — paste or upload the JSON
 - [Redocly](https://redocly.com) — `npx @redocly/cli preview-docs openapi.json`

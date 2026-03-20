@@ -545,6 +545,46 @@ public sealed class ControllerEndpointTests
     }
 
     [Fact]
+    public void Controller_ActionResultT_WithOnly404_Synthesizes200()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+            [RivetType]
+            public sealed record ErrorDto(string Message);
+
+            [Route("api/items")]
+            public sealed class ItemsController
+            {
+                [RivetEndpoint]
+                [HttpGet("{id:guid}")]
+                [ProducesResponseType(typeof(ErrorDto), 404)]
+                public Task<ActionResult<ItemDto>> Get(Guid id, CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+
+        var endpoint = Assert.Single(endpoints);
+        Assert.Equal(2, endpoint.Responses.Count);
+        Assert.Equal(200, endpoint.Responses[0].StatusCode);
+        Assert.NotNull(endpoint.Responses[0].DataType);
+        Assert.Equal(404, endpoint.Responses[1].StatusCode);
+        Assert.NotNull(endpoint.Responses[1].DataType);
+    }
+
+    [Fact]
     public void Controller_ActionResultT_UnwrapsReturnType()
     {
         var source = """

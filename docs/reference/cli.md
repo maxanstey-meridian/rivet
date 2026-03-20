@@ -14,7 +14,7 @@ Rivet detects which mode to run based on the flags provided:
 |---|---|
 | `--project` | Forward: C# → TypeScript |
 | `--project` + `--compile` | Forward + typia runtime validators |
-| `--project` + `--openapi` | Forward + OpenAPI 3.1 JSON spec |
+| `--project` + `--openapi` | Forward + OpenAPI 3.0 JSON spec |
 | `--project` + `--check` | Verify contract coverage against implementations |
 | `--project` + `--routes` | List all discovered endpoints |
 | `--from-openapi` | Reverse: OpenAPI → C# contracts + DTOs |
@@ -25,13 +25,13 @@ Rivet detects which mode to run based on the flags provided:
 |---|---|---|
 | `--project <path>` | | Path to the `.csproj` file to analyse |
 | `--output <dir>` | `-o` | Output directory. Omit to preview to stdout |
-| `--compile` | | Compile typia validators (requires Node.js on PATH) |
-| `--openapi` | | Emit OpenAPI 3.1 JSON alongside TS output |
+| `--compile` | | Compile typia validators (requires Node.js on PATH, requires `--output`) |
+| `--openapi` | | Emit OpenAPI 3.0 JSON alongside TS output |
 | `--security <scheme>` | | Security scheme for OpenAPI spec |
 | `--check` | | Verify contract coverage (missing implementations, route/method mismatches) |
 | `--routes` | | List all discovered endpoints (method, route, handler) |
 | `--quiet` | `-q` | Suppress codegen preview output (useful with `--check`) |
-| `--from-openapi <path>` | | Path to OpenAPI 3.1 JSON spec to import |
+| `--from-openapi <path>` | | Path to OpenAPI 3.x JSON spec to import |
 | `--namespace <ns>` | | C# namespace for imported contracts/types |
 
 ## Security scheme formats
@@ -117,7 +117,7 @@ Output:
 dotnet rivet --from-openapi spec.json --namespace TaskBoard.Contracts
 
 # Write to disk
-dotnet rivet --from-openapi spec.json --namespace TaskBoard.Contracts --output ./src/Contracts/
+dotnet rivet --from-openapi spec.json --namespace TaskBoard.Contracts --output ./src/
 
 # With security scheme
 dotnet rivet --from-openapi spec.json --namespace TaskBoard.Contracts --output ./src/ --security bearer

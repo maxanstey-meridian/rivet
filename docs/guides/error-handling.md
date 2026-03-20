@@ -7,7 +7,7 @@ Every generated endpoint supports two modes: throw on error (default) or return 
 By default, every endpoint returns `Promise<T>` directly and throws `RivetError` on non-2xx responses:
 
 ```typescript
-import { RivetError } from "~/generated/rivet/rivet";
+import { RivetError } from "~/generated/rivet";
 
 try {
   await tasks.create({ title: "", description: null, priority: "High",
@@ -15,8 +15,9 @@ try {
 } catch (err) {
   if (err instanceof RivetError) {
     err.status;        // 422
-    err.body?.message; // "Title is required" (parsed from JSON response)
-    err.body?.code;    // "VALIDATION_ERROR"
+    const body = err.body as { message?: string; code?: string };
+    body.message;      // "Title is required" (parsed from JSON response)
+    body.code;         // "VALIDATION_ERROR"
   }
 }
 ```
@@ -29,7 +30,7 @@ try {
 | `body` | `unknown` | Parsed JSON response body (if any) |
 | `method` | `string` | HTTP method (`GET`, `POST`, etc.) |
 | `path` | `string` | Request path |
-| `response` | `Response` | Raw `fetch` Response object |
+| `response` | `Response \| undefined` | Raw `fetch` Response object |
 
 ## Typed results with `unwrap: false`
 

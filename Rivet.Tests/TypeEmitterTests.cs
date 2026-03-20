@@ -759,6 +759,27 @@ public sealed class TypeEmitterTests
     }
 
     [Fact]
+    public void RivetType_OnEnum_EmitsStringUnion()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public enum Priority { Low, Medium, High, Critical }
+            """;
+
+        var result = Generate(source);
+
+        Assert.Contains("export type Priority =", result);
+        Assert.Contains("\"Low\"", result);
+        Assert.Contains("\"Medium\"", result);
+        Assert.Contains("\"High\"", result);
+        Assert.Contains("\"Critical\"", result);
+    }
+
+    [Fact]
     public void DeeplyNestedGeneric_FourLevels()
     {
         var source = """

@@ -2,5 +2,5 @@ using System;
 
 namespace Rivet;
 
-[AttributeUsage(AttributeTargets.Class, Inherited = false)]
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Enum, Inherited = false)]
 public sealed class RivetTypeAttribute : Attribute;

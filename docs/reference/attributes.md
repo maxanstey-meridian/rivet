@@ -50,6 +50,8 @@ public static class HealthCheck
 }
 ```
 
+> **Note:** Rivet reads `[HttpGet]` and other HTTP attributes for code generation, but ASP.NET won't route to a plain static class. To actually serve this endpoint at runtime, register it via minimal APIs (`app.MapGet(...)`) or a controller.
+
 Use when only some methods on a class should be exposed, or for standalone endpoints outside the controller pattern.
 
 ## `[RivetContract]`

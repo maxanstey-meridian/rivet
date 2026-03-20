@@ -24,7 +24,7 @@ All builder methods return the definition for chaining.
 |---|---|
 | `.Returns<T>(statusCode)` | Declare an additional response type for a status code |
 | `.Returns<T>(statusCode, description)` | Same, with a human-readable description |
-| `.Status(code)` | Override the default success status code (default: 200) |
+| `.Status(code)` | Override the default success status code (default: 200, or 201 for POST) |
 | `.Description(desc)` | Endpoint description, emitted to the OpenAPI spec |
 | `.Anonymous()` | Marks endpoint as not requiring authentication |
 | `.Secure(scheme)` | Sets a named security scheme for the endpoint |

@@ -22,7 +22,7 @@ dotnet rivet --project path/to/Api.csproj --output ./generated --compile
 ## Output structure
 
 ```
-generated/rivet/
+generated/
 ├── types/...                  # same as without --compile
 ├── client/...                 # re-emitted with validator calls
 ├── rivet.ts                   # same

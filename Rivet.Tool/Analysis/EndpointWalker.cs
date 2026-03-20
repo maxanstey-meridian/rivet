@@ -494,6 +494,19 @@ public static class EndpointWalker
             }
         }
 
+        // If [ProducesResponseType] attributes exist but none are 2xx, synthesize the
+        // success response from ActionResult<T> so the discriminated union has a success branch.
+        if (responses.Count > 0 && !responses.Any(r => r.StatusCode is >= 200 and < 300))
+        {
+            var unwrapped = UnwrapTask(method.ReturnType, out _);
+            if (unwrapped is INamedTypeSymbol actionResult
+                && actionResult.OriginalDefinition.ToDisplayString() is "Microsoft.AspNetCore.Mvc.ActionResult<TValue>")
+            {
+                var tsType = typeWalker.MapType(actionResult.TypeArguments[0]);
+                responses.Insert(0, new TsResponseType(200, tsType));
+            }
+        }
+
         // If no [ProducesResponseType] found, try typed results from return type
         if (responses.Count == 0)
         {

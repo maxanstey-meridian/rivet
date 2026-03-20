@@ -4,8 +4,8 @@ Known limitations of the current Rivet implementation.
 
 ## Type system
 
-- **Records only** — no inheritance, no polymorphism. Rivet works with sealed records and enums. Class hierarchies and interface-typed properties are not supported.
-- **`delete` → `remove` rename** — `delete` is a reserved word in TypeScript/JavaScript. Generated client functions for `[HttpDelete]` endpoints are renamed to `remove`.
+- **No inheritance hierarchies or interface-typed properties** — Rivet works with sealed records, sealed classes, structs, and enums. Class inheritance and interface-typed properties are not supported.
+- **`delete` → `remove` rename** — `delete` is a reserved word in TypeScript/JavaScript. When the generated function name would be literally `delete` (e.g., a method named `Delete()`), it is renamed to `remove`. Other `[HttpDelete]` endpoints (e.g., `RemoveItem()`) keep their original name.
 
 ## File uploads
 
@@ -22,5 +22,5 @@ Known limitations of the current Rivet implementation.
 
 ## OpenAPI import
 
-- **OpenAPI 3.1 JSON only** — YAML specs and OpenAPI 2.0 (Swagger) are not supported.
+- **OpenAPI 3.x JSON only** — YAML specs and OpenAPI 2.0 (Swagger) are not supported.
 - **No `discriminator` mappings** — `discriminator` is not supported. These produce a warning and are skipped.

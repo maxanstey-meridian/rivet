@@ -272,13 +272,13 @@ Notice:
 - **`Role`** is a string union, not a numeric enum
 - **`GetResult`** is a discriminated union — `{ status: 404; data: ErrorDto }` is a real type you can narrow on
 - **`avatarUrl`** is `string | null` — C# nullability flows through
-- **`uploadAvatar`** accepts `File` — Rivet detected the `IFormFile` parameter and generates a `FormData` upload
+- **`uploadAvatar`** accepts `File` — `.AcceptsFile()` on the contract generates a `FormData` upload
 
 ## 7. Use in your frontend
 
 ```typescript
-import { configureRivet } from "~/generated/rivet/rivet";
-import { users } from "~/generated/rivet/client";
+import { configureRivet } from "~/generated/rivet";
+import { users } from "~/generated/client";
 
 configureRivet({ baseUrl: "http://localhost:5000" });
 
