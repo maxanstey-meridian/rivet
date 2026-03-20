@@ -116,10 +116,7 @@ public static partial class ClientEmitter
                 if (_config.onError) _config.onError(error);
                 throw error;
               }
-              if (res.status === 204) {
-                return undefined as T;
-              }
-              return (await res.json()) as T;
+              return (await parseBody(res)) as T;
             };
             """);
 
