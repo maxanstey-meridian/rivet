@@ -100,7 +100,7 @@ app.MapGet(MembersContract.List.Route, async (AppDb db, CancellationToken ct) =>
 dotnet rivet --project Api.csproj --output ./generated --compile
 ```
 
-Single-property records become branded types with compile-time-generated runtime checks:
+Rivet generates [typia](https://typia.io) validators for your types:
 
 ```csharp
 [RivetType]
