@@ -423,6 +423,7 @@ public sealed class JsonSchemaEmitterTests
     }
 
     [Fact]
+    [Trait("Category", "Local")]
     public void Zod_Integration()
     {
         var jsDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "js");
