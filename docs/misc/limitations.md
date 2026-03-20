@@ -23,5 +23,4 @@ Known limitations of the current Rivet implementation.
 ## OpenAPI import
 
 - **OpenAPI 3.1 JSON only** — YAML specs and OpenAPI 2.0 (Swagger) are not supported.
-- **No composition schemas** — `allOf`, `oneOf`, `anyOf`, and `discriminator` are not supported. These produce a warning and are skipped.
-- **No inline anonymous objects** — all types must be named via `$ref`.
+- **No `discriminator` mappings** — `discriminator` is not supported. These produce a warning and are skipped.

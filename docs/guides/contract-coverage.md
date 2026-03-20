@@ -24,7 +24,7 @@ dotnet rivet --project Api.csproj --output ./generated --check
 A contract field with no `.Invoke()` call anywhere in the project:
 
 ```
-⚠ MembersContract.UpdateRole: no .Invoke() call found
+warning: [MissingImplementation] MembersContract.UpdateRole: expected PUT /api/members/{id}/role, got (none)
 ```
 
 ### HTTP method mismatch
@@ -40,7 +40,7 @@ public async Task<IActionResult> List(CancellationToken ct)
 ```
 
 ```
-⚠ MembersContract.List: HTTP method mismatch — expected GET, found POST
+warning: [HttpMethodMismatch] MembersContract.List: expected GET, got POST
 ```
 
 ### Route mismatch
@@ -48,7 +48,7 @@ public async Task<IActionResult> List(CancellationToken ct)
 The contract says `/api/members` but the controller routes to `/api/users`:
 
 ```
-⚠ MembersContract.List: route mismatch — expected /api/members, found /api/users
+warning: [RouteMismatch] MembersContract.List: expected /api/members, got /api/users
 ```
 
 ## Works with MVC controllers and minimal APIs

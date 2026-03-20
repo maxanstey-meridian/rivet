@@ -79,6 +79,9 @@ export type Label = {
   name: string;
   color: string;
 };
+
+export type Email = string & { readonly __brand: "Email" };
+export type TaskId = string & { readonly __brand: "TaskId" };
 ```
 
 ```typescript [types/controllers.ts]

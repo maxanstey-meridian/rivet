@@ -55,9 +55,7 @@ See the [Type Mapping reference](/reference/type-mapping#openapi--c-import-direc
 
 The following produce a warning and are skipped:
 
-- `allOf` / `oneOf` / `anyOf` composition
 - `discriminator` mappings
-- Inline anonymous objects (must be named via `$ref`)
 - XML-specific attributes
 - Callbacks, webhooks, links
 
