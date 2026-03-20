@@ -24,14 +24,14 @@ public static class MembersContract
         Define.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
             .Description("Invite a new team member")
             .Status(201)
-            .Returns<InviteMemberResponse>(422, "Validation failed")
+            .Returns<ValidationErrorDto>(422, "Validation failed")
             .Secure("admin");
 
     // DELETE /api/members/{id} — no typed I/O, 404 response declared
     public static readonly RouteDefinition Remove =
         Define.Delete("/api/members/{id}")
             .Description("Remove a team member")
-            .Returns<MemberDto>(404, "Member not found")
+            .Returns<NotFoundDto>(404, "Member not found")
             .Secure("admin");
 
     // GET /api/health — no auth required
@@ -52,7 +52,7 @@ export function list(opts: { unwrap: false }): Promise<RivetResult<MemberDto[]>>
 
 export type InviteResult =
   | { status: 201; data: InviteMemberResponse; response: Response }
-  | { status: 422; data: InviteMemberResponse; response: Response };
+  | { status: 422; data: ValidationErrorDto; response: Response };
 
 export function invite(body: InviteMemberRequest): Promise<InviteMemberResponse>;
 export function invite(body: InviteMemberRequest, opts: { unwrap: false }): Promise<InviteResult>;

@@ -16,6 +16,12 @@ public sealed record InviteMemberResponse(Guid Id);
 [RivetType]
 public sealed record UpdateRoleRequest(string Role);
 
+[RivetType]
+public sealed record NotFoundDto(string Message);
+
+[RivetType]
+public sealed record ValidationErrorDto(string Message, Dictionary<string, string[]> Errors);
+
 [Route("api/members")]
 public sealed class MembersController : ControllerBase
 {

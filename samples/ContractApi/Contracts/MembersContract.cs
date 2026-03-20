@@ -25,14 +25,14 @@ public static class MembersContract
         Define.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
             .Description("Invite a new team member")
             .Status(201)
-            .Returns<InviteMemberResponse>(422, "Validation failed")
+            .Returns<ValidationErrorDto>(422, "Validation failed")
             .Secure("admin");
 
     /// TS: remove(id: string): Promise<void>  — delete → remove (reserved word)
     public static readonly RouteDefinition Remove =
         Define.Delete("/api/members/{id}")
             .Description("Remove a team member")
-            .Returns<MemberDto>(404, "Member not found")
+            .Returns<NotFoundDto>(404, "Member not found")
             .Secure("admin");
 
     /// TS: updateRole(id: string, body: UpdateRoleRequest): Promise<void>  — input only, 204
@@ -41,7 +41,7 @@ public static class MembersContract
             .Accepts<UpdateRoleRequest>()
             .Status(204)
             .Description("Update a member's role")
-            .Returns<MemberDto>(404, "Member not found")
+            .Returns<NotFoundDto>(404, "Member not found")
             .Secure("admin");
 
     /// TS: health(): Promise<void>  — .Anonymous() → no auth required

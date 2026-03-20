@@ -267,6 +267,7 @@ public sealed class TypeScriptCompilationTests : IDisposable
                 public sealed record MemberDto(Guid Id, string Name, Email Email);
                 public sealed record InviteMemberRequest(Email Email, string Role);
                 public sealed record InviteMemberResponse(Guid Id);
+                public sealed record ValidationErrorDto(string Message);
             }
 
             namespace MyApp.Api
@@ -306,11 +307,11 @@ public sealed class TypeScriptCompilationTests : IDisposable
                     public static readonly Define Invite =
                         Define.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
                             .Status(201)
-                            .Returns<InviteMemberResponse>(422);
+                            .Returns<ValidationErrorDto>(422);
 
                     public static readonly Define Remove =
                         Define.Delete("/api/members/{id}")
-                            .Returns<MemberDto>(404);
+                            .Returns<NotFoundDto>(404);
                 }
             }
             """;
