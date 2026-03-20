@@ -334,6 +334,15 @@ public sealed class CoverageCheckerTests
         var (_, warnings) = RunCheck(TasksContract, impl);
         var missing = warnings.Where(w => w.Kind == CoverageWarningKind.MissingImplementation).ToList();
         Assert.Equal(5, missing.Count); // All 5 fields missing
+
+        // MissingImplementation should populate Expected with method+route and Actual with "(none)"
+        var listWarning = missing.Single(w => w.FieldName == "ListTasks");
+        Assert.Equal("GET /api/tasks", listWarning.Expected);
+        Assert.Equal("(none)", listWarning.Actual);
+
+        var removeWarning = missing.Single(w => w.FieldName == "RemoveTask");
+        Assert.Equal("DELETE /api/tasks/{id}", removeWarning.Expected);
+        Assert.Equal("(none)", removeWarning.Actual);
     }
 
     [Fact]

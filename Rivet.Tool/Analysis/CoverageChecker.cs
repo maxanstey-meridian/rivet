@@ -139,8 +139,8 @@ public static class CoverageChecker
                     CoverageWarningKind.MissingImplementation,
                     field.ContainingType.Name,
                     field.Name,
-                    Expected: null,
-                    Actual: null,
+                    Expected: $"{endpoint.HttpMethod} {endpoint.RouteTemplate}",
+                    Actual: "(none)",
                     Location: field.Locations.FirstOrDefault()));
                 continue;
             }
