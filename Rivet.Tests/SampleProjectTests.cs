@@ -39,6 +39,16 @@ public sealed class SampleProjectTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportDemo_Builds()
+    {
+        var importDemoDir = Path.Combine(RepoRoot, "samples", "ImportDemo");
+        var (exitCode, output) = await RunProcessAsync(
+            "dotnet", $"build \"{Path.Combine(importDemoDir, "ImportDemo.csproj")}\" --verbosity quiet");
+
+        Assert.True(exitCode == 0, $"ImportDemo build failed:\n{output}");
+    }
+
+    [Fact]
     public void SampleProject_Contracts_Survive_Roslyn_RoundTrip()
     {
         var sources = ReadSampleSources();
