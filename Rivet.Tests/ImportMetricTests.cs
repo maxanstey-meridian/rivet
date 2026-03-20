@@ -5,7 +5,9 @@ namespace Rivet.Tests;
 /// <summary>
 /// Metric assertions against real-world OpenAPI specs.
 /// These catch regressions in import coverage without snapshot maintenance.
+/// Requires local spec files in /openapi (gitignored) — skipped in CI via trait filter.
 /// </summary>
+[Trait("Category", "Local")]
 public sealed class ImportMetricTests
 {
     private static string SpecPath(string name) =>
