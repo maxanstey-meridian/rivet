@@ -24,8 +24,13 @@ dotnet tool install --global dotnet-rivet
 ## Mark your C# types → get TypeScript types
 
 ```csharp
+[RivetType]
 public enum Priority { Low, Medium, High, Critical }
-public sealed record Email(string Value);               // single-property → branded
+
+[RivetType]
+public sealed record Email(string Value); // single-property → branded
+
+[RivetType]
 public sealed record TaskItem(Guid Id, string Title, Priority Priority, Email Author);
 ```
 
@@ -54,7 +59,8 @@ public sealed class TasksController : ControllerBase
 // Generated — discriminated union, narrowable by status
 export type GetResult =
   | { status: 200; data: TaskDetailDto; response: Response }
-  | { status: 404; data: NotFoundDto; response: Response };
+  | { status: 404; data: NotFoundDto; response: Response }
+  | { status: Exclude<number, 200 | 404>; data: unknown; response: Response };
 
 const task = await tasks.get(id);                        // → TaskDetailDto (throws on error)
 const result = await tasks.get(id, { unwrap: false });   // → GetResult (no throw)
@@ -94,7 +100,33 @@ app.MapGet(MembersContract.List.Route, async (AppDb db, CancellationToken ct) =>
 dotnet rivet --project Api.csproj --output ./generated --compile
 ```
 
-Every API response is validated at the network boundary with [typia](https://typia.io) runtime assertions. If the server sends unexpected data, you get a clear error immediately — not a silent `undefined` three components later.
+Single-property records become branded types with compile-time-generated runtime checks:
+
+```csharp
+[RivetType]
+public sealed record Age(int Value);
+```
+
+```typescript
+// Generated type — number at runtime, branded at compile time
+export type Age = number & { readonly __brand: "Age" };
+
+// Generated validator — typia compiles it to:
+export const assertAge = typia.createAssert<Age>();
+```
+
+```javascript
+// What typia emits at runtime — a pure function, no reflection, no runtime schema
+export const assertAge = (input) => {
+  if (typeof input !== "number") {
+    throw new TypeGuardError({ expected: "Age", value: input });
+  }
+  
+  return input;
+};
+```
+
+Every API response is validated at the network boundary with [typia](https://typia.io) runtime assertions — not just primitives, but full object shapes, nested types, and unions. If the server sends unexpected data, you get a clear error immediately — not a silent `undefined` three components later.
 
 ## Import OpenAPI → get C# contracts
 
