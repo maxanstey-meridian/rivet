@@ -140,18 +140,18 @@ var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
 app.MapGet(MembersContract.List.Route, async () =>
-{
-    var members = GetMembers();
-    return (await MembersContract.List.Invoke(async () => members)).ToResult();
-});
+    (await MembersContract.List.Invoke(async () =>
+    {
+        var members = GetMembers();
+        return members;
+    })).ToResult());
 
 app.MapGet(MembersContract.GetById.Route, async (string id) =>
-{
-    var members = GetMembers();
-    var member = members.FirstOrDefault(m => m.Id == id)
-        ?? throw new KeyNotFoundException($"Member {id} not found");
-    return (await MembersContract.GetById.Invoke(async () => member)).ToResult();
-});
+    (await MembersContract.GetById.Invoke(async () =>
+    {
+        var members = GetMembers();
+        return members.First(m => m.Id == id);
+    })).ToResult());
 
 app.Run();
 
