@@ -35,6 +35,9 @@ public abstract record TsType
     /// <summary>Branded primitive: string &amp; { readonly __brand: "Email" }.</summary>
     public sealed record Brand(string Name, TsType Inner) : TsType;
 
+    /// <summary>Inline object: { key: string; value: number }. Used for tuples.</summary>
+    public sealed record InlineObject(IReadOnlyList<(string Name, TsType Type)> Fields) : TsType;
+
     /// <summary>
     /// Recursively collects all named type references from a TsType tree.
     /// </summary>
@@ -63,6 +66,12 @@ public abstract record TsType
                 break;
             case Brand b:
                 names.Add(b.Name);
+                break;
+            case InlineObject obj:
+                foreach (var (_, fieldType) in obj.Fields)
+                {
+                    CollectTypeRefs(fieldType, names);
+                }
                 break;
         }
     }

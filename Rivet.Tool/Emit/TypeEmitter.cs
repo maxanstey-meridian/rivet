@@ -43,6 +43,7 @@ public static class TypeEmitter
             TsType.TypeRef r => r.Name,
             TsType.Generic g => $"{g.Name}<{string.Join(", ", g.TypeArguments.Select(EmitType))}>",
             TsType.Brand b => b.Name,
+            TsType.InlineObject obj => $"{{ {string.Join("; ", obj.Fields.Select(f => $"{f.Name}: {EmitType(f.Type)}"))}; }}",
             _ => "unknown",
         };
 

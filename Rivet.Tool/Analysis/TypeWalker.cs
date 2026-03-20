@@ -224,7 +224,8 @@ public sealed class TypeWalker
                 && SymbolEqualityComparer.Default.Equals(namedType.ContainingAssembly, _sourceAssembly))
             {
                 // Value Object convention: single property named "Value" → branded type
-                var voInner = TryGetValueObjectInner(namedType);
+                // Skip for generic types — Wrapper<T>(T Value) is a generic record, not a VO
+                var voInner = namedType.IsGenericType ? null : TryGetValueObjectInner(namedType);
                 if (voInner is not null)
                 {
                     var brand = new TsType.Brand(namedType.Name, MapTypeCore(voInner));
@@ -244,6 +245,15 @@ public sealed class TypeWalker
 
                 return new TsType.TypeRef(namedType.Name);
             }
+        }
+
+        // ValueTuple → inline object { key: string; value: number }
+        if (symbol is INamedTypeSymbol { IsTupleType: true } tupleType)
+        {
+            var fields = tupleType.TupleElements
+                .Select(e => (Naming.ToCamelCase(e.Name), MapTypeCore(e.Type)))
+                .ToList();
+            return new TsType.InlineObject(fields);
         }
 
         // Fallback
