@@ -15,8 +15,21 @@ public sealed class ValidatorEmitterTests
         var typeFileMap = typeGrouping.BuildTypeFileMap();
         var validators = ValidatorEmitter.Emit(endpoints, typeFileMap);
         var client = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap);
-        var validatedClient = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap, validated: true);
+        var validatedClient = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap, ValidateMode.Typia);
         return (validators, client, validatedClient);
+    }
+
+    private static (string ZodValidators, string ZodClient) GenerateZod(string source)
+    {
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var definitions = walker.Definitions.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
+        var zodValidators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
+        var zodClient = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap, ValidateMode.Zod);
+        return (zodValidators, zodClient);
     }
 
     [Fact]
@@ -315,5 +328,94 @@ public sealed class ValidatorEmitterTests
         Assert.Contains("PagedResult", validators);
         Assert.Contains("TaskListItemDto", validators);
         Assert.Contains("MemberDto", validators);
+    }
+
+    [Fact]
+    public void ZodValidatorEmitter_EmitsFromJSONSchema()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record MessageDto(Guid Id, string Body);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/messages/{id}")]
+                public static Task<MessageDto> GetMessage([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (zodValidators, _) = GenerateZod(source);
+
+        Assert.Contains("import { fromJSONSchema, z } from \"zod\";", zodValidators);
+        Assert.Contains("import { MessageDtoSchema } from \"./schemas.js\";", zodValidators);
+        Assert.Contains("const _assertMessageDto = fromJSONSchema(MessageDtoSchema as any);", zodValidators);
+        Assert.Contains("export const assertMessageDto = (data: unknown): MessageDto => _assertMessageDto.parse(data) as MessageDto;", zodValidators);
+    }
+
+    [Fact]
+    public void ZodClient_ImportsFromValidatorsJs()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record MessageDto(Guid Id, string Body);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/messages/{id}")]
+                public static Task<MessageDto> GetMessage([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (_, zodClient) = GenerateZod(source);
+
+        // Zod client imports from validators.js (not build/validators.js)
+        Assert.Contains("""import { assertMessageDto } from "../validators.js";""", zodClient);
+        Assert.DoesNotContain("build/validators.js", zodClient);
+
+        // Same assertion wiring as typia
+        Assert.Contains("return assertMessageDto(data);", zodClient);
+    }
+
+    [Fact]
+    public void ZodValidatorEmitter_VoidReturn_Empty()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpDelete("/api/things/{id}")]
+                public static Task Delete([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (zodValidators, _) = GenerateZod(source);
+
+        Assert.Empty(zodValidators);
     }
 }

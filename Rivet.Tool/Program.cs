@@ -182,22 +182,63 @@ static async Task<int> Run(string[] args)
             Console.WriteLine($"  {options.OpenApiPath} → {openApiFilePath}");
         }
 
+        // JSON Schema
+        if (options.JsonSchema)
+        {
+            var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
+            var schemasPath = Path.Combine(outputDir, "schemas.ts");
+            await File.WriteAllTextAsync(schemasPath, schemasOutput);
+            Console.WriteLine($"  schemas.ts → {schemasPath}");
+        }
+
         Console.WriteLine($"Generated {definitions.Count} types, {endpoints.Count} endpoints in {FormatElapsed(sw.Elapsed)}.");
 
-        // Compile step: run tsc + typia, then re-emit validated client
+        // Compile step
         if (mode == "compile")
         {
-            Console.WriteLine();
-            Console.WriteLine("Compiling validators...");
+            ValidateMode validateMode;
 
-            var brandOverrides = brands
-                .Select(b => (b.Name, TypeEmitter.EmitTypeString(b.Inner)))
-                .ToList();
-            var compileOk = await TypiaCompiler.CompileAsync(outputDir, brandOverrides);
-            if (!compileOk)
+            if (options.CompileTarget == "zod")
             {
-                Console.Error.WriteLine("Typia compilation failed.");
-                return 1;
+                Console.WriteLine();
+                Console.WriteLine("Emitting Zod validators...");
+
+                // schemas.ts (JSON Schema definitions)
+                var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
+                var schemasPath = Path.Combine(outputDir, "schemas.ts");
+                await File.WriteAllTextAsync(schemasPath, schemasOutput);
+                Console.WriteLine($"  schemas.ts → {schemasPath}");
+
+                // validators.ts (Zod-based, directly usable — no compile step)
+                if (endpoints.Count > 0)
+                {
+                    var zodValidators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
+                    if (zodValidators.Length > 0)
+                    {
+                        var zodPath = Path.Combine(outputDir, "validators.ts");
+                        await File.WriteAllTextAsync(zodPath, zodValidators);
+                        Console.WriteLine($"  validators.ts → {zodPath}");
+                    }
+                }
+
+                validateMode = ValidateMode.Zod;
+            }
+            else
+            {
+                Console.WriteLine();
+                Console.WriteLine("Compiling validators...");
+
+                var brandOverrides = brands
+                    .Select(b => (b.Name, TypeEmitter.EmitTypeString(b.Inner)))
+                    .ToList();
+                var compileOk = await TypiaCompiler.CompileAsync(outputDir, brandOverrides);
+                if (!compileOk)
+                {
+                    Console.Error.WriteLine("Typia compilation failed.");
+                    return 1;
+                }
+
+                validateMode = ValidateMode.Typia;
             }
 
             // Re-emit per-controller clients with validator assertions wired in
@@ -208,7 +249,7 @@ static async Task<int> Run(string[] args)
                 foreach (var (controllerName, controllerEndpoints) in controllerGroups)
                 {
                     var validatedContent = ClientEmitter.EmitControllerClient(
-                        controllerName, controllerEndpoints, typeFileMap, validated: true);
+                        controllerName, controllerEndpoints, typeFileMap, validateMode);
                     var clientPath = Path.Combine(clientDir, $"{controllerName}.ts");
                     await File.WriteAllTextAsync(clientPath, validatedContent);
                     Console.WriteLine($"  client/{controllerName}.ts → {clientPath} (validated)");
@@ -256,6 +297,14 @@ static async Task<int> Run(string[] args)
             Console.WriteLine();
             Console.WriteLine($"=== {options.OpenApiPath} ===");
             Console.Write(openApiJson);
+        }
+
+        if (options.JsonSchema)
+        {
+            var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
+            Console.WriteLine();
+            Console.WriteLine("=== schemas.ts ===");
+            Console.Write(schemasOutput);
         }
 
     }
@@ -395,6 +444,7 @@ static RivetOptions? ParseArgs(string[] args)
     string? projectPath = null;
     string? outputDir = null;
     var mode = "generate";
+    var compileTarget = "typia";
     string? openApiPath = null;
     string? defaultSecurity = null;
     string? fromOpenApiPath = null;
@@ -402,6 +452,7 @@ static RivetOptions? ParseArgs(string[] args)
     var check = false;
     var quiet = false;
     var routes = false;
+    var jsonSchema = false;
     var files = new List<string>();
 
     for (var i = 0; i < args.Length; i++)
@@ -416,6 +467,10 @@ static RivetOptions? ParseArgs(string[] args)
                 break;
             case "--compile":
                 mode = "compile";
+                if (i + 1 < args.Length && args[i + 1] is "typia" or "zod")
+                {
+                    compileTarget = args[++i];
+                }
                 break;
             case "--openapi":
                 openApiPath = i + 1 < args.Length && !args[i + 1].StartsWith('-')
@@ -440,6 +495,9 @@ static RivetOptions? ParseArgs(string[] args)
             case "--routes":
                 routes = true;
                 break;
+            case "--jsonschema":
+                jsonSchema = true;
+                break;
             default:
                 files.Add(args[i]);
                 break;
@@ -451,7 +509,7 @@ static RivetOptions? ParseArgs(string[] args)
     {
         return new RivetOptions(
             fromOpenApiPath, outputDir, mode, files.ToArray(),
-            openApiPath, defaultSecurity, fromOpenApiPath, importNamespace, check, quiet, routes);
+            openApiPath, defaultSecurity, fromOpenApiPath, importNamespace, check, quiet, routes, jsonSchema, compileTarget);
     }
 
     projectPath ??= files.FirstOrDefault();
@@ -461,7 +519,7 @@ static RivetOptions? ParseArgs(string[] args)
         return null;
     }
 
-    return new RivetOptions(projectPath, outputDir, mode, files.ToArray(), openApiPath, defaultSecurity, Check: check, Quiet: quiet, Routes: routes);
+    return new RivetOptions(projectPath, outputDir, mode, files.ToArray(), openApiPath, defaultSecurity, Check: check, Quiet: quiet, Routes: routes, JsonSchema: jsonSchema, CompileTarget: compileTarget);
 }
 
 static int RunImport(RivetOptions options)
@@ -563,11 +621,12 @@ static void PrintUsage()
     Console.Error.WriteLine("Options:");
     Console.Error.WriteLine("  -p, --project <path>       Path to .csproj file");
     Console.Error.WriteLine("  -o, --output <dir>         Output directory (omit for stdout preview)");
-    Console.Error.WriteLine("  --compile                  Also run typia compilation (requires node on PATH)");
+    Console.Error.WriteLine("  --compile [typia|zod]      Compile validators — typia (default, requires node) or zod (fromJSONSchema)");
     Console.Error.WriteLine("  --openapi [file]           Emit OpenAPI 3.1 JSON spec (default: openapi.json)");
     Console.Error.WriteLine("  --security <spec>          Default security scheme (bearer, bearer:jwt, cookie:name, apikey:in:name)");
     Console.Error.WriteLine("  --from-openapi <spec.json> Import OpenAPI spec → C# contracts + DTOs");
     Console.Error.WriteLine("  --namespace <ns>           Namespace for generated C# files (default: Generated)");
+    Console.Error.WriteLine("  --jsonschema               Emit standalone JSON Schema definitions (schemas.ts)");
     Console.Error.WriteLine("  --check                    Verify contract coverage (missing impls, route/method mismatches)");
     Console.Error.WriteLine("  --routes                   List all discovered endpoints (method, route, handler)");
     Console.Error.WriteLine("  -q, --quiet                Suppress codegen output (useful with --check)");
@@ -653,4 +712,6 @@ sealed record RivetOptions(
     string? FromOpenApiPath = null, string? ImportNamespace = null,
     bool Check = false,
     bool Quiet = false,
-    bool Routes = false);
+    bool Routes = false,
+    bool JsonSchema = false,
+    string CompileTarget = "typia");

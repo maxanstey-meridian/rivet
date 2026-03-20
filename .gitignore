@@ -10,6 +10,9 @@ Solution1/
 # Test specs
 openapi/
 
+# Test JS deps
+Rivet.Tests/js/node_modules/
+
 # Docs
 docs/node_modules/
 docs/.vitepress/dist/

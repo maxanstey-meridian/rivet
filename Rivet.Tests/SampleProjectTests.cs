@@ -284,6 +284,170 @@ public sealed class SampleProjectTests : IDisposable
         Assert.True(nodeExit == 0, $"Node test failed:\n{nodeOutput}");
     }
 
+    // ========== Tier 4: Zod-validated client with mocked fetch ==========
+
+    [Fact]
+    public async Task SampleProject_ZodValidatedClient_Validates_Responses()
+    {
+        var jsDir = Path.Combine(RepoRoot, "Rivet.Tests", "js");
+        Assert.True(
+            File.Exists(Path.Combine(jsDir, "node_modules", "zod", "package.json")),
+            "Zod not installed — run 'npm install' in Rivet.Tests/js/");
+
+        // 1. Generate TS from sample source
+        var sources = ReadSampleSources();
+        var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var contractEndpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+
+        var definitions = walker.Definitions.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(
+            definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
+
+        // 2. Write generated files to temp directory
+        Directory.CreateDirectory(_tempDir);
+
+        var typesDir = Path.Combine(_tempDir, "types");
+        Directory.CreateDirectory(typesDir);
+
+        foreach (var group in typeGrouping.Groups)
+        {
+            var content = TypeEmitter.EmitGroupFile(group);
+            await File.WriteAllTextAsync(Path.Combine(typesDir, $"{group.FileName}.ts"), content);
+        }
+
+        var typeFileNames = typeGrouping.Groups.Select(g => g.FileName).ToList();
+        await File.WriteAllTextAsync(
+            Path.Combine(typesDir, "index.ts"), TypeEmitter.EmitNamespacedBarrel(typeFileNames));
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_tempDir, "rivet.ts"), ClientEmitter.EmitRivetBase());
+
+        // 3. Emit schemas.ts + zod validators.ts
+        var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "schemas.ts"), schemasOutput);
+
+        var zodValidators = ZodValidatorEmitter.Emit(contractEndpoints, typeFileMap);
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "validators.ts"), zodValidators);
+
+        // 4. Emit zod-validated clients
+        var clientDir = Path.Combine(_tempDir, "client");
+        Directory.CreateDirectory(clientDir);
+
+        var controllerGroups = ClientEmitter.GroupByController(contractEndpoints);
+        var clientFileNames = new List<string>();
+        foreach (var (controllerName, groupEndpoints) in controllerGroups)
+        {
+            var clientContent = ClientEmitter.EmitControllerClient(
+                controllerName, groupEndpoints, typeFileMap, ValidateMode.Zod);
+            await File.WriteAllTextAsync(
+                Path.Combine(clientDir, $"{controllerName}.ts"), clientContent);
+            clientFileNames.Add(controllerName);
+        }
+
+        await File.WriteAllTextAsync(
+            Path.Combine(clientDir, "index.ts"), TypeEmitter.EmitNamespacedBarrel(clientFileNames));
+
+        // 5. tsconfig + node_modules symlink for zod
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "tsconfig.json"), """
+            {
+              "compilerOptions": {
+                "target": "ES2022",
+                "module": "ES2022",
+                "moduleResolution": "bundler",
+                "strict": true,
+                "skipLibCheck": true,
+                "outDir": "./dist",
+                "declaration": false
+              },
+              "include": ["./**/*.ts"],
+              "exclude": ["node_modules"]
+            }
+            """);
+
+        // Symlink node_modules from Rivet.Tests/js so zod is available
+        var nodeModulesLink = Path.Combine(_tempDir, "node_modules");
+        var nodeModulesTarget = Path.Combine(jsDir, "node_modules");
+        Directory.CreateSymbolicLink(nodeModulesLink, nodeModulesTarget);
+
+        // 6. Compile TS → JS
+        var (tscExit, tscOutput) = await RunProcessAsync(
+            "npx", $"--yes tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
+            workingDir: _tempDir);
+        Assert.True(tscExit == 0, $"tsc failed:\n{tscOutput}");
+
+        // 7. Test script: valid response passes, invalid response throws
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "test.mjs"), $$"""
+            globalThis.fetch = async (url, opts) => {
+              const path = new URL(url).pathname;
+              const method = (opts?.method ?? "GET").toUpperCase();
+
+              const json = (data, status = 200) => new Response(
+                JSON.stringify(data),
+                { status, headers: { "content-type": "application/json" } }
+              );
+
+              // Valid response
+              if (method === "GET" && path === "/api/members") {
+                return json([
+                  { id: "a1b2c3d4-0000-0000-0000-000000000001", name: "Alice", email: "alice@example.com", role: "admin" },
+                ]);
+              }
+
+              // Valid 201 response
+              if (method === "POST" && path === "/api/members") {
+                return json({ id: "a1b2c3d4-0000-0000-0000-000000000099" }, 201);
+              }
+
+              // Invalid response — name should be string, not number
+              if (method === "GET" && path === "/api/members/bad") {
+                return json([{ id: 123, name: 456 }]);
+              }
+
+              // Void endpoints
+              if (method === "DELETE" && path.startsWith("/api/members/")) {
+                return new Response(null, { status: 200 });
+              }
+
+              throw new Error(`Unmocked: ${method} ${path}`);
+            };
+
+            const { configureRivet } = await import("./dist/rivet.js");
+            const client = await import("./dist/client/members.js");
+
+            configureRivet({ baseUrl: "http://localhost:9999" });
+
+            // Valid data passes validation
+            const members = await client.list();
+            assert(Array.isArray(members), "list() should return an array");
+            assert(members[0].name === "Alice", "first member should be Alice");
+
+            // Valid invite passes
+            const invited = await client.invite({ email: "new@example.com", role: "member", nickname: "newbie" });
+            assert(invited.id === "a1b2c3d4-0000-0000-0000-000000000099", "invite() should return id");
+
+            // Void endpoint — no validation, should work
+            const removeResult = await client.remove("some-id");
+            assert(removeResult === undefined, "remove() should return undefined");
+
+            console.log("All zod-validated client tests passed");
+
+            function assert(condition, message) {
+              if (!condition) {
+                throw new Error(`Assertion failed: ${message}`);
+              }
+            }
+            """);
+
+        // 8. Run
+        var (nodeExit, nodeOutput) = await RunProcessAsync(
+            "node", $"\"{Path.Combine(_tempDir, "test.mjs")}\"",
+            workingDir: _tempDir);
+
+        Assert.True(nodeExit == 0, $"Zod validated client test failed:\n{nodeOutput}");
+    }
+
     // ========== rivetFetch response handling ==========
 
     [Fact]
