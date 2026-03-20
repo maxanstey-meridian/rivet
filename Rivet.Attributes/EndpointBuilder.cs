@@ -36,6 +36,7 @@ public sealed class RouteDefinition<TInput, TOutput>
     public RouteDefinition<TInput, TOutput> Description(string description) => this;
     public RouteDefinition<TInput, TOutput> Anonymous() => this;
     public RouteDefinition<TInput, TOutput> Secure(string scheme) => this;
+    public RouteDefinition<TInput, TOutput> ProducesFile(string contentType = "application/octet-stream") => this;
 
     /// <summary>
     /// Execute the endpoint handler with type-safe input and output.
@@ -81,6 +82,7 @@ public sealed class RouteDefinition<TOutput>
     public RouteDefinition<TOutput> Description(string description) => this;
     public RouteDefinition<TOutput> Anonymous() => this;
     public RouteDefinition<TOutput> Secure(string scheme) => this;
+    public RouteDefinition<TOutput> ProducesFile(string contentType = "application/octet-stream") => this;
 
     /// <summary>
     /// Marks this endpoint as accepting a file upload (multipart/form-data).
@@ -133,6 +135,7 @@ public sealed class InputRouteDefinition<TInput>
     public InputRouteDefinition<TInput> Description(string description) => this;
     public InputRouteDefinition<TInput> Anonymous() => this;
     public InputRouteDefinition<TInput> Secure(string scheme) => this;
+    public InputRouteDefinition<TInput> ProducesFile(string contentType = "application/octet-stream") => this;
 
     /// <summary>
     /// Execute the endpoint handler with type-safe input (void output).
@@ -178,6 +181,12 @@ public sealed class RouteDefinition
     public RouteDefinition Description(string description) => this;
     public RouteDefinition Anonymous() => this;
     public RouteDefinition Secure(string scheme) => this;
+
+    /// <summary>
+    /// Marks this endpoint as returning a file download instead of JSON.
+    /// The generated TS client returns Blob; the OpenAPI spec emits the given content type with format: binary.
+    /// </summary>
+    public RouteDefinition ProducesFile(string contentType = "application/octet-stream") => this;
 
     /// <summary>
     /// Convert to an input-only endpoint (accepts a body, returns void).

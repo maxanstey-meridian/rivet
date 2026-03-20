@@ -828,4 +828,269 @@ public sealed class ContractEndpointTests
 
         Assert.Contains("id: string, file: File", client);
     }
+
+    [Fact]
+    public void ProducesFile_SetsFileContentType()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ErrorDto(string Message);
+
+            [RivetContract]
+            public static class DocumentsContract
+            {
+                public static readonly RouteDefinition GetDocument =
+                    Define.Get("/api/documents/{id}")
+                        .Description("Download a document")
+                        .ProducesFile("application/octet-stream")
+                        .Returns<ErrorDto>(404, "Document not found");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("getDocument", ep.Name);
+        Assert.Equal("GET", ep.HttpMethod);
+        Assert.Equal("application/octet-stream", ep.FileContentType);
+        Assert.Null(ep.ReturnType);
+
+        // Client should return Blob
+        Assert.Contains("Promise<Blob>", client);
+        Assert.Contains("blob: true", client);
+
+        // Result DU should use Blob for success, not void
+        Assert.Contains("data: Blob", client);
+        Assert.DoesNotContain("status: 200; data: void", client);
+
+        // Error response should still be typed
+        Assert.Single(ep.Responses, r => r.StatusCode == 404);
+    }
+
+    [Fact]
+    public void ProducesFile_DefaultContentType()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly RouteDefinition Download =
+                    Define.Get("/api/files/{id}")
+                        .ProducesFile();
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        Assert.Equal("application/octet-stream", endpoints[0].FileContentType);
+    }
+
+    [Fact]
+    public void ProducesFile_OpenApi_EmitsBinarySchema()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ErrorDto(string Message);
+
+            [RivetContract]
+            public static class DocumentsContract
+            {
+                public static readonly RouteDefinition GetDocument =
+                    Define.Get("/api/documents/{id}")
+                        .ProducesFile("application/pdf")
+                        .Returns<ErrorDto>(404, "Not found");
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = Rivet.Tool.Analysis.ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        // Success response should use application/pdf with binary schema
+        Assert.Contains("application/pdf", json);
+        Assert.Contains("\"format\": \"binary\"", json);
+        // Error response should still be application/json
+        Assert.Contains("application/json", json);
+    }
+
+    [Fact]
+    public void ByteArray_TOutput_InfersFileEndpoint()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ErrorDto(string Message);
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly RouteDefinition<byte[]> Download =
+                    Define.Get<byte[]>("/api/files/{id}")
+                        .Description("Download a file")
+                        .Returns<ErrorDto>(404, "Not found");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("download", ep.Name);
+        // byte[] infers file endpoint — no explicit .ProducesFile() needed
+        Assert.Equal("application/octet-stream", ep.FileContentType);
+        Assert.Null(ep.ReturnType); // TS gets Blob, not number[]
+        Assert.Contains("Promise<Blob>", client);
+        Assert.Contains("blob: true", client);
+        // Error response still typed
+        Assert.Single(ep.Responses, r => r.StatusCode == 404);
+    }
+
+    [Fact]
+    public void ByteArray_TOutput_ProducesFile_OverridesContentType()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly RouteDefinition<byte[]> Download =
+                    Define.Get<byte[]>("/api/files/{id}")
+                        .ProducesFile("application/pdf");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        Assert.Single(endpoints);
+        // Explicit .ProducesFile() wins over the byte[] default
+        Assert.Equal("application/pdf", endpoints[0].FileContentType);
+    }
+
+    [Fact]
+    public void ByteArray_TOutput_OpenApi_EmitsBinarySchema()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly RouteDefinition<byte[]> Download =
+                    Define.Get<byte[]>("/api/files/{id}");
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = Rivet.Tool.Analysis.ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        Assert.Contains("application/octet-stream", json);
+        Assert.Contains("\"format\": \"binary\"", json);
+        Assert.DoesNotContain("application/json", json);
+    }
+
+    [Fact]
+    public void ProducesFileAttribute_ByteArrayStringTuple_SetsFileContentType()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                [ProducesFile]
+                public static readonly RouteDefinition<(byte[] Content, string FileName)> Download =
+                    Define.Get<(byte[] Content, string FileName)>("/api/files/{id}")
+                        .Description("Download a file");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("download", ep.Name);
+        Assert.Equal("application/octet-stream", ep.FileContentType);
+        Assert.Null(ep.ReturnType);
+        Assert.Contains("Promise<Blob>", client);
+        Assert.Contains("blob: true", client);
+    }
+
+    [Fact]
+    public void ProducesFileAttribute_ByteArrayStringTuple_OpenApi_EmitsBinarySchema()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                [ProducesFile]
+                public static readonly RouteDefinition<(byte[] Content, string FileName)> Download =
+                    Define.Get<(byte[] Content, string FileName)>("/api/files/{id}");
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = Rivet.Tool.Analysis.ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        Assert.Contains("application/octet-stream", json);
+        Assert.Contains("\"format\": \"binary\"", json);
+        Assert.DoesNotContain("application/json", json);
+    }
+
+    [Fact]
+    public void ProducesFileAttribute_PlainByteArray_SetsFileContentType()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                [ProducesFile]
+                public static readonly RouteDefinition<byte[]> Download =
+                    Define.Get<byte[]>("/api/files/{id}");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        Assert.Equal("application/octet-stream", endpoints[0].FileContentType);
+        Assert.Null(endpoints[0].ReturnType);
+        Assert.Contains("Promise<Blob>", client);
+    }
 }

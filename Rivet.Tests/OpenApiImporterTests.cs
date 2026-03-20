@@ -1587,7 +1587,7 @@ public sealed class OpenApiImporterTests
 
         var content = FindFile(Import(spec), "AvatarContract.cs");
 
-        Assert.Contains("[rivet:unsupported response status=200 content-type=image/png]", content);
+        Assert.Contains(".ProducesFile(\"image/png\")", content);
         Assert.Contains("public static readonly RouteDefinition Get", content);
     }
 

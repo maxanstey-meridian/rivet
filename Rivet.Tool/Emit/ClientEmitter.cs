@@ -76,7 +76,7 @@ public static partial class ClientEmitter
             export const rivetFetch = async <T>(
               method: string,
               path: string,
-              options?: { body?: unknown; query?: Record<string, unknown>; unwrap?: boolean },
+              options?: { body?: unknown; query?: Record<string, unknown>; unwrap?: boolean; blob?: boolean },
             ): Promise<T> => {
               const url = new URL(`${_config.baseUrl}${path}`);
               if (options?.query) {
@@ -105,7 +105,7 @@ public static partial class ClientEmitter
                 throw error;
               }
               if (options?.unwrap === false) {
-                const body = await parseBody(res);
+                const body = options?.blob && res.ok ? await res.blob() : await parseBody(res);
                 return { status: res.status, data: body, response: res } as T;
               }
               if (!res.ok) {
@@ -116,6 +116,7 @@ public static partial class ClientEmitter
                 if (_config.onError) _config.onError(error);
                 throw error;
               }
+              if (options?.blob) return (await res.blob()) as T;
               return (await parseBody(res)) as T;
             };
             """);
@@ -210,9 +211,12 @@ public static partial class ClientEmitter
     {
         var funcName = SafeFunctionName(endpoint.Name);
 
-        var successType = endpoint.ReturnType is not null
-            ? TypeEmitter.EmitTypeString(endpoint.ReturnType)
-            : "void";
+        var isFileEndpoint = endpoint.FileContentType is not null;
+        var successType = isFileEndpoint
+            ? "Blob"
+            : endpoint.ReturnType is not null
+                ? TypeEmitter.EmitTypeString(endpoint.ReturnType)
+                : "void";
 
         var paramParts = new List<string>();
         foreach (var p in endpoint.Params)
@@ -237,7 +241,7 @@ public static partial class ClientEmitter
         // Emit result DU type for multi-response endpoints
         if (hasResultDU)
         {
-            EmitResultType(sb, resultTypeName, endpoint.Responses);
+            EmitResultType(sb, resultTypeName, endpoint.Responses, isFileEndpoint);
         }
 
         // Overload signatures
@@ -260,6 +264,11 @@ public static partial class ClientEmitter
         {
             var queryEntries = queryParams.Select(p => $"{p.Name}");
             fetchOptionParts.Add($"query: {{ {string.Join(", ", queryEntries)} }}");
+        }
+
+        if (isFileEndpoint)
+        {
+            fetchOptionParts.Add("blob: true");
         }
 
         var baseFetchStr = fetchOptionParts.Count > 0
@@ -325,13 +334,19 @@ public static partial class ClientEmitter
     private static void EmitResultType(
         StringBuilder sb,
         string typeName,
-        IReadOnlyList<TsResponseType> responses)
+        IReadOnlyList<TsResponseType> responses,
+        bool isFileEndpoint = false)
     {
         var statusCodes = string.Join(" | ", responses.Select(r => r.StatusCode));
         sb.Append($"export type {typeName} =");
         foreach (var r in responses)
         {
-            var dataType = r.DataType is not null ? TypeEmitter.EmitTypeString(r.DataType) : "void";
+            // File endpoints: success responses (2xx with no DataType) carry Blob, not void
+            var dataType = r.DataType is not null
+                ? TypeEmitter.EmitTypeString(r.DataType)
+                : isFileEndpoint && r.StatusCode is >= 200 and < 300
+                    ? "Blob"
+                    : "void";
             sb.AppendLine();
             sb.Append($"  | {{ status: {r.StatusCode}; data: {dataType}; response: Response }}");
         }

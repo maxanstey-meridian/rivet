@@ -30,6 +30,13 @@ All builder methods return the definition for chaining.
 | `.Secure(scheme)` | Sets a named security scheme for the endpoint |
 | `.Accepts<T>()` | Convert void definition to input-only (accepts body, returns void) |
 | `.AcceptsFile()` | Mark endpoint as accepting a file upload (generates `File` param with `FormData`) |
+| `.ProducesFile(contentType?)` | Mark endpoint as returning a file download. Default `application/octet-stream`. TS client returns `Blob`, OpenAPI emits `format: binary` |
+
+## Field attributes
+
+| Attribute | Description |
+|---|---|
+| `[ProducesFile]` | Marks a field as a file download endpoint. Works with `byte[]` (same as `.ProducesFile()`) or `(byte[] Content, string FileName)` tuple for named file downloads. The tuple lets the handler return both content and filename through `.Invoke()` |
 
 ## Runtime properties
 

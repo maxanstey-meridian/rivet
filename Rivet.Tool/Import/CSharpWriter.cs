@@ -200,6 +200,18 @@ internal static class CSharpWriter
             }
         }
 
+        if (field.FileContentType is not null)
+        {
+            if (field.FileContentType == "application/octet-stream")
+            {
+                calls.Add(".ProducesFile()");
+            }
+            else
+            {
+                calls.Add($".ProducesFile(\"{EscapeString(field.FileContentType)}\")");
+            }
+        }
+
         if (field.IsAnonymous)
         {
             calls.Add(".Anonymous()");
@@ -235,7 +247,8 @@ internal sealed record GeneratedEndpointField(
     IReadOnlyList<GeneratedErrorResponse> ErrorResponses,
     bool IsAnonymous,
     string? SecurityScheme,
-    IReadOnlyList<string> UnsupportedMarkers = null!)
+    IReadOnlyList<string> UnsupportedMarkers = null!,
+    string? FileContentType = null)
 {
     public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
 }

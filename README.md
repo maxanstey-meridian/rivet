@@ -32,6 +32,9 @@ public sealed record Email(string Value); // single-property → branded
 
 [RivetType]
 public sealed record TaskItem(Guid Id, string Title, Priority Priority, Email Author);
+
+[RivetType]
+public sealed record ErrorDto(string Code, string Message);
 ```
 
 ```typescript
@@ -39,6 +42,7 @@ public sealed record TaskItem(Guid Id, string Title, Priority Priority, Email Au
 export type Priority = "Low" | "Medium" | "High" | "Critical";
 export type Email = string & { readonly __brand: "Email" };
 export type TaskItem = { id: string; title: string; priority: Priority; author: Email };
+export type ErrorDto = { code: string; message: string };
 ```
 
 ## Mark your controllers → get a typed client
@@ -49,9 +53,8 @@ export type TaskItem = { id: string; title: string; priority: Priority; author: 
 public sealed class TasksController : ControllerBase
 {
     [HttpGet("{id:guid}")]
-    [ProducesResponseType(typeof(TaskDetailDto), 200)]
-    [ProducesResponseType(typeof(NotFoundDto), 404)]
-    public async Task<IActionResult> Get(Guid id, CancellationToken ct) { ... }
+    [ProducesResponseType(typeof(ErrorDto), 404)]
+    public async Task<ActionResult<TaskDetailDto>> Get(Guid id, CancellationToken ct) { ... }
 }
 ```
 
@@ -59,11 +62,37 @@ public sealed class TasksController : ControllerBase
 // Generated — discriminated union, narrowable by status
 export type GetResult =
   | { status: 200; data: TaskDetailDto; response: Response }
-  | { status: 404; data: NotFoundDto; response: Response }
+  | { status: 404; data: ErrorDto; response: Response }
   | { status: Exclude<number, 200 | 404>; data: unknown; response: Response };
 
 const task = await tasks.get(id);                        // → TaskDetailDto (throws on error)
 const result = await tasks.get(id, { unwrap: false });   // → GetResult (no throw)
+```
+
+## Or mark your minimal API endpoints
+
+```csharp
+public static class TaskEndpoints
+{
+    [RivetEndpoint]
+    [HttpGet("/api/tasks/{id:guid}")]
+    public static async Task<Results<Ok<TaskDetailDto>, NotFound<ErrorDto>>> Get(
+        Guid id, AppDb db, CancellationToken ct)
+    {
+        var task = await db.Tasks.FindAsync(id, ct);
+        return task is not null
+            ? TypedResults.Ok(Map(task))
+            : TypedResults.NotFound(new ErrorDto("not_found", "Task not found"));
+    }
+}
+```
+
+```typescript
+// Generated — Rivet reads the type args from Results<Ok<T>, NotFound<T>>
+export type GetResult =
+  | { status: 200; data: TaskDetailDto; response: Response }
+  | { status: 404; data: ErrorDto; response: Response }
+  | { status: Exclude<number, 200 | 404>; data: unknown; response: Response };
 ```
 
 ## Or define contracts → get compile-time enforcement

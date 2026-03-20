@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.OpenApi;
+using Microsoft.OpenApi.Reader;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
@@ -55,7 +57,7 @@ public sealed class OpenApiEmitterTests
         using var doc = EmitOpenApi(source);
         var root = doc.RootElement;
 
-        Assert.Equal("3.1.0", root.GetProperty("openapi").GetString());
+        Assert.Equal("3.0.3", root.GetProperty("openapi").GetString());
 
         var pathItem = root.GetProperty("paths").GetProperty("/api/tasks/{id}");
         var get = pathItem.GetProperty("get");
@@ -260,7 +262,7 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
-    public void Nullable_Primitive_Type_Array()
+    public void Nullable_Primitive_Emits_Type_With_Nullable_True()
     {
         var source = """
             using Rivet;
@@ -285,15 +287,13 @@ public sealed class OpenApiEmitterTests
             .GetProperty("properties")
             .GetProperty("description");
 
-        // Nullable primitive → type: ["string", "null"]
-        var typeArray = descProp.GetProperty("type");
-        Assert.Equal(JsonValueKind.Array, typeArray.ValueKind);
-        Assert.Equal("string", typeArray[0].GetString());
-        Assert.Equal("null", typeArray[1].GetString());
+        // Nullable primitive → type + nullable: true (OpenAPI 3.0)
+        Assert.Equal("string", descProp.GetProperty("type").GetString());
+        Assert.True(descProp.GetProperty("nullable").GetBoolean());
     }
 
     [Fact]
-    public void Nullable_Ref_OneOf()
+    public void Nullable_Ref_Emits_AllOf_With_Nullable_True()
     {
         var source = """
             using Rivet;
@@ -321,11 +321,67 @@ public sealed class OpenApiEmitterTests
             .GetProperty("properties")
             .GetProperty("address");
 
-        // Nullable ref → oneOf
-        var oneOf = addressProp.GetProperty("oneOf");
-        Assert.Equal(2, oneOf.GetArrayLength());
-        Assert.Equal("#/components/schemas/AddressDto", oneOf[0].GetProperty("$ref").GetString());
-        Assert.Equal("null", oneOf[1].GetProperty("type").GetString());
+        // Nullable ref → allOf [$ref] + nullable: true (OpenAPI 3.0)
+        var allOf = addressProp.GetProperty("allOf");
+        Assert.Equal(1, allOf.GetArrayLength());
+        Assert.Equal("#/components/schemas/AddressDto", allOf[0].GetProperty("$ref").GetString());
+        Assert.True(addressProp.GetProperty("nullable").GetBoolean());
+    }
+
+    [Fact]
+    public void Emitted_Json_Contains_No_OpenApi31_Nullable_Patterns()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record AddressDto(string City);
+
+            [RivetType]
+            public sealed record PersonDto(string Name, string? Bio, int? Age, AddressDto? Address);
+
+            [RivetContract]
+            public static class PeopleContract
+            {
+                public static readonly Define GetPerson =
+                    Define.Get<PersonDto>("/api/people/{id}");
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var json = doc.RootElement.GetRawText();
+
+        // No 3.1-style type arrays like ["string", "null"]
+        Assert.DoesNotContain("\"null\"", json);
+        // No 3.1-style { "type": "null" } in oneOf
+        Assert.DoesNotContain("\"type\": \"null\"", json);
+        // Version must be 3.0.x
+        Assert.Contains("\"openapi\": \"3.0.3\"", json);
+        // Must use nullable: true instead
+        Assert.Contains("\"nullable\": true", json);
+    }
+
+    [Fact]
+    public void Nullable_Inline_Schema_Gets_Nullable_Property()
+    {
+        // Nullable array, nullable dictionary — verify nullable is added directly
+        var nullableArray = OpenApiEmitter.MapTsTypeToJsonSchema(
+            new TsType.Nullable(new TsType.Array(new TsType.Primitive("string"))));
+        var json = JsonSerializer.Serialize(nullableArray);
+        var doc = JsonSerializer.Deserialize<JsonElement>(json);
+
+        Assert.Equal("array", doc.GetProperty("type").GetString());
+        Assert.True(doc.GetProperty("nullable").GetBoolean());
+
+        var nullableDict = OpenApiEmitter.MapTsTypeToJsonSchema(
+            new TsType.Nullable(new TsType.Dictionary(new TsType.Primitive("number"))));
+        var dictJson = JsonSerializer.Serialize(nullableDict);
+        var dictDoc = JsonSerializer.Deserialize<JsonElement>(dictJson);
+
+        Assert.Equal("object", dictDoc.GetProperty("type").GetString());
+        Assert.True(dictDoc.GetProperty("nullable").GetBoolean());
     }
 
     [Fact]
@@ -624,7 +680,7 @@ public sealed class OpenApiEmitterTests
         var root = doc.RootElement;
 
         // Required top-level fields
-        Assert.Equal("3.1.0", root.GetProperty("openapi").GetString());
+        Assert.Equal("3.0.3", root.GetProperty("openapi").GetString());
         Assert.True(root.TryGetProperty("info", out var info));
         Assert.True(info.TryGetProperty("title", out _));
         Assert.True(info.TryGetProperty("version", out _));
@@ -767,6 +823,93 @@ public sealed class OpenApiEmitterTests
             Assert.True(schemaNames.Contains(schemaName),
                 $"Broken $ref: {refValue} — schema '{schemaName}' not found in components/schemas. Available: [{string.Join(", ", schemaNames)}]");
         }
+    }
+
+    [Fact]
+    public void Emitted_OpenApi_Is_Valid_Spec()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using Rivet;
+
+            namespace Test;
+
+            public enum Priority { Low, Medium, High }
+
+            [RivetType]
+            public sealed record AddressDto(string Street, string City);
+
+            [RivetType]
+            public sealed record UserDto(
+                Guid Id,
+                string Name,
+                string? Email,
+                int Age,
+                bool IsActive,
+                Priority Priority,
+                AddressDto Address,
+                IReadOnlyList<string> Tags,
+                Dictionary<string, string> Metadata);
+
+            [RivetType]
+            public sealed record CreateUserRequest(string Name, string Email);
+
+            [RivetType]
+            public sealed record ErrorDto(string Code, string Message);
+
+            [RivetType]
+            public sealed record NotFoundDto(string Message);
+
+            [RivetType]
+            public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Total);
+
+            [RivetContract]
+            public static class UsersContract
+            {
+                public static readonly Define ListUsers =
+                    Define.Get<PagedResult<UserDto>>("/api/users")
+                        .Description("List all users");
+
+                public static readonly Define GetUser =
+                    Define.Get<UserDto>("/api/users/{id}")
+                        .Returns<NotFoundDto>(404, "User not found");
+
+                public static readonly Define CreateUser =
+                    Define.Post<CreateUserRequest, UserDto>("/api/users")
+                        .Status(201)
+                        .Returns<ErrorDto>(400, "Validation error");
+
+                public static readonly Define DeleteUser =
+                    Define.Delete("/api/users/{id}")
+                        .Returns<NotFoundDto>(404, "Not found");
+            }
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly RouteDefinition DownloadFile =
+                    Define.Get("/api/files/{id}")
+                        .ProducesFile("application/pdf")
+                        .Returns<NotFoundDto>(404, "File not found");
+
+                public static readonly RouteDefinition<byte[]> DownloadRaw =
+                    Define.Get<byte[]>("/api/files/{id}/raw");
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        var readResult = OpenApiDocument.Parse(json, "json");
+
+        Assert.NotNull(readResult.Document);
+
+        var errors = readResult.Diagnostic?.Errors ?? [];
+        Assert.True(errors.Count == 0,
+            $"OpenAPI validation errors:\n{string.Join("\n", errors.Select(e => $"  - {e.Message}"))}");
     }
 
     private static void CollectRefs(JsonElement element, List<string> refs)

@@ -4,12 +4,12 @@
 
 Rivet is feature-complete through Phase 4 + VO support + grouped type emission + typed error responses via overloaded unwrap. Published to NuGet as
 `Rivet.Attributes` (0.1.0) and `dotnet-rivet` (0.2.0, 0.3.0 pending). Working against CaseBridge's real `.csproj` with
-17 types and 5 endpoints. 281 tests.
+17 types and 5 endpoints.
 
 OpenAPI import pipeline migrated from raw `System.Text.Json` (`JsonElement`) to `Microsoft.OpenApi` v2.7.0. The
 library handles `$ref` resolution, schema parsing, and type representation via `IOpenApiSchema`/`OpenApiSchemaReference`.
 Manual `ResolveRef()`, `CloneWithType()`, JSON fingerprinting, and `$ref` resolution for requestBodies all deleted — the
-library handles these automatically. All 281 tests pass unchanged.
+library handles these automatically.
 
 OpenAPI importer produces 0 warnings across 10 real-world specs (Stripe, GitHub, Twilio, Cloudflare, Bitbucket, Box,
 Jira, Discord, Kubernetes, Petstore v3). SchemaMapper handles: `$ref`, nullable type arrays, all primitive types, objects
@@ -29,8 +29,11 @@ form-encoded, and multipart request bodies, plus `default` error responses (mapp
 - Type grouping: types split into per-namespace files (`types/`), cross-referenced types promoted to `common.ts`,
   barrel `index.ts` for both `types/` and `client/`. Namespace last segment used as file name, number-suffix on
   collision. Grouping signal is not yet configurable (future feature).
-- Contract style: `[RivetContract] public static class` with `EndpointBuilder<T>` fields, `.Invoke()` for type-safe
+- Contract style: `[RivetContract] public static class` with `RouteDefinition<T>` fields, `.Invoke()` for type-safe
   runtime execution, `RivetResult<T>` for framework-agnostic returns
+- File download endpoints: `.ProducesFile(contentType)` on contracts or `[ProducesFile]` attribute on fields (supports `byte[]` and `(byte[], string)` named file tuples), emits `Blob` in TS client, `format: binary` in OpenAPI
+- Typed results: `Results<Ok<T>, NotFound>` in minimal API endpoints → extracts status codes and body types
+- Cross-project type discovery: types from project references (not just the source assembly) are walked transitively
 - Coverage checker: `--check` flag verifies contract implementations — detects missing `.Invoke()` call sites,
   HTTP method mismatches, and route mismatches. Supports both ASP.NET controllers and minimal API (`MapGet`/etc.)
 - CLI: MSBuildWorkspace with multi-SDK Homebrew discovery, file output, stdout preview, --compile flag, --check flag

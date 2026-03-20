@@ -274,6 +274,112 @@ public static class EndpointWalker
     }
 
     /// <summary>
+    /// Maps an ASP.NET typed result type (e.g. Ok&lt;T&gt;, NotFound) to its HTTP status code
+    /// and optional body type.
+    /// </summary>
+    private static (int StatusCode, ITypeSymbol? BodyType)? MapTypedResult(INamedTypeSymbol type)
+    {
+        var display = type.OriginalDefinition.ToDisplayString();
+        return display switch
+        {
+            "Microsoft.AspNetCore.Http.HttpResults.Ok<TValue>" => (200, type.TypeArguments[0]),
+            "Microsoft.AspNetCore.Http.HttpResults.Ok" => (200, null),
+            "Microsoft.AspNetCore.Http.HttpResults.Created<TValue>" => (201, type.TypeArguments[0]),
+            "Microsoft.AspNetCore.Http.HttpResults.Created" => (201, null),
+            "Microsoft.AspNetCore.Http.HttpResults.Accepted<TValue>" => (202, type.TypeArguments[0]),
+            "Microsoft.AspNetCore.Http.HttpResults.Accepted" => (202, null),
+            "Microsoft.AspNetCore.Http.HttpResults.NoContent" => (204, null),
+            "Microsoft.AspNetCore.Http.HttpResults.BadRequest<TValue>" => (400, type.TypeArguments[0]),
+            "Microsoft.AspNetCore.Http.HttpResults.BadRequest" => (400, null),
+            "Microsoft.AspNetCore.Http.HttpResults.UnauthorizedHttpResult" => (401, null),
+            "Microsoft.AspNetCore.Http.HttpResults.NotFound<TValue>" => (404, type.TypeArguments[0]),
+            "Microsoft.AspNetCore.Http.HttpResults.NotFound" => (404, null),
+            "Microsoft.AspNetCore.Http.HttpResults.Conflict<TValue>" => (409, type.TypeArguments[0]),
+            "Microsoft.AspNetCore.Http.HttpResults.Conflict" => (409, null),
+            "Microsoft.AspNetCore.Http.HttpResults.UnprocessableEntity<TValue>" => (422, type.TypeArguments[0]),
+            "Microsoft.AspNetCore.Http.HttpResults.UnprocessableEntity" => (422, null),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Unwraps Task&lt;T&gt; / ValueTask&lt;T&gt; from a return type.
+    /// Returns the inner type, or null if it's a non-generic Task/ValueTask/void.
+    /// Returns the type unchanged if it's not a task wrapper.
+    /// The out parameter isVoidTask is true when the return type is Task or ValueTask (no result).
+    /// </summary>
+    private static ITypeSymbol? UnwrapTask(ITypeSymbol returnType, out bool isVoidTask)
+    {
+        isVoidTask = false;
+
+        if (returnType is INamedTypeSymbol namedReturn)
+        {
+            var displayName = namedReturn.OriginalDefinition.ToDisplayString();
+            if (displayName is "System.Threading.Tasks.Task<TResult>" or "System.Threading.Tasks.ValueTask<TResult>")
+            {
+                return namedReturn.TypeArguments[0];
+            }
+
+            if (displayName is "System.Threading.Tasks.Task" or "System.Threading.Tasks.ValueTask")
+            {
+                isVoidTask = true;
+                return null;
+            }
+        }
+
+        if (returnType.SpecialType == SpecialType.System_Void)
+        {
+            isVoidTask = true;
+            return null;
+        }
+
+        return returnType;
+    }
+
+    /// <summary>
+    /// Checks if a type is Results&lt;T1, T2, ...&gt; (arity 2-6).
+    /// </summary>
+    private static bool IsTypedResults(INamedTypeSymbol type)
+    {
+        var ns = type.ContainingNamespace?.ToDisplayString();
+        return ns is "Microsoft.AspNetCore.Http.HttpResults" && type.Name is "Results" && type.TypeArguments.Length >= 2;
+    }
+
+    /// <summary>
+    /// Collects typed result mappings from a type that is either Results&lt;T1, T2, ...&gt;
+    /// or a single typed result (e.g. Ok&lt;T&gt;). Returns an empty list if the type is neither.
+    /// </summary>
+    private static List<(int StatusCode, ITypeSymbol? BodyType)> CollectTypedResultMappings(INamedTypeSymbol type)
+    {
+        var results = new List<(int StatusCode, ITypeSymbol? BodyType)>();
+
+        if (IsTypedResults(type))
+        {
+            foreach (var arg in type.TypeArguments)
+            {
+                if (arg is INamedTypeSymbol resultArg)
+                {
+                    var mapped = MapTypedResult(resultArg);
+                    if (mapped is not null)
+                    {
+                        results.Add(mapped.Value);
+                    }
+                }
+            }
+        }
+        else
+        {
+            var mapped = MapTypedResult(type);
+            if (mapped is not null)
+            {
+                results.Add(mapped.Value);
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
     /// Extracts return type. Tries ProducesResponseType(typeof(T), 200) first (controllers),
     /// then falls back to method return type (minimal API).
     /// </summary>
@@ -287,43 +393,44 @@ public static class EndpointWalker
         }
 
         // Fall back to method return type (minimal API pattern)
-        var returnType = method.ReturnType;
-
-        // Unwrap Task<T> / ValueTask<T>
-        if (returnType is INamedTypeSymbol namedReturn)
-        {
-            var displayName = namedReturn.OriginalDefinition.ToDisplayString();
-            if (displayName is "System.Threading.Tasks.Task<TResult>" or "System.Threading.Tasks.ValueTask<TResult>")
-            {
-                returnType = namedReturn.TypeArguments[0];
-            }
-            else if (displayName is "System.Threading.Tasks.Task" or "System.Threading.Tasks.ValueTask")
-            {
-                return null;
-            }
-        }
-
-        if (returnType.SpecialType == SpecialType.System_Void)
+        var unwrapped = UnwrapTask(method.ReturnType, out var isVoidTask);
+        if (isVoidTask || unwrapped is null)
         {
             return null;
         }
 
+        // Check for typed results (Results<T1, T2, ...> or single e.g. Ok<T>)
+        if (unwrapped is INamedTypeSymbol namedUnwrapped)
+        {
+            var resultMappings = CollectTypedResultMappings(namedUnwrapped);
+            if (resultMappings.Count > 0)
+            {
+                // Prefer 2xx with body over 2xx without — order in Results<> shouldn't matter
+                var successWithBody = resultMappings.FirstOrDefault(
+                    m => m.StatusCode is >= 200 and < 300 && m.BodyType is not null);
+
+                return successWithBody.BodyType is not null
+                    ? typeWalker.MapType(successWithBody.BodyType)
+                    : null;
+            }
+        }
+
         // Unwrap ActionResult<T> → T
-        if (returnType is INamedTypeSymbol actionResult
+        if (unwrapped is INamedTypeSymbol actionResult
             && actionResult.OriginalDefinition.ToDisplayString() is "Microsoft.AspNetCore.Mvc.ActionResult<TValue>")
         {
             return typeWalker.MapType(actionResult.TypeArguments[0]);
         }
 
         // If it's IActionResult or non-generic ActionResult, we can't infer the type — skip
-        var returnName = returnType.ToDisplayString();
+        var returnName = unwrapped.ToDisplayString();
         if (returnName is "Microsoft.AspNetCore.Mvc.IActionResult"
             or "Microsoft.AspNetCore.Mvc.ActionResult")
         {
             return null;
         }
 
-        return typeWalker.MapType(returnType);
+        return typeWalker.MapType(unwrapped);
     }
 
     /// <summary>
@@ -355,6 +462,7 @@ public static class EndpointWalker
 
     /// <summary>
     /// Extracts all [ProducesResponseType] attributes as typed responses.
+    /// Falls back to Results&lt;T1, T2, ...&gt; or single typed results when no attributes are present.
     /// </summary>
     internal static IReadOnlyList<TsResponseType> ExtractAllResponseTypes(
         IMethodSymbol method,
@@ -383,6 +491,22 @@ public static class EndpointWalker
                 && attr.ConstructorArguments[0].Value is int codeOnly)
             {
                 responses.Add(new TsResponseType(codeOnly, null));
+            }
+        }
+
+        // If no [ProducesResponseType] found, try typed results from return type
+        if (responses.Count == 0)
+        {
+            var unwrapped = UnwrapTask(method.ReturnType, out _);
+            if (unwrapped is INamedTypeSymbol namedType)
+            {
+                foreach (var mapping in CollectTypedResultMappings(namedType))
+                {
+                    var tsType = mapping.BodyType is not null
+                        ? typeWalker.MapType(mapping.BodyType)
+                        : null;
+                    responses.Add(new TsResponseType(mapping.StatusCode, tsType));
+                }
             }
         }
 

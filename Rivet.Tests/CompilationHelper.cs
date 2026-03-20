@@ -82,6 +82,30 @@ public static class CompilationHelper
                 public const int Status409Conflict = 409;
             }
         }
+        namespace Microsoft.AspNetCore.Http.HttpResults
+        {
+            public class Ok<TValue> { }
+            public class Ok { }
+            public class Created<TValue> { }
+            public class Created { }
+            public class Accepted<TValue> { }
+            public class Accepted { }
+            public class NoContent { }
+            public class BadRequest<TValue> { }
+            public class BadRequest { }
+            public class UnauthorizedHttpResult { }
+            public class NotFound<TValue> { }
+            public class NotFound { }
+            public class Conflict<TValue> { }
+            public class Conflict { }
+            public class UnprocessableEntity<TValue> { }
+            public class UnprocessableEntity { }
+            public class Results<T1, T2> { }
+            public class Results<T1, T2, T3> { }
+            public class Results<T1, T2, T3, T4> { }
+            public class Results<T1, T2, T3, T4, T5> { }
+            public class Results<T1, T2, T3, T4, T5, T6> { }
+        }
         namespace Microsoft.AspNetCore.Builder
         {
             public static class EndpointRouteBuilderExtensions
@@ -175,6 +199,27 @@ public static class CompilationHelper
         var discovered = SymbolDiscovery.Discover(compilation);
         var walker = TypeWalker.Create(compilation, discovered.RivetTypes);
         return (discovered, walker);
+    }
+
+    /// <summary>
+    /// Creates a compilation where domainSource lives in a separate "project" (CompilationReference),
+    /// simulating types from a referenced project assembly.
+    /// </summary>
+    public static Compilation CreateCompilationWithProjectReference(string mainSource, string domainSource)
+    {
+        var domainTree = CSharpSyntaxTree.ParseText(domainSource);
+        var domainCompilation = CSharpCompilation.Create(
+            "DomainAssembly",
+            [domainTree],
+            CoreReferences,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var mainTree = CSharpSyntaxTree.ParseText(mainSource + "\n" + AspNetStubs);
+        return CSharpCompilation.Create(
+            "TestAssembly",
+            [mainTree],
+            [.. CoreReferences, domainCompilation.ToMetadataReference()],
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
     }
 
     private static MetadataReference[] GetCoreReferences()

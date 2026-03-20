@@ -176,12 +176,13 @@ public static class ContractWalker
         }
 
         // Process chained calls: .Accepts<T>(), .Returns<T>(statusCode[, description]),
-        // .Status(statusCode), .Description(desc), .Anonymous(), .Secure(scheme)
+        // .Status(statusCode), .Description(desc), .Anonymous(), .Secure(scheme), .ProducesFile(contentType)
         var responses = new List<TsResponseType>();
         int? successStatusOverride = null;
         string? endpointDescription = null;
         EndpointSecurity? security = null;
         var acceptsFile = false;
+        string? fileContentType = null;
 
         for (var i = 1; i < chain.Count; i++)
         {
@@ -215,6 +216,28 @@ public static class ContractWalker
             {
                 security = new EndpointSecurity(false, call.DescriptionArg);
             }
+            else if (call.MethodName == "ProducesFile")
+            {
+                fileContentType = call.DescriptionArg ?? "application/octet-stream";
+            }
+        }
+
+        // [ProducesFile] attribute on the field → file endpoint
+        if (field.GetAttributes().Any(a => a.AttributeClass?.Name is "ProducesFileAttribute" or "ProducesFile"))
+        {
+            fileContentType ??= "application/octet-stream";
+        }
+
+        // byte[] or (byte[], string) as TOutput → file endpoint
+        // The runtime contract keeps the original type for .Invoke(), but the TS client gets Blob
+        if (tOutput is IArrayTypeSymbol { ElementType.SpecialType: SpecialType.System_Byte })
+        {
+            fileContentType ??= "application/octet-stream";
+            tOutput = null; // Don't map byte[] → number[] in TS
+        }
+        else if (fileContentType is not null && IsByteArrayStringTuple(tOutput))
+        {
+            tOutput = null; // Named file tuple — don't map to TS, client gets Blob
         }
 
         // Build return type from TOutput
@@ -223,20 +246,21 @@ public static class ContractWalker
         // Build params based on HTTP method and TInput
         var parameters = BuildParams(httpMethod, route, tInput, typeWalker, acceptsFile);
 
-        // Add success response to responses list if we have TOutput
+        // Add success response to responses list
         if (returnType is not null)
         {
             var successCode = successStatusOverride ?? DefaultSuccessCode(httpMethod);
             responses.Insert(0, new TsResponseType(successCode, returnType));
         }
-        else if (successStatusOverride is not null)
+        else if (fileContentType is not null || successStatusOverride is not null)
         {
-            responses.Insert(0, new TsResponseType(successStatusOverride.Value, null));
+            var successCode = successStatusOverride ?? DefaultSuccessCode(httpMethod);
+            responses.Insert(0, new TsResponseType(successCode, null));
         }
 
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
 
-        return new TsEndpointDefinition(name, httpMethod, route, parameters, returnType, controllerName, responses, endpointDescription, security);
+        return new TsEndpointDefinition(name, httpMethod, route, parameters, returnType, controllerName, responses, endpointDescription, security, fileContentType);
     }
 
     private static int DefaultSuccessCode(string httpMethod) =>
@@ -352,6 +376,24 @@ public static class ContractWalker
     private static bool HasFormFileProperty(ITypeSymbol type) =>
         type.GetMembers().OfType<IPropertySymbol>()
             .Any(p => !p.IsImplicitlyDeclared && IsFormFileType(p.Type));
+
+    /// <summary>
+    /// Checks if the type is a (byte[], string) tuple — used for named file downloads
+    /// when the field is marked with [ProducesFile].
+    /// </summary>
+    private static bool IsByteArrayStringTuple(ITypeSymbol? type)
+    {
+        if (type is not INamedTypeSymbol named || !named.IsTupleType || named.TupleElements.Length != 2)
+        {
+            return false;
+        }
+
+        var first = named.TupleElements[0].Type;
+        var second = named.TupleElements[1].Type;
+
+        return first is IArrayTypeSymbol { ElementType.SpecialType: SpecialType.System_Byte }
+            && second.SpecialType == SpecialType.System_String;
+    }
 
     /// <summary>
     /// Accepts Endpoint fields (v1 legacy), RouteDefinition fields (current),

@@ -4,7 +4,7 @@ using Rivet.Tool.Model;
 namespace Rivet.Tool.Emit;
 
 /// <summary>
-/// Emits an OpenAPI 3.1 JSON spec from the Rivet model.
+/// Emits an OpenAPI 3.0 JSON spec from the Rivet model.
 /// </summary>
 public static class OpenApiEmitter
 {
@@ -29,7 +29,7 @@ public static class OpenApiEmitter
 
         var doc = new Dictionary<string, object>
         {
-            ["openapi"] = "3.1.0",
+            ["openapi"] = "3.0.3",
             ["info"] = new Dictionary<string, object>
             {
                 ["title"] = "API",
@@ -209,6 +209,20 @@ public static class OpenApiEmitter
                     },
                 };
             }
+            else if (ep.FileContentType is not null && resp.StatusCode is >= 200 and < 300)
+            {
+                respObj["content"] = new Dictionary<string, object>
+                {
+                    [ep.FileContentType] = new Dictionary<string, object>
+                    {
+                        ["schema"] = new Dictionary<string, object>
+                        {
+                            ["type"] = "string",
+                            ["format"] = "binary",
+                        },
+                    },
+                };
+            }
 
             responses[resp.StatusCode.ToString()] = respObj;
         }
@@ -306,24 +320,31 @@ public static class OpenApiEmitter
 
     private static Dictionary<string, object> MapNullable(TsType.Nullable n)
     {
-        // Primitive inner → type array: ["string", "null"]
+        // OpenAPI 3.0: nullable is a property, not a type
         if (n.Inner is TsType.Primitive p)
         {
             return new Dictionary<string, object>
             {
-                ["type"] = new List<string> { p.Name, "null" },
+                ["type"] = p.Name,
+                ["nullable"] = true,
             };
         }
 
-        // Ref / complex inner → oneOf
-        return new Dictionary<string, object>
+        var inner = MapTsTypeToJsonSchema(n.Inner);
+
+        // $ref siblings are ignored in 3.0 — wrap in allOf
+        if (inner.ContainsKey("$ref"))
         {
-            ["oneOf"] = new List<object>
+            return new Dictionary<string, object>
             {
-                MapTsTypeToJsonSchema(n.Inner),
-                new Dictionary<string, object> { ["type"] = "null" },
-            },
-        };
+                ["allOf"] = new List<object> { inner },
+                ["nullable"] = true,
+            };
+        }
+
+        // Inline schema — add nullable directly
+        inner["nullable"] = true;
+        return inner;
     }
 
     private static Dictionary<string, object> FallbackTypeParam(TsType.TypeParam tp)

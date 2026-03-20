@@ -110,6 +110,57 @@ public static class RivetExtensions
 }
 ```
 
+### File download endpoints
+
+Use `.ProducesFile()` for endpoints that return binary content instead of JSON. No `TOutput` type parameter — the success response is a file, not a typed DTO.
+
+```csharp
+[RivetContract]
+public static class DocumentsContract
+{
+    public static readonly RouteDefinition GetDocument =
+        Define.Get("/api/documents/{id}")
+            .Description("Download a document")
+            .ProducesFile()  // default: application/octet-stream
+            .Returns<ErrorDto>(404, "Document not found");
+}
+```
+
+```typescript
+// Generated — returns Blob, error responses still typed
+export function getDocument(id: string): Promise<Blob>;
+export function getDocument(id: string, opts: { unwrap: false }): Promise<GetDocumentResult>;
+```
+
+The content type defaults to `application/octet-stream`. Pass a specific type for known formats:
+
+```csharp
+.ProducesFile("application/pdf")
+```
+
+::: info Note
+`.ProducesFile()` is metadata-only — it affects codegen and OpenAPI emission but has no runtime `Invoke()` behavior. File download controllers wire the response manually (e.g. `File(bytes, contentType, fileName)`).
+:::
+
+#### Named file downloads with `[ProducesFile]`
+
+When the handler needs to return both file content and a filename through `.Invoke()`, use the `[ProducesFile]` attribute with a `(byte[], string)` tuple:
+
+```csharp
+[RivetContract]
+public static class DocumentsContract
+{
+    [ProducesFile]
+    public static readonly RouteDefinition<(byte[] Content, string FileName)> GetDocument =
+        Define.Get<(byte[] Content, string FileName)>("/api/documents/{id}")
+            .Description("Download a document");
+}
+```
+
+The walker recognises the attribute and emits the same `application/octet-stream` + `format: binary` schema. The tuple lets the handler return both pieces through the contract's lambda, while the bridge extension unpacks them into the framework's file response.
+
+`[ProducesFile]` also works on plain `byte[]` fields — equivalent to calling `.ProducesFile()` in the builder chain.
+
 ### Controller naming
 
 The contract class name maps to the client file: `MembersContract` → `client/members.ts` (strips the `Contract` suffix and camelCases, same as `MembersController` → `client/members.ts`).

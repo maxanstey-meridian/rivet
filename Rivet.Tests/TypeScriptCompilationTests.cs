@@ -321,6 +321,108 @@ public sealed class TypeScriptCompilationTests : IDisposable
         Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
     }
 
+    [Fact]
+    public async Task FileEndpoint_ByteArray_CompilesTs()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace MyApp.Contracts
+            {
+                public sealed record ErrorDto(string Code, string Message);
+                public sealed record NotFoundDto(string Message);
+            }
+
+            namespace MyApp.Api
+            {
+                using MyApp.Contracts;
+
+                [RivetContract]
+                public static class FilesContract
+                {
+                    // byte[] TOutput → inferred file endpoint → Promise<Blob>
+                    public static readonly RouteDefinition<byte[]> Download =
+                        Define.Get<byte[]>("/api/files/{id}")
+                            .Description("Download a file")
+                            .Returns<NotFoundDto>(404, "File not found");
+
+                    // Explicit .ProducesFile() on void definition
+                    public static readonly RouteDefinition Preview =
+                        Define.Get("/api/files/{id}/preview")
+                            .ProducesFile("image/png")
+                            .Returns<ErrorDto>(400, "Bad request");
+                }
+            }
+            """;
+
+        var (exitCode, output) = await GenerateAndTypeCheck(source);
+
+        Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
+    }
+
+    [Fact]
+    public async Task TypedResults_Endpoints_CompileTs()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace MyApp.Contracts
+            {
+                public sealed record ItemDto(Guid Id, string Name);
+                public sealed record ErrorDto(string Code, string Message);
+                public sealed record CreateItemRequest(string Name);
+            }
+
+            namespace MyApp.Api
+            {
+                using MyApp.Contracts;
+
+                public static class Endpoints
+                {
+                    // Ok<T> + NotFound → typed success + void error
+                    [RivetEndpoint]
+                    [HttpGet("/api/items/{id}")]
+                    public static Task<Results<Ok<ItemDto>, NotFound>> Get([FromRoute] Guid id)
+                        => throw new NotImplementedException();
+
+                    // Created<T> + Conflict<T> → typed success + typed error
+                    [RivetEndpoint]
+                    [HttpPost("/api/items")]
+                    public static Task<Results<Created<ItemDto>, Conflict<ErrorDto>>> Create(
+                        [FromBody] CreateItemRequest body)
+                        => throw new NotImplementedException();
+
+                    // NoContent + NotFound → void success + void error
+                    [RivetEndpoint]
+                    [HttpDelete("/api/items/{id}")]
+                    public static Task<Results<NoContent, NotFound>> Delete([FromRoute] Guid id)
+                        => throw new NotImplementedException();
+
+                    // Single typed result (no Results<> wrapper)
+                    [RivetEndpoint]
+                    [HttpGet("/api/items")]
+                    public static Task<Ok<List<ItemDto>>> List()
+                        => throw new NotImplementedException();
+                }
+            }
+            """;
+
+        var (exitCode, output) = await GenerateAndTypeCheck(source);
+
+        Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
+    }
+
     private async Task<(int ExitCode, string Output)> GenerateAndTypeCheck(string csharpSource)
     {
         // 1. Compile C# and run Rivet analysis

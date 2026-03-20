@@ -69,7 +69,7 @@ internal static class ContractBuilder
         var inputType = ResolveInputType(operation, mapper, fieldName, unsupported);
 
         // Resolve output type (lowest 2xx response with JSON content)
-        var (outputType, successStatus) = ResolveOutputType(operation, mapper, fieldName, unsupported);
+        var (outputType, successStatus, fileContentType) = ResolveOutputType(operation, mapper, fieldName, unsupported);
 
         // Error responses
         var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, unsupported);
@@ -80,7 +80,7 @@ internal static class ContractBuilder
         return new GeneratedEndpointField(
             fieldName, method, route, inputType, outputType,
             description, successStatus, errorResponses,
-            isAnonymous, securityScheme, unsupported);
+            isAnonymous, securityScheme, unsupported, fileContentType);
     }
 
     private static string? ResolveInputType(
@@ -107,7 +107,25 @@ internal static class ContractBuilder
         return null;
     }
 
-    private static (string? OutputType, int? SuccessStatus) ResolveOutputType(
+    private static readonly HashSet<string> BinaryContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/octet-stream",
+        "application/pdf",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "audio/mpeg",
+        "video/mp4",
+    };
+
+    private static bool IsBinaryContentType(string contentType) =>
+        BinaryContentTypes.Contains(contentType)
+        || contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+        || contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)
+        || contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
+
+    private static (string? OutputType, int? SuccessStatus, string? FileContentType) ResolveOutputType(
         OpenApiOperation operation,
         SchemaMapper mapper,
         string fieldName,
@@ -115,11 +133,12 @@ internal static class ContractBuilder
     {
         if (operation.Responses is null)
         {
-            return (null, null);
+            return (null, null, null);
         }
 
         string? outputType = null;
         int? successCode = null;
+        string? fileContentType = null;
 
         foreach (var (statusStr, response) in operation.Responses)
         {
@@ -144,9 +163,19 @@ internal static class ContractBuilder
                 }
                 else
                 {
-                    var contentTypes = string.Join(", ", response.Content.Keys);
-                    unsupported.Add($"response status={code} content-type={contentTypes}");
-                    outputType = null;
+                    // Check for binary/file content types
+                    var binaryType = response.Content.Keys.FirstOrDefault(IsBinaryContentType);
+                    if (binaryType is not null)
+                    {
+                        fileContentType = binaryType;
+                        outputType = null;
+                    }
+                    else
+                    {
+                        var contentTypes = string.Join(", ", response.Content.Keys);
+                        unsupported.Add($"response status={code} content-type={contentTypes}");
+                        outputType = null;
+                    }
                 }
             }
             else
@@ -158,7 +187,7 @@ internal static class ContractBuilder
         // Only emit .Status() if non-200
         var statusOverride = successCode != 200 ? successCode : null;
 
-        return (outputType, statusOverride);
+        return (outputType, statusOverride, fileContentType);
     }
 
     private static IReadOnlyList<GeneratedErrorResponse> ResolveErrorResponses(

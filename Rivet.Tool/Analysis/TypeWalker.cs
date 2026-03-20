@@ -9,7 +9,7 @@ namespace Rivet.Tool.Analysis;
 /// </summary>
 public sealed class TypeWalker
 {
-    private readonly IAssemblySymbol _sourceAssembly;
+    private readonly HashSet<IAssemblySymbol> _walkableAssemblies;
     private readonly Dictionary<string, TsTypeDefinition> _definitions = new();
     private readonly Dictionary<string, TsType.Brand> _brands = new();
     private readonly Dictionary<string, TsType.StringUnion> _enums = new();
@@ -39,7 +39,16 @@ public sealed class TypeWalker
 
     public TypeWalker(Compilation compilation)
     {
-        _sourceAssembly = compilation.Assembly;
+        // Build set of walkable assemblies: source + project references (not NuGet/framework)
+        _walkableAssemblies = new HashSet<IAssemblySymbol>(SymbolEqualityComparer.Default) { compilation.Assembly };
+        foreach (var reference in compilation.References)
+        {
+            if (reference is CompilationReference
+                && compilation.GetAssemblyOrModuleSymbol(reference) is IAssemblySymbol asm)
+            {
+                _walkableAssemblies.Add(asm);
+            }
+        }
 
         _jsonObjectType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonObject");
         _jsonArrayType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonArray");
@@ -219,9 +228,9 @@ public sealed class TypeWalker
                 return new TsType.TypeRef(namedType.Name);
             }
 
-            // Named record/class from source assembly → walk transitively
+            // Named record/class from source or project-referenced assembly → walk transitively
             if (namedType.TypeKind is TypeKind.Class or TypeKind.Struct
-                && SymbolEqualityComparer.Default.Equals(namedType.ContainingAssembly, _sourceAssembly))
+                && _walkableAssemblies.Contains(namedType.ContainingAssembly))
             {
                 // Value Object convention: single property named "Value" → branded type
                 // Skip for generic types — Wrapper<T>(T Value) is a generic record, not a VO

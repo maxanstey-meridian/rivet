@@ -344,6 +344,207 @@ public sealed class ControllerEndpointTests
     }
 
     [Fact]
+    public void Results_Ok_NotFound_ExtractsSuccessType()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/items/{id}")]
+                public static Task<Results<Ok<ItemDto>, NotFound>> Get([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var client = GenerateClient(source);
+
+        Assert.Contains("Promise<ItemDto>", client);
+    }
+
+    [Fact]
+    public void Results_Ok_NotFound_ExtractsAllResponses()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/items/{id}")]
+                public static Task<Results<Ok<ItemDto>, NotFound>> Get([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+
+        var endpoint = Assert.Single(endpoints);
+        Assert.Equal(2, endpoint.Responses.Count);
+        Assert.Equal(200, endpoint.Responses[0].StatusCode);
+        Assert.NotNull(endpoint.Responses[0].DataType);
+        Assert.Equal(404, endpoint.Responses[1].StatusCode);
+        Assert.Null(endpoint.Responses[1].DataType);
+    }
+
+    [Fact]
+    public void Results_Created_Conflict_ExtractsResponses()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+            [RivetType]
+            public sealed record ErrorDto(string Message);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpPost("/api/items")]
+                public static Task<Results<Created<ItemDto>, Conflict<ErrorDto>>> Create([FromBody] ItemDto body)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+
+        var endpoint = Assert.Single(endpoints);
+        Assert.Equal(2, endpoint.Responses.Count);
+        Assert.Equal(201, endpoint.Responses[0].StatusCode);
+        Assert.NotNull(endpoint.Responses[0].DataType);
+        Assert.Equal(409, endpoint.Responses[1].StatusCode);
+        Assert.NotNull(endpoint.Responses[1].DataType);
+    }
+
+    [Fact]
+    public void SingleTypedResult_Ok_ExtractsType()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/items/{id}")]
+                public static Task<Ok<ItemDto>> Get([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var client = GenerateClient(source);
+
+        Assert.Contains("Promise<ItemDto>", client);
+    }
+
+    [Fact]
+    public void Results_VoidSuccessBeforeTypedSuccess_PrefersTypedBody()
+    {
+        // Results<> is a union — declaration order shouldn't affect which type is extracted
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/items/{id}")]
+                public static Task<Results<NoContent, Ok<ItemDto>>> Get([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+
+        var endpoint = Assert.Single(endpoints);
+        // Ok<ItemDto> should be the return type even though NoContent appears first
+        Assert.NotNull(endpoint.ReturnType);
+        Assert.Equal(2, endpoint.Responses.Count);
+    }
+
+    [Fact]
+    public void Results_NoContent_ExtractsVoidSuccess()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpDelete("/api/items/{id}")]
+                public static Task<Results<NoContent, NotFound>> Delete([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+
+        var endpoint = Assert.Single(endpoints);
+        Assert.Null(endpoint.ReturnType);
+        Assert.Equal(2, endpoint.Responses.Count);
+        Assert.Equal(204, endpoint.Responses[0].StatusCode);
+        Assert.Null(endpoint.Responses[0].DataType);
+        Assert.Equal(404, endpoint.Responses[1].StatusCode);
+        Assert.Null(endpoint.Responses[1].DataType);
+    }
+
+    [Fact]
     public void Controller_ActionResultT_UnwrapsReturnType()
     {
         var source = """

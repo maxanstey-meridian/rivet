@@ -160,9 +160,25 @@ internal sealed class SchemaMapper
                 return innerType + "?";
             }
 
-            // Pure null type
+            // Pure null type — check for 3.0 nullable composition (allOf [$ref] + nullable: true)
             if (type.Value == JsonSchemaType.Null)
             {
+                if (schema.AllOf is { Count: 1 }
+                    && schema.AllOf[0] is OpenApiSchemaReference nullableRef
+                    && schema.Properties is not { Count: > 0 })
+                {
+                    return SanitizeName(nullableRef.Reference.Id!) + "?";
+                }
+
+                if (schema.AllOf is { Count: > 0 })
+                {
+                    var allOfName = Naming.CapIdentifierLength(context ?? $"Composed{++_syntheticCounter}");
+                    var record = ResolveAllOfRecord(allOfName, schema.AllOf);
+                    record = MergeWithSiblingProperties(record, schema, allOfName);
+                    _extraRecords.Add(record);
+                    return allOfName + "?";
+                }
+
                 return "System.Text.Json.JsonElement";
             }
         }

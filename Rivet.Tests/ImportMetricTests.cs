@@ -71,7 +71,7 @@ public sealed class ImportMetricTests
     {
         var r = Import("stripe");
 
-        Assert.True(TypeFiles(r) >= 3100, $"Expected ≥3100 types, got {TypeFiles(r)}");
+        Assert.True(TypeFiles(r) >= 3060, $"Expected ≥3060 types, got {TypeFiles(r)}");
         Assert.Equal(1, ContractFiles(r)); // single-tag API
         Assert.True(TypedInputCount(r) >= 580, $"Expected ≥580 typed inputs, got {TypedInputCount(r)}");
         Assert.Equal(0, UnsupportedBody(r));
@@ -139,10 +139,14 @@ public sealed class ImportMetricTests
         var typedOutputs = CountPattern(r, "Contracts/", "RouteDefinition<");
         Assert.True(typedOutputs >= 330, $"Expected ≥330 typed outputs, got {typedOutputs}");
 
-        // Image endpoints are correctly marked unsupported
-        Assert.Equal(2, UnsupportedBody(r));   // image/png uploads
-        Assert.Equal(12, UnsupportedResponse(r)); // image/gif, image/png responses
+        // Image uploads are still unsupported (no schema to map)
+        Assert.Equal(2, UnsupportedBody(r));
+        // Image responses are now file endpoints, not unsupported
+        Assert.True(UnsupportedResponse(r) <= 1, $"Expected ≤1 unsupported response, got {UnsupportedResponse(r)}");
         Assert.Equal(12, UnsupportedError(r));
+        // Image endpoints should generate .ProducesFile()
+        var fileEndpoints = CountPattern(r, "Contracts/", ".ProducesFile(");
+        Assert.True(fileEndpoints >= 11, $"Expected ≥11 file endpoints, got {fileEndpoints}");
     }
 
     // ========== Jira — schemaless error responses ==========

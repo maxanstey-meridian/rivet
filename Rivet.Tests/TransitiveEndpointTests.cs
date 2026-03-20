@@ -109,4 +109,58 @@ public sealed class TransitiveEndpointTests
         // Priority discovered as named enum type via PostDto
         Assert.Contains("""export type Priority = "Low" | "Medium" | "High";""", types);
     }
+
+    [Fact]
+    public void ContractTypes_DiscoveredFromProjectReference()
+    {
+        // Domain types in a separate "project" (CompilationReference) — no [RivetType]
+        var domainSource = """
+            using System.Collections.Generic;
+
+            namespace Domain;
+
+            public sealed record CaseDocumentMeta(
+                int DocumentId,
+                string DocumentName);
+
+            public sealed record CaseSearchResult(
+                string CaseRef,
+                string? Title,
+                IReadOnlyList<CaseDocumentMeta> Documents);
+            """;
+
+        var mainSource = """
+            using Domain;
+            using Rivet;
+
+            namespace Host;
+
+            [RivetContract]
+            public static class CaseSearchContract
+            {
+                public static readonly RouteDefinition<CaseSearchResult> Search =
+                    Define.Get<CaseSearchResult>("/api/cases/{caseRef}")
+                        .Description("Search for a case");
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilationWithProjectReference(mainSource, domainSource);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+
+        // Endpoint should be discovered
+        Assert.Single(endpoints);
+        Assert.Equal("search", endpoints[0].Name);
+        Assert.NotNull(endpoints[0].ReturnType);
+
+        // Types from the referenced project should be walked transitively
+        Assert.True(walker.Definitions.ContainsKey("CaseSearchResult"),
+            $"CaseSearchResult not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
+        Assert.True(walker.Definitions.ContainsKey("CaseDocumentMeta"),
+            $"CaseDocumentMeta not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
+
+        // CaseSearchResult should have the Documents property
+        var csr = walker.Definitions["CaseSearchResult"];
+        Assert.Contains(csr.Properties, p => p.Name == "documents");
+    }
 }

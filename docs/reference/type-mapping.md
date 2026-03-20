@@ -11,7 +11,7 @@
 | `T?` (nullable value/ref) | `T \| null` | `type: ["<base>", "null"]` |
 | `List<T>`, `T[]`, `IEnumerable<T>`, `IReadOnlyList<T>` | `T[]` | `type: array, items: {...}` |
 | `Dictionary<string, T>`, `IReadOnlyDictionary<string, T>` | `Record<string, T>` | `type: object, additionalProperties: {...}` |
-| `sealed record` | `type { ... }` (transitive discovery) | `type: object, properties: {...}` |
+| `sealed record` | `type { ... }` (transitive discovery, including project references) | `type: object, properties: {...}` |
 | `enum` (with `JsonStringEnumConverter`) | `type Status = "A" \| "B"` | `type: string, enum: [...]` |
 | `PagedResult<T>` (generic record) | `PagedResult<T>` | Monomorphised: `PagedResultOfT` |
 | `JsonElement`, `JsonNode` | `unknown` | `{}` |
@@ -22,6 +22,10 @@
 ::: info Note
 The OpenAPI emitter maps from the TypeScript type model, which does not carry `format` or `integer` vs `number` distinctions. All numeric C# types emit as `type: number`, all string-like types emit as `type: string`, and branded value objects are unwrapped to their inner primitive. The [importer](/guides/openapi-import) does use `format` fields when reading specs — the asymmetry is intentional (richer input, simpler output).
 :::
+
+## Cross-project type discovery
+
+Types referenced by contracts or endpoints are discovered transitively — even from project references. If your domain types live in a separate `.csproj` that your API project references, Rivet walks them automatically. No `[RivetType]` attribute needed on transitively-discovered types. NuGet and framework types are not walked.
 
 ## Value objects
 
