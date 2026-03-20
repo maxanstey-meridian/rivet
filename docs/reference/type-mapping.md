@@ -58,8 +58,11 @@ Multi-property records are emitted as regular object types: `Money(decimal Amoun
 | `number` + `format: float` | `float` |
 | `boolean` | `bool` |
 | `array` + `items` | `List<T>` |
-| `object` + `properties` | `sealed record` |
+| `object` + non-empty `properties` | `sealed record` |
 | `object` + `additionalProperties` | `Dictionary<string, T>` |
+| `object` with no `properties` | `Dictionary<string, JsonElement>` (no record generated) |
+
+> **Note:** Empty `properties: {}` is treated the same as absent `properties` — the OpenAPI library does not distinguish them. Both produce `Dictionary<string, JsonElement>`.
 | `$ref` | Named type reference |
 | Nullable (`type: ["string", "null"]`) | `T?` |
 

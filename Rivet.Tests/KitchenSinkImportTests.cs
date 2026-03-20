@@ -448,25 +448,35 @@ public sealed class KitchenSinkImportTests
     }
 
     [Fact]
-    public void AdditionalProperties_True_Maps_To_Untyped_Dictionary()
+    public void AdditionalProperties_True_Skips_Record_Generation()
     {
-        // When additionalProperties: true appears as an inline property type,
-        // it resolves to Dictionary<string, JsonElement>. As a top-level schema
-        // with no properties, MapSchemas produces an empty record.
+        // A top-level schema with additionalProperties: true and no properties
+        // should NOT generate a record — it resolves to Dictionary inline.
         var result = Import(LoadFixture());
-        var content = FindFile(result, "OpenMapDto.cs");
-        Assert.Contains("public sealed record OpenMapDto()", content);
+        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("OpenMapDto"));
     }
 
     // ========== Bare object ==========
 
     [Fact]
-    public void Bare_Object_Maps_To_Empty_Record()
+    public void Bare_Object_Skips_Record_Generation()
     {
-        // { "type": "object" } with nothing else — top-level schema becomes an empty record
+        // { "type": "object" } with no properties — resolved inline as Dictionary, no record generated
         var result = Import(LoadFixture());
-        var content = FindFile(result, "BareObjectDto.cs");
-        Assert.Contains("public sealed record BareObjectDto()", content);
+        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("BareObjectDto"));
+    }
+
+    [Fact]
+    public void Ref_To_PropertyLess_Object_Resolves_To_Dictionary()
+    {
+        // A $ref pointing to a property-less object schema (OpenMapDto, BareObjectDto)
+        // should resolve to Dictionary on the consuming property, not to a dead type name.
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "MapRefConsumerDto.cs");
+
+        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement> OpenMap", content);
+        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement> BareObj", content);
+        Assert.Contains("string Label", content);
     }
 
     // ========== Inline anonymous objects ==========
@@ -511,13 +521,11 @@ public sealed class KitchenSinkImportTests
         // UntypedEnumDto has enum but no type field — should not crash or warn
         var result = Import(LoadFixture());
 
-        // It's a top-level schema with enum values, IsStringEnum checks for type=="string"
-        // so it won't match. But our fix in ResolveCSharpType catches enum-without-type.
-        // Actually at the MapSchemas level, IsStringEnum requires type=="string", so
-        // UntypedEnumDto won't be mapped as an enum. It'll fall through to IsObject (false)
-        // and be skipped. But if referenced inline, ResolveCSharpType should return "string".
-        // Let's just verify no crash and no "could not be resolved" warning for it.
+        // UntypedEnumDto has enum values but no type field. IsStringEnum requires type=="string",
+        // so it won't be mapped as an enum. It falls through all checks in MapSchemas and is
+        // skipped (no file generated). If referenced inline, ResolveCSharpType returns "string".
         Assert.DoesNotContain(result.Warnings, w => w.Contains("UntypedEnumDto"));
+        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("UntypedEnumDto"));
     }
 
     // ========== Optional property edge cases ==========
@@ -543,12 +551,11 @@ public sealed class KitchenSinkImportTests
     }
 
     [Fact]
-    public void Empty_Object_Produces_Parameterless_Record()
+    public void Empty_Object_Skips_Record_Generation()
     {
+        // { "type": "object", "properties": {} } — no actual properties, no record generated
         var result = Import(LoadFixture());
-        var content = FindFile(result, "EmptyDto.cs");
-
-        Assert.Contains("public sealed record EmptyDto()", content);
+        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("EmptyDto"));
     }
 
     [Fact]

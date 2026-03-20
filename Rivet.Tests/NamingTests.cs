@@ -7,7 +7,7 @@ public sealed class NamingTests
     [Theory]
     [InlineData("my_status", "MyStatus")]
     [InlineData("in-progress", "InProgress")]
-    [InlineData("ACTIVE", "ACTIVE")]
+    [InlineData("ACTIVE", "ACTIVE")] // All-caps preserved — avoids silent serialization mismatch with APIs expecting exact casing
     [InlineData("already_Good", "AlreadyGood")]
     [InlineData("a", "A")]
     [InlineData("", "")]

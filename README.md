@@ -188,6 +188,20 @@ public static class TasksContract
 }
 ```
 
+## Check contract coverage
+
+```bash
+dotnet rivet --project Api.csproj --check
+```
+
+```
+warning: [MissingImplementation] MembersContract.Remove: expected DELETE /api/members/{id}, got (none)
+warning: [RouteMismatch] MembersContract.UpdateRole: expected /api/members/{id}/role, got /api/members/{id}/update-role
+Coverage: 2/4 endpoints covered, 1 mismatch(es), 1 missing.
+```
+
+Verifies that every contract endpoint has a matching handler implementation, with correct HTTP method and route. Useful in CI to catch missing or mismatched handlers.
+
 ## List your routes
 
 ```bash

@@ -96,6 +96,12 @@ internal sealed class SchemaMapper
 
             if (IsObject(schema))
             {
+                // Object with no properties → resolved inline as Dictionary, not as a record
+                if (schema.Properties is not { Count: > 0 })
+                {
+                    continue;
+                }
+
                 records.Add(MapRecord(name, schema));
                 continue;
             }
@@ -132,6 +138,13 @@ internal sealed class SchemaMapper
         // $ref — library resolves refs, but OpenApiSchemaReference preserves the reference name
         if (schema is OpenApiSchemaReference schemaRef)
         {
+            // If the target is a property-less object schema, resolve to Dictionary
+            // (no record was generated for it in MapSchemas)
+            if (IsObject(schemaRef) && schemaRef.Properties is not { Count: > 0 })
+            {
+                return ResolveObjectType(schemaRef, context);
+            }
+
             return SanitizeName(schemaRef.Reference.Id!);
         }
 

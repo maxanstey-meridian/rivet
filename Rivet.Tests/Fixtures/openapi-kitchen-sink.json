@@ -735,6 +735,15 @@
           "exampled": { "example": "foo" }
         },
         "required": ["opaque"]
+      },
+      "MapRefConsumerDto": {
+        "type": "object",
+        "properties": {
+          "openMap": { "$ref": "#/components/schemas/OpenMapDto" },
+          "bareObj": { "$ref": "#/components/schemas/BareObjectDto" },
+          "label": { "type": "string" }
+        },
+        "required": ["openMap", "bareObj", "label"]
       }
     },
     "securitySchemes": {
