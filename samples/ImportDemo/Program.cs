@@ -4,25 +4,30 @@ using Rivet;
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-// In-memory data — imagine this is a database
-var members = new List<MemberDto>
-{
-    new("1", "Alice", "alice@example.com", "admin"),
-    new("2", "Bob", "bob@example.com", "member"),
-    new("3", "Charlie", "charlie@example.com", "viewer"),
-};
-
-// Wire the contracts to handlers — that's it
 app.MapGet(MembersContract.List.Route, async () =>
-    (await MembersContract.List.Invoke(async () => members)).ToResult());
+{
+    var members = GetMembers();
+    return (await MembersContract.List.Invoke(async () => members)).ToResult();
+});
 
 app.MapGet(MembersContract.GetById.Route, async (string id) =>
-    (await MembersContract.GetById.Invoke(async () =>
-        members.FirstOrDefault(m => m.Id == id)!)).ToResult());
+{
+    var members = GetMembers();
+    var member = members.FirstOrDefault(m => m.Id == id)
+        ?? throw new KeyNotFoundException($"Member {id} not found");
+    return (await MembersContract.GetById.Invoke(async () => member)).ToResult();
+});
 
 app.Run();
 
-// One-line bridge — you write this once
+// Imagine this is a database call
+List<MemberDto> GetMembers() =>
+[
+    new("1", "Alice", "alice@example.com", "admin"),
+    new("2", "Bob", "bob@example.com", "member"),
+    new("3", "Charlie", "charlie@example.com", "viewer"),
+];
+
 static class RivetExtensions
 {
     public static IResult ToResult<T>(this RivetResult<T> r) => Results.Json(r.Data, statusCode: r.StatusCode);
