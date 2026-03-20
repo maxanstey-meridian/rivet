@@ -10,7 +10,7 @@
 
 **End-to-end type safety between .NET and TypeScript.** No drift, no schema files, no codegen config.
 
-[oRPC](https://orpc.unnoq.com) gives you this when your server is TypeScript. Rivet gives you the same DX when your server is .NET — richer types than an OpenAPI generator, because it reads Roslyn's full type graph instead of a JSON schema intermediary.
+[oRPC](https://orpc.unnoq.com) gives you this when your server is TypeScript. Rivet gives you the same DX when your server is .NET.
 
 > **New here?** Follow the [**Tutorial: Zero to Typed Client**](https://maxanstey-meridian.github.io/rivet/guides/tutorial) — `dotnet new webapi` to a fully typed TS client in under 5 minutes.
 
@@ -67,32 +67,6 @@ export type GetResult =
 
 const task = await tasks.get(id);                        // → TaskDetailDto (throws on error)
 const result = await tasks.get(id, { unwrap: false });   // → GetResult (no throw)
-```
-
-## Or mark your minimal API endpoints
-
-```csharp
-public static class TaskEndpoints
-{
-    [RivetEndpoint]
-    [HttpGet("/api/tasks/{id:guid}")]
-    public static async Task<Results<Ok<TaskDetailDto>, NotFound<ErrorDto>>> Get(
-        Guid id, AppDb db, CancellationToken ct)
-    {
-        var task = await db.Tasks.FindAsync(id, ct);
-        return task is not null
-            ? TypedResults.Ok(Map(task))
-            : TypedResults.NotFound(new ErrorDto("not_found", "Task not found"));
-    }
-}
-```
-
-```typescript
-// Generated — Rivet reads the type args from Results<Ok<T>, NotFound<T>>
-export type GetResult =
-  | { status: 200; data: TaskDetailDto; response: Response }
-  | { status: 404; data: ErrorDto; response: Response }
-  | { status: Exclude<number, 200 | 404>; data: unknown; response: Response };
 ```
 
 ## Or define contracts → get compile-time enforcement
@@ -156,6 +130,34 @@ export const assertAge = (input) => {
 ```
 
 Every API response is validated at the network boundary with [typia](https://typia.io) runtime assertions — not just primitives, but full object shapes, nested types, and unions. If the server sends unexpected data, you get a clear error immediately — not a silent `undefined` three components later.
+
+## Or `--compile zod` → validate with Zod 4, no compile step
+
+```bash
+dotnet rivet --project Api.csproj --output ./generated --compile zod
+```
+
+Same validation wiring as typia, but backed by Zod 4's `fromJSONSchema()` — no typia transformer, no node compile step. Rivet emits a `schemas.ts` with standalone JSON Schema definitions and a `validators.ts` that wraps them:
+
+```typescript
+// schemas.ts — standalone JSON Schema, usable with any validator
+export const TaskItemSchema = { "$ref": "#/$defs/TaskItem", "$defs": $defs } as const;
+
+// validators.ts — cached Zod schemas, same assertFoo interface as typia
+import { fromJSONSchema, z } from "zod";
+const _assertTaskItem = fromJSONSchema(TaskItemSchema as any);
+export const assertTaskItem = (data: unknown): TaskItem => _assertTaskItem.parse(data) as TaskItem;
+```
+
+The generated client imports from `validators.ts` identically to the typia path — consumers don't need to know which backend is wired in.
+
+You can also emit just the schemas without validation wiring:
+
+```bash
+dotnet rivet --project Api.csproj --output ./generated --jsonschema
+```
+
+This writes `schemas.ts` only — use it with `fromJSONSchema()`, ajv, or any JSON Schema consumer.
 
 ## Import OpenAPI → get C# contracts
 
