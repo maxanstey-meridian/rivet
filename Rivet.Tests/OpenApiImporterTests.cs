@@ -229,7 +229,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Unsupported_OneOf_Schema_Produces_Warning()
+    public void OneOf_Schema_Produces_Union_Wrapper()
     {
         var spec = BuildSpec(schemas: """
             "Shape": {
@@ -251,9 +251,13 @@ public sealed class OpenApiImporterTests
             """);
 
         var result = Import(spec);
-        Assert.Contains(result.Warnings, w => w.Contains("oneOf") && w.Contains("Shape"));
+        Assert.Contains(result.Files, f => f.FileName.Contains("Shape"));
         Assert.Contains(result.Files, f => f.FileName.Contains("Circle"));
         Assert.Contains(result.Files, f => f.FileName.Contains("Square"));
+
+        var content = result.Files.First(f => f.FileName.Contains("Shape")).Content;
+        Assert.Contains("Circle? AsCircle", content);
+        Assert.Contains("Square? AsSquare", content);
     }
 
     // ========== Contract output tests (v1 static class + RouteDefinition fields) ==========
@@ -521,8 +525,8 @@ public sealed class OpenApiImporterTests
     {
         var result = Import(LoadFixture(), "TaskBoard.Contracts");
         var compilation = CompileGeneratedFiles(result);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
 
         Assert.Equal(10, endpoints.Count);
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks");
@@ -542,7 +546,7 @@ public sealed class OpenApiImporterTests
     {
         var result = Import(LoadFixture(), "TaskBoard.Contracts");
         var compilation = CompileGeneratedFiles(result);
-        var walker = TypeWalker.Create(compilation);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
         Assert.True(walker.Definitions.ContainsKey("TaskDto"));
         Assert.True(walker.Definitions.ContainsKey("LabelDto"));
@@ -566,7 +570,7 @@ public sealed class OpenApiImporterTests
     public void Fixture_TaskDto_Properties_Match_OpenAPI_Schema()
     {
         var result = Import(LoadFixture(), "TaskBoard.Contracts");
-        var walker = TypeWalker.Create(CompileGeneratedFiles(result));
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(CompileGeneratedFiles(result));
         var taskDto = walker.Definitions["TaskDto"];
 
         AssertProperty(taskDto, "id", "string");
@@ -589,8 +593,8 @@ public sealed class OpenApiImporterTests
     {
         var result = Import(LoadFixture(), "TaskBoard.Contracts");
         var compilation = CompileGeneratedFiles(result);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
 
         var createTask = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks");
         Assert.Contains(createTask.Responses, r => r.StatusCode == 201);
@@ -664,8 +668,8 @@ public sealed class OpenApiImporterTests
     {
         var result = Import(LoadFixture(), "TaskBoard.Contracts");
         var compilation = CompileGeneratedFiles(result);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
 
         var attach = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks/{taskId}/attachments");
         Assert.Contains(attach.Params, p => p.Source == ParamSource.File && p.Name == "file");
@@ -772,6 +776,899 @@ public sealed class OpenApiImporterTests
 
         // Descriptions present
         Assert.Contains(".Description(\"List all tasks\")", FindFile(result, "TasksContract.cs"));
+    }
+
+    // ========== Union ref name sanitization ==========
+
+    [Fact]
+    public void OneOf_With_Hyphenated_Ref_Names_Sanitized()
+    {
+        var spec = BuildSpec(schemas: """
+            "my-shape": {
+                "oneOf": [
+                    { "$ref": "#/components/schemas/my-circle" },
+                    { "$ref": "#/components/schemas/my-square" }
+                ]
+            },
+            "my-circle": {
+                "type": "object",
+                "properties": { "radius": { "type": "number" } },
+                "required": ["radius"]
+            },
+            "my-square": {
+                "type": "object",
+                "properties": { "side": { "type": "number" } },
+                "required": ["side"]
+            }
+            """);
+
+        var result = Import(spec);
+        var content = FindFile(result, "MyShape.cs");
+
+        // Ref names should be PascalCased, not raw "my-circle"
+        Assert.Contains("MyCircle? AsMyCircle", content);
+        Assert.Contains("MySquare? AsMySquare", content);
+        Assert.DoesNotContain("my-circle", content);
+        Assert.DoesNotContain("my-square", content);
+    }
+
+    [Fact]
+    public void AnyOf_With_Dotted_Ref_Names_Sanitized()
+    {
+        var spec = BuildSpec(schemas: """
+            "shape.union": {
+                "anyOf": [
+                    { "$ref": "#/components/schemas/geo.circle" },
+                    { "$ref": "#/components/schemas/geo.square" }
+                ]
+            },
+            "geo.circle": {
+                "type": "object",
+                "properties": { "radius": { "type": "number" } },
+                "required": ["radius"]
+            },
+            "geo.square": {
+                "type": "object",
+                "properties": { "side": { "type": "number" } },
+                "required": ["side"]
+            }
+            """);
+
+        var result = Import(spec);
+        var content = FindFile(result, "ShapeUnion.cs");
+
+        Assert.Contains("GeoCircle? AsGeoCircle", content);
+        Assert.Contains("GeoSquare? AsGeoSquare", content);
+    }
+
+    [Fact]
+    public void Sanitized_Union_Refs_Compile()
+    {
+        var spec = BuildSpec(schemas: """
+            "result-union": {
+                "oneOf": [
+                    { "$ref": "#/components/schemas/success-response" },
+                    { "$ref": "#/components/schemas/error-response" }
+                ]
+            },
+            "success-response": {
+                "type": "object",
+                "properties": { "data": { "type": "string" } },
+                "required": ["data"]
+            },
+            "error-response": {
+                "type": "object",
+                "properties": { "message": { "type": "string" } },
+                "required": ["message"]
+            }
+            """);
+
+        var result = Import(spec);
+        var errors = CompileGeneratedFiles(result).GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        Assert.Empty(errors);
+    }
+
+    // ========== allOf ref name sanitization ==========
+
+    [Fact]
+    public void AllOf_With_Hyphenated_Ref_Names_Sanitized()
+    {
+        var spec = BuildSpec(schemas: """
+            "base-address": {
+                "type": "object",
+                "properties": { "street": { "type": "string" } },
+                "required": ["street"]
+            },
+            "extended-address": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/base-address" },
+                    { "type": "object", "properties": { "zip": { "type": "string" } }, "required": ["zip"] }
+                ]
+            }
+            """);
+
+        var result = Import(spec);
+        var content = FindFile(result, "ExtendedAddress.cs");
+
+        Assert.Contains("string Street", content);
+        Assert.Contains("string Zip", content);
+        // No hyphens in the output
+        Assert.DoesNotContain("base-address", content);
+    }
+
+    [Fact]
+    public void AllOf_Nested_Hyphenated_Refs_Compile()
+    {
+        // allOf referencing another allOf with hyphenated names — 3 levels deep
+        var spec = BuildSpec(schemas: """
+            "api-base": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "api-response-single": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/api-base" },
+                    { "type": "object", "properties": { "result": { "type": "string" } }, "required": ["result"] }
+                ]
+            },
+            "device-api-response": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/api-response-single" },
+                    { "type": "object", "properties": { "device": { "type": "string" } }, "required": ["device"] }
+                ]
+            }
+            """);
+
+        var result = Import(spec);
+
+        var errors = CompileGeneratedFiles(result).GetDiagnostics()
+            .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error).ToList();
+        Assert.Empty(errors);
+
+        var content = FindFile(result, "DeviceApiResponse.cs");
+        Assert.Contains("string Id", content);
+        Assert.Contains("string Result", content);
+        Assert.Contains("string Device", content);
+    }
+
+    // ========== $ref requestBody resolution ==========
+
+    [Fact]
+    public void RequestBody_Ref_Resolves_To_Input_Type()
+    {
+        var spec = """
+            {
+                "openapi": "3.1.0",
+                "info": { "title": "API", "version": "1.0.0" },
+                "components": {
+                    "schemas": {
+                        "BrandPayload": {
+                            "type": "object",
+                            "properties": { "name": { "type": "string" } },
+                            "required": ["name"]
+                        },
+                        "BrandResult": {
+                            "type": "object",
+                            "properties": { "id": { "type": "string" } },
+                            "required": ["id"]
+                        }
+                    },
+                    "requestBodies": {
+                        "BrandRequest": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/BrandPayload" }
+                                }
+                            }
+                        }
+                    }
+                },
+                "paths": {
+                    "/api/brands": {
+                        "post": {
+                            "operationId": "brands_create",
+                            "tags": ["Brands"],
+                            "requestBody": {
+                                "$ref": "#/components/requestBodies/BrandRequest"
+                            },
+                            "responses": {
+                                "201": {
+                                    "description": "Created",
+                                    "content": {
+                                        "application/json": {
+                                            "schema": { "$ref": "#/components/schemas/BrandResult" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            """;
+
+        var result = Import(spec);
+        var content = FindFile(result, "BrandsContract.cs");
+
+        Assert.Contains("RouteDefinition<BrandPayload, BrandResult>", content);
+        Assert.Contains("Define.Post<BrandPayload, BrandResult>", content);
+    }
+
+    [Fact]
+    public void RequestBody_Ref_With_Inline_Schema()
+    {
+        var spec = """
+            {
+                "openapi": "3.1.0",
+                "info": { "title": "API", "version": "1.0.0" },
+                "components": {
+                    "requestBodies": {
+                        "SettingsBody": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": { "theme": { "type": "string" } },
+                                        "required": ["theme"]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "paths": {
+                    "/api/settings": {
+                        "put": {
+                            "operationId": "settings_update",
+                            "tags": ["Settings"],
+                            "requestBody": {
+                                "$ref": "#/components/requestBodies/SettingsBody"
+                            },
+                            "responses": {
+                                "204": { "description": "No Content" }
+                            }
+                        }
+                    }
+                }
+            }
+            """;
+
+        var result = Import(spec);
+        var content = FindFile(result, "SettingsContract.cs");
+
+        Assert.Contains("InputRouteDefinition<UpdateRequest>", content);
+        Assert.Contains(".Accepts<UpdateRequest>()", content);
+    }
+
+    [Fact]
+    public void Unresolvable_RequestBody_Ref_Produces_No_Input()
+    {
+        var spec = """
+            {
+                "openapi": "3.1.0",
+                "info": { "title": "API", "version": "1.0.0" },
+                "paths": {
+                    "/api/things": {
+                        "post": {
+                            "operationId": "things_create",
+                            "tags": ["Things"],
+                            "requestBody": {
+                                "$ref": "#/components/requestBodies/DoesNotExist"
+                            },
+                            "responses": {
+                                "201": { "description": "Created" }
+                            }
+                        }
+                    }
+                }
+            }
+            """;
+
+        var result = Import(spec);
+        var content = FindFile(result, "ThingsContract.cs");
+
+        // Unresolvable ref → no input type, just bare RouteDefinition
+        Assert.DoesNotContain("InputRouteDefinition", content);
+        Assert.Contains("public static readonly RouteDefinition Create", content);
+    }
+
+    // ========== Empty allOf record skipping ==========
+
+    [Fact]
+    public void AllOf_With_Primitive_Ref_Skips_Empty_Record()
+    {
+        // allOf referencing a primitive-like schema (no properties) should not emit an empty record
+        var spec = BuildSpec(schemas: """
+            "StringAlias": {
+                "type": "string"
+            },
+            "Wrapper": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/StringAlias" }
+                ]
+            }
+            """);
+
+        var result = Import(spec);
+
+        // Wrapper should not be emitted as an empty record
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("Wrapper.cs"));
+    }
+
+    [Fact]
+    public void AllOf_With_Object_Ref_Still_Emits_Record()
+    {
+        // allOf referencing an object schema should still produce a record with flattened properties
+        var spec = BuildSpec(schemas: """
+            "Base": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"]
+            },
+            "Extended": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/Base" },
+                    { "type": "object", "properties": { "extra": { "type": "string" } }, "required": ["extra"] }
+                ]
+            }
+            """);
+
+        var result = Import(spec);
+        var content = FindFile(result, "Extended.cs");
+
+        Assert.Contains("string Name", content);
+        Assert.Contains("string Extra", content);
+    }
+
+    // ========== */* content type fallback ==========
+
+    [Fact]
+    public void Wildcard_Content_Type_Resolves_Input_Type()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "PodSpec": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                },
+                "PodResult": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/pods": {
+                    "post": {
+                        "operationId": "pods_create",
+                        "tags": ["Pods"],
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "*/*": {
+                                    "schema": { "$ref": "#/components/schemas/PodSpec" }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "201": {
+                                "description": "Created",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/PodResult" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var content = FindFile(Import(spec), "PodsContract.cs");
+
+        Assert.Contains("RouteDefinition<PodSpec, PodResult>", content);
+        Assert.Contains("Define.Post<PodSpec, PodResult>", content);
+    }
+
+    [Fact]
+    public void Wildcard_Content_Type_Resolves_Output_Type()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "StatusDto": {
+                    "type": "object",
+                    "properties": { "ok": { "type": "boolean" } },
+                    "required": ["ok"]
+                }
+                """,
+            paths: """
+                "/api/status": {
+                    "get": {
+                        "operationId": "status_check",
+                        "tags": ["Status"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "*/*": {
+                                        "schema": { "$ref": "#/components/schemas/StatusDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var content = FindFile(Import(spec), "StatusContract.cs");
+
+        Assert.Contains("RouteDefinition<StatusDto>", content);
+        Assert.Contains("Define.Get<StatusDto>", content);
+    }
+
+    [Fact]
+    public void Wildcard_Content_Type_Resolves_Error_Response()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "ItemDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                },
+                "ErrorDto": {
+                    "type": "object",
+                    "properties": { "message": { "type": "string" } },
+                    "required": ["message"]
+                }
+                """,
+            paths: """
+                "/api/items/{id}": {
+                    "get": {
+                        "operationId": "items_get",
+                        "tags": ["Items"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
+                                    }
+                                }
+                            },
+                            "404": {
+                                "description": "Not found",
+                                "content": {
+                                    "*/*": {
+                                        "schema": { "$ref": "#/components/schemas/ErrorDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var content = FindFile(Import(spec), "ItemsContract.cs");
+
+        Assert.Contains(".Returns<ErrorDto>(404, \"Not found\")", content);
+    }
+
+    [Fact]
+    public void Json_Content_Type_Takes_Priority_Over_Wildcard()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "TaskDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                },
+                "GenericDto": {
+                    "type": "object",
+                    "properties": { "data": { "type": "string" } },
+                    "required": ["data"]
+                }
+                """,
+            paths: """
+                "/api/tasks": {
+                    "get": {
+                        "operationId": "tasks_list",
+                        "tags": ["Tasks"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
+                                    },
+                                    "*/*": {
+                                        "schema": { "$ref": "#/components/schemas/GenericDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var content = FindFile(Import(spec), "TasksContract.cs");
+
+        // application/json should win
+        Assert.Contains("RouteDefinition<TaskDto>", content);
+        Assert.DoesNotContain("GenericDto", content);
+    }
+
+    // ========== 4XX/5XX wildcard status codes ==========
+
+    [Fact]
+    public void Wildcard_4XX_Status_Code_Maps_To_400()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "TaskDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                },
+                "ClientErrorDto": {
+                    "type": "object",
+                    "properties": { "error": { "type": "string" } },
+                    "required": ["error"]
+                }
+                """,
+            paths: """
+                "/api/tasks": {
+                    "get": {
+                        "operationId": "tasks_list",
+                        "tags": ["Tasks"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
+                                    }
+                                }
+                            },
+                            "4XX": {
+                                "description": "Client error",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ClientErrorDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        Assert.Contains(".Returns<ClientErrorDto>(400, \"Client error\")",
+            FindFile(Import(spec), "TasksContract.cs"));
+    }
+
+    [Fact]
+    public void Wildcard_5XX_Status_Code_Maps_To_500()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "TaskDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                },
+                "ServerErrorDto": {
+                    "type": "object",
+                    "properties": { "error": { "type": "string" } },
+                    "required": ["error"]
+                }
+                """,
+            paths: """
+                "/api/tasks": {
+                    "get": {
+                        "operationId": "tasks_list",
+                        "tags": ["Tasks"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
+                                    }
+                                }
+                            },
+                            "5XX": {
+                                "description": "Server error",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ServerErrorDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        Assert.Contains(".Returns<ServerErrorDto>(500, \"Server error\")",
+            FindFile(Import(spec), "TasksContract.cs"));
+    }
+
+    // ========== InputRouteDefinition<T> (input-only endpoints) ==========
+
+    [Fact]
+    public void Input_Only_Endpoint_Produces_InputRouteDefinition()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "UpdateSettingsRequest": {
+                    "type": "object",
+                    "properties": { "theme": { "type": "string" } },
+                    "required": ["theme"]
+                }
+                """,
+            paths: """
+                "/api/settings": {
+                    "put": {
+                        "operationId": "settings_update",
+                        "tags": ["Settings"],
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/UpdateSettingsRequest" }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "204": { "description": "No Content" }
+                        }
+                    }
+                }
+                """);
+
+        var content = FindFile(Import(spec), "SettingsContract.cs");
+
+        Assert.Contains("InputRouteDefinition<UpdateSettingsRequest> Update", content);
+        Assert.Contains("Define.Put(\"/api/settings\")", content);
+        Assert.Contains(".Accepts<UpdateSettingsRequest>()", content);
+        Assert.Contains(".Status(204)", content);
+        // Must NOT have type args on Define.Put
+        Assert.DoesNotContain("Define.Put<", content);
+    }
+
+    [Fact]
+    public void Input_Only_Endpoint_With_Wildcard_Content_Type()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "PodSpec": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                }
+                """,
+            paths: """
+                "/api/pods": {
+                    "post": {
+                        "operationId": "pods_create",
+                        "tags": ["Pods"],
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "*/*": {
+                                    "schema": { "$ref": "#/components/schemas/PodSpec" }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "201": { "description": "Created" }
+                        }
+                    }
+                }
+                """);
+
+        var content = FindFile(Import(spec), "PodsContract.cs");
+
+        Assert.Contains("InputRouteDefinition<PodSpec>", content);
+        Assert.Contains(".Accepts<PodSpec>()", content);
+    }
+
+    [Fact]
+    public void Input_Only_Endpoint_Compiles_And_Survives_RoundTrip()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "UpdateRequest": {
+                    "type": "object",
+                    "properties": { "value": { "type": "string" } },
+                    "required": ["value"]
+                }
+                """,
+            paths: """
+                "/api/config": {
+                    "put": {
+                        "operationId": "config_update",
+                        "tags": ["Config"],
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/UpdateRequest" }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "204": { "description": "No Content" }
+                        }
+                    }
+                }
+                """);
+
+        var result = Import(spec);
+
+        // Compiles
+        var compilation = CompileGeneratedFiles(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        Assert.Empty(errors);
+
+        // Survives Roslyn walk
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+
+        Assert.Single(endpoints);
+        var endpoint = endpoints[0];
+        Assert.Equal("PUT", endpoint.HttpMethod);
+        Assert.Equal("/api/config", endpoint.RouteTemplate);
+        Assert.Contains(endpoint.Params, p => p.Source == ParamSource.Body);
+        Assert.Null(endpoint.ReturnType);
+    }
+
+    // ========== Unsupported content type markers ==========
+
+    [Fact]
+    public void Unsupported_Body_Content_Type_Emits_Marker_Comment()
+    {
+        var spec = BuildSpec(
+            paths: """
+                "/api/upload": {
+                    "post": {
+                        "operationId": "upload_create",
+                        "tags": ["Upload"],
+                        "requestBody": {
+                            "content": {
+                                "application/octet-stream": {
+                                    "schema": { "type": "string", "format": "binary" }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "201": { "description": "Created" }
+                        }
+                    }
+                }
+                """);
+
+        var content = FindFile(Import(spec), "UploadContract.cs");
+
+        Assert.Contains("[rivet:unsupported body content-type=application/octet-stream]", content);
+        // Should still emit the endpoint, just without input type
+        Assert.Contains("public static readonly RouteDefinition Create", content);
+    }
+
+    [Fact]
+    public void Unsupported_Response_Content_Type_Emits_Marker_Comment()
+    {
+        var spec = BuildSpec(
+            paths: """
+                "/api/avatar": {
+                    "get": {
+                        "operationId": "avatar_get",
+                        "tags": ["Avatar"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "image/png": {
+                                        "schema": { "type": "string", "format": "binary" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var content = FindFile(Import(spec), "AvatarContract.cs");
+
+        Assert.Contains("[rivet:unsupported response status=200 content-type=image/png]", content);
+        Assert.Contains("public static readonly RouteDefinition Get", content);
+    }
+
+    [Fact]
+    public void Unsupported_Error_Content_Type_Emits_Marker_Comment()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "ItemDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/items/{id}": {
+                    "get": {
+                        "operationId": "items_get",
+                        "tags": ["Items"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
+                                    }
+                                }
+                            },
+                            "404": {
+                                "description": "Not found",
+                                "content": {
+                                    "text/plain": {
+                                        "schema": { "type": "string" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var content = FindFile(Import(spec), "ItemsContract.cs");
+
+        Assert.Contains("[rivet:unsupported error status=404 content-type=text/plain]", content);
+        // The typed 200 response should still work
+        Assert.Contains("RouteDefinition<ItemDto>", content);
+    }
+
+    [Fact]
+    public void Supported_Content_Types_Do_Not_Emit_Markers()
+    {
+        var spec = BuildSpec(
+            schemas: """
+                "TaskDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/tasks": {
+                    "get": {
+                        "operationId": "tasks_list",
+                        "tags": ["Tasks"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var content = FindFile(Import(spec), "TasksContract.cs");
+
+        Assert.DoesNotContain("[rivet:unsupported", content);
     }
 
     private static void AssertProperty(TsTypeDefinition def, string name, string? expectedPrimitive)

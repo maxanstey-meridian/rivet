@@ -15,8 +15,8 @@ public sealed class OpenApiRoundTripTests
     {
         // Forward: C# → OpenAPI JSON
         var compilation = CompilationHelper.CreateCompilation(csharpSource);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
         var securityConfig = security is not null ? SecurityParser.Parse(security) : null;
         var openApiJson = OpenApiEmitter.Emit(
             endpoints, walker.Definitions, walker.Brands, walker.Enums, securityConfig);
@@ -26,8 +26,8 @@ public sealed class OpenApiRoundTripTests
             openApiJson, new ImportOptions("RoundTrip", security));
         var recompilation = CompilationHelper.CreateCompilationFromMultiple(
             importResult.Files.Select(f => f.Content).ToArray());
-        var rewalker = TypeWalker.Create(recompilation);
-        var reEndpoints = ContractWalker.Walk(recompilation, rewalker);
+        var (reDiscovered, rewalker) = CompilationHelper.DiscoverAndWalk(recompilation);
+        var reEndpoints = ContractWalker.Walk(recompilation, rewalker, reDiscovered.ContractTypes);
 
         return (reEndpoints, rewalker);
     }

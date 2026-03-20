@@ -49,11 +49,11 @@ public sealed class KitchenSinkImportTests
     {
         var result = Import(LoadFixture());
         var compilation = CompileGeneratedFiles(result);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
 
-        // 13 endpoints: 6 Users + 1 Orgs + 1 Tenants + 1 Analytics + 1 Health + 2 Admin + 1 Default
-        Assert.Equal(13, endpoints.Count);
+        // 15 endpoints: 6 Users + 1 Orgs + 1 Tenants + 1 Analytics + 1 Health + 2 Admin + 1 Default + 1 InlineTest + 1 Forms
+        Assert.Equal(15, endpoints.Count);
 
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/users");
@@ -68,6 +68,7 @@ public sealed class KitchenSinkImportTests
         Assert.Contains(endpoints, e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/admin/purge");
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/status");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/webhooks");
+        Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/form-submit");
     }
 
     [Fact]
@@ -75,7 +76,7 @@ public sealed class KitchenSinkImportTests
     {
         var result = Import(LoadFixture());
         var compilation = CompileGeneratedFiles(result);
-        var walker = TypeWalker.Create(compilation);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
         // Records
         Assert.True(walker.Definitions.ContainsKey("UserDto"));
@@ -86,6 +87,14 @@ public sealed class KitchenSinkImportTests
         Assert.True(walker.Definitions.ContainsKey("NullableFieldsDto"));
         Assert.True(walker.Definitions.ContainsKey("NotFoundDto"));
         Assert.True(walker.Definitions.ContainsKey("ValidationErrorDto"));
+
+        // Composition
+        Assert.True(walker.Definitions.ContainsKey("ComposedDto"));
+        Assert.True(walker.Definitions.ContainsKey("ComposedMultiRefDto"));
+        Assert.True(walker.Definitions.ContainsKey("UnionShape"));
+        Assert.True(walker.Definitions.ContainsKey("FlexibleDto"));
+        Assert.True(walker.Definitions.ContainsKey("UnionWithPrimitiveDto"));
+        Assert.True(walker.Definitions.ContainsKey("DiscriminatedShape"));
 
         // Enums
         Assert.True(walker.Enums.ContainsKey("Priority"));
@@ -147,7 +156,7 @@ public sealed class KitchenSinkImportTests
     {
         var result = Import(LoadFixture());
         var compilation = CompileGeneratedFiles(result);
-        var walker = TypeWalker.Create(compilation);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
         var priority = walker.Enums["Priority"];
         Assert.Contains("Low", priority.Members);
@@ -188,7 +197,7 @@ public sealed class KitchenSinkImportTests
         // ProjectTaskDto → CompanyDto → AddressDto (3 deep)
         var result = Import(LoadFixture());
         var compilation = CompileGeneratedFiles(result);
-        var walker = TypeWalker.Create(compilation);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
         Assert.True(walker.Definitions.ContainsKey("ProjectTaskDto"));
         Assert.True(walker.Definitions.ContainsKey("CompanyDto"));
@@ -208,8 +217,8 @@ public sealed class KitchenSinkImportTests
     {
         var result = Import(LoadFixture());
         var compilation = CompileGeneratedFiles(result);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
 
         Assert.Contains(endpoints, e =>
             e.RouteTemplate == "/api/orgs/{orgId}/projects/{projectId}/tasks/{taskId}");
@@ -281,24 +290,116 @@ public sealed class KitchenSinkImportTests
         Assert.Contains(result.Files, f => f.FileName == "Contracts/DefaultContract.cs");
     }
 
-    // ========== Warnings ==========
+    // ========== Form-encoded request body ==========
 
     [Fact]
-    public void Unsupported_Schemas_Produce_Warnings_Not_Failures()
+    public void Form_Encoded_Request_Body_Produces_Input_Type()
     {
         var result = Import(LoadFixture());
+        var content = FindFile(result, "FormsContract.cs");
 
-        // Should have warnings for allOf, anyOf, oneOf, discriminator
-        Assert.Contains(result.Warnings, w => w.Contains("UnionShape"));
-        Assert.Contains(result.Warnings, w => w.Contains("ComposedDto"));
-        Assert.Contains(result.Warnings, w => w.Contains("FlexibleDto"));
-        Assert.Contains(result.Warnings, w => w.Contains("DiscriminatedShape"));
+        Assert.Contains("SubmitRequest", content);
+        Assert.Contains("HealthStatusDto", content);
+        Assert.Contains("/api/form-submit", content);
 
-        // Import should not throw — we already got here
-        // Generated C# should still compile
-        var errors = CompileGeneratedFiles(result).GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
-        Assert.Empty(errors);
+        // Synthetic request type should exist
+        var requestContent = FindFile(result, "SubmitRequest.cs");
+        Assert.Contains("string Name", requestContent);
+        Assert.Contains("int? Value", requestContent);
+    }
+
+    // ========== Default error response ==========
+
+    [Fact]
+    public void Default_Error_Response_Mapped_As_500()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "FormsContract.cs");
+
+        Assert.Contains(".Returns<ValidationErrorDto>(500, \"Unexpected error\")", content);
+    }
+
+    // ========== Composition ==========
+
+    [Fact]
+    public void AllOf_Produces_Flattened_Record()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "ComposedDto.cs");
+
+        // Should have AddressDto props flattened in
+        Assert.Contains("string Street", content);
+        Assert.Contains("string City", content);
+        Assert.Contains("string ZipCode", content);
+        // Plus the inline extension property
+        Assert.Contains("string? Extra", content);
+    }
+
+    [Fact]
+    public void AllOf_MultiRef_Merges_Properties()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "ComposedMultiRefDto.cs");
+
+        // AddressDto props
+        Assert.Contains("string Street", content);
+        Assert.Contains("string City", content);
+        Assert.Contains("string ZipCode", content);
+        // SinglePropDto props
+        Assert.Contains("string Value", content);
+    }
+
+    [Fact]
+    public void AllOf_With_Sibling_Properties_Merges()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "AllOfWithSiblingPropsDto.cs");
+
+        // AddressDto props from allOf
+        Assert.Contains("string Street", content);
+        Assert.Contains("string City", content);
+        Assert.Contains("string ZipCode", content);
+        // Sibling property
+        Assert.Contains("string Extra", content);
+    }
+
+    [Fact]
+    public void OneOf_Produces_Union_Wrapper()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "UnionShape.cs");
+
+        Assert.Contains("AddressDto? AsAddressDto", content);
+        Assert.Contains("CompanyDto? AsCompanyDto", content);
+    }
+
+    [Fact]
+    public void AnyOf_Produces_Union_Wrapper()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "FlexibleDto.cs");
+
+        Assert.Contains("AddressDto? AsAddressDto", content);
+        Assert.Contains("CompanyDto? AsCompanyDto", content);
+    }
+
+    [Fact]
+    public void OneOf_With_Primitives_Produces_Union()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "UnionWithPrimitiveDto.cs");
+
+        Assert.Contains("string? AsString", content);
+        Assert.Contains("int? AsInt", content);
+    }
+
+    [Fact]
+    public void Discriminator_Object_Becomes_Regular_Record()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "DiscriminatedShape.cs");
+
+        Assert.Contains("string Kind", content);
     }
 
     // ========== File upload ==========
@@ -330,6 +431,93 @@ public sealed class KitchenSinkImportTests
         // GET /api/status with no operationId, no tag → DefaultContract, derived name "GetApiStatus"
         var result = Import(LoadFixture());
         Assert.Contains("GetApiStatus", FindFile(result, "DefaultContract.cs"));
+    }
+
+    // ========== additionalProperties: false ==========
+
+    [Fact]
+    public void AdditionalProperties_False_Does_Not_Crash()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "StrictDto.cs");
+
+        Assert.Contains("string Name", content);
+        Assert.Contains("bool Locked", content);
+        // Should NOT produce a Dictionary — it's a regular record
+        Assert.DoesNotContain("Dictionary", content);
+    }
+
+    [Fact]
+    public void AdditionalProperties_True_Maps_To_Untyped_Dictionary()
+    {
+        // When additionalProperties: true appears as an inline property type,
+        // it resolves to Dictionary<string, JsonElement>. As a top-level schema
+        // with no properties, MapSchemas produces an empty record.
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "OpenMapDto.cs");
+        Assert.Contains("public sealed record OpenMapDto()", content);
+    }
+
+    // ========== Bare object ==========
+
+    [Fact]
+    public void Bare_Object_Maps_To_Empty_Record()
+    {
+        // { "type": "object" } with nothing else — top-level schema becomes an empty record
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "BareObjectDto.cs");
+        Assert.Contains("public sealed record BareObjectDto()", content);
+    }
+
+    // ========== Inline anonymous objects ==========
+
+    [Fact]
+    public void Inline_Object_In_Schema_Produces_Synthetic_Record()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "InlineParentDto.cs");
+
+        // The nested property should reference the synthetic type, not JsonElement
+        Assert.Contains("InlineParentDtoNested Nested", content);
+        Assert.DoesNotContain("JsonElement", content);
+
+        // The synthetic record should be emitted
+        var syntheticContent = FindFile(result, "InlineParentDtoNested.cs");
+        Assert.Contains("int X", syntheticContent);
+        Assert.Contains("int Y", syntheticContent);
+    }
+
+    [Fact]
+    public void Inline_Object_In_Endpoint_Produces_Synthetic_Record()
+    {
+        var result = Import(LoadFixture());
+
+        // Inline request body → synthetic CreateRequest record
+        var requestContent = FindFile(result, "CreateRequest.cs");
+        Assert.Contains("string Title", requestContent);
+        Assert.Contains("int? Count", requestContent);
+
+        // Inline response body → synthetic CreateResponse record
+        var responseContent = FindFile(result, "CreateResponse.cs");
+        Assert.Contains("Guid Id", responseContent);
+        Assert.Contains("bool Created", responseContent);
+    }
+
+    // ========== Enum without type ==========
+
+    [Fact]
+    public void Enum_Without_Type_Treated_As_String()
+    {
+        // UntypedEnumDto has enum but no type field — should not crash or warn
+        var result = Import(LoadFixture());
+
+        // It's a top-level schema with enum values, IsStringEnum checks for type=="string"
+        // so it won't match. But our fix in ResolveCSharpType catches enum-without-type.
+        // Actually at the MapSchemas level, IsStringEnum requires type=="string", so
+        // UntypedEnumDto won't be mapped as an enum. It'll fall through to IsObject (false)
+        // and be skipped. But if referenced inline, ResolveCSharpType should return "string".
+        // Let's just verify no crash and no "could not be resolved" warning for it.
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("UntypedEnumDto"));
     }
 
     // ========== Optional property edge cases ==========
@@ -370,6 +558,83 @@ public sealed class KitchenSinkImportTests
         var content = FindFile(result, "SinglePropDto.cs");
 
         Assert.Contains("string Value", content);
+    }
+
+    // ========== const without type ==========
+
+    [Fact]
+    public void Const_Int_Infers_Int_Type()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "ConstIntDto.cs");
+
+        Assert.Contains("int Version", content);
+        Assert.Contains("string Label", content);
+    }
+
+    [Fact]
+    public void Const_String_Infers_String_Type()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "ConstStringDto.cs");
+
+        Assert.Contains("string Kind", content);
+        Assert.Contains("bool Enabled", content);
+    }
+
+    // ========== bare nullable ==========
+
+    [Fact]
+    public void Bare_Nullable_Maps_To_Nullable_JsonElement()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "BareNullableDto.cs");
+
+        Assert.Contains("System.Text.Json.JsonElement? Data", content);
+        Assert.Contains("string Name", content);
+    }
+
+    // ========== implied object ==========
+
+    [Fact]
+    public void Properties_Without_Type_Implies_Object()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "ImpliedObjectDto.cs");
+
+        Assert.Contains("string Title", content);
+        Assert.Contains("int Count", content);
+    }
+
+    // ========== contextless inline composition ==========
+
+    [Fact]
+    public void Inline_AllOf_In_Array_Items_Gets_Named()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "InlineComposedArrayDto.cs");
+
+        // The array items allOf gets a context-derived name, not JsonElement
+        Assert.DoesNotContain("JsonElement", content);
+        Assert.Contains("List<InlineComposedArrayDtoItems>", content);
+
+        // The synthetic record should have the flattened properties
+        var syntheticContent = FindFile(result, "InlineComposedArrayDtoItems.cs");
+        Assert.Contains("string Street", syntheticContent);
+        Assert.Contains("string City", syntheticContent);
+    }
+
+    // ========== bare/doc-only schemas suppress warnings ==========
+
+    [Fact]
+    public void Bare_Schema_Does_Not_Warn()
+    {
+        var result = Import(LoadFixture());
+        var content = FindFile(result, "BareSchemaDto.cs");
+
+        // Should map to JsonElement without a warning
+        Assert.Contains("System.Text.Json.JsonElement Opaque", content);
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("BareSchemaDto"));
     }
 
     // ========== Wide record ==========

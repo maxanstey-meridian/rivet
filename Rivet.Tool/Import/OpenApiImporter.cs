@@ -1,4 +1,5 @@
-using System.Text.Json;
+using Microsoft.OpenApi;
+using Microsoft.OpenApi.Reader;
 
 namespace Rivet.Tool.Import;
 
@@ -9,33 +10,38 @@ public static class OpenApiImporter
 {
     public static ImportResult Import(string json, ImportOptions options)
     {
-        var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        var readResult = OpenApiDocument.Parse(json, "json");
+        var doc = readResult.Document ?? throw new InvalidOperationException("Failed to parse OpenAPI document.");
         var warnings = new List<string>();
         var files = new List<GeneratedFile>();
+        var mapper = new SchemaMapper(warnings);
 
         // Parse schemas
-        var schemas = root.TryGetProperty("components", out var components)
-            && components.TryGetProperty("schemas", out var schemasEl)
-            ? schemasEl
-            : default;
+        var schemas = doc.Components?.Schemas;
 
-        var schemaResult = schemas.ValueKind == JsonValueKind.Object
-            ? SchemaMapper.MapSchemas(schemas, warnings)
+        var schemaResult = schemas is { Count: > 0 }
+            ? mapper.MapSchemas(schemas)
             : new SchemaMapResult([], [], []);
 
         // Detect global security scheme from spec
-        var globalSecurityScheme = options.SecurityScheme ?? DetectGlobalSecurity(root);
+        var globalSecurityScheme = options.SecurityScheme ?? DetectGlobalSecurity(doc);
 
         // Parse paths → contracts
-        var contracts = root.TryGetProperty("paths", out var paths)
-            ? ContractBuilder.BuildContracts(paths, schemaResult, globalSecurityScheme, warnings)
+        var contracts = doc.Paths is { Count: > 0 }
+            ? ContractBuilder.BuildContracts(doc.Paths, mapper, globalSecurityScheme)
             : [];
 
         // Emit type files (records → Types/, enums → Types/, brands → Domain/)
         var ns = options.Namespace;
 
         foreach (var record in schemaResult.Records)
+        {
+            var content = CSharpWriter.WriteRecord(record, ns);
+            files.Add(new GeneratedFile($"Types/{record.Name}.cs", content));
+        }
+
+        // Emit synthetic records from inline objects
+        foreach (var record in mapper.ExtraRecords)
         {
             var content = CSharpWriter.WriteRecord(record, ns);
             files.Add(new GeneratedFile($"Types/{record.Name}.cs", content));
@@ -63,24 +69,18 @@ public static class OpenApiImporter
         return new ImportResult(files, warnings);
     }
 
-    private static string? DetectGlobalSecurity(JsonElement root)
+    private static string? DetectGlobalSecurity(OpenApiDocument doc)
     {
-        if (!root.TryGetProperty("security", out var security))
+        if (doc.Security is null || doc.Security.Count == 0)
         {
             return null;
         }
 
-        if (security.GetArrayLength() == 0)
+        foreach (var req in doc.Security)
         {
-            return null;
-        }
-
-        // First security requirement's first scheme name
-        foreach (var req in security.EnumerateArray())
-        {
-            foreach (var scheme in req.EnumerateObject())
+            foreach (var (scheme, _) in req)
             {
-                return scheme.Name;
+                return scheme.Reference?.Id;
             }
         }
 

@@ -41,8 +41,8 @@ public sealed class TransitiveEndpointTests
             """;
 
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = EndpointWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
         var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
@@ -93,8 +93,8 @@ public sealed class TransitiveEndpointTests
             """;
 
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = EndpointWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
         var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);

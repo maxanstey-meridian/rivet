@@ -18,6 +18,7 @@
     <PackageReference Include="Microsoft.Build.Framework" Version="17.*" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Build" Version="17.*" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Build.Tasks.Core" Version="17.*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.0" />
     <PackageReference Include="System.Text.Json" Version="9.*" />
   </ItemGroup>
 

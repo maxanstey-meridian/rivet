@@ -12,8 +12,8 @@ public sealed class OpenApiEmitterTests
         SecurityConfig? security = null)
     {
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
         var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, security);
         return JsonDocument.Parse(json);
     }

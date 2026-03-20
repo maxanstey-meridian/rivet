@@ -16,9 +16,50 @@ public sealed class TypeWalker
     private readonly Dictionary<string, string?> _typeNamespaces = new();
     private readonly HashSet<string> _visiting = new();
 
-    public TypeWalker(IAssemblySymbol sourceAssembly)
+    // Pre-resolved type symbols for fast comparison (avoids ToDisplayString in hot paths)
+    private readonly INamedTypeSymbol? _jsonObjectType;
+    private readonly INamedTypeSymbol? _jsonArrayType;
+    private readonly INamedTypeSymbol? _guidType;
+    private readonly INamedTypeSymbol? _dateTimeType;
+    private readonly INamedTypeSymbol? _dateTimeOffsetType;
+    private readonly INamedTypeSymbol? _dateOnlyType;
+    private readonly INamedTypeSymbol? _jsonElementType;
+    private readonly INamedTypeSymbol? _jsonNodeType;
+
+    private readonly INamedTypeSymbol? _listType;
+    private readonly INamedTypeSymbol? _iListType;
+    private readonly INamedTypeSymbol? _iCollectionType;
+    private readonly INamedTypeSymbol? _iEnumerableType;
+    private readonly INamedTypeSymbol? _iReadOnlyListType;
+    private readonly INamedTypeSymbol? _iReadOnlyCollectionType;
+
+    private readonly INamedTypeSymbol? _dictionaryType;
+    private readonly INamedTypeSymbol? _iDictionaryType;
+    private readonly INamedTypeSymbol? _iReadOnlyDictionaryType;
+
+    public TypeWalker(Compilation compilation)
     {
-        _sourceAssembly = sourceAssembly;
+        _sourceAssembly = compilation.Assembly;
+
+        _jsonObjectType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonObject");
+        _jsonArrayType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonArray");
+        _guidType = compilation.GetTypeByMetadataName("System.Guid");
+        _dateTimeType = compilation.GetTypeByMetadataName("System.DateTime");
+        _dateTimeOffsetType = compilation.GetTypeByMetadataName("System.DateTimeOffset");
+        _dateOnlyType = compilation.GetTypeByMetadataName("System.DateOnly");
+        _jsonElementType = compilation.GetTypeByMetadataName("System.Text.Json.JsonElement");
+        _jsonNodeType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonNode");
+
+        _listType = compilation.GetTypeByMetadataName("System.Collections.Generic.List`1");
+        _iListType = compilation.GetTypeByMetadataName("System.Collections.Generic.IList`1");
+        _iCollectionType = compilation.GetTypeByMetadataName("System.Collections.Generic.ICollection`1");
+        _iEnumerableType = compilation.GetTypeByMetadataName("System.Collections.Generic.IEnumerable`1");
+        _iReadOnlyListType = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyList`1");
+        _iReadOnlyCollectionType = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyCollection`1");
+
+        _dictionaryType = compilation.GetTypeByMetadataName("System.Collections.Generic.Dictionary`2");
+        _iDictionaryType = compilation.GetTypeByMetadataName("System.Collections.Generic.IDictionary`2");
+        _iReadOnlyDictionaryType = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyDictionary`2");
     }
 
     public IReadOnlyDictionary<string, TsTypeDefinition> Definitions => _definitions;
@@ -27,30 +68,14 @@ public sealed class TypeWalker
     public IReadOnlyDictionary<string, string?> TypeNamespaces => _typeNamespaces;
 
     /// <summary>
-    /// Finds all [RivetType]-attributed types in the compilation and walks them.
-    /// Returns the definitions collected so far.
+    /// Creates a walker and walks the provided [RivetType]-attributed types.
+    /// Use SymbolDiscovery.Discover() to obtain the type list.
     /// </summary>
-    public static IReadOnlyList<TsTypeDefinition> Walk(Compilation compilation)
+    public static TypeWalker Create(
+        Compilation compilation,
+        IReadOnlyList<INamedTypeSymbol> attributedTypes)
     {
-        var walker = Create(compilation);
-        return [.. walker._definitions.Values];
-    }
-
-    /// <summary>
-    /// Creates a walker and discovers [RivetType]-attributed types.
-    /// Returns the walker instance so endpoint analysis can share it.
-    /// </summary>
-    public static TypeWalker Create(Compilation compilation)
-    {
-        var walker = new TypeWalker(compilation.Assembly);
-        var attributeSymbol = compilation.GetTypeByMetadataName("Rivet.RivetTypeAttribute");
-
-        if (attributeSymbol is null)
-        {
-            return walker;
-        }
-
-        var attributedTypes = FindAttributedTypes(compilation, attributeSymbol);
+        var walker = new TypeWalker(compilation);
 
         foreach (var type in attributedTypes)
         {
@@ -65,15 +90,6 @@ public sealed class TypeWalker
     /// Used by EndpointWalker for parameter and return types.
     /// </summary>
     public TsType MapType(ITypeSymbol symbol) => MapTypeCore(symbol);
-
-    private static IEnumerable<INamedTypeSymbol> FindAttributedTypes(
-        Compilation compilation,
-        INamedTypeSymbol attributeSymbol)
-    {
-        return RoslynExtensions.GetAllTypes(compilation.GlobalNamespace)
-            .Where(t => t.GetAttributes().Any(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, attributeSymbol)));
-    }
 
     /// <summary>
     /// Walks a named type, producing a TsTypeDefinition and recursively
@@ -156,7 +172,7 @@ public sealed class TypeWalker
 
         if (symbol is INamedTypeSymbol namedType)
         {
-            // Primitives
+            // Primitives (SpecialType-based: string, bool, int, etc.)
             var primitive = MapPrimitive(namedType);
             if (primitive is not null)
             {
@@ -164,12 +180,11 @@ public sealed class TypeWalker
             }
 
             // JsonObject → Record<string, unknown>, JsonArray → unknown[]
-            var displayName = namedType.ToDisplayString();
-            if (displayName is "System.Text.Json.Nodes.JsonObject")
+            if (SymbolEqualityComparer.Default.Equals(namedType, _jsonObjectType))
             {
                 return new TsType.Dictionary(new TsType.Primitive("unknown"));
             }
-            if (displayName is "System.Text.Json.Nodes.JsonArray")
+            if (SymbolEqualityComparer.Default.Equals(namedType, _jsonArrayType))
             {
                 return new TsType.Array(new TsType.Primitive("unknown"));
             }
@@ -235,10 +250,10 @@ public sealed class TypeWalker
         return new TsType.Primitive("unknown");
     }
 
-    private static TsType.Primitive? MapPrimitive(INamedTypeSymbol symbol)
+    private TsType.Primitive? MapPrimitive(INamedTypeSymbol symbol)
     {
-        // Special types via Roslyn's built-in classification
-        return symbol.SpecialType switch
+        // Special types via Roslyn's built-in classification (fast path)
+        var result = symbol.SpecialType switch
         {
             SpecialType.System_String => new TsType.Primitive("string"),
             SpecialType.System_Boolean => new TsType.Primitive("boolean"),
@@ -246,18 +261,30 @@ public sealed class TypeWalker
                 or SpecialType.System_UInt16 or SpecialType.System_UInt32 or SpecialType.System_UInt64
                 or SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_Decimal
                 or SpecialType.System_Byte or SpecialType.System_SByte => new TsType.Primitive("number"),
-            // Types identified by metadata name (no SpecialType)
-            _ => symbol.ToDisplayString() switch
-            {
-                "System.Guid" => new TsType.Primitive("string"),
-                "System.DateTime" => new TsType.Primitive("string"),
-                "System.DateTimeOffset" => new TsType.Primitive("string"),
-                "System.DateOnly" => new TsType.Primitive("string"),
-                "System.Text.Json.JsonElement" => new TsType.Primitive("unknown"),
-                "System.Text.Json.Nodes.JsonNode" => new TsType.Primitive("unknown"),
-                _ => null,
-            }
+            _ => (TsType.Primitive?)null,
         };
+
+        if (result is not null)
+        {
+            return result;
+        }
+
+        // Non-SpecialType primitives — resolved via symbol comparison instead of ToDisplayString
+        if (SymbolEqualityComparer.Default.Equals(symbol, _guidType)
+            || SymbolEqualityComparer.Default.Equals(symbol, _dateTimeType)
+            || SymbolEqualityComparer.Default.Equals(symbol, _dateTimeOffsetType)
+            || SymbolEqualityComparer.Default.Equals(symbol, _dateOnlyType))
+        {
+            return new TsType.Primitive("string");
+        }
+
+        if (SymbolEqualityComparer.Default.Equals(symbol, _jsonElementType)
+            || SymbolEqualityComparer.Default.Equals(symbol, _jsonNodeType))
+        {
+            return new TsType.Primitive("unknown");
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -279,25 +306,23 @@ public sealed class TypeWalker
         return null;
     }
 
-    private static bool IsCollectionType(INamedTypeSymbol symbol)
+    private bool IsCollectionType(INamedTypeSymbol symbol)
     {
-        var name = symbol.OriginalDefinition.ToDisplayString();
-        return name is
-            "System.Collections.Generic.List<T>" or
-            "System.Collections.Generic.IList<T>" or
-            "System.Collections.Generic.ICollection<T>" or
-            "System.Collections.Generic.IEnumerable<T>" or
-            "System.Collections.Generic.IReadOnlyList<T>" or
-            "System.Collections.Generic.IReadOnlyCollection<T>";
+        var orig = symbol.OriginalDefinition;
+        return SymbolEqualityComparer.Default.Equals(orig, _listType)
+            || SymbolEqualityComparer.Default.Equals(orig, _iListType)
+            || SymbolEqualityComparer.Default.Equals(orig, _iCollectionType)
+            || SymbolEqualityComparer.Default.Equals(orig, _iEnumerableType)
+            || SymbolEqualityComparer.Default.Equals(orig, _iReadOnlyListType)
+            || SymbolEqualityComparer.Default.Equals(orig, _iReadOnlyCollectionType);
     }
 
-    private static bool IsDictionaryType(INamedTypeSymbol symbol)
+    private bool IsDictionaryType(INamedTypeSymbol symbol)
     {
-        var name = symbol.OriginalDefinition.ToDisplayString();
-        return name is
-            "System.Collections.Generic.Dictionary<TKey, TValue>" or
-            "System.Collections.Generic.IDictionary<TKey, TValue>" or
-            "System.Collections.Generic.IReadOnlyDictionary<TKey, TValue>";
+        var orig = symbol.OriginalDefinition;
+        return SymbolEqualityComparer.Default.Equals(orig, _dictionaryType)
+            || SymbolEqualityComparer.Default.Equals(orig, _iDictionaryType)
+            || SymbolEqualityComparer.Default.Equals(orig, _iReadOnlyDictionaryType);
     }
 
     private static bool IsOptionalProperty(IPropertySymbol _)

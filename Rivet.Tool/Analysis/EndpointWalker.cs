@@ -19,41 +19,46 @@ public static class EndpointWalker
         "Microsoft.AspNetCore.Mvc.HttpPatchAttribute",
     };
 
-    public static IReadOnlyList<TsEndpointDefinition> Walk(Compilation compilation, TypeWalker typeWalker)
+    /// <summary>
+    /// Discovers endpoints from [RivetEndpoint] methods and [RivetClient] classes.
+    /// Use SymbolDiscovery.Discover() to obtain the method/type lists.
+    /// </summary>
+    public static IReadOnlyList<TsEndpointDefinition> Walk(
+        TypeWalker typeWalker,
+        IReadOnlyList<IMethodSymbol> endpointMethods,
+        IReadOnlyList<INamedTypeSymbol> clientTypes)
     {
         var endpoints = new List<TsEndpointDefinition>();
         var seen = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
 
         // [RivetEndpoint] on individual methods
-        var rivetEndpointAttr = compilation.GetTypeByMetadataName("Rivet.RivetEndpointAttribute");
-        if (rivetEndpointAttr is not null)
+        foreach (var method in endpointMethods)
         {
-            foreach (var method in FindAttributedMethods(compilation, rivetEndpointAttr))
+            if (seen.Add(method))
             {
-                if (seen.Add(method))
+                var endpoint = BuildEndpoint(method, typeWalker);
+                if (endpoint is not null)
                 {
-                    var endpoint = BuildEndpoint(method, typeWalker);
-                    if (endpoint is not null)
-                    {
-                        endpoints.Add(endpoint);
-                    }
+                    endpoints.Add(endpoint);
                 }
             }
         }
 
         // [RivetClient] on classes — all public methods with HTTP attributes
-        var rivetClientAttr = compilation.GetTypeByMetadataName("Rivet.RivetClientAttribute");
-        if (rivetClientAttr is not null)
+        var clientMethods = clientTypes
+            .SelectMany(t => t.GetMembers().OfType<IMethodSymbol>())
+            .Where(m => m.DeclaredAccessibility == Accessibility.Public
+                && !m.IsImplicitlyDeclared
+                && HasHttpMethodAttribute(m));
+
+        foreach (var method in clientMethods)
         {
-            foreach (var method in FindClientMethods(compilation, rivetClientAttr))
+            if (seen.Add(method))
             {
-                if (seen.Add(method))
+                var endpoint = BuildEndpoint(method, typeWalker);
+                if (endpoint is not null)
                 {
-                    var endpoint = BuildEndpoint(method, typeWalker);
-                    if (endpoint is not null)
-                    {
-                        endpoints.Add(endpoint);
-                    }
+                    endpoints.Add(endpoint);
                 }
             }
         }
@@ -385,32 +390,6 @@ public static class EndpointWalker
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
 
         return responses;
-    }
-
-    private static IEnumerable<IMethodSymbol> FindAttributedMethods(
-        Compilation compilation,
-        INamedTypeSymbol attributeSymbol)
-    {
-        return RoslynExtensions.GetAllTypes(compilation.GlobalNamespace)
-            .SelectMany(t => t.GetMembers().OfType<IMethodSymbol>())
-            .Where(m => m.GetAttributes().Any(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, attributeSymbol)));
-    }
-
-    /// <summary>
-    /// Finds all public methods with HTTP method attributes on [RivetClient]-decorated classes.
-    /// </summary>
-    private static IEnumerable<IMethodSymbol> FindClientMethods(
-        Compilation compilation,
-        INamedTypeSymbol clientAttributeSymbol)
-    {
-        return RoslynExtensions.GetAllTypes(compilation.GlobalNamespace)
-            .Where(t => t.GetAttributes().Any(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, clientAttributeSymbol)))
-            .SelectMany(t => t.GetMembers().OfType<IMethodSymbol>())
-            .Where(m => m.DeclaredAccessibility == Accessibility.Public
-                && !m.IsImplicitlyDeclared
-                && HasHttpMethodAttribute(m));
     }
 
     internal static bool HasHttpMethodAttribute(IMethodSymbol method) =>

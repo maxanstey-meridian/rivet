@@ -1,50 +1,102 @@
-using System.Text.Json;
+using System.Text;
+using Microsoft.OpenApi;
 
 namespace Rivet.Tool.Import;
 
 /// <summary>
-/// Maps JSON Schema objects from an OpenAPI spec to C# type representations.
+/// Maps OpenAPI schema objects to C# type representations.
 /// Builds a registry of discovered records, enums, and branded value objects.
 /// </summary>
-internal static class SchemaMapper
+internal sealed class SchemaMapper
 {
     private static readonly HashSet<string> BrandFormats = ["email", "uri", "url", "uri-reference"];
+
+    private const int MaxRecursionDepth = 50;
+
+    private readonly List<string> _warnings;
+    private readonly List<GeneratedRecord> _extraRecords = [];
+    private readonly HashSet<string> _resolving = [];
+    private readonly Dictionary<string, string> _schemaFingerprints = new();
+    private int _syntheticCounter;
+    private int _recursionDepth;
+
+    public SchemaMapper(List<string> warnings)
+    {
+        _warnings = warnings;
+    }
+
+    /// <summary>
+    /// Records synthesised from inline anonymous objects during type resolution.
+    /// </summary>
+    public IReadOnlyList<GeneratedRecord> ExtraRecords => _extraRecords;
 
     /// <summary>
     /// Walk #/components/schemas and return C# type representations.
     /// </summary>
-    public static SchemaMapResult MapSchemas(JsonElement schemas, List<string> warnings)
+    public SchemaMapResult MapSchemas(IDictionary<string, IOpenApiSchema> schemas)
     {
         var records = new List<GeneratedRecord>();
         var enums = new List<GeneratedEnum>();
         var brands = new List<GeneratedBrand>();
 
-        foreach (var schema in schemas.EnumerateObject())
+        foreach (var (key, schema) in schemas)
         {
-            var name = schema.Name;
-            var value = schema.Value;
+            var name = SanitizeName(key);
 
-            if (IsUnsupported(value, out var reason))
+            // Skip $ref aliases — these are resolved by the library and handled inline
+            if (schema is OpenApiSchemaReference)
             {
-                warnings.Add($"Schema '{name}': {reason} — skipped.");
                 continue;
             }
 
-            if (IsStringEnum(value))
+            if (IsStringEnum(schema))
             {
-                enums.Add(MapEnum(name, value));
+                enums.Add(MapEnum(name, schema));
                 continue;
             }
 
-            if (IsBrandedString(value))
+            if (IsBrandedString(schema))
             {
-                brands.Add(MapBrand(name, value));
+                brands.Add(MapBrand(name));
                 continue;
             }
 
-            if (IsObject(value))
+            if (schema.AllOf is { Count: > 0 })
             {
-                records.Add(MapRecord(name, value, warnings));
+                var record = ResolveAllOfRecord(name, schema.AllOf);
+                record = MergeWithSiblingProperties(record, schema, name);
+
+                // Skip empty allOf records — resolved inline via $ref
+                if (record.Properties.Count == 0 && schema.Properties is not { Count: > 0 })
+                {
+                    continue;
+                }
+
+                records.Add(record);
+                continue;
+            }
+
+            if (schema.OneOf is { Count: > 0 })
+            {
+                // Skip nullable oneOf (exactly 2 items, one null) — handled inline
+                if (IsNullableOneOf(schema.OneOf))
+                {
+                    continue;
+                }
+
+                records.Add(ResolveUnionRecord(name, schema.OneOf));
+                continue;
+            }
+
+            if (schema.AnyOf is { Count: > 1 })
+            {
+                records.Add(ResolveUnionRecord(name, schema.AnyOf));
+                continue;
+            }
+
+            if (IsObject(schema))
+            {
+                records.Add(MapRecord(name, schema));
                 continue;
             }
 
@@ -55,61 +107,70 @@ internal static class SchemaMapper
     }
 
     /// <summary>
-    /// Resolve a JSON Schema element to a C# type string.
+    /// Resolve an OpenAPI schema to a C# type string.
     /// </summary>
-    public static string ResolveCSharpType(JsonElement schema, List<string> warnings)
+    public string ResolveCSharpType(IOpenApiSchema schema, string? context = null)
     {
-        // $ref
-        if (schema.TryGetProperty("$ref", out var refEl))
+        if (++_recursionDepth > MaxRecursionDepth)
         {
-            var refPath = refEl.GetString()!;
-            var parts = refPath.Split('/');
-            return parts[^1];
+            _recursionDepth--;
+            return "System.Text.Json.JsonElement";
         }
 
-        // Nullable: type is an array like ["string", "null"]
-        if (schema.TryGetProperty("type", out var typeEl) && typeEl.ValueKind == JsonValueKind.Array)
+        try
         {
-            var types = new List<string>();
-            foreach (var t in typeEl.EnumerateArray())
-            {
-                types.Add(t.GetString()!);
-            }
+            return ResolveCSharpTypeCore(schema, context);
+        }
+        finally
+        {
+            _recursionDepth--;
+        }
+    }
 
-            var nonNull = types.FirstOrDefault(t => t != "null");
-            if (nonNull is not null && types.Contains("null"))
+    private string ResolveCSharpTypeCore(IOpenApiSchema schema, string? context)
+    {
+        // $ref — library resolves refs, but OpenApiSchemaReference preserves the reference name
+        if (schema is OpenApiSchemaReference schemaRef)
+        {
+            return SanitizeName(schemaRef.Reference.Id!);
+        }
+
+        var type = schema.Type;
+
+        // Nullable type: Type flags contain Null alongside another type (e.g. ["string", "null"])
+        if (type.HasValue && type.Value.HasFlag(JsonSchemaType.Null))
+        {
+            var nonNullType = type.Value & ~JsonSchemaType.Null;
+            if (nonNullType != 0)
             {
-                var innerSchema = CloneWithType(schema, nonNull);
-                var innerType = ResolveCSharpType(innerSchema, warnings);
+                var innerType = ResolveSingleType(nonNullType, schema, context);
                 return innerType + "?";
             }
+
+            // Pure null type
+            if (type.Value == JsonSchemaType.Null)
+            {
+                return "System.Text.Json.JsonElement";
+            }
         }
 
-        // type is a string
-        if (schema.TryGetProperty("type", out var typeStr) && typeStr.ValueKind == JsonValueKind.String)
+        // Single type (non-null)
+        if (type.HasValue && type.Value != 0)
         {
-            var type = typeStr.GetString()!;
-            return type switch
-            {
-                "string" => ResolveStringType(schema),
-                "integer" => ResolveIntegerType(schema),
-                "number" => ResolveNumberType(schema),
-                "boolean" => "bool",
-                "array" => ResolveArrayType(schema, warnings),
-                "object" => ResolveObjectType(schema, warnings),
-                _ => WarnAndFallback(warnings, $"Unsupported JSON Schema type '{type}'"),
-            };
+            return ResolveSingleType(type.Value, schema, context);
         }
+
+        // No type specified — check composition keywords
 
         // oneOf with null (nullable ref in 3.1)
-        if (schema.TryGetProperty("oneOf", out var oneOf) && oneOf.GetArrayLength() == 2)
+        if (schema.OneOf is { Count: 2 })
         {
-            JsonElement? refPart = null;
+            IOpenApiSchema? refPart = null;
             var hasNull = false;
 
-            foreach (var item in oneOf.EnumerateArray())
+            foreach (var item in schema.OneOf)
             {
-                if (item.TryGetProperty("type", out var t) && t.GetString() == "null")
+                if (item.Type.HasValue && item.Type.Value == JsonSchemaType.Null)
                 {
                     hasNull = true;
                 }
@@ -119,205 +180,251 @@ internal static class SchemaMapper
                 }
             }
 
-            if (hasNull && refPart.HasValue)
+            if (hasNull && refPart is not null)
             {
-                return ResolveCSharpType(refPart.Value, warnings) + "?";
+                return ResolveCSharpType(refPart, context) + "?";
             }
         }
 
-        return WarnAndFallback(warnings, "Schema could not be resolved to a C# type");
-    }
+        // anyOf with single element + nullable (OpenAPI 3.0 nullable pattern)
+        if (schema.AnyOf is { Count: 1 })
+        {
+            var inner = schema.AnyOf[0];
+            var resolved = ResolveCSharpType(inner, context);
+            return resolved;
+        }
 
-    private static string WarnAndFallback(List<string> warnings, string reason)
-    {
-        warnings.Add($"{reason} — mapped to 'JsonElement'.");
+        // allOf inline → synthetic flattened record
+        if (schema.AllOf is { Count: > 0 })
+        {
+            // Short-circuit: allOf with a single $ref and no sibling properties → just use the named type
+            if (schema.AllOf.Count == 1
+                && schema.AllOf[0] is OpenApiSchemaReference singleRef
+                && schema.Properties is not { Count: > 0 })
+            {
+                return SanitizeName(singleRef.Reference.Id!);
+            }
+
+            var allOfName = Naming.CapIdentifierLength(context ?? $"Composed{++_syntheticCounter}");
+            var record = ResolveAllOfRecord(allOfName, schema.AllOf);
+            record = MergeWithSiblingProperties(record, schema, allOfName);
+
+            _extraRecords.Add(record);
+            return allOfName;
+        }
+
+        // oneOf multi-element (non-nullable) → synthetic union wrapper
+        if (schema.OneOf is { Count: > 0 })
+        {
+            if (context is not null)
+            {
+                var record = ResolveUnionRecord(context, schema.OneOf);
+                _extraRecords.Add(record);
+                return context;
+            }
+
+            var syntheticOneOf = $"Composed{++_syntheticCounter}";
+            var syntheticOneOfRecord = ResolveUnionRecord(syntheticOneOf, schema.OneOf);
+            _extraRecords.Add(syntheticOneOfRecord);
+            return syntheticOneOf;
+        }
+
+        // anyOf multi-element → same as oneOf
+        if (schema.AnyOf is { Count: > 1 })
+        {
+            if (context is not null)
+            {
+                var record = ResolveUnionRecord(context, schema.AnyOf);
+                _extraRecords.Add(record);
+                return context;
+            }
+
+            var syntheticAnyOf = $"Composed{++_syntheticCounter}";
+            var syntheticAnyOfRecord = ResolveUnionRecord(syntheticAnyOf, schema.AnyOf);
+            _extraRecords.Add(syntheticAnyOfRecord);
+            return syntheticAnyOf;
+        }
+
+        // enum without explicit type (common in some generators)
+        if (schema.Enum is { Count: > 0 })
+        {
+            return "string";
+        }
+
+        // Inline object with properties but no type field (JSON Schema: properties implies object)
+        if (schema.Properties is { Count: > 0 })
+        {
+            return ResolveObjectType(schema, context);
+        }
+
+        // const without type — infer from the const value
+        if (schema.Const is not null)
+        {
+            var constStr = schema.Const;
+            if (bool.TryParse(constStr, out _))
+            {
+                return "bool";
+            }
+
+            if (int.TryParse(constStr, out _))
+            {
+                return "int";
+            }
+
+            if (double.TryParse(constStr, out _))
+            {
+                return "double";
+            }
+
+            return "string";
+        }
+
+        // Final fallback — only warn if the schema had structural properties we should have handled
+        if (HasResolvableProperties(schema))
+        {
+            return WarnAndFallback("Schema could not be resolved to a C# type");
+        }
+
         return "System.Text.Json.JsonElement";
     }
 
-    private static string ResolveStringType(JsonElement schema)
+    private string ResolveSingleType(JsonSchemaType type, IOpenApiSchema schema, string? context)
     {
-        if (schema.TryGetProperty("format", out var fmt))
+        if (type.HasFlag(JsonSchemaType.String))
         {
-            var format = fmt.GetString();
-            return format switch
+            return ResolveStringType(schema);
+        }
+
+        if (type.HasFlag(JsonSchemaType.Integer))
+        {
+            return ResolveIntegerType(schema);
+        }
+
+        if (type.HasFlag(JsonSchemaType.Number))
+        {
+            return ResolveNumberType(schema);
+        }
+
+        if (type.HasFlag(JsonSchemaType.Boolean))
+        {
+            return "bool";
+        }
+
+        if (type.HasFlag(JsonSchemaType.Array))
+        {
+            return ResolveArrayType(schema, context);
+        }
+
+        if (type.HasFlag(JsonSchemaType.Object))
+        {
+            return ResolveObjectType(schema, context);
+        }
+
+        return WarnAndFallback($"Unsupported JSON Schema type '{type}'");
+    }
+
+    private GeneratedRecord ResolveAllOfRecord(string name, IList<IOpenApiSchema> allOfList, HashSet<string>? visited = null)
+    {
+        if (!_resolving.Add(name))
+        {
+            return new GeneratedRecord(name, []);
+        }
+
+        visited ??= [];
+        visited.Add(name);
+
+        var merged = new List<RecordProperty>();
+        var seenNames = new HashSet<string>();
+
+        foreach (var element in allOfList)
+        {
+            List<RecordProperty> props;
+
+            if (element is OpenApiSchemaReference elementRef)
             {
-                "date-time" => "DateTime",
-                "guid" or "uuid" => "Guid",
-                "binary" => "IFormFile",
-                _ => "string",
-            };
-        }
+                var refName = SanitizeName(elementRef.Reference.Id!);
 
-        return "string";
-    }
-
-    private static string ResolveIntegerType(JsonElement schema)
-    {
-        if (schema.TryGetProperty("format", out var fmt) && fmt.GetString() == "int64")
-        {
-            return "long";
-        }
-
-        return "int";
-    }
-
-    private static string ResolveNumberType(JsonElement schema)
-    {
-        if (schema.TryGetProperty("format", out var fmt) && fmt.GetString() == "float")
-        {
-            return "float";
-        }
-
-        return "double";
-    }
-
-    private static string ResolveArrayType(JsonElement schema, List<string> warnings)
-    {
-        if (schema.TryGetProperty("items", out var items))
-        {
-            var itemType = ResolveCSharpType(items, warnings);
-            return $"List<{itemType}>";
-        }
-
-        return $"List<{WarnAndFallback(warnings, "Array schema missing 'items'")}>";
-    }
-
-    private static string ResolveObjectType(JsonElement schema, List<string> warnings)
-    {
-        if (schema.TryGetProperty("additionalProperties", out var addlProps))
-        {
-            var valueType = ResolveCSharpType(addlProps, warnings);
-            return $"Dictionary<string, {valueType}>";
-        }
-
-        // Inline object with properties → unsupported
-        if (schema.TryGetProperty("properties", out _))
-        {
-            return WarnAndFallback(warnings, "Inline anonymous object encountered");
-        }
-
-        return WarnAndFallback(warnings, "Unstructured object schema");
-    }
-
-    private static bool IsStringEnum(JsonElement schema)
-    {
-        return GetTypeString(schema) == "string"
-            && schema.TryGetProperty("enum", out var enumEl)
-            && enumEl.ValueKind == JsonValueKind.Array;
-    }
-
-    private static bool IsBrandedString(JsonElement schema)
-    {
-        if (GetTypeString(schema) != "string")
-        {
-            return false;
-        }
-
-        if (!schema.TryGetProperty("format", out var fmt))
-        {
-            return false;
-        }
-
-        var format = fmt.GetString();
-        return format is not null && BrandFormats.Contains(format);
-    }
-
-    private static bool IsObject(JsonElement schema)
-    {
-        var type = GetTypeString(schema);
-        return type == "object" || (type is null && schema.TryGetProperty("properties", out _));
-    }
-
-    private static bool IsUnsupported(JsonElement schema, out string reason)
-    {
-        if (schema.TryGetProperty("allOf", out _))
-        {
-            reason = "allOf composition is not supported";
-            return true;
-        }
-
-        if (schema.TryGetProperty("oneOf", out var oneOf))
-        {
-            // Allow nullable oneOf (exactly 2 items, one being null)
-            if (oneOf.GetArrayLength() == 2)
-            {
-                var hasNull = false;
-                foreach (var item in oneOf.EnumerateArray())
+                if (visited.Contains(refName))
                 {
-                    if (item.TryGetProperty("type", out var t) && t.GetString() == "null")
-                    {
-                        hasNull = true;
-                    }
+                    continue;
                 }
 
-                if (hasNull)
+                // If the ref target itself has allOf, recurse
+                if (element.AllOf is { Count: > 0 })
                 {
-                    reason = "";
-                    return false;
+                    var nested = ResolveAllOfRecord(refName, element.AllOf, visited);
+                    props = nested.Properties.ToList();
+                }
+                else
+                {
+                    props = ExtractProperties(element, name);
                 }
             }
+            else
+            {
+                props = ExtractProperties(element, name);
+            }
 
-            reason = "oneOf composition is not supported";
-            return true;
+            foreach (var prop in props)
+            {
+                if (seenNames.Add(prop.Name))
+                {
+                    merged.Add(prop);
+                }
+            }
         }
 
-        if (schema.TryGetProperty("anyOf", out _))
-        {
-            reason = "anyOf composition is not supported";
-            return true;
-        }
-
-        if (schema.TryGetProperty("discriminator", out _))
-        {
-            reason = "discriminator is not supported";
-            return true;
-        }
-
-        reason = "";
-        return false;
+        _resolving.Remove(name);
+        return new GeneratedRecord(name, merged);
     }
 
-    private static GeneratedEnum MapEnum(string name, JsonElement schema)
-    {
-        var members = new List<string>();
-        foreach (var member in schema.GetProperty("enum").EnumerateArray())
-        {
-            members.Add(Naming.ToPascalCaseFromSegments(member.GetString()!));
-        }
-
-        return new GeneratedEnum(name, members);
-    }
-
-    private static GeneratedBrand MapBrand(string name, JsonElement schema)
-    {
-        // All BrandFormats (email, uri, url, uri-reference) map to string.
-        // Non-string brands (date-time, guid) are not in BrandFormats and
-        // won't reach here — they're resolved inline by ResolveCSharpType.
-        return new GeneratedBrand(name, "string");
-    }
-
-    private static GeneratedRecord MapRecord(string name, JsonElement schema, List<string> warnings)
+    private GeneratedRecord ResolveUnionRecord(string name, IList<IOpenApiSchema> variants)
     {
         var properties = new List<RecordProperty>();
-        var requiredSet = new HashSet<string>();
+        var optionIndex = 0;
 
-        if (schema.TryGetProperty("required", out var reqArray))
+        foreach (var variant in variants)
         {
-            foreach (var req in reqArray.EnumerateArray())
+            if (variant is OpenApiSchemaReference variantRef)
             {
-                requiredSet.Add(req.GetString()!);
+                var refName = SanitizeName(variantRef.Reference.Id!);
+                properties.Add(new RecordProperty($"As{refName}", $"{refName}?", false));
+            }
+            else if (variant.Properties is { Count: > 0 })
+            {
+                // Inline object → synthesize sub-record
+                var subName = $"{name}Option{optionIndex}";
+                var record = MapRecord(subName, variant);
+                _extraRecords.Add(record);
+                properties.Add(new RecordProperty($"As{subName}", $"{subName}?", false));
+                optionIndex++;
+            }
+            else
+            {
+                // Inline primitive
+                var csharpType = ResolveCSharpType(variant);
+                var typeName = PrimitiveDisplayName(csharpType);
+                properties.Add(new RecordProperty($"As{typeName}", $"{csharpType}?", false));
             }
         }
 
-        if (schema.TryGetProperty("properties", out var props))
-        {
-            foreach (var prop in props.EnumerateObject())
-            {
-                var propName = Naming.ToPascalCaseFromSegments(prop.Name);
-                var isRequired = requiredSet.Contains(prop.Name);
-                var csharpType = ResolveCSharpType(prop.Value, warnings);
+        return new GeneratedRecord(name, properties);
+    }
 
-                // If not required and type isn't already nullable, make it nullable
+    private List<RecordProperty> ExtractProperties(IOpenApiSchema schema, string context)
+    {
+        var properties = new List<RecordProperty>();
+        var requiredSet = schema.Required ?? (ISet<string>)new HashSet<string>();
+
+        if (schema.Properties is not null)
+        {
+            foreach (var (propKey, propSchema) in schema.Properties)
+            {
+                var propName = Naming.ToPascalCaseFromSegments(propKey);
+                var propContext = Naming.CapIdentifierLength($"{context}{propName}");
+                var isRequired = requiredSet.Contains(propKey);
+                var csharpType = ResolveCSharpType(propSchema, propContext);
+
                 if (!isRequired && !csharpType.EndsWith("?"))
                 {
                     csharpType += "?";
@@ -327,48 +434,289 @@ internal static class SchemaMapper
             }
         }
 
-        return new GeneratedRecord(name, properties);
+        return properties;
     }
 
-    private static string? GetTypeString(JsonElement schema)
+    private GeneratedRecord MergeWithSiblingProperties(
+        GeneratedRecord record, IOpenApiSchema schema, string name)
     {
-        if (schema.TryGetProperty("type", out var typeEl) && typeEl.ValueKind == JsonValueKind.String)
+        if (schema.Properties is not { Count: > 0 })
         {
-            return typeEl.GetString();
+            return record;
         }
 
-        return null;
+        var siblingProps = ExtractProperties(schema, name);
+        var merged = record.Properties.ToList();
+        var seen = new HashSet<string>(merged.Select(p => p.Name));
+        foreach (var prop in siblingProps)
+        {
+            if (seen.Add(prop.Name))
+            {
+                merged.Add(prop);
+            }
+        }
+
+        return new GeneratedRecord(name, merged);
+    }
+
+    private static string PrimitiveDisplayName(string csharpType)
+    {
+        return csharpType switch
+        {
+            "string" => "String",
+            "int" => "Int",
+            "long" => "Long",
+            "double" => "Double",
+            "float" => "Float",
+            "bool" => "Bool",
+            "DateTime" => "DateTime",
+            "Guid" => "Guid",
+            "System.Text.Json.JsonElement" => "Object",
+            _ => Naming.ToPascalCaseFromSegments(csharpType),
+        };
+    }
+
+    private static bool IsNullableOneOf(IList<IOpenApiSchema> oneOfList)
+    {
+        if (oneOfList.Count != 2)
+        {
+            return false;
+        }
+
+        foreach (var item in oneOfList)
+        {
+            if (item.Type.HasValue && item.Type.Value == JsonSchemaType.Null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string SanitizeName(string name)
+    {
+        return Naming.ToPascalCaseFromSegments(name);
     }
 
     /// <summary>
-    /// Creates a new JSON element that replaces the type array with a single type string.
-    /// Used to resolve the non-null type from a nullable union.
+    /// Computes a structural fingerprint for an inline schema.
     /// </summary>
-    private static JsonElement CloneWithType(JsonElement original, string type)
+    private static string ComputeSchemaFingerprint(IOpenApiSchema schema)
     {
-        using var ms = new System.IO.MemoryStream();
-        using (var writer = new Utf8JsonWriter(ms))
-        {
-            writer.WriteStartObject();
+        var sb = new StringBuilder();
+        AppendSchemaFingerprint(sb, schema, 0);
+        return sb.ToString();
+    }
 
-            foreach (var prop in original.EnumerateObject())
+    private static void AppendSchemaFingerprint(StringBuilder sb, IOpenApiSchema schema, int depth)
+    {
+        if (depth > 10)
+        {
+            sb.Append("...");
+            return;
+        }
+
+        sb.Append('{');
+        sb.Append("t:").Append(schema.Type.HasValue ? (int)schema.Type.Value : -1);
+
+        if (schema.Format is not null)
+        {
+            sb.Append(",f:").Append(schema.Format);
+        }
+
+        if (schema.Properties is { Count: > 0 })
+        {
+            sb.Append(",p:{");
+            foreach (var (k, v) in schema.Properties.OrderBy(p => p.Key))
             {
-                if (prop.Name == "type")
+                sb.Append(k).Append(':');
+                if (v is OpenApiSchemaReference propRef)
                 {
-                    writer.WriteString("type", type);
+                    sb.Append("$ref:").Append(propRef.Reference.Id);
                 }
                 else
                 {
-                    prop.WriteTo(writer);
+                    AppendSchemaFingerprint(sb, v, depth + 1);
                 }
+
+                sb.Append(',');
             }
 
-            writer.WriteEndObject();
+            sb.Append('}');
         }
 
-        return JsonSerializer.Deserialize<JsonElement>(ms.ToArray());
+        if (schema.Required is { Count: > 0 })
+        {
+            sb.Append(",r:").Append(string.Join(",", schema.Required.OrderBy(r => r)));
+        }
+
+        if (schema.Items is not null)
+        {
+            sb.Append(",i:");
+            if (schema.Items is OpenApiSchemaReference itemRef)
+            {
+                sb.Append("$ref:").Append(itemRef.Reference.Id);
+            }
+            else
+            {
+                AppendSchemaFingerprint(sb, schema.Items, depth + 1);
+            }
+        }
+
+        if (schema.Enum is { Count: > 0 })
+        {
+            sb.Append(",e:").Append(string.Join(",", schema.Enum.Select(e => e?.ToString())));
+        }
+
+        if (schema.AdditionalProperties is not null)
+        {
+            sb.Append(",ap:");
+            if (schema.AdditionalProperties is OpenApiSchemaReference apRef)
+            {
+                sb.Append("$ref:").Append(apRef.Reference.Id);
+            }
+            else
+            {
+                AppendSchemaFingerprint(sb, schema.AdditionalProperties, depth + 1);
+            }
+        }
+
+        sb.Append('}');
     }
 
+    private static bool HasResolvableProperties(IOpenApiSchema schema)
+    {
+        return schema.AllOf is { Count: > 0 }
+            || schema.OneOf is { Count: > 0 }
+            || schema.AnyOf is { Count: > 0 }
+            || schema.Properties is { Count: > 0 }
+            || schema.Items is not null
+            || schema.AdditionalProperties is not null
+            || schema.Enum is { Count: > 0 }
+            || schema.Const is not null;
+    }
+
+    private string WarnAndFallback(string reason)
+    {
+        _warnings.Add($"{reason} — mapped to 'JsonElement'.");
+        return "System.Text.Json.JsonElement";
+    }
+
+    private static string ResolveStringType(IOpenApiSchema schema)
+    {
+        return schema.Format switch
+        {
+            "date-time" => "DateTime",
+            "guid" or "uuid" => "Guid",
+            "binary" => "IFormFile",
+            _ => "string",
+        };
+    }
+
+    private static string ResolveIntegerType(IOpenApiSchema schema)
+    {
+        return schema.Format == "int64" ? "long" : "int";
+    }
+
+    private static string ResolveNumberType(IOpenApiSchema schema)
+    {
+        return schema.Format == "float" ? "float" : "double";
+    }
+
+    private string ResolveArrayType(IOpenApiSchema schema, string? context)
+    {
+        if (schema.Items is not null)
+        {
+            var itemType = ResolveCSharpType(schema.Items, context);
+            return $"List<{itemType}>";
+        }
+
+        return $"List<{WarnAndFallback("Array schema missing 'items'")}>";
+    }
+
+    private string ResolveObjectType(IOpenApiSchema schema, string? context)
+    {
+        if (schema.AdditionalProperties is not null)
+        {
+            var valueType = ResolveCSharpType(schema.AdditionalProperties, context);
+            return $"Dictionary<string, {valueType}>";
+        }
+
+        // Inline object with properties
+        if (schema.Properties is { Count: > 0 })
+        {
+            var fingerprint = ComputeSchemaFingerprint(schema);
+            if (_schemaFingerprints.TryGetValue(fingerprint, out var existingName))
+            {
+                return existingName;
+            }
+
+            var name = context ?? $"Synthetic{++_syntheticCounter}";
+            var record = MapRecord(name, schema);
+            _extraRecords.Add(record);
+            _schemaFingerprints[fingerprint] = name;
+            return name;
+        }
+
+        // Bare object with no properties or additionalProperties → untyped map
+        return "Dictionary<string, System.Text.Json.JsonElement>";
+    }
+
+    private static bool IsStringEnum(IOpenApiSchema schema)
+    {
+        return schema.Type.HasValue
+            && schema.Type.Value.HasFlag(JsonSchemaType.String)
+            && schema.Enum is { Count: > 0 };
+    }
+
+    private static bool IsBrandedString(IOpenApiSchema schema)
+    {
+        if (!schema.Type.HasValue || !schema.Type.Value.HasFlag(JsonSchemaType.String))
+        {
+            return false;
+        }
+
+        return schema.Format is not null && BrandFormats.Contains(schema.Format);
+    }
+
+    private static bool IsObject(IOpenApiSchema schema)
+    {
+        if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Object))
+        {
+            return true;
+        }
+
+        return !schema.Type.HasValue && schema.Properties is { Count: > 0 };
+    }
+
+    private GeneratedRecord MapRecord(string name, IOpenApiSchema schema)
+    {
+        if (!_resolving.Add(name))
+        {
+            return new GeneratedRecord(name, []);
+        }
+
+        var properties = ExtractProperties(schema, name);
+        _resolving.Remove(name);
+        return new GeneratedRecord(name, properties);
+    }
+
+    private static GeneratedEnum MapEnum(string name, IOpenApiSchema schema)
+    {
+        var members = new List<string>();
+        foreach (var member in schema.Enum!)
+        {
+            members.Add(Naming.ToPascalCaseFromSegments(member!.ToString()));
+        }
+
+        return new GeneratedEnum(name, members);
+    }
+
+    private static GeneratedBrand MapBrand(string name)
+    {
+        return new GeneratedBrand(name, "string");
+    }
 }
 
 // --- Intermediate types ---

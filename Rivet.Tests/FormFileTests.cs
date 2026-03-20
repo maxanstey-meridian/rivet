@@ -18,8 +18,8 @@ public sealed class FormFileTests
     private static string GenerateContractClient(string source)
     {
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
         var typeFileMap = BuildTypeFileMap(walker);
         var controllerGroups = ClientEmitter.GroupByController(endpoints);
         return string.Join("\n", controllerGroups.Select(g =>
@@ -56,8 +56,8 @@ public sealed class FormFileTests
             """;
 
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = EndpointWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
         var typeFileMap = BuildTypeFileMap(walker);
         var client = ClientEmitter.EmitControllerClient("files", endpoints, typeFileMap);
 
@@ -103,8 +103,8 @@ public sealed class FormFileTests
             """;
 
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = EndpointWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
         var typeFileMap = BuildTypeFileMap(walker);
         var client = ClientEmitter.EmitControllerClient("tasks", endpoints, typeFileMap);
 
@@ -142,8 +142,8 @@ public sealed class FormFileTests
             """;
 
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = EndpointWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
         var typeFileMap = BuildTypeFileMap(walker);
         var client = ClientEmitter.EmitControllerClient("avatars", endpoints, typeFileMap);
 

@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Rivet.Tool.Analysis;
 
 namespace Rivet.Tests;
 
@@ -164,6 +165,16 @@ public static class CompilationHelper
         }
 
         return compilation;
+    }
+
+    /// <summary>
+    /// Runs single-pass discovery and creates a TypeWalker — the same path as Program.cs.
+    /// </summary>
+    public static (DiscoveredSymbols Discovered, TypeWalker Walker) DiscoverAndWalk(Compilation compilation)
+    {
+        var discovered = SymbolDiscovery.Discover(compilation);
+        var walker = TypeWalker.Create(compilation, discovered.RivetTypes);
+        return (discovered, walker);
     }
 
     private static MetadataReference[] GetCoreReferences()

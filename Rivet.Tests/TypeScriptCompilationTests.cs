@@ -325,9 +325,9 @@ public sealed class TypeScriptCompilationTests : IDisposable
     {
         // 1. Compile C# and run Rivet analysis
         var compilation = CompilationHelper.CreateCompilation(csharpSource);
-        var walker = TypeWalker.Create(compilation);
-        var controllerEndpoints = EndpointWalker.Walk(compilation, walker);
-        var contractEndpoints = ContractWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var controllerEndpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var contractEndpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
 
         // Merge: contract wins on (ControllerName, Name) collision
         var seen = new HashSet<(string, string)>(

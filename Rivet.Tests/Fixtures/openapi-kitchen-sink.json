@@ -280,6 +280,85 @@
         "tags": ["Admin"],
         "summary": "Fire and forget webhook"
       }
+    },
+    "/api/form-submit": {
+      "post": {
+        "operationId": "forms_submit",
+        "tags": ["Forms"],
+        "summary": "Submit a form (form-encoded)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "value": { "type": "integer" }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthStatusDto" }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationErrorDto" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/inline-test": {
+      "post": {
+        "operationId": "inlineTest_create",
+        "tags": ["InlineTest"],
+        "summary": "Endpoint with inline request and response schemas",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": { "type": "string" },
+                  "count": { "type": "integer" }
+                },
+                "required": ["title"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string", "format": "uuid" },
+                    "created": { "type": "boolean" }
+                  },
+                  "required": ["id", "created"]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -545,6 +624,117 @@
           "kind": { "type": "string" }
         },
         "required": ["kind"]
+      },
+      "StrictDto": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "locked": { "type": "boolean" }
+        },
+        "additionalProperties": false,
+        "required": ["name", "locked"]
+      },
+      "OpenMapDto": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "BareObjectDto": {
+        "type": "object"
+      },
+      "UntypedEnumDto": {
+        "enum": ["alpha", "beta", "gamma"]
+      },
+      "InlineParentDto": {
+        "type": "object",
+        "properties": {
+          "label": { "type": "string" },
+          "nested": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "integer" },
+              "y": { "type": "integer" }
+            },
+            "required": ["x", "y"]
+          }
+        },
+        "required": ["label", "nested"]
+      },
+      "ComposedMultiRefDto": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AddressDto" },
+          { "$ref": "#/components/schemas/SinglePropDto" }
+        ]
+      },
+      "AllOfWithSiblingPropsDto": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AddressDto" }
+        ],
+        "type": "object",
+        "properties": {
+          "extra": { "type": "string" }
+        },
+        "required": ["extra"]
+      },
+      "UnionWithPrimitiveDto": {
+        "oneOf": [
+          { "type": "string" },
+          { "type": "integer" }
+        ]
+      },
+      "ConstIntDto": {
+        "type": "object",
+        "properties": {
+          "version": { "const": 2 },
+          "label": { "type": "string" }
+        },
+        "required": ["version", "label"]
+      },
+      "ConstStringDto": {
+        "type": "object",
+        "properties": {
+          "kind": { "const": "button" },
+          "enabled": { "type": "boolean" }
+        },
+        "required": ["kind", "enabled"]
+      },
+      "BareNullableDto": {
+        "type": "object",
+        "properties": {
+          "data": { "nullable": true },
+          "name": { "type": "string" }
+        },
+        "required": ["name"]
+      },
+      "ImpliedObjectDto": {
+        "properties": {
+          "title": { "type": "string" },
+          "count": { "type": "integer" }
+        },
+        "required": ["title", "count"]
+      },
+      "InlineComposedArrayDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                { "$ref": "#/components/schemas/AddressDto" },
+                { "type": "object", "properties": { "note": { "type": "string" } } }
+              ]
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "BareSchemaDto": {
+        "type": "object",
+        "properties": {
+          "opaque": {},
+          "documented": { "description": "Some docs" },
+          "exampled": { "example": "foo" }
+        },
+        "required": ["opaque"]
       }
     },
     "securitySchemes": {

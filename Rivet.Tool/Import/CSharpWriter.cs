@@ -99,6 +99,12 @@ internal static class CSharpWriter
 
     private static void WriteEndpointField(StringBuilder sb, GeneratedEndpointField field)
     {
+        // Unsupported markers as structured comments
+        foreach (var marker in field.UnsupportedMarkers)
+        {
+            sb.AppendLine($"    // [rivet:unsupported {marker}]");
+        }
+
         // Field type: RouteDefinition<TIn, TOut>, RouteDefinition<TOut>, or RouteDefinition
         var fieldType = BuildFieldType(field.InputType, field.OutputType);
         sb.Append($"    public static readonly {fieldType} {field.FieldName} =");
@@ -133,6 +139,11 @@ internal static class CSharpWriter
             return $"RouteDefinition<{inputType}, {outputType}>";
         }
 
+        if (inputType is not null)
+        {
+            return $"InputRouteDefinition<{inputType}>";
+        }
+
         if (outputType is not null)
         {
             return $"RouteDefinition<{outputType}>";
@@ -153,6 +164,7 @@ internal static class CSharpWriter
             return $"<{outputType}>";
         }
 
+        // InputRouteDefinition: type arg goes on .Accepts<T>(), not on Define.Method()
         return "";
     }
 
@@ -168,6 +180,12 @@ internal static class CSharpWriter
         if (field.SuccessStatus is not null)
         {
             calls.Add($".Status({field.SuccessStatus})");
+        }
+
+        // Input-only endpoint: type arg goes on .Accepts<T>()
+        if (field.InputType is not null && field.OutputType is null)
+        {
+            calls.Add($".Accepts<{field.InputType}>()");
         }
 
         foreach (var error in field.ErrorResponses)
@@ -216,7 +234,11 @@ internal sealed record GeneratedEndpointField(
     int? SuccessStatus,
     IReadOnlyList<GeneratedErrorResponse> ErrorResponses,
     bool IsAnonymous,
-    string? SecurityScheme);
+    string? SecurityScheme,
+    IReadOnlyList<string> UnsupportedMarkers = null!)
+{
+    public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
+}
 
 internal sealed record GeneratedErrorResponse(
     int StatusCode,

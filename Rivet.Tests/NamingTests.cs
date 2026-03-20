@@ -15,6 +15,12 @@ public sealed class NamingTests
     [InlineData("camelCase", "CamelCase")]
     [InlineData("with spaces", "WithSpaces")]
     [InlineData("mixed_kebab-snake", "MixedKebabSnake")]
+    [InlineData("repos/listForOrg", "ReposListForOrg")]
+    [InlineData("io.k8s.api.core.v1.PodSpec", "IoK8sApiCoreV1PodSpec")]
+    [InlineData("AI Studio", "AIStudio")]
+    [InlineData("pull-request-simple", "PullRequestSimple")]
+    [InlineData("waf-managed-rules_response", "WafManagedRulesResponse")]
+    [InlineData("AiSingleAgentResponse--Full", "AiSingleAgentResponseFull")]
     public void ToPascalCaseFromSegments(string input, string expected)
     {
         Assert.Equal(expected, Naming.ToPascalCaseFromSegments(input));

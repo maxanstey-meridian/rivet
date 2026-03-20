@@ -9,8 +9,8 @@ public sealed class ContractEndpointTests
     private static (IReadOnlyList<TsEndpointDefinition> Endpoints, string Client) Generate(string source)
     {
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
@@ -324,9 +324,9 @@ public sealed class ContractEndpointTests
             """;
 
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
-        var contractEndpoints = ContractWalker.Walk(compilation, walker);
-        var controllerEndpoints = EndpointWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var contractEndpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var controllerEndpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
 
         // Both sources produce endpoints for different controllers
         Assert.Single(contractEndpoints);
@@ -358,8 +358,8 @@ public sealed class ContractEndpointTests
             """;
 
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
 
         Assert.Single(endpoints);
         // TaskDto should have been walked transitively
@@ -514,9 +514,9 @@ public sealed class ContractEndpointTests
     private static (IReadOnlyList<TsEndpointDefinition> Endpoints, string Client) GenerateWithBothWalkers(string source)
     {
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
-        var contractEndpoints = ContractWalker.Walk(compilation, walker);
-        var annotationEndpoints = EndpointWalker.Walk(compilation, walker);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var contractEndpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var annotationEndpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
 
         // Merge: contract wins on collision (same as Program.cs)
         var seen = new HashSet<(string, string)>(

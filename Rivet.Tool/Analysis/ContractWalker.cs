@@ -11,14 +11,15 @@ namespace Rivet.Tool.Analysis;
 /// </summary>
 public static class ContractWalker
 {
-    public static IReadOnlyList<TsEndpointDefinition> Walk(Compilation compilation, TypeWalker typeWalker)
+    /// <summary>
+    /// Discovers endpoints from [RivetContract] static classes.
+    /// Use SymbolDiscovery.Discover() to obtain the contract type list.
+    /// </summary>
+    public static IReadOnlyList<TsEndpointDefinition> Walk(
+        Compilation compilation,
+        TypeWalker typeWalker,
+        IReadOnlyList<INamedTypeSymbol> contractTypes)
     {
-        var contractAttr = compilation.GetTypeByMetadataName("Rivet.RivetContractAttribute");
-        if (contractAttr is null)
-        {
-            return [];
-        }
-
         var defineType = compilation.GetTypeByMetadataName("Rivet.Define");
         var endpointType = compilation.GetTypeByMetadataName("Rivet.Endpoint");
         if (defineType is null && endpointType is null)
@@ -28,13 +29,8 @@ public static class ContractWalker
 
         var endpoints = new List<TsEndpointDefinition>();
 
-        foreach (var type in RoslynExtensions.GetAllTypes(compilation.GlobalNamespace))
+        foreach (var type in contractTypes)
         {
-            if (!type.GetAttributes().Any(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, contractAttr)))
-            {
-                continue;
-            }
 
             var controllerName = DeriveControllerName(type);
 
@@ -361,7 +357,7 @@ public static class ContractWalker
     /// Accepts Endpoint fields (v1 legacy), RouteDefinition fields (current),
     /// and EndpointBuilder/InputEndpointBuilder fields (old name, backwards compat).
     /// </summary>
-    private static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? defineType, INamedTypeSymbol? endpointType)
+    internal static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? defineType, INamedTypeSymbol? endpointType)
     {
         if (defineType is not null && SymbolEqualityComparer.Default.Equals(fieldType, defineType))
         {
@@ -386,7 +382,7 @@ public static class ContractWalker
     /// <summary>
     /// Strips "Contract" suffix and camelCases. TasksContract → tasks.
     /// </summary>
-    private static string DeriveControllerName(INamedTypeSymbol type)
+    internal static string DeriveControllerName(INamedTypeSymbol type)
     {
         var name = type.Name;
 

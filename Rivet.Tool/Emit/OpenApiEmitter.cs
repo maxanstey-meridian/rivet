@@ -512,7 +512,6 @@ public static class OpenApiEmitter
         }
 
         // Transitively collect refs from referenced definitions
-        var enqueued = new HashSet<string>(names);
         var queue = new Queue<string>(names);
         while (queue.Count > 0)
         {
@@ -523,20 +522,17 @@ public static class OpenApiEmitter
                 continue;
             }
 
+            var newRefs = new HashSet<string>();
             foreach (var prop in def.Properties)
             {
-                var before = names.Count;
-                TsType.CollectTypeRefs(prop.Type, names);
+                TsType.CollectTypeRefs(prop.Type, newRefs);
+            }
 
-                if (names.Count > before)
+            foreach (var n in newRefs)
+            {
+                if (names.Add(n))
                 {
-                    foreach (var n in names)
-                    {
-                        if (enqueued.Add(n))
-                        {
-                            queue.Enqueue(n);
-                        }
-                    }
+                    queue.Enqueue(n);
                 }
             }
         }

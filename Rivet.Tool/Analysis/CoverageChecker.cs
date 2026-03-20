@@ -46,7 +46,8 @@ public static class CoverageChecker
 
         var fieldMap = new Dictionary<IFieldSymbol, TsEndpointDefinition>(SymbolEqualityComparer.Default);
 
-        foreach (var type in RoslynExtensions.GetAllTypes(compilation.GlobalNamespace))
+        // Scope to source assembly — Rivet attributes only exist on user code
+        foreach (var type in RoslynExtensions.GetAllTypes(compilation.Assembly.GlobalNamespace))
         {
             if (!type.GetAttributes().Any(a =>
                 SymbolEqualityComparer.Default.Equals(a.AttributeClass, contractAttr)))
@@ -59,7 +60,7 @@ public static class CoverageChecker
                 continue; // Abstract class contracts don't use RouteDefinition fields
             }
 
-            var controllerName = DeriveControllerName(type);
+            var controllerName = ContractWalker.DeriveControllerName(type);
 
             foreach (var member in type.GetMembers())
             {
@@ -68,7 +69,7 @@ public static class CoverageChecker
                     continue;
                 }
 
-                if (!IsRivetEndpointField(field.Type, defineType, endpointType))
+                if (!ContractWalker.IsRivetEndpointField(field.Type, defineType, endpointType))
                 {
                     continue;
                 }
@@ -280,37 +281,4 @@ public static class CoverageChecker
         return "/" + route.Trim('/');
     }
 
-    private static string DeriveControllerName(INamedTypeSymbol type)
-    {
-        var name = type.Name;
-
-        if (name.EndsWith("Contract", StringComparison.Ordinal))
-        {
-            name = name[..^"Contract".Length];
-        }
-
-        return Naming.ToCamelCase(name);
-    }
-
-    private static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? defineType, INamedTypeSymbol? endpointType)
-    {
-        if (defineType is not null && SymbolEqualityComparer.Default.Equals(fieldType, defineType))
-        {
-            return true;
-        }
-
-        if (endpointType is not null && SymbolEqualityComparer.Default.Equals(fieldType, endpointType))
-        {
-            return true;
-        }
-
-        if (fieldType is INamedTypeSymbol named
-            && named.Name is "RouteDefinition" or "InputRouteDefinition" or "EndpointBuilder" or "InputEndpointBuilder"
-            && named.ContainingNamespace?.ToDisplayString() == "Rivet")
-        {
-            return true;
-        }
-
-        return false;
-    }
 }

@@ -47,9 +47,12 @@ static async Task<int> Run(string[] args)
         compilation = CompileFiles(options.Files);
     }
 
-    var walker = TypeWalker.Create(compilation);
-    var endpoints = EndpointWalker.Walk(compilation, walker);
-    var contractEndpoints = ContractWalker.Walk(compilation, walker);
+    // Single-pass discovery: scan source assembly types once instead of 4× full namespace walks
+    var discovered = SymbolDiscovery.Discover(compilation);
+
+    var walker = TypeWalker.Create(compilation, discovered.RivetTypes);
+    var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+    var contractEndpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
 
     if (options.Check)
     {
@@ -501,6 +504,12 @@ static int RunImport(RivetOptions options)
 
 static void PrintRoutes(IReadOnlyList<TsEndpointDefinition> endpoints)
 {
+    if (endpoints.Count == 0)
+    {
+        Console.Error.WriteLine("0 route(s).");
+        return;
+    }
+
     var sorted = endpoints
         .OrderBy(e => e.RouteTemplate)
         .ThenBy(e => e.HttpMethod)

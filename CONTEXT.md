@@ -4,7 +4,19 @@
 
 Rivet is feature-complete through Phase 4 + VO support + grouped type emission + typed error responses via overloaded unwrap. Published to NuGet as
 `Rivet.Attributes` (0.1.0) and `dotnet-rivet` (0.2.0, 0.3.0 pending). Working against CaseBridge's real `.csproj` with
-17 types and 5 endpoints. 169 tests.
+17 types and 5 endpoints. 281 tests.
+
+OpenAPI import pipeline migrated from raw `System.Text.Json` (`JsonElement`) to `Microsoft.OpenApi` v2.7.0. The
+library handles `$ref` resolution, schema parsing, and type representation via `IOpenApiSchema`/`OpenApiSchemaReference`.
+Manual `ResolveRef()`, `CloneWithType()`, JSON fingerprinting, and `$ref` resolution for requestBodies all deleted — the
+library handles these automatically. All 281 tests pass unchanged.
+
+OpenAPI importer produces 0 warnings across 10 real-world specs (Stripe, GitHub, Twilio, Cloudflare, Bitbucket, Box,
+Jira, Discord, Kubernetes, Petstore v3). SchemaMapper handles: `$ref`, nullable type arrays, all primitive types, objects
+(inline + named), arrays, dicts, allOf/oneOf/anyOf composition (with synthetic names for contextless inline schemas),
+enums without type, `const` without type (infer from value kind), bare `nullable: true`, implied objects (properties
+without type), and silent fallback to `JsonElement` for genuinely untyped schemas. ContractBuilder handles JSON,
+form-encoded, and multipart request bodies, plus `default` error responses (mapped to 500).
 
 ### What's shipped
 
@@ -27,6 +39,19 @@ Rivet is feature-complete through Phase 4 + VO support + grouped type emission +
 - OpenAPI 3.1 emission: `--openapi` flag, monomorphised generics, $ref integrity, SecurityConfig support
 - NuGet: Rivet.Attributes (netstandard2.0), dotnet-rivet (net8.0, PackAsTool)
 - Samples: AnnotationApi (attribute-based discovery), ContractApi (contract-driven discovery)
+
+### Importer Gaps (not bugs — feature work)
+
+- **Query parameters not modelled** — GET endpoints with `parameters` in the spec produce no input type. Pagination
+  params (`limit`, `starting_after`), filters, etc. are invisible in the generated contract. Needs design: should they
+  become a request record? A separate query object?
+- **Inline enum properties → string** — Fields with `enum: ["active", "inactive"]` but defined inline (not as a named
+  schema) map to `string`. No compile-time safety. ~1000 such fields in Stripe alone. Generating enums for every inline
+  enum would produce huge file counts; possibly a `--inline-enums` flag.
+- **Multiple security schemes** — `security: [{ "basicAuth": [] }, { "bearerAuth": [] }]` only picks the first scheme.
+  Rivet contracts currently model security as a single string. Would need `string[]` or similar.
+- **anyOf/oneOf union shape** — Modelled as a record with nullable variant fields (`AsX?`, `AsY?`). All fields can be
+  null simultaneously, which is invalid. Not a priority unless someone tries to use these for serialization.
 
 ### Known Issues / Polish
 

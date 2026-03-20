@@ -8,7 +8,7 @@ public sealed class ValueObjectTests
     private static string Generate(string source)
     {
         var compilation = CompilationHelper.CreateCompilation(source);
-        var walker = TypeWalker.Create(compilation);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
         var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);

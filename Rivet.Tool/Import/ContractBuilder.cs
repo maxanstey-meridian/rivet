@@ -1,4 +1,5 @@
-using System.Text.Json;
+using System.Net.Http;
+using Microsoft.OpenApi;
 
 namespace Rivet.Tool.Import;
 
@@ -7,36 +8,32 @@ namespace Rivet.Tool.Import;
 /// </summary>
 internal static class ContractBuilder
 {
-    private static readonly HashSet<string> HttpMethods =
-        ["get", "post", "put", "patch", "delete"];
+    private static readonly HashSet<HttpMethod> SupportedMethods =
+        [HttpMethod.Get, HttpMethod.Post, HttpMethod.Put, HttpMethod.Patch, HttpMethod.Delete];
 
     /// <summary>
     /// Group operations by tag, return one contract per tag.
     /// </summary>
     public static IReadOnlyList<GeneratedContract> BuildContracts(
-        JsonElement paths,
-        SchemaMapResult schemas,
-        string? globalSecurityScheme,
-        List<string> warnings)
+        OpenApiPaths paths,
+        SchemaMapper mapper,
+        string? globalSecurityScheme)
     {
         var groups = new Dictionary<string, List<GeneratedEndpointField>>();
 
-        foreach (var path in paths.EnumerateObject())
+        foreach (var (route, pathItem) in paths)
         {
-            var route = path.Name;
-
-            foreach (var method in path.Value.EnumerateObject())
+            foreach (var (method, operation) in pathItem.Operations ?? [])
             {
-                if (!HttpMethods.Contains(method.Name))
+                if (!SupportedMethods.Contains(method))
                 {
                     continue;
                 }
 
-                var operation = method.Value;
-                var httpMethod = method.Name;
+                var httpMethod = method.Method.ToLowerInvariant();
                 var tag = ExtractTag(operation) ?? "Default";
                 var field = BuildEndpointField(
-                    httpMethod, route, operation, tag, globalSecurityScheme, warnings);
+                    httpMethod, route, operation, tag, globalSecurityScheme, mapper);
 
                 if (!groups.TryGetValue(tag, out var list))
                 {
@@ -57,29 +54,25 @@ internal static class ContractBuilder
     private static GeneratedEndpointField BuildEndpointField(
         string httpMethod,
         string route,
-        JsonElement operation,
+        OpenApiOperation operation,
         string tag,
         string? globalSecurityScheme,
-        List<string> warnings)
+        SchemaMapper mapper)
     {
-        var operationId = operation.TryGetProperty("operationId", out var opId)
-            ? opId.GetString()!
-            : null;
-
+        var operationId = operation.OperationId;
         var fieldName = DeriveFieldName(operationId, httpMethod, route, tag);
         var method = Naming.ToPascalCaseFromSegments(httpMethod);
-        var description = operation.TryGetProperty("summary", out var summary)
-            ? summary.GetString()
-            : null;
+        var description = operation.Summary;
+        var unsupported = new List<string>();
 
-        // Resolve input type (requestBody)
-        var inputType = ResolveInputType(operation, warnings);
+        // Resolve input type (requestBody — $ref resolved by library)
+        var inputType = ResolveInputType(operation, mapper, fieldName, unsupported);
 
         // Resolve output type (lowest 2xx response with JSON content)
-        var (outputType, successStatus) = ResolveOutputType(operation, warnings);
+        var (outputType, successStatus) = ResolveOutputType(operation, mapper, fieldName, unsupported);
 
         // Error responses
-        var errorResponses = ResolveErrorResponses(operation, warnings);
+        var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, unsupported);
 
         // Security
         var (isAnonymous, securityScheme) = ResolveSecurity(operation, globalSecurityScheme);
@@ -87,53 +80,40 @@ internal static class ContractBuilder
         return new GeneratedEndpointField(
             fieldName, method, route, inputType, outputType,
             description, successStatus, errorResponses,
-            isAnonymous, securityScheme);
+            isAnonymous, securityScheme, unsupported);
     }
 
-    private static string? ResolveInputType(JsonElement operation, List<string> warnings)
+    private static string? ResolveInputType(
+        OpenApiOperation operation, SchemaMapper mapper, string fieldName, List<string> unsupported)
     {
-        if (!operation.TryGetProperty("requestBody", out var requestBody))
+        var content = operation.RequestBody?.Content;
+        if (content is null)
         {
             return null;
         }
 
-        if (!requestBody.TryGetProperty("content", out var content))
+        // Try content types in priority order
+        if (TryGetSchemaForContentType(content, "application/json", out var schema)
+            || TryGetSchemaForContentType(content, "application/x-www-form-urlencoded", out schema)
+            || TryGetSchemaForContentType(content, "multipart/form-data", out schema)
+            || TryGetSchemaForContentType(content, "*/*", out schema))
         {
-            return null;
+            return mapper.ResolveCSharpType(schema!, $"{fieldName}Request");
         }
 
-        // JSON body — standard path
-        if (content.TryGetProperty("application/json", out var json)
-            && json.TryGetProperty("schema", out var jsonSchema))
-        {
-            return SchemaMapper.ResolveCSharpType(jsonSchema, warnings);
-        }
-
-        // multipart/form-data — file upload path
-        if (content.TryGetProperty("multipart/form-data", out var multipart)
-            && multipart.TryGetProperty("schema", out var multipartSchema))
-        {
-            return ResolveMultipartInputType(multipartSchema, warnings);
-        }
-
+        // Request body exists but uses unsupported content type(s)
+        var contentTypes = string.Join(", ", content.Keys);
+        unsupported.Add($"body content-type={contentTypes}");
         return null;
     }
 
-    /// <summary>
-    /// Resolves a multipart/form-data schema to an input type name.
-    /// The schema is typically a $ref to a named schema whose binary properties
-    /// are already mapped to IFormFile by SchemaMapper.
-    /// </summary>
-    private static string? ResolveMultipartInputType(JsonElement schema, List<string> warnings)
-    {
-        return SchemaMapper.ResolveCSharpType(schema, warnings);
-    }
-
     private static (string? OutputType, int? SuccessStatus) ResolveOutputType(
-        JsonElement operation,
-        List<string> warnings)
+        OpenApiOperation operation,
+        SchemaMapper mapper,
+        string fieldName,
+        List<string> unsupported)
     {
-        if (!operation.TryGetProperty("responses", out var responses))
+        if (operation.Responses is null)
         {
             return (null, null);
         }
@@ -141,9 +121,9 @@ internal static class ContractBuilder
         string? outputType = null;
         int? successCode = null;
 
-        foreach (var resp in responses.EnumerateObject())
+        foreach (var (statusStr, response) in operation.Responses)
         {
-            if (!int.TryParse(resp.Name, out var code) || code < 200 || code >= 300)
+            if (!int.TryParse(statusStr, out var code) || code < 200 || code >= 300)
             {
                 continue;
             }
@@ -155,11 +135,19 @@ internal static class ContractBuilder
 
             successCode = code;
 
-            if (resp.Value.TryGetProperty("content", out var content)
-                && content.TryGetProperty("application/json", out var json)
-                && json.TryGetProperty("schema", out var schema))
+            if (response.Content is { Count: > 0 })
             {
-                outputType = SchemaMapper.ResolveCSharpType(schema, warnings);
+                if (TryGetSchemaForContentType(response.Content, "application/json", out var schema)
+                    || TryGetSchemaForContentType(response.Content, "*/*", out schema))
+                {
+                    outputType = mapper.ResolveCSharpType(schema!, $"{fieldName}Response");
+                }
+                else
+                {
+                    var contentTypes = string.Join(", ", response.Content.Keys);
+                    unsupported.Add($"response status={code} content-type={contentTypes}");
+                    outputType = null;
+                }
             }
             else
             {
@@ -174,45 +162,84 @@ internal static class ContractBuilder
     }
 
     private static IReadOnlyList<GeneratedErrorResponse> ResolveErrorResponses(
-        JsonElement operation,
-        List<string> warnings)
+        OpenApiOperation operation,
+        SchemaMapper mapper,
+        string fieldName,
+        List<string> unsupported)
     {
-        if (!operation.TryGetProperty("responses", out var responses))
+        if (operation.Responses is null)
         {
             return [];
         }
 
         var errors = new List<GeneratedErrorResponse>();
 
-        foreach (var resp in responses.EnumerateObject())
+        foreach (var (statusStr, response) in operation.Responses)
         {
-            if (!int.TryParse(resp.Name, out var code) || code < 300)
+            int code;
+            if (statusStr == "default")
+            {
+                code = 500;
+            }
+            else if (statusStr is "4XX" or "4xx")
+            {
+                code = 400;
+            }
+            else if (statusStr is "5XX" or "5xx")
+            {
+                code = 500;
+            }
+            else if (!int.TryParse(statusStr, out code) || code < 300)
             {
                 continue;
             }
 
-            // Only include if the response has a typed schema
-            if (resp.Value.TryGetProperty("content", out var content)
-                && content.TryGetProperty("application/json", out var json)
-                && json.TryGetProperty("schema", out var schema))
+            if (response.Content is { Count: > 0 })
             {
-                var typeName = SchemaMapper.ResolveCSharpType(schema, warnings);
-                var description = resp.Value.TryGetProperty("description", out var desc)
-                    ? desc.GetString()
-                    : null;
+                if (TryGetSchemaForContentType(response.Content, "application/json", out var schema)
+                    || TryGetSchemaForContentType(response.Content, "*/*", out schema))
+                {
+                    var typeName = mapper.ResolveCSharpType(schema!, $"{fieldName}Error{code}");
+                    var description = string.IsNullOrEmpty(response.Description) ? null : response.Description;
 
-                errors.Add(new GeneratedErrorResponse(code, typeName, description));
+                    if (!errors.Any(e => e.StatusCode == code))
+                    {
+                        errors.Add(new GeneratedErrorResponse(code, typeName, description));
+                    }
+                }
+                else
+                {
+                    // Error response has content but no supported schema
+                    var contentTypes = string.Join(", ", response.Content.Keys);
+                    unsupported.Add($"error status={code} content-type={contentTypes}");
+                }
             }
+            // Responses with no content block at all are intentionally void — not unsupported
         }
 
         return errors;
     }
 
+    private static bool TryGetSchemaForContentType(
+        IDictionary<string, OpenApiMediaType> content,
+        string contentType,
+        out IOpenApiSchema? schema)
+    {
+        if (content.TryGetValue(contentType, out var mediaType) && mediaType.Schema is not null)
+        {
+            schema = mediaType.Schema;
+            return true;
+        }
+
+        schema = null;
+        return false;
+    }
+
     private static (bool IsAnonymous, string? Scheme) ResolveSecurity(
-        JsonElement operation,
+        OpenApiOperation operation,
         string? globalSecurityScheme)
     {
-        if (!operation.TryGetProperty("security", out var security))
+        if (operation.Security is null)
         {
             // No operation-level security — use global default
             return globalSecurityScheme is not null
@@ -220,18 +247,18 @@ internal static class ContractBuilder
                 : (false, null);
         }
 
-        // Empty array → anonymous
-        if (security.GetArrayLength() == 0)
+        // Empty list → anonymous
+        if (operation.Security.Count == 0)
         {
             return (true, null);
         }
 
         // First security requirement object
-        foreach (var req in security.EnumerateArray())
+        foreach (var req in operation.Security)
         {
-            foreach (var scheme in req.EnumerateObject())
+            foreach (var (scheme, _) in req)
             {
-                return (false, scheme.Name);
+                return (false, scheme.Reference?.Id);
             }
         }
 
@@ -278,18 +305,16 @@ internal static class ContractBuilder
         return Naming.ToPascalCaseFromSegments(operationId);
     }
 
-    private static string? ExtractTag(JsonElement operation)
+    private static string? ExtractTag(OpenApiOperation operation)
     {
-        if (!operation.TryGetProperty("tags", out var tags))
+        if (operation.Tags is null || operation.Tags.Count == 0)
         {
             return null;
         }
 
-        if (tags.GetArrayLength() == 0)
-        {
-            return null;
-        }
-
-        return Naming.ToPascalCaseFromSegments(tags[0].GetString()!);
+        var firstTag = operation.Tags.FirstOrDefault();
+        return firstTag?.Name is not null
+            ? Naming.ToPascalCaseFromSegments(firstTag.Name)
+            : null;
     }
 }
