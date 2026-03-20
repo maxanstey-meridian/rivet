@@ -4,6 +4,9 @@
     <ProjectReference Include="..\Rivet.Attributes\Rivet.Attributes.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Rivet.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="/" Link="README.md" />
   </ItemGroup>
 

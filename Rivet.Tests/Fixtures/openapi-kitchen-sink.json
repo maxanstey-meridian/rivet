@@ -1,0 +1,561 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Kitchen Sink API",
+    "version": "1.0.0"
+  },
+  "security": [{ "bearer": [] }],
+  "paths": {
+    "/api/users": {
+      "get": {
+        "operationId": "users_listAll",
+        "tags": ["Users"],
+        "summary": "List all users",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/UserDto" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "users_create",
+        "tags": ["Users"],
+        "summary": "Create a new user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateUserRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserDto" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationErrorDto" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{userId}": {
+      "get": {
+        "operationId": "users_getById",
+        "tags": ["Users"],
+        "summary": "Get user by ID",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserDto" }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/NotFoundDto" }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "users_update",
+        "tags": ["Users"],
+        "summary": "Update user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateUserRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserDto" }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationErrorDto" }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/NotFoundDto" }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ConflictDto" }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable entity",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationErrorDto" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "users_delete",
+        "tags": ["Users"],
+        "summary": "Delete a user",
+        "responses": {
+          "204": { "description": "No Content" }
+        }
+      }
+    },
+    "/api/users/{userId}/avatar": {
+      "post": {
+        "operationId": "users_uploadAvatar",
+        "tags": ["Users"],
+        "summary": "Upload user avatar",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/AvatarUploadRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AvatarDto" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/projects/{projectId}/tasks/{taskId}": {
+      "get": {
+        "operationId": "organizations_getTask",
+        "tags": ["Organizations"],
+        "summary": "Get a specific task in a project",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ProjectTaskDto" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/{tenantId}/users/{userId}": {
+      "get": {
+        "operationId": "tenants_getUser",
+        "tags": ["Tenants"],
+        "summary": "Get user in tenant context",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserDto" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analytics": {
+      "get": {
+        "operationId": "analytics_summary",
+        "tags": ["Analytics"],
+        "summary": "Get analytics summary",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CollectionsDto" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "health_check",
+        "tags": ["Health"],
+        "summary": "Health check",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthStatusDto" }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "health_head",
+        "tags": ["Health"],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "options": {
+        "operationId": "health_options",
+        "tags": ["Health"],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/admin/purge": {
+      "delete": {
+        "operationId": "admin_purge",
+        "tags": ["Admin"],
+        "summary": "Purge all data",
+        "security": [{ "admin": [] }],
+        "responses": {
+          "204": { "description": "No Content" }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "summary": "System status",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthStatusDto" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Fire and forget webhook"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "UserDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "email": { "$ref": "#/components/schemas/Email" },
+          "bio": { "type": ["string", "null"] },
+          "age": { "type": "integer" },
+          "totalPoints": { "type": "integer", "format": "int64" },
+          "score": { "type": "number" },
+          "rating": { "type": "number", "format": "float" },
+          "isActive": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "website": { "$ref": "#/components/schemas/WebsiteUri" },
+          "company": { "$ref": "#/components/schemas/CompanyDto" },
+          "priority": { "$ref": "#/components/schemas/Priority" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } },
+          "role": { "$ref": "#/components/schemas/SingleRole" },
+          "homepage": { "$ref": "#/components/schemas/WebsiteUrl" },
+          "profileRef": { "$ref": "#/components/schemas/ResourceRef" }
+        },
+        "required": [
+          "id", "name", "email", "bio", "age", "totalPoints", "score",
+          "rating", "isActive", "createdAt", "priority", "tags", "metadata", "role"
+        ]
+      },
+      "AddressDto": {
+        "type": "object",
+        "properties": {
+          "street": { "type": "string" },
+          "city": { "type": "string" },
+          "zipCode": { "type": "string" }
+        },
+        "required": ["street", "city", "zipCode"]
+      },
+      "CompanyDto": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "address": { "$ref": "#/components/schemas/AddressDto" }
+        },
+        "required": ["name", "address"]
+      },
+      "ProjectTaskDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string" },
+          "assignee": { "$ref": "#/components/schemas/CompanyDto" },
+          "status": { "$ref": "#/components/schemas/TaskStatus" }
+        },
+        "required": ["id", "title", "assignee", "status"]
+      },
+      "AllPrimitivesDto": {
+        "type": "object",
+        "properties": {
+          "stringField": { "type": "string" },
+          "intField": { "type": "integer" },
+          "longField": { "type": "integer", "format": "int64" },
+          "doubleField": { "type": "number" },
+          "floatField": { "type": "number", "format": "float" },
+          "boolField": { "type": "boolean" },
+          "dateTimeField": { "type": "string", "format": "date-time" },
+          "guidField": { "type": "string", "format": "uuid" }
+        },
+        "required": ["stringField", "intField", "longField", "doubleField", "floatField", "boolField", "dateTimeField", "guidField"]
+      },
+      "NullableFieldsDto": {
+        "type": "object",
+        "properties": {
+          "nullableString": { "type": ["string", "null"] },
+          "nullableInt": { "type": ["integer", "null"] },
+          "nullableRef": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/AddressDto" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["nullableString", "nullableInt", "nullableRef"]
+      },
+      "CollectionsDto": {
+        "type": "object",
+        "properties": {
+          "stringList": { "type": "array", "items": { "type": "string" } },
+          "refList": { "type": "array", "items": { "$ref": "#/components/schemas/AddressDto" } },
+          "nestedList": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "stringDict": { "type": "object", "additionalProperties": { "type": "string" } },
+          "refDict": { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/AddressDto" } },
+          "arrayDict": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "required": ["stringList", "refList", "nestedList", "stringDict", "refDict", "arrayDict"]
+      },
+      "AllOptionalDto": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "value": { "type": "integer" }
+        }
+      },
+      "EmptyRequiredDto": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "value": { "type": "integer" }
+        },
+        "required": []
+      },
+      "EmptyDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "SinglePropDto": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "string" }
+        },
+        "required": ["value"]
+      },
+      "CreateUserRequest": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "email": { "$ref": "#/components/schemas/Email" },
+          "bio": { "type": ["string", "null"] }
+        },
+        "required": ["name", "email"]
+      },
+      "UpdateUserRequest": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "email": { "$ref": "#/components/schemas/Email" },
+          "bio": { "type": ["string", "null"] },
+          "priority": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/Priority" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["name", "email"]
+      },
+      "AvatarUploadRequest": {
+        "type": "object",
+        "properties": {
+          "file": { "type": "string", "format": "binary" },
+          "caption": { "type": "string" }
+        },
+        "required": ["file"]
+      },
+      "AvatarDto": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string" },
+          "size": { "type": "integer" }
+        },
+        "required": ["url", "size"]
+      },
+      "NotFoundDto": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" }
+        },
+        "required": ["message"]
+      },
+      "ValidationErrorDto": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "required": ["message", "errors"]
+      },
+      "ConflictDto": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" },
+          "existingId": { "type": "string", "format": "uuid" }
+        },
+        "required": ["message", "existingId"]
+      },
+      "HealthStatusDto": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" }
+        },
+        "required": ["status"]
+      },
+      "Priority": {
+        "type": "string",
+        "enum": ["low", "medium", "high", "critical"]
+      },
+      "TaskStatus": {
+        "type": "string",
+        "enum": ["my_status", "ACTIVE", "in-progress"]
+      },
+      "SingleRole": {
+        "type": "string",
+        "enum": ["admin"]
+      },
+      "Email": {
+        "type": "string",
+        "format": "email"
+      },
+      "WebsiteUri": {
+        "type": "string",
+        "format": "uri"
+      },
+      "WebsiteUrl": {
+        "type": "string",
+        "format": "url"
+      },
+      "ResourceRef": {
+        "type": "string",
+        "format": "uri-reference"
+      },
+      "UnionShape": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/AddressDto" },
+          { "$ref": "#/components/schemas/CompanyDto" }
+        ]
+      },
+      "ComposedDto": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AddressDto" },
+          { "type": "object", "properties": { "extra": { "type": "string" } } }
+        ]
+      },
+      "FlexibleDto": {
+        "anyOf": [
+          { "$ref": "#/components/schemas/AddressDto" },
+          { "$ref": "#/components/schemas/CompanyDto" }
+        ]
+      },
+      "DiscriminatedShape": {
+        "type": "object",
+        "discriminator": { "propertyName": "kind" },
+        "properties": {
+          "kind": { "type": "string" }
+        },
+        "required": ["kind"]
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "admin": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}
