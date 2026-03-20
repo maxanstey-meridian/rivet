@@ -326,6 +326,82 @@ public sealed class OpenApiRoundTripTests
         Assert.Contains(deleteTask.Responses, r => r.StatusCode == 204);
     }
 
+    [Fact]
+    public void Path_Parameter_Types_Survive_RoundTrip()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record GetTaskInput(Guid Id);
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask =
+                    Define.Get<GetTaskInput, TaskDto>("/api/tasks/{id}");
+            }
+            """;
+
+        var (endpoints, _) = RoundTrip(source);
+
+        Assert.Single(endpoints);
+        var getTask = endpoints[0];
+
+        // Route param should exist with correct type
+        var idParam = Assert.Single(getTask.Params, p => p.Source == ParamSource.Route);
+        Assert.Equal("id", idParam.Name);
+        Assert.IsType<TsType.Primitive>(idParam.Type);
+        Assert.Equal("string", ((TsType.Primitive)idParam.Type).Name);
+    }
+
+    [Fact]
+    public void Query_Parameter_Types_Survive_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record SearchInput(string Query, int Limit);
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define SearchTasks =
+                    Define.Get<SearchInput, TaskDto>("/api/tasks");
+            }
+            """;
+
+        var (endpoints, _) = RoundTrip(source);
+
+        Assert.Single(endpoints);
+        var search = endpoints[0];
+
+        // Both query params should have correct types
+        Assert.Equal(2, search.Params.Count);
+
+        var queryParam = Assert.Single(search.Params, p => p.Name == "query");
+        Assert.Equal(ParamSource.Query, queryParam.Source);
+        Assert.IsType<TsType.Primitive>(queryParam.Type);
+        Assert.Equal("string", ((TsType.Primitive)queryParam.Type).Name);
+
+        var limitParam = Assert.Single(search.Params, p => p.Name == "limit");
+        Assert.Equal(ParamSource.Query, limitParam.Source);
+        Assert.IsType<TsType.Primitive>(limitParam.Type);
+        Assert.Equal("number", ((TsType.Primitive)limitParam.Type).Name);
+    }
+
     // Note: File upload does NOT survive round-trip because the emitter creates inline
     // multipart/form-data schemas (not $refs), which the importer can't resolve back
     // to named records. File upload is tested via KitchenSinkImportTests and

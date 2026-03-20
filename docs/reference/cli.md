@@ -13,7 +13,7 @@ Rivet detects which mode to run based on the flags provided:
 | Flags | Mode |
 |---|---|
 | `--project` | Forward: C# → TypeScript |
-| `--project` + `--compile` | Forward + typia runtime validators |
+| `--project` + `--compile` | Forward + runtime validators (typia or zod) |
 | `--project` + `--openapi` | Forward + OpenAPI 3.0 JSON spec |
 | `--project` + `--check` | Verify contract coverage against implementations |
 | `--project` + `--routes` | List all discovered endpoints |
@@ -25,7 +25,8 @@ Rivet detects which mode to run based on the flags provided:
 |---|---|---|
 | `--project <path>` | | Path to the `.csproj` file to analyse |
 | `--output <dir>` | `-o` | Output directory. Omit to preview to stdout |
-| `--compile` | | Compile typia validators (requires Node.js on PATH, requires `--output`) |
+| `--compile [typia\|zod]` | | Compile validators — typia (default, requires Node.js) or zod (`fromJSONSchema`). Requires `--output` |
+| `--jsonschema` | | Emit standalone JSON Schema definitions (`schemas.ts`) |
 | `--openapi` | | Emit OpenAPI 3.0 JSON alongside TS output |
 | `--security <scheme>` | | Security scheme for OpenAPI spec |
 | `--check` | | Verify contract coverage (missing implementations, route/method mismatches) |
@@ -65,8 +66,14 @@ dotnet rivet --from-openapi spec.json --namespace MyApp.Contracts
 # Generate TS types + client
 dotnet rivet --project path/to/Api.csproj --output ./generated
 
-# Generate with runtime validators
+# Generate with runtime validators (typia, default)
 dotnet rivet --project path/to/Api.csproj --output ./generated --compile
+
+# Generate with Zod validators (no Node compile step)
+dotnet rivet --project path/to/Api.csproj --output ./generated --compile zod
+
+# Generate standalone JSON Schema definitions
+dotnet rivet --project path/to/Api.csproj --output ./generated --jsonschema
 
 # Generate with OpenAPI spec
 dotnet rivet --project path/to/Api.csproj --output ./generated --openapi

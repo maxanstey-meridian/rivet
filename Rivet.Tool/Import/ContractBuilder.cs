@@ -68,6 +68,12 @@ internal static class ContractBuilder
         // Resolve input type (requestBody — $ref resolved by library)
         var inputType = ResolveInputType(operation, mapper, fieldName, unsupported);
 
+        // If no body input, synthesize an input record from path/query parameters
+        if (inputType is null)
+        {
+            inputType = ResolveParamInputType(operation, mapper, fieldName);
+        }
+
         // Resolve output type (lowest 2xx response with JSON content)
         var (outputType, successStatus, fileContentType) = ResolveOutputType(operation, mapper, fieldName, unsupported);
 
@@ -105,6 +111,45 @@ internal static class ContractBuilder
         var contentTypes = string.Join(", ", content.Keys);
         unsupported.Add($"body content-type={contentTypes}");
         return null;
+    }
+
+    private static string? ResolveParamInputType(
+        OpenApiOperation operation, SchemaMapper mapper, string fieldName)
+    {
+        if (operation.Parameters is null or { Count: 0 })
+        {
+            return null;
+        }
+
+        var properties = new List<RecordProperty>();
+
+        foreach (var param in operation.Parameters)
+        {
+            if (param.In is not (ParameterLocation.Path or ParameterLocation.Query))
+            {
+                continue;
+            }
+
+            if (param.Schema is null || param.Name is null)
+            {
+                continue;
+            }
+
+            var csharpType = mapper.ResolveCSharpType(param.Schema, $"{fieldName}.{param.Name}");
+            properties.Add(new RecordProperty(
+                Naming.ToPascalCaseFromSegments(param.Name),
+                csharpType,
+                param.Required));
+        }
+
+        if (properties.Count == 0)
+        {
+            return null;
+        }
+
+        var recordName = $"{fieldName}Input";
+        mapper.AddExtraRecord(new GeneratedRecord(recordName, properties));
+        return recordName;
     }
 
     private static readonly HashSet<string> BinaryContentTypes = new(StringComparer.OrdinalIgnoreCase)

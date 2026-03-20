@@ -10,8 +10,8 @@ public static class MembersContract
         Define.Get<List<MemberDto>>("/api/members")
             .Description("List all team members");
 
-    public static readonly RouteDefinition<MemberDto> GetById =
-        Define.Get<MemberDto>("/api/members/{id}")
+    public static readonly RouteDefinition<GetByIdInput, MemberDto> GetById =
+        Define.Get<GetByIdInput, MemberDto>("/api/members/{id}")
             .Description("Get a member by ID")
             .Returns<ErrorDto>(404, "Member not found");
 }

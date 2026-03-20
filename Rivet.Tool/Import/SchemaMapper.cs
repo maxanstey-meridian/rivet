@@ -31,6 +31,11 @@ internal sealed class SchemaMapper
     public IReadOnlyList<GeneratedRecord> ExtraRecords => _extraRecords;
 
     /// <summary>
+    /// Register a synthetic record (e.g. parameter input records built by ContractBuilder).
+    /// </summary>
+    public void AddExtraRecord(GeneratedRecord record) => _extraRecords.Add(record);
+
+    /// <summary>
     /// Walk #/components/schemas and return C# type representations.
     /// </summary>
     public SchemaMapResult MapSchemas(IDictionary<string, IOpenApiSchema> schemas)

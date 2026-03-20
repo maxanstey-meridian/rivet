@@ -15,7 +15,7 @@ dotnet tool install --global dotnet-rivet
 **Dependencies:**
 - .NET 8+ SDK
 - `Rivet.Attributes` — marker attributes and contract builders, zero dependencies
-- Node.js on PATH (only required for `--compile`)
+- Node.js on PATH (only required for `--compile` with typia; not needed for `--compile zod`)
 
 ## 2. Mark your types and endpoints
 

@@ -4,32 +4,51 @@ Compile-time type safety catches shape mismatches at the network boundary. If th
 
 ## What `--compile` does
 
-Rivet emits a `validators.ts` file containing [typia](https://typia.io) assertion calls for every response type. With `--compile`, Rivet runs `tsc` with the typia transformer to compile these into runtime assertion functions.
+Rivet emits validators for every response type and re-emits the client to call them at every fetch boundary. Two backends are available:
 
-The generated client is re-emitted to call these validators at every fetch boundary — every API response is validated against its expected TypeScript type at runtime.
+| | `--compile` (typia) | `--compile zod` |
+|---|---|---|
+| **Validation engine** | [typia](https://typia.io) — compiled to pure JS assertion functions | [Zod 4](https://zod.dev) — `fromJSONSchema()` at runtime |
+| **Requires Node.js** | Yes (for `tsc` + typia transformer) | No |
+| **Extra npm packages** | None (Rivet bundles typia setup) | `zod` in your project |
+| **Output** | `build/validators.js` (compiled) | `schemas.ts` + `validators.ts` (directly usable) |
 
-## Prerequisites
-
-- Node.js on PATH (required for `tsc` + typia transformer)
-- No additional npm packages needed — Rivet bundles the necessary typia setup
+Both backends produce the same `assertFoo()` interface — the client doesn't need to know which is wired in.
 
 ## Command
 
 ```bash
+# typia (default)
 dotnet rivet --project path/to/Api.csproj --output ./generated --compile
+
+# Zod
+dotnet rivet --project path/to/Api.csproj --output ./generated --compile zod
 ```
 
 ## Output structure
 
+### typia
+
 ```
 generated/
-├── types/...                  # same as without --compile
-├── client/...                 # re-emitted with validator calls
-├── rivet.ts                   # same
+├── types/...
+├── client/...                 # imports from build/validators.js
+├── rivet.ts
 ├── validators.ts              # typia source (assertion functions)
 └── build/
     ├── validators.js          # compiled runtime assertions
-    └── validators.d.ts        # type declarations
+    └── validators.d.ts
+```
+
+### Zod
+
+```
+generated/
+├── types/...
+├── client/...                 # imports from validators.js
+├── rivet.ts
+├── schemas.ts                 # standalone JSON Schema definitions
+└── validators.ts              # Zod wrappers (directly usable, no compile step)
 ```
 
 ## What changes in the client
@@ -52,7 +71,17 @@ return assertTaskDto(data); // throws if shape doesn't match
 
 ## When validation fails
 
-If the server sends data that doesn't match the expected type, typia throws a `TypeGuardError` with a clear message describing which property failed and what type was expected. This surfaces immediately at the fetch boundary rather than propagating as `undefined` through your component tree.
+If the server sends data that doesn't match the expected type, the validator throws with a clear message describing which property failed and what type was expected. This surfaces immediately at the fetch boundary rather than propagating as `undefined` through your component tree.
+
+## Standalone JSON Schema
+
+If you want the schemas without wiring validation into the client:
+
+```bash
+dotnet rivet --project Api.csproj --output ./generated --jsonschema
+```
+
+This emits `schemas.ts` only — use it with `fromJSONSchema()`, ajv, or any JSON Schema consumer.
 
 ## When to use
 

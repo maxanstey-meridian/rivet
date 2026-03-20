@@ -106,7 +106,8 @@ This produces:
 Generated/
 ├── Types/
 │   ├── MemberDto.cs
-│   └── ErrorDto.cs
+│   ├── ErrorDto.cs
+│   └── GetByIdInput.cs
 └── Contracts/
     └── MembersContract.cs
 ```
@@ -121,8 +122,8 @@ public static class MembersContract
         Define.Get<List<MemberDto>>("/api/members")
             .Description("List all team members");
 
-    public static readonly RouteDefinition<MemberDto> GetById =
-        Define.Get<MemberDto>("/api/members/{id}")
+    public static readonly RouteDefinition<GetByIdInput, MemberDto> GetById =
+        Define.Get<GetByIdInput, MemberDto>("/api/members/{id}")
             .Description("Get a member by ID")
             .Returns<ErrorDto>(404, "Member not found");
 }
@@ -147,10 +148,10 @@ app.MapGet(MembersContract.List.Route, async () =>
     })).ToResult());
 
 app.MapGet(MembersContract.GetById.Route, async (string id) =>
-    (await MembersContract.GetById.Invoke(async () =>
+    (await MembersContract.GetById.Invoke(new GetByIdInput(id), async input =>
     {
         var members = GetMembers();
-        return members.First(m => m.Id == id);
+        return members.First(m => m.Id == input.Id);
     })).ToResult());
 
 app.Run();
@@ -217,6 +218,7 @@ output/
 ### What it generates
 
 - **Sealed records** for object schemas
+- **Input records** for path/query parameters (preserving types — `int`, `Guid`, etc.)
 - **Enums** for string enums
 - **Branded value objects** for string types with semantic formats (`email`, `uri`, etc.)
 - **Static contract classes** with `RouteDefinition<T>` builder chains

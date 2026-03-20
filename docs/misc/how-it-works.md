@@ -34,7 +34,7 @@ A CLI tool (like `dotnet-ef` or `dotnet-format`) can do all of this. You run it 
 5. Merges controller-sourced and contract-sourced endpoints (contract wins on collision)
 6. Groups types by C# namespace, promotes cross-referenced types to `common.ts`
 7. Emits per-controller client files and optionally `validators.ts` and `openapi.json`
-8. With `--compile`, runs `tsc` with the typia transformer to produce runtime validators
+8. With `--compile`, runs `tsc` with the typia transformer to produce runtime validators; with `--compile zod`, emits JSON Schema + Zod validators (no compile step)
 
 ### Reverse pipeline: OpenAPI → C#
 

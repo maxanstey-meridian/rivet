@@ -12,10 +12,10 @@ app.MapGet(MembersContract.List.Route, async () =>
     })).ToResult());
 
 app.MapGet(MembersContract.GetById.Route, async (string id) =>
-    (await MembersContract.GetById.Invoke(async () =>
+    (await MembersContract.GetById.Invoke(new GetByIdInput(id), async input =>
     {
         var members = GetMembers();
-        return members.First(m => m.Id == id);
+        return members.First(m => m.Id == input.Id);
     })).ToResult());
 
 app.Run();
