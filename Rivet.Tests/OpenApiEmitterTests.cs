@@ -409,7 +409,7 @@ public sealed class OpenApiEmitterTests
         var brandSchema = OpenApiEmitter.MapTsTypeToJsonSchema(
             new TsType.Brand("Email", new TsType.Primitive("string")));
         var brandJson = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(brandSchema));
-        Assert.Equal("string", brandJson.GetProperty("type").GetString());
+        Assert.Equal("#/components/schemas/Email", brandJson.GetProperty("$ref").GetString());
     }
 
     [Fact]
@@ -749,8 +749,8 @@ public sealed class OpenApiEmitterTests
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
         // Monomorphised schema must exist
-        Assert.True(schemas.TryGetProperty("PagedResultTaskDto", out var pagedSchema),
-            "Missing monomorphised schema PagedResultTaskDto");
+        Assert.True(schemas.TryGetProperty("PagedResult_TaskDto", out var pagedSchema),
+            "Missing monomorphised schema PagedResult_TaskDto");
 
         Assert.Equal("object", pagedSchema.GetProperty("type").GetString());
 
@@ -768,7 +768,7 @@ public sealed class OpenApiEmitterTests
             .GetProperty("content")
             .GetProperty("application/json")
             .GetProperty("schema");
-        Assert.Equal("#/components/schemas/PagedResultTaskDto", respSchema.GetProperty("$ref").GetString());
+        Assert.Equal("#/components/schemas/PagedResult_TaskDto", respSchema.GetProperty("$ref").GetString());
     }
 
     [Fact]
@@ -910,6 +910,321 @@ public sealed class OpenApiEmitterTests
         var errors = readResult.Diagnostic?.Errors ?? [];
         Assert.True(errors.Count == 0,
             $"OpenAPI validation errors:\n{string.Join("\n", errors.Select(e => $"  - {e.Message}"))}");
+    }
+
+    [Fact]
+    public void Nullable_Query_Param_Not_Required()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record SearchInput(string Query, string? Category);
+
+            [RivetType]
+            public sealed record ResultDto(string Id);
+
+            [RivetContract]
+            public static class SearchContract
+            {
+                public static readonly Define Search =
+                    Define.Get<SearchInput, ResultDto>("/api/search");
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var parameters = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/search")
+            .GetProperty("get")
+            .GetProperty("parameters");
+
+        // Find query and category params
+        JsonElement? queryParam = null;
+        JsonElement? categoryParam = null;
+        foreach (var p in parameters.EnumerateArray())
+        {
+            if (p.GetProperty("in").GetString() == "query")
+            {
+                if (p.GetProperty("name").GetString() == "query")
+                    queryParam = p;
+                else if (p.GetProperty("name").GetString() == "category")
+                    categoryParam = p;
+            }
+        }
+
+        Assert.NotNull(queryParam);
+        Assert.NotNull(categoryParam);
+        Assert.True(queryParam.Value.GetProperty("required").GetBoolean(), "Non-nullable query param should be required");
+        Assert.False(categoryParam.Value.GetProperty("required").GetBoolean(), "Nullable query param should not be required");
+    }
+
+    [Fact]
+    public void Void_Endpoint_Without_Status_Gets_204_Response()
+    {
+        // Void endpoint with no .Status() and no return type → should get default 204
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("doSomething", "POST", "/api/do", [], null, "test", []),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType.StringUnion>());
+
+        var responses = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/do")
+            .GetProperty("post")
+            .GetProperty("responses");
+
+        Assert.True(responses.TryGetProperty("204", out var resp204));
+        Assert.Equal("No Content", resp204.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public void InlineObject_In_Schema()
+    {
+        var inlineSchema = OpenApiEmitter.MapTsTypeToJsonSchema(
+            new TsType.InlineObject([("key", new TsType.Primitive("string")), ("value", new TsType.Primitive("number"))]));
+        var json = JsonSerializer.Serialize(inlineSchema);
+        var doc = JsonSerializer.Deserialize<JsonElement>(json);
+
+        Assert.Equal("object", doc.GetProperty("type").GetString());
+        var props = doc.GetProperty("properties");
+        Assert.Equal("string", props.GetProperty("key").GetProperty("type").GetString());
+        Assert.Equal("number", props.GetProperty("value").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public void Monomorphised_Names_Use_Underscores()
+    {
+        // Two different generic instantiations should have distinct, delimited names
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("listA", "GET", "/api/a", [],
+                new TsType.Generic("PagedResult", [new TsType.TypeRef("A")]),
+                "test",
+                [new TsResponseType(200, new TsType.Generic("PagedResult", [new TsType.TypeRef("A")]))]),
+            new("listAB", "GET", "/api/ab", [],
+                new TsType.Generic("PagedResult", [new TsType.TypeRef("AB")]),
+                "test",
+                [new TsResponseType(200, new TsType.Generic("PagedResult", [new TsType.TypeRef("AB")]))]),
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["A"] = new("A", [], [new TsPropertyDefinition("id", new TsType.Primitive("string"), false)]),
+            ["AB"] = new("AB", [], [new TsPropertyDefinition("id", new TsType.Primitive("string"), false)]),
+            ["PagedResult"] = new("PagedResult", ["T"],
+            [
+                new TsPropertyDefinition("items", new TsType.Array(new TsType.TypeParam("T")), false),
+            ]),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints, definitions,
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType.StringUnion>());
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+
+        // With underscore separator, PagedResult_A and PagedResult_AB are distinct
+        Assert.True(schemas.TryGetProperty("PagedResult_A", out _));
+        Assert.True(schemas.TryGetProperty("PagedResult_AB", out _));
+    }
+
+    [Fact]
+    public void GetTypeNameSuffix_Covers_StringUnion_And_InlineObject()
+    {
+        // StringUnion inside a generic should produce a readable suffix
+        var genericWithUnion = new TsType.Generic("Wrapper",
+            [new TsType.StringUnion(["A", "B"])]);
+        var schema = OpenApiEmitter.MapTsTypeToJsonSchema(genericWithUnion);
+        var json = JsonSerializer.Serialize(schema);
+
+        // The $ref should use the suffix — just verify it doesn't crash and produces a ref
+        Assert.Contains("$ref", json);
+        Assert.Contains("Wrapper_AB", json);
+
+        // InlineObject inside a generic
+        var genericWithInline = new TsType.Generic("Wrapper",
+            [new TsType.InlineObject([("key", new TsType.Primitive("string"))])]);
+        var schema2 = OpenApiEmitter.MapTsTypeToJsonSchema(genericWithInline);
+        var json2 = JsonSerializer.Serialize(schema2);
+        Assert.Contains("$ref", json2);
+        Assert.Contains("Wrapper_Key", json2);
+
+        // Dictionary suffix
+        var genericWithDict = new TsType.Generic("Wrapper",
+            [new TsType.Dictionary(new TsType.Primitive("string"))]);
+        var schema3 = OpenApiEmitter.MapTsTypeToJsonSchema(genericWithDict);
+        var json3 = JsonSerializer.Serialize(schema3);
+        Assert.Contains("$ref", json3);
+        Assert.Contains("Wrapper_RecordString", json3);
+    }
+
+    [Fact]
+    public void MultipartSchema_IncludesFormFieldProperties()
+    {
+        // Mixed file upload: file + text fields should all appear in multipart schema
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "upload", "POST", "/api/files",
+                [
+                    new TsEndpointParam("document", new TsType.Primitive("File"), ParamSource.File),
+                    new TsEndpointParam("title", new TsType.Primitive("string"), ParamSource.FormField),
+                    new TsEndpointParam("categoryId", new TsType.Primitive("number"), ParamSource.FormField),
+                ],
+                new TsType.TypeRef("UploadResult"),
+                "files",
+                [new TsResponseType(201, new TsType.TypeRef("UploadResult"))]),
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["UploadResult"] = new("UploadResult", [], [new TsPropertyDefinition("url", new TsType.Primitive("string"), false)]),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints, definitions,
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType.StringUnion>());
+
+        var schema = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/files")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("multipart/form-data")
+            .GetProperty("schema")
+            .GetProperty("properties");
+
+        // File field
+        Assert.True(schema.TryGetProperty("document", out var fileProp));
+        Assert.Equal("binary", fileProp.GetProperty("format").GetString());
+
+        // Non-file fields should also be present
+        Assert.True(schema.TryGetProperty("title", out var titleProp));
+        Assert.Equal("string", titleProp.GetProperty("type").GetString());
+
+        Assert.True(schema.TryGetProperty("categoryId", out var catProp));
+        Assert.Equal("number", catProp.GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public void Brand_Emits_Component_Schema_With_Extension()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Email(string Value);
+
+            [RivetType]
+            public sealed record UserDto(string Name, Email Email);
+
+            [RivetContract]
+            public static class UsersContract
+            {
+                public static readonly Define GetUser =
+                    Define.Get<UserDto>("/api/users/{id}");
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+
+        // Brand should be a component schema
+        Assert.True(schemas.TryGetProperty("Email", out var emailSchema));
+        Assert.Equal("string", emailSchema.GetProperty("type").GetString());
+        Assert.Equal("Email", emailSchema.GetProperty("x-rivet-brand").GetString());
+
+        // UserDto.email should $ref to Email
+        var emailProp = schemas.GetProperty("UserDto")
+            .GetProperty("properties")
+            .GetProperty("email");
+        Assert.Equal("#/components/schemas/Email", emailProp.GetProperty("$ref").GetString());
+    }
+
+    [Fact]
+    public void FileUpload_Emits_Extensions()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "upload", "POST", "/api/files",
+                [
+                    new TsEndpointParam("document", new TsType.Primitive("File"), ParamSource.File),
+                    new TsEndpointParam("title", new TsType.Primitive("string"), ParamSource.FormField),
+                ],
+                new TsType.TypeRef("UploadResult"),
+                "files",
+                [new TsResponseType(201, new TsType.TypeRef("UploadResult"))],
+                InputTypeName: "UploadInput"),
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["UploadResult"] = new("UploadResult", [], [new TsPropertyDefinition("url", new TsType.Primitive("string"), false)]),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints, definitions,
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType.StringUnion>());
+
+        var multipartSchema = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/files")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("multipart/form-data")
+            .GetProperty("schema");
+
+        // x-rivet-input-type preserves the record name
+        Assert.Equal("UploadInput", multipartSchema.GetProperty("x-rivet-input-type").GetString());
+
+        // File properties have x-rivet-file
+        var docProp = multipartSchema.GetProperty("properties").GetProperty("document");
+        Assert.True(docProp.GetProperty("x-rivet-file").GetBoolean());
+    }
+
+    [Fact]
+    public void Generic_Schema_Emits_Extension()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "list", "GET", "/api/tasks",
+                [],
+                new TsType.Generic("PagedResult", [new TsType.TypeRef("TaskDto")]),
+                "tasks",
+                [new TsResponseType(200, new TsType.Generic("PagedResult", [new TsType.TypeRef("TaskDto")]))]),
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["TaskDto"] = new("TaskDto", [],
+            [
+                new TsPropertyDefinition("id", new TsType.Primitive("string"), false),
+            ]),
+            ["PagedResult"] = new("PagedResult", ["T"],
+            [
+                new TsPropertyDefinition("items", new TsType.Array(new TsType.TypeParam("T")), false),
+                new TsPropertyDefinition("totalCount", new TsType.Primitive("number"), false),
+            ]),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints, definitions,
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType.StringUnion>());
+
+        var monoSchema = doc.RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("PagedResult_TaskDto");
+
+        var ext = monoSchema.GetProperty("x-rivet-generic");
+        Assert.Equal("PagedResult", ext.GetProperty("name").GetString());
+        Assert.Equal("T", ext.GetProperty("typeParams")[0].GetString());
+        Assert.Equal("TaskDto", ext.GetProperty("args").GetProperty("T").GetString());
     }
 
     private static void CollectRefs(JsonElement element, List<string> refs)

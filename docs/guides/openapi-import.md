@@ -236,6 +236,42 @@ The following produce a warning and are skipped:
 - XML-specific attributes
 - Callbacks, webhooks, links
 
+## Supported content types
+
+The importer resolves request bodies and responses for these content types, in priority order:
+
+**Request bodies:** `application/json`, `application/x-www-form-urlencoded`, `multipart/form-data`, `*/*`, then any binary (`application/octet-stream`, `image/*`, etc.), `text/*`, or `application/x-*` content type that has a schema.
+
+**Responses:** `application/json`, `*/*`, then any binary content type (→ `.ProducesFile()`), then any `text/*` content type with a schema.
+
+For binary bodies with `format: binary`, the schema resolves to `IFormFile`. For `text/*` bodies and responses, the schema typically resolves to `string`.
+
+## Unsupported content markers
+
+When an endpoint has a request body or response with a content type the importer can't resolve — either because no schema is defined, or the content type doesn't match any supported pattern — it emits a structured comment:
+
+```csharp
+// [rivet:unsupported body content-type=application/vnd.custom+xml]
+public static readonly RouteDefinition Create =
+    Define.Post("/api/things")
+        .Description("Create a thing");
+```
+
+The endpoint is still generated — routes, parameters, and any resolvable types are preserved. Only the specific body or response that couldn't be mapped is annotated.
+
+### What triggers a marker
+
+A marker appears when:
+
+- The content type doesn't match any supported pattern (e.g. a vendor-specific XML type)
+- The content type is supported but the schema is missing (e.g. `application/json` with examples but no `schema` key — this is a spec authoring error)
+
+### Working with markers
+
+1. **Search for them** — `grep -r "rivet:unsupported" ./Generated/` shows every gap at a glance.
+2. **Handle them manually** — add a hand-written endpoint alongside the generated contract.
+3. **Track upstream changes** — re-importing updates the markers if the spec changes.
+
 ## Security scheme handling
 
 If the source spec defines `securityDefinitions` / `components/securitySchemes`, the importer maps them to `.Secure()` / `.Anonymous()` calls on the generated contract endpoints.

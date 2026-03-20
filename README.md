@@ -10,6 +10,8 @@
 
 **End-to-end type safety between .NET and TypeScript.** No drift, no schema files, no codegen config.
 
+> If .NET can express a type that can be serialised on the wire, Rivet can make it TypeScript on the other side. It maps exactly what can survive a JSON boundary — no more, no less.
+
 [oRPC](https://orpc.unnoq.com) gives you this when your server is TypeScript. Rivet gives you the same DX when your server is .NET.
 
 > **New here?** Follow the [**Tutorial: Zero to Typed Client**](https://maxanstey-meridian.github.io/rivet/guides/tutorial) — `dotnet new webapi` to a fully typed TS client in under 5 minutes.
@@ -218,6 +220,8 @@ public static class TasksContract
             .Description("List all tasks");
 }
 ```
+
+The importer handles JSON, form-encoded, binary (`application/octet-stream` → `IFormFile`), and text (`text/*` → `string`) content types. Endpoints with unsupported or schema-less content types are still generated but annotated with a `// [rivet:unsupported ...]` comment — see the [OpenAPI Import guide](https://maxanstey-meridian.github.io/rivet/guides/openapi-import#unsupported-content-markers) for details.
 
 ## Check contract coverage
 

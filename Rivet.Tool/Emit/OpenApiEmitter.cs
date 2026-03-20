@@ -108,7 +108,8 @@ public static class OpenApiEmitter
         // Parameters (route + query)
         var parameters = new List<object>();
         TsEndpointParam? bodyParam = null;
-        TsEndpointParam? fileParam = null;
+        var fileParams = new List<TsEndpointParam>();
+        var formFieldParams = new List<TsEndpointParam>();
 
         foreach (var param in ep.Params)
         {
@@ -125,13 +126,14 @@ public static class OpenApiEmitter
                     break;
 
                 case ParamSource.Query:
-                    parameters.Add(new Dictionary<string, object>
+                    var queryParam = new Dictionary<string, object>
                     {
                         ["name"] = param.Name,
                         ["in"] = "query",
-                        ["required"] = true,
+                        ["required"] = param.Type is not TsType.Nullable,
                         ["schema"] = MapTsTypeToJsonSchema(param.Type),
-                    });
+                    };
+                    parameters.Add(queryParam);
                     break;
 
                 case ParamSource.Body:
@@ -139,7 +141,11 @@ public static class OpenApiEmitter
                     break;
 
                 case ParamSource.File:
-                    fileParam = param;
+                    fileParams.Add(param);
+                    break;
+
+                case ParamSource.FormField:
+                    formFieldParams.Add(param);
                     break;
             }
         }
@@ -150,8 +156,35 @@ public static class OpenApiEmitter
         }
 
         // Request body
-        if (fileParam is not null)
+        if (fileParams.Count > 0)
         {
+            var multipartProps = new Dictionary<string, object>();
+            foreach (var fp in fileParams)
+            {
+                var filePropSchema = new Dictionary<string, object>
+                {
+                    ["type"] = "string",
+                    ["format"] = "binary",
+                    ["x-rivet-file"] = true,
+                };
+                multipartProps[fp.Name] = filePropSchema;
+            }
+            foreach (var ff in formFieldParams)
+            {
+                multipartProps[ff.Name] = MapTsTypeToJsonSchema(ff.Type);
+            }
+
+            var multipartSchema = new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["properties"] = multipartProps,
+            };
+
+            if (ep.InputTypeName is not null)
+            {
+                multipartSchema["x-rivet-input-type"] = ep.InputTypeName;
+            }
+
             operation["requestBody"] = new Dictionary<string, object>
             {
                 ["required"] = true,
@@ -159,18 +192,7 @@ public static class OpenApiEmitter
                 {
                     ["multipart/form-data"] = new Dictionary<string, object>
                     {
-                        ["schema"] = new Dictionary<string, object>
-                        {
-                            ["type"] = "object",
-                            ["properties"] = new Dictionary<string, object>
-                            {
-                                [fileParam.Name] = new Dictionary<string, object>
-                                {
-                                    ["type"] = "string",
-                                    ["format"] = "binary",
-                                },
-                            },
-                        },
+                        ["schema"] = multipartSchema,
                     },
                 },
             };
@@ -227,10 +249,12 @@ public static class OpenApiEmitter
             responses[resp.StatusCode.ToString()] = respObj;
         }
 
-        if (responses.Count > 0)
+        if (responses.Count == 0)
         {
-            operation["responses"] = responses;
+            responses["204"] = new Dictionary<string, object> { ["description"] = "No Content" };
         }
+
+        operation["responses"] = responses;
 
         // Security
         if (ep.Security is not null)
@@ -287,12 +311,42 @@ public static class OpenApiEmitter
                 ["$ref"] = $"#/components/schemas/{MonomorphisedName(g)}",
             },
 
-            TsType.Brand b => MapTsTypeToJsonSchema(b.Inner),
+            TsType.Brand b => new Dictionary<string, object>
+            {
+                ["$ref"] = $"#/components/schemas/{b.Name}",
+            },
 
             TsType.TypeParam tp => FallbackTypeParam(tp),
 
+            TsType.InlineObject obj => BuildInlineObjectSchema(obj),
+
             _ => new Dictionary<string, object> { ["type"] = "object" },
         };
+    }
+
+    private static Dictionary<string, object> BuildInlineObjectSchema(TsType.InlineObject obj)
+    {
+        var properties = new Dictionary<string, object>();
+        var required = new List<string>();
+
+        foreach (var (name, fieldType) in obj.Fields)
+        {
+            properties[name] = MapTsTypeToJsonSchema(fieldType);
+            required.Add(name);
+        }
+
+        var schema = new Dictionary<string, object>
+        {
+            ["type"] = "object",
+            ["properties"] = properties,
+        };
+
+        if (required.Count > 0)
+        {
+            schema["required"] = required;
+        }
+
+        return schema;
     }
 
     private static Dictionary<string, object> MapPrimitive(TsType.Primitive p)
@@ -354,24 +408,7 @@ public static class OpenApiEmitter
     }
 
     private static string MonomorphisedName(TsType.Generic g)
-    {
-        return g.Name + string.Concat(g.TypeArguments.Select(GetTypeNameSuffix));
-    }
-
-    private static string GetTypeNameSuffix(TsType type)
-    {
-        return type switch
-        {
-            TsType.TypeRef r => r.Name,
-            TsType.TypeParam tp => tp.Name,
-            TsType.Primitive p => UpperFirst(p.Name),
-            TsType.Generic g => MonomorphisedName(g),
-            TsType.Array a => GetTypeNameSuffix(a.Element) + "Array",
-            TsType.Nullable n => GetTypeNameSuffix(n.Inner) + "Nullable",
-            TsType.Brand b => b.Name,
-            _ => "Unknown",
-        };
-    }
+        => TsType.MonomorphisedName(g);
 
     private static Dictionary<string, object> BuildSchemas(
         IReadOnlyList<TsEndpointDefinition> endpoints,
@@ -416,7 +453,29 @@ public static class OpenApiEmitter
                 typeParamMap[genericDef.TypeParameters[i]] = generic.TypeArguments[i];
             }
 
-            schemas[monoName] = BuildMonomorphisedSchema(genericDef, typeParamMap);
+            var monoSchema = BuildMonomorphisedSchema(genericDef, typeParamMap);
+            monoSchema["x-rivet-generic"] = new Dictionary<string, object>
+            {
+                ["name"] = generic.Name,
+                ["typeParams"] = genericDef.TypeParameters.ToList(),
+                ["args"] = typeParamMap.ToDictionary(
+                    kv => kv.Key,
+                    kv => (object)GetCSharpTypeName(kv.Value)),
+            };
+            schemas[monoName] = monoSchema;
+        }
+
+        // Brands as schemas with x-rivet-brand extension
+        foreach (var (name, brand) in brands)
+        {
+            if (!referencedTypes.Contains(name))
+            {
+                continue;
+            }
+
+            var brandSchema = MapTsTypeToJsonSchema(brand.Inner);
+            brandSchema["x-rivet-brand"] = name;
+            schemas[name] = brandSchema;
         }
 
         // Enums as string schemas
@@ -499,16 +558,7 @@ public static class OpenApiEmitter
     }
 
     private static TsType ResolveTypeParams(TsType type, Dictionary<string, TsType> map)
-    {
-        return type switch
-        {
-            TsType.TypeParam tp when map.TryGetValue(tp.Name, out var resolved) => resolved,
-            TsType.Array a => new TsType.Array(ResolveTypeParams(a.Element, map)),
-            TsType.Nullable n => new TsType.Nullable(ResolveTypeParams(n.Inner, map)),
-            TsType.Dictionary d => new TsType.Dictionary(ResolveTypeParams(d.Value, map)),
-            _ => type,
-        };
-    }
+        => TsType.ResolveTypeParams(type, map);
 
     private static HashSet<string> CollectReferencedTypes(
         IReadOnlyList<TsEndpointDefinition> endpoints,
@@ -637,6 +687,30 @@ public static class OpenApiEmitter
             422 => "Unprocessable Entity",
             500 => "Internal Server Error",
             _ => $"Status {statusCode}",
+        };
+    }
+
+    /// <summary>
+    /// Converts a TsType to a C# type name string for x-rivet-generic args.
+    /// </summary>
+    private static string GetCSharpTypeName(TsType type)
+    {
+        return type switch
+        {
+            TsType.Primitive p => p.Name switch
+            {
+                "string" => "string",
+                "number" => "int",
+                "boolean" => "bool",
+                _ => p.Name,
+            },
+            TsType.TypeRef r => r.Name,
+            TsType.Array a => $"List<{GetCSharpTypeName(a.Element)}>",
+            TsType.Nullable n => $"{GetCSharpTypeName(n.Inner)}?",
+            TsType.Dictionary d => $"Dictionary<string, {GetCSharpTypeName(d.Value)}>",
+            TsType.Generic g => $"{g.Name}<{string.Join(", ", g.TypeArguments.Select(GetCSharpTypeName))}>",
+            TsType.Brand b => b.Name,
+            _ => "object",
         };
     }
 

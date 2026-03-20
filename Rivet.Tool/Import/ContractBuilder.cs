@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 
 namespace Rivet.Tool.Import;
@@ -47,7 +48,7 @@ internal static class ContractBuilder
 
         return groups
             .OrderBy(g => g.Key)
-            .Select(g => new GeneratedContract($"{g.Key}Contract", g.Value))
+            .Select(g => new GeneratedContract($"{g.Key}Contract", DeduplicateFields(g.Value)))
             .ToList();
     }
 
@@ -104,6 +105,18 @@ internal static class ContractBuilder
             || TryGetSchemaForContentType(content, "multipart/form-data", out schema)
             || TryGetSchemaForContentType(content, "*/*", out schema))
         {
+            // x-rivet-input-type preserves the original record name through round-trips
+            var context = GetExtensionString(schema!, "x-rivet-input-type") ?? $"{fieldName}Request";
+            return mapper.ResolveCSharpType(schema!, context);
+        }
+
+        // Fallback: try binary or text content types with a schema
+        var fallbackType = content.Keys.FirstOrDefault(k =>
+            IsBinaryContentType(k)
+            || k.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
+            || k.StartsWith("application/x-", StringComparison.OrdinalIgnoreCase));
+        if (fallbackType is not null && TryGetSchemaForContentType(content, fallbackType, out schema))
+        {
             return mapper.ResolveCSharpType(schema!, $"{fieldName}Request");
         }
 
@@ -135,7 +148,7 @@ internal static class ContractBuilder
                 continue;
             }
 
-            var csharpType = mapper.ResolveCSharpType(param.Schema, $"{fieldName}.{param.Name}");
+            var csharpType = mapper.ResolveCSharpType(param.Schema, $"{fieldName}{Naming.ToPascalCaseFromSegments(param.Name)}");
             properties.Add(new RecordProperty(
                 Naming.ToPascalCaseFromSegments(param.Name),
                 csharpType,
@@ -217,9 +230,20 @@ internal static class ContractBuilder
                     }
                     else
                     {
-                        var contentTypes = string.Join(", ", response.Content.Keys);
-                        unsupported.Add($"response status={code} content-type={contentTypes}");
-                        outputType = null;
+                        // Try any text/* content type with a schema
+                        var textType = response.Content.Keys.FirstOrDefault(k =>
+                            k.StartsWith("text/", StringComparison.OrdinalIgnoreCase));
+                        if (textType is not null
+                            && TryGetSchemaForContentType(response.Content, textType, out schema))
+                        {
+                            outputType = mapper.ResolveCSharpType(schema!, $"{fieldName}Response");
+                        }
+                        else
+                        {
+                            var contentTypes = string.Join(", ", response.Content.Keys);
+                            unsupported.Add($"response status={code} content-type={contentTypes}");
+                            outputType = null;
+                        }
                     }
                 }
             }
@@ -339,6 +363,32 @@ internal static class ContractBuilder
         return (false, null);
     }
 
+    private static IReadOnlyList<GeneratedEndpointField> DeduplicateFields(
+        List<GeneratedEndpointField> fields)
+    {
+        var seen = new Dictionary<string, int>();
+        var result = new List<GeneratedEndpointField>(fields.Count);
+
+        foreach (var field in fields)
+        {
+            var name = field.FieldName;
+            if (seen.TryGetValue(name, out var count))
+            {
+                count++;
+                seen[name] = count;
+                var deduped = $"{name}_{count}";
+                result.Add(field with { FieldName = deduped });
+            }
+            else
+            {
+                seen[name] = 1;
+                result.Add(field);
+            }
+        }
+
+        return result;
+    }
+
     private static string DeriveFieldName(
         string? operationId,
         string httpMethod,
@@ -351,8 +401,9 @@ internal static class ContractBuilder
         }
 
         var segments = route.Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Where(s => !s.StartsWith('{'))
-            .Select(Naming.ToPascalCaseFromSegments);
+            .Select(s => s.StartsWith('{') && s.EndsWith('}')
+                ? "By" + Naming.ToPascalCaseFromSegments(s[1..^1])
+                : Naming.ToPascalCaseFromSegments(s));
 
         return Naming.ToPascalCaseFromSegments(httpMethod) + string.Concat(segments);
     }
@@ -377,6 +428,21 @@ internal static class ContractBuilder
         }
 
         return Naming.ToPascalCaseFromSegments(operationId);
+    }
+
+    private static string? GetExtensionString(IOpenApiSchema schema, string key)
+    {
+        if (schema.Extensions is null || !schema.Extensions.TryGetValue(key, out var ext))
+        {
+            return null;
+        }
+
+        if (ext is JsonNodeExtension jsonExt)
+        {
+            return jsonExt.Node?.GetValue<string>();
+        }
+
+        return null;
     }
 
     private static string? ExtractTag(OpenApiOperation operation)

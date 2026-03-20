@@ -350,4 +350,31 @@ public sealed class ClientEmitterTests
         Assert.DoesNotContain("export type GetResult", client);
         Assert.Contains("export function get(id: string, opts: { unwrap: false }): Promise<RivetResult<TaskDetailDto>>;", client);
     }
+
+    [Fact]
+    public void FalsyBodyHandling_UsesNullCheck()
+    {
+        var rivetBase = ClientEmitter.EmitRivetBase();
+
+        // Must use != null, not truthiness check, to avoid dropping 0/false/""
+        Assert.Contains("options?.body != null && !isFormData", rivetBase);
+        Assert.Contains("options?.body != null ?", rivetBase);
+        Assert.DoesNotContain("options?.body &&", rivetBase);
+        Assert.DoesNotContain("options?.body ?", rivetBase);
+    }
+
+    [Fact]
+    public void ReservedWordFunctionName_Delete_BecomesRemove()
+    {
+        // The function name "delete" should be replaced with "remove"
+        var funcName = typeof(ClientEmitter)
+            .GetMethod("SafeFunctionName", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(null, ["delete"]) as string;
+        Assert.Equal("remove", funcName);
+
+        var funcName2 = typeof(ClientEmitter)
+            .GetMethod("SafeFunctionName", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(null, ["class"]) as string;
+        Assert.Equal("_class", funcName2);
+    }
 }

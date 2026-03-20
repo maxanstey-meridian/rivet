@@ -18,7 +18,8 @@ public static class JsonSchemaEmitter
     public static string Emit(
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
-        IReadOnlyDictionary<string, TsType.StringUnion> enums)
+        IReadOnlyDictionary<string, TsType.StringUnion> enums,
+        IReadOnlyList<TsEndpointDefinition>? endpoints = null)
     {
         var defs = new Dictionary<string, object>();
 
@@ -33,9 +34,13 @@ public static class JsonSchemaEmitter
             defs[name] = BuildObjectSchema(def);
         }
 
-        // Monomorphised generics: find all Generic type refs used in definitions
+        // Monomorphised generics: find all Generic type refs used in definitions and endpoints
         var genericInstances = new Dictionary<string, TsType.Generic>();
         CollectAllGenericInstances(definitions, genericInstances);
+        if (endpoints is not null)
+        {
+            CollectGenericInstancesFromEndpoints(endpoints, genericInstances);
+        }
 
         foreach (var (monoName, generic) in genericInstances)
         {
@@ -246,16 +251,7 @@ public static class JsonSchemaEmitter
     }
 
     private static TsType ResolveTypeParams(TsType type, Dictionary<string, TsType> map)
-    {
-        return type switch
-        {
-            TsType.TypeParam tp when map.TryGetValue(tp.Name, out var resolved) => resolved,
-            TsType.Array a => new TsType.Array(ResolveTypeParams(a.Element, map)),
-            TsType.Nullable n => new TsType.Nullable(ResolveTypeParams(n.Inner, map)),
-            TsType.Dictionary d => new TsType.Dictionary(ResolveTypeParams(d.Value, map)),
-            _ => type,
-        };
-    }
+        => TsType.ResolveTypeParams(type, map);
 
     private static void CollectAllGenericInstances(
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
@@ -266,6 +262,27 @@ public static class JsonSchemaEmitter
             foreach (var prop in def.Properties)
             {
                 CollectGenericsFromType(prop.Type, genericInstances);
+            }
+        }
+    }
+
+    private static void CollectGenericInstancesFromEndpoints(
+        IReadOnlyList<TsEndpointDefinition> endpoints,
+        Dictionary<string, TsType.Generic> genericInstances)
+    {
+        foreach (var ep in endpoints)
+        {
+            foreach (var param in ep.Params)
+            {
+                CollectGenericsFromType(param.Type, genericInstances);
+            }
+
+            foreach (var resp in ep.Responses)
+            {
+                if (resp.DataType is not null)
+                {
+                    CollectGenericsFromType(resp.DataType, genericInstances);
+                }
             }
         }
     }
@@ -300,24 +317,5 @@ public static class JsonSchemaEmitter
     }
 
     internal static string MonomorphisedName(TsType.Generic g)
-    {
-        return g.Name + string.Concat(g.TypeArguments.Select(GetTypeNameSuffix));
-    }
-
-    private static string GetTypeNameSuffix(TsType type)
-    {
-        return type switch
-        {
-            TsType.TypeRef r => r.Name,
-            TsType.TypeParam tp => tp.Name,
-            TsType.Primitive p => UpperFirst(p.Name),
-            TsType.Generic g => MonomorphisedName(g),
-            TsType.Array a => GetTypeNameSuffix(a.Element) + "Array",
-            TsType.Nullable n => GetTypeNameSuffix(n.Inner) + "Nullable",
-            TsType.Brand b => b.Name,
-            _ => "Unknown",
-        };
-    }
-
-    private static string UpperFirst(string s) => Naming.ToPascalCase(s);
+        => TsType.MonomorphisedName(g);
 }

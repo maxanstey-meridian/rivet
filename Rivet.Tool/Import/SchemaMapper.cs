@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 
 namespace Rivet.Tool.Import;
@@ -44,12 +45,45 @@ internal sealed class SchemaMapper
         var enums = new List<GeneratedEnum>();
         var brands = new List<GeneratedBrand>();
 
+        // Pre-scan: collect generic template info from x-rivet-generic extensions
+        var genericTemplates = new Dictionary<string, GenericTemplateInfo>();
+        var handledByGeneric = new HashSet<string>();
+
+        foreach (var (key, schema) in schemas)
+        {
+            if (TryGetGenericExtension(schema, out var info))
+            {
+                if (!genericTemplates.ContainsKey(info!.Name))
+                {
+                    genericTemplates[info.Name] = info;
+                }
+
+                handledByGeneric.Add(key);
+            }
+        }
+
+        // Emit one generic template record per unique template name
+        foreach (var (templateName, info) in genericTemplates)
+        {
+            var templateRecord = BuildGenericTemplateRecord(templateName, info, schemas);
+            if (templateRecord is not null)
+            {
+                records.Add(templateRecord);
+            }
+        }
+
         foreach (var (key, schema) in schemas)
         {
             var name = SanitizeName(key);
 
             // Skip $ref aliases — these are resolved by the library and handled inline
             if (schema is OpenApiSchemaReference)
+            {
+                continue;
+            }
+
+            // Skip monomorphised schemas handled by generic templates
+            if (handledByGeneric.Contains(key))
             {
                 continue;
             }
@@ -62,7 +96,7 @@ internal sealed class SchemaMapper
 
             if (IsBrandedString(schema))
             {
-                brands.Add(MapBrand(name));
+                brands.Add(MapBrand(name, schema));
                 continue;
             }
 
@@ -150,7 +184,18 @@ internal sealed class SchemaMapper
                 return ResolveObjectType(schemaRef, context);
             }
 
-            return SanitizeName(schemaRef.Reference.Id!);
+            // If the target has x-rivet-generic, resolve to generic type string
+            if (TryGetGenericExtension(schemaRef, out var genericInfo))
+            {
+                return BuildGenericTypeString(genericInfo!);
+            }
+
+            // If the target would generate a type (record, enum, brand), use the ref name.
+            // Otherwise it's a primitive alias — fall through to resolve the underlying type.
+            if (WouldGenerateType(schemaRef))
+            {
+                return SanitizeName(schemaRef.Reference.Id!);
+            }
         }
 
         var type = schema.Type;
@@ -216,7 +261,8 @@ internal sealed class SchemaMapper
 
             if (hasNull && refPart is not null)
             {
-                return ResolveCSharpType(refPart, context) + "?";
+                var resolved = ResolveCSharpType(refPart, context);
+                return resolved.EndsWith("?") ? resolved : resolved + "?";
             }
         }
 
@@ -419,7 +465,7 @@ internal sealed class SchemaMapper
 
         foreach (var variant in variants)
         {
-            if (variant is OpenApiSchemaReference variantRef)
+            if (variant is OpenApiSchemaReference variantRef && WouldGenerateType(variantRef))
             {
                 var refName = SanitizeName(variantRef.Reference.Id!);
                 properties.Add(new RecordProperty($"As{refName}", $"{refName}?", false));
@@ -437,12 +483,13 @@ internal sealed class SchemaMapper
             {
                 // Inline primitive
                 var csharpType = ResolveCSharpType(variant);
-                var typeName = PrimitiveDisplayName(csharpType);
-                properties.Add(new RecordProperty($"As{typeName}", $"{csharpType}?", false));
+                var nullableType = csharpType.EndsWith("?") ? csharpType : $"{csharpType}?";
+                var typeName = PrimitiveDisplayName(csharpType.TrimEnd('?'));
+                properties.Add(new RecordProperty($"As{typeName}", nullableType, false));
             }
         }
 
-        return new GeneratedRecord(name, properties);
+        return new GeneratedRecord(name, DeduplicateProperties(properties));
     }
 
     private List<RecordProperty> ExtractProperties(IOpenApiSchema schema, string context)
@@ -455,6 +502,11 @@ internal sealed class SchemaMapper
             foreach (var (propKey, propSchema) in schema.Properties)
             {
                 var propName = Naming.ToPascalCaseFromSegments(propKey);
+                if (propName == context)
+                {
+                    propName += "Value";
+                }
+
                 var propContext = Naming.CapIdentifierLength($"{context}{propName}");
                 var isRequired = requiredSet.Contains(propKey);
                 var csharpType = ResolveCSharpType(propSchema, propContext);
@@ -468,7 +520,31 @@ internal sealed class SchemaMapper
             }
         }
 
-        return properties;
+        return DeduplicateProperties(properties);
+    }
+
+    private static List<RecordProperty> DeduplicateProperties(List<RecordProperty> properties)
+    {
+        var seen = new Dictionary<string, int>();
+        var result = new List<RecordProperty>(properties.Count);
+
+        foreach (var prop in properties)
+        {
+            var name = prop.Name;
+            if (seen.TryGetValue(name, out var count))
+            {
+                count++;
+                seen[name] = count;
+                result.Add(prop with { Name = $"{name}_{count}" });
+            }
+            else
+            {
+                seen[name] = 1;
+                result.Add(prop);
+            }
+        }
+
+        return result;
     }
 
     private GeneratedRecord MergeWithSiblingProperties(
@@ -506,7 +582,11 @@ internal sealed class SchemaMapper
             "DateTime" => "DateTime",
             "Guid" => "Guid",
             "System.Text.Json.JsonElement" => "Object",
-            _ => Naming.ToPascalCaseFromSegments(csharpType),
+            _ when csharpType.StartsWith("List<") || csharpType.StartsWith("IReadOnlyList<") =>
+                "ListOf" + Naming.StripInvalidIdentifierChars(csharpType),
+            _ when csharpType.StartsWith("Dictionary<string,") =>
+                "DictionaryOf" + Naming.StripInvalidIdentifierChars(csharpType),
+            _ => Naming.StripInvalidIdentifierChars(Naming.ToPascalCaseFromSegments(csharpType)),
         };
     }
 
@@ -619,6 +699,44 @@ internal sealed class SchemaMapper
         sb.Append('}');
     }
 
+    /// <summary>
+    /// Returns true if MapSchemas would generate a record, enum, or brand for this schema.
+    /// </summary>
+    private static bool WouldGenerateType(IOpenApiSchema schema)
+    {
+        if (IsStringEnum(schema))
+        {
+            return true;
+        }
+
+        if (IsBrandedString(schema))
+        {
+            return true;
+        }
+
+        if (schema.AllOf is { Count: > 0 })
+        {
+            return true;
+        }
+
+        if (schema.OneOf is { Count: > 0 } && !IsNullableOneOf(schema.OneOf))
+        {
+            return true;
+        }
+
+        if (schema.AnyOf is { Count: > 1 })
+        {
+            return true;
+        }
+
+        if (IsObject(schema) && schema.Properties is { Count: > 0 })
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     private static bool HasResolvableProperties(IOpenApiSchema schema)
     {
         return schema.AllOf is { Count: > 0 }
@@ -639,11 +757,15 @@ internal sealed class SchemaMapper
 
     private static string ResolveStringType(IOpenApiSchema schema)
     {
+        if (schema.Format is "binary" || HasExtension(schema, "x-rivet-file"))
+        {
+            return "IFormFile";
+        }
+
         return schema.Format switch
         {
             "date-time" => "DateTime",
             "guid" or "uuid" => "Guid",
-            "binary" => "IFormFile",
             _ => "string",
         };
     }
@@ -711,6 +833,12 @@ internal sealed class SchemaMapper
             return false;
         }
 
+        // x-rivet-brand extension takes precedence
+        if (HasExtension(schema, "x-rivet-brand"))
+        {
+            return true;
+        }
+
         return schema.Format is not null && BrandFormats.Contains(schema.Format);
     }
 
@@ -747,13 +875,165 @@ internal sealed class SchemaMapper
         return new GeneratedEnum(name, members);
     }
 
-    private static GeneratedBrand MapBrand(string name)
+    private static GeneratedBrand MapBrand(string name, IOpenApiSchema schema)
     {
-        return new GeneratedBrand(name, "string");
+        var brandName = GetExtensionString(schema, "x-rivet-brand") ?? name;
+        var innerType = ResolvePrimitiveType(schema) ?? "string";
+        return new GeneratedBrand(brandName, innerType);
+    }
+
+    private static string? ResolvePrimitiveType(IOpenApiSchema schema)
+    {
+        if (!schema.Type.HasValue)
+        {
+            return null;
+        }
+
+        var type = schema.Type.Value & ~JsonSchemaType.Null;
+        return type switch
+        {
+            JsonSchemaType.String => "string",
+            JsonSchemaType.Integer => ResolveIntegerType(schema),
+            JsonSchemaType.Number => ResolveNumberType(schema),
+            JsonSchemaType.Boolean => "bool",
+            _ => null,
+        };
+    }
+
+    private static bool HasExtension(IOpenApiSchema schema, string key)
+    {
+        return schema.Extensions is not null && schema.Extensions.ContainsKey(key);
+    }
+
+    private static string? GetExtensionString(IOpenApiSchema schema, string key)
+    {
+        if (schema.Extensions is null || !schema.Extensions.TryGetValue(key, out var ext))
+        {
+            return null;
+        }
+
+        if (ext is JsonNodeExtension jsonExt)
+        {
+            return jsonExt.Node?.GetValue<string>();
+        }
+
+        return null;
+    }
+
+    private static bool TryGetGenericExtension(IOpenApiSchema schema, out GenericTemplateInfo? info)
+    {
+        info = null;
+        if (schema.Extensions is null || !schema.Extensions.TryGetValue("x-rivet-generic", out var ext))
+        {
+            return false;
+        }
+
+        if (ext is not JsonNodeExtension jsonExt || jsonExt.Node is not JsonObject obj)
+        {
+            return false;
+        }
+
+        var name = obj["name"]?.GetValue<string>();
+        if (name is null)
+        {
+            return false;
+        }
+
+        var typeParams = new List<string>();
+        if (obj["typeParams"] is JsonArray paramsArr)
+        {
+            foreach (var p in paramsArr)
+            {
+                var val = p?.GetValue<string>();
+                if (val is not null)
+                {
+                    typeParams.Add(val);
+                }
+            }
+        }
+
+        var args = new Dictionary<string, string>();
+        if (obj["args"] is JsonObject argsObj)
+        {
+            foreach (var (k, v) in argsObj)
+            {
+                var val = v?.GetValue<string>();
+                if (val is not null)
+                {
+                    args[k] = val;
+                }
+            }
+        }
+
+        info = new GenericTemplateInfo(name, typeParams, args);
+        return true;
+    }
+
+    private GeneratedRecord? BuildGenericTemplateRecord(
+        string templateName,
+        GenericTemplateInfo info,
+        IDictionary<string, IOpenApiSchema> schemas)
+    {
+        // Find the first monomorphised instance to derive the template properties
+        IOpenApiSchema? firstInstance = null;
+        foreach (var (key, schema) in schemas)
+        {
+            if (TryGetGenericExtension(schema, out var schemaInfo) && schemaInfo!.Name == templateName)
+            {
+                firstInstance = schema;
+                break;
+            }
+        }
+
+        if (firstInstance is null)
+        {
+            return null;
+        }
+
+        // Extract properties from the monomorphised instance
+        var monoProps = ExtractProperties(firstInstance, templateName);
+
+        // Reverse-substitute concrete types back to type params using the args map
+        var reverseMap = info.Args.ToDictionary(kv => kv.Value, kv => kv.Key);
+        var templateProps = new List<RecordProperty>();
+        foreach (var prop in monoProps)
+        {
+            var templatedType = ReverseSubstituteTypes(prop.CSharpType, reverseMap);
+            templateProps.Add(prop with { CSharpType = templatedType });
+        }
+
+        return new GeneratedRecord(templateName, templateProps, info.TypeParams);
+    }
+
+    private static string BuildGenericTypeString(GenericTemplateInfo info)
+    {
+        // Build e.g. "PagedResult<TaskDto>" from template name and args
+        var argStrings = info.TypeParams.Select(tp =>
+            info.Args.TryGetValue(tp, out var concrete) ? concrete : tp);
+        return $"{info.Name}<{string.Join(", ", argStrings)}>";
+    }
+
+    private static string ReverseSubstituteTypes(string csharpType, Dictionary<string, string> reverseMap)
+    {
+        // Replace concrete type names with type parameter names
+        // Work from longest keys first to avoid partial replacements
+        var result = csharpType;
+        foreach (var (concreteType, typeParam) in reverseMap.OrderByDescending(kv => kv.Key.Length))
+        {
+            result = result.Replace(concreteType, typeParam);
+        }
+
+        return result;
     }
 }
 
 // --- Intermediate types ---
+
+internal sealed record GenericTemplateInfo(
+    string Name,
+    IReadOnlyList<string> TypeParams,
+    Dictionary<string, string> Args);
+
 
 internal sealed record SchemaMapResult(
     IReadOnlyList<GeneratedRecord> Records,
@@ -762,7 +1042,8 @@ internal sealed record SchemaMapResult(
 
 internal sealed record GeneratedRecord(
     string Name,
-    IReadOnlyList<RecordProperty> Properties);
+    IReadOnlyList<RecordProperty> Properties,
+    IReadOnlyList<string>? TypeParameters = null);
 
 internal sealed record RecordProperty(
     string Name,

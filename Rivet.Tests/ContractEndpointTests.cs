@@ -1093,4 +1093,72 @@ public sealed class ContractEndpointTests
         Assert.Null(endpoints[0].ReturnType);
         Assert.Contains("Promise<Blob>", client);
     }
+
+    [Fact]
+    public void MixedFileUpload_IncludesNonFileProperties()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadInput(IFormFile Document, string Title, int CategoryId);
+
+            [RivetType]
+            public sealed record UploadResult(string Id);
+
+            [RivetContract]
+            public static class UploadsContract
+            {
+                public static readonly Define Upload =
+                    Define.Post<UploadInput, UploadResult>("/api/uploads");
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+
+        // File param
+        var fileParam = ep.Params.FirstOrDefault(p => p.Source == ParamSource.File);
+        Assert.NotNull(fileParam);
+        Assert.Equal("document", fileParam.Name);
+
+        // Non-file properties should be FormField, not dropped
+        var titleParam = ep.Params.FirstOrDefault(p => p.Name == "title");
+        Assert.NotNull(titleParam);
+        Assert.Equal(ParamSource.FormField, titleParam.Source);
+
+        var categoryParam = ep.Params.FirstOrDefault(p => p.Name == "categoryId");
+        Assert.NotNull(categoryParam);
+        Assert.Equal(ParamSource.FormField, categoryParam.Source);
+
+        // Client should append text fields to FormData
+        Assert.Contains("fd.append(\"title\", title)", client);
+        Assert.Contains("fd.append(\"categoryId\", JSON.stringify(categoryId))", client);
+    }
+
+    [Fact]
+    public void Status_DoubleCall_Throws()
+    {
+        // Test that the guard works via the actual Rivet types — all 4 variants
+        var voidRoute = Rivet.Define.Get("/test");
+        voidRoute.Status(201);
+        Assert.Throws<InvalidOperationException>(() => voidRoute.Status(204));
+
+        var outputRoute = Rivet.Define.Get<string>("/test");
+        outputRoute.Status(201);
+        Assert.Throws<InvalidOperationException>(() => outputRoute.Status(204));
+
+        var inputOutputRoute = Rivet.Define.Get<string, string>("/test");
+        inputOutputRoute.Status(201);
+        Assert.Throws<InvalidOperationException>(() => inputOutputRoute.Status(204));
+
+        var inputRoute = Rivet.Define.Put("/test").Accepts<string>();
+        inputRoute.Status(201);
+        Assert.Throws<InvalidOperationException>(() => inputRoute.Status(204));
+    }
 }

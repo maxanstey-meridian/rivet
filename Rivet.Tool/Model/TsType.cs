@@ -39,6 +39,57 @@ public abstract record TsType
     public sealed record InlineObject(IReadOnlyList<(string Name, TsType Type)> Fields) : TsType;
 
     /// <summary>
+    /// Produces a stable, human-readable name suffix for a TsType.
+    /// Used by emitters to generate unique names for monomorphised generics, validators, etc.
+    /// </summary>
+    public static string GetNameSuffix(TsType type)
+    {
+        return type switch
+        {
+            TypeRef r => r.Name,
+            TypeParam tp => tp.Name,
+            Primitive p => char.ToUpperInvariant(p.Name[0]) + p.Name[1..],
+            Generic g => MonomorphisedName(g),
+            Array a => GetNameSuffix(a.Element) + "Array",
+            Nullable n => GetNameSuffix(n.Inner) + "Nullable",
+            Brand b => b.Name,
+            Dictionary d => "Record" + GetNameSuffix(d.Value),
+            StringUnion su => su.Members.Count <= 3
+                ? string.Concat(su.Members.Select(s => char.ToUpperInvariant(s[0]) + s[1..]))
+                : "Enum",
+            InlineObject obj => obj.Fields.Count <= 3
+                ? string.Concat(obj.Fields.Select(f => char.ToUpperInvariant(f.Name[0]) + f.Name[1..]))
+                : "Object",
+            _ => "Unknown",
+        };
+    }
+
+    /// <summary>
+    /// Produces a monomorphised name for a generic type: "PagedResult_TaskDto".
+    /// </summary>
+    public static string MonomorphisedName(Generic g)
+    {
+        return g.Name + "_" + string.Join("_", g.TypeArguments.Select(GetNameSuffix));
+    }
+
+    /// <summary>
+    /// Recursively resolves type parameters in a TsType tree using the given map.
+    /// </summary>
+    public static TsType ResolveTypeParams(TsType type, Dictionary<string, TsType> map)
+    {
+        return type switch
+        {
+            TypeParam tp when map.TryGetValue(tp.Name, out var resolved) => resolved,
+            Array a => new Array(ResolveTypeParams(a.Element, map)),
+            Nullable n => new Nullable(ResolveTypeParams(n.Inner, map)),
+            Dictionary d => new Dictionary(ResolveTypeParams(d.Value, map)),
+            Generic g => new Generic(g.Name, g.TypeArguments.Select(a => ResolveTypeParams(a, map)).ToList()),
+            InlineObject obj => new InlineObject(obj.Fields.Select(f => (f.Name, ResolveTypeParams(f.Type, map))).ToList()),
+            _ => type,
+        };
+    }
+
+    /// <summary>
     /// Recursively collects all named type references from a TsType tree.
     /// </summary>
     public static void CollectTypeRefs(TsType type, HashSet<string> names)
@@ -66,6 +117,11 @@ public abstract record TsType
                 break;
             case Brand b:
                 names.Add(b.Name);
+                break;
+            case StringUnion:
+            case Primitive:
+            case TypeParam:
+                // No type refs to collect
                 break;
             case InlineObject obj:
                 foreach (var (_, fieldType) in obj.Fields)

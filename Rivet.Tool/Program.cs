@@ -36,7 +36,7 @@ static async Task<int> Run(string[] args)
         return 1;
     }
 
-    Compilation compilation;
+    Compilation? compilation;
 
     if (projectPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
     {
@@ -47,10 +47,22 @@ static async Task<int> Run(string[] args)
         compilation = CompileFiles(options.Files);
     }
 
+    if (compilation is null)
+    {
+        Console.Error.WriteLine("Aborting — cannot proceed with compilation errors.");
+        return 1;
+    }
+
     // Single-pass discovery: scan source assembly types once instead of 4× full namespace walks
     var discovered = SymbolDiscovery.Discover(compilation);
 
     var walker = TypeWalker.Create(compilation, discovered.RivetTypes);
+    if (walker.HasErrors)
+    {
+        Console.Error.WriteLine("Aborting — type name collisions detected.");
+        return 1;
+    }
+
     var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
     var contractEndpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
 
@@ -185,7 +197,7 @@ static async Task<int> Run(string[] args)
         // JSON Schema
         if (options.JsonSchema)
         {
-            var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
+            var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums, endpoints);
             var schemasPath = Path.Combine(outputDir, "schemas.ts");
             await File.WriteAllTextAsync(schemasPath, schemasOutput);
             Console.WriteLine($"  schemas.ts → {schemasPath}");
@@ -204,7 +216,7 @@ static async Task<int> Run(string[] args)
                 Console.WriteLine("Emitting Zod validators...");
 
                 // schemas.ts (JSON Schema definitions)
-                var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
+                var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums, endpoints);
                 var schemasPath = Path.Combine(outputDir, "schemas.ts");
                 await File.WriteAllTextAsync(schemasPath, schemasOutput);
                 Console.WriteLine($"  schemas.ts → {schemasPath}");
@@ -301,7 +313,7 @@ static async Task<int> Run(string[] args)
 
         if (options.JsonSchema)
         {
-            var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
+            var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums, endpoints);
             Console.WriteLine();
             Console.WriteLine("=== schemas.ts ===");
             Console.Write(schemasOutput);
@@ -312,7 +324,7 @@ static async Task<int> Run(string[] args)
     return 0;
 }
 
-static async Task<Compilation> LoadProjectCompilation(string csprojPath)
+static async Task<Compilation?> LoadProjectCompilation(string csprojPath)
 {
     // MSBuildLocator.RegisterDefaults() fails when the tool targets a different
     // framework than the SDK on PATH (e.g. net8.0 tool, net10 Homebrew SDK).
@@ -381,12 +393,14 @@ static async Task<Compilation> LoadProjectCompilation(string csprojPath)
         {
             Console.Error.WriteLine($"  {error}");
         }
+
+        return null;
     }
 
     return compilation;
 }
 
-static Compilation CompileFiles(string[] paths)
+static Compilation? CompileFiles(string[] paths)
 {
     var syntaxTrees = new List<SyntaxTree>();
 
@@ -429,6 +443,8 @@ static Compilation CompileFiles(string[] paths)
         {
             Console.Error.WriteLine($"  {error}");
         }
+
+        return null;
     }
 
     return compilation;

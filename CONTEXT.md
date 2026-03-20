@@ -43,11 +43,25 @@ form-encoded, and multipart request bodies, plus `default` error responses (mapp
 - NuGet: Rivet.Attributes (netstandard2.0), dotnet-rivet (net8.0, PackAsTool)
 - Samples: AnnotationApi (attribute-based discovery), ContractApi (contract-driven discovery)
 
+### x-rivet-* Vendor Extensions (lossless round-trip)
+
+Three categories of vendor extensions added to OpenAPI output for lossless C# → OpenAPI → C# round-trips:
+
+1. **`x-rivet-brand`** — Brands emit as component schemas (`{ "type": "string", "x-rivet-brand": "Email" }`) instead of
+   inlining. The `Brand` arm in `MapTsTypeToJsonSchema` now produces `$ref`. Importer reads the extension in
+   `IsBrandedString()` and `MapBrand()`.
+2. **`x-rivet-input-type`** / **`x-rivet-file`** — Multipart schemas carry `x-rivet-input-type` (record name) and
+   `x-rivet-file: true` on file properties. `InputTypeName` added to `TsEndpointDefinition`, populated by
+   `ContractWalker.BuildParams` from `tInput.Name`. Importer reads in `ContractBuilder.ResolveInputType`.
+3. **`x-rivet-generic`** — Monomorphised schemas carry `{ name, typeParams, args }`. Importer pre-scans for these,
+   builds one generic template record per unique name via reverse type substitution. `ResolveCSharpTypeCore` resolves
+   `$ref` to monomorphised schemas as generic type strings (e.g. `PagedResult<TaskDto>`). `GeneratedRecord` gained
+   optional `TypeParameters`; `CSharpWriter.WriteRecord` emits `<T>` suffix.
+
+All extensions are backward-compatible — specs without `x-rivet-*` import identically to before.
+
 ### Importer Gaps (not bugs — feature work)
 
-- **Query parameters not modelled** — GET endpoints with `parameters` in the spec produce no input type. Pagination
-  params (`limit`, `starting_after`), filters, etc. are invisible in the generated contract. Needs design: should they
-  become a request record? A separate query object?
 - **Inline enum properties → string** — Fields with `enum: ["active", "inactive"]` but defined inline (not as a named
   schema) map to `string`. No compile-time safety. ~1000 such fields in Stripe alone. Generating enums for every inline
   enum would produce huge file counts; possibly a `--inline-enums` flag.
@@ -55,6 +69,27 @@ form-encoded, and multipart request bodies, plus `default` error responses (mapp
   Rivet contracts currently model security as a single string. Would need `string[]` or similar.
 - **anyOf/oneOf union shape** — Modelled as a record with nullable variant fields (`AsX?`, `AsY?`). All fields can be
   null simultaneously, which is invalid. Not a priority unless someone tries to use these for serialization.
+
+### Deep Review Bug Fixes (2026-03-20)
+
+Batch fix of 21 confirmed bugs from Claude + Codex independent audits. Key changes:
+
+- **OpenAPI**: Nullable query params emit `required: false`. Void endpoints without `.Status()` get `204` response.
+  `InlineObject` handled in `MapTsTypeToJsonSchema`. `GetTypeNameSuffix` covers all TsType variants.
+  Monomorphised generic names use `_` delimiter to prevent `PagedResultA`/`PagedResultAB` collision.
+- **Client**: `rivetFetch` uses `!= null` instead of truthiness for body check (preserves `false`, `0`, `""`).
+  Reserved word sanitization on parameter names. Unmatched route placeholder warnings at generation time.
+- **TypeWalker**: `[JsonPropertyName]` and `[JsonIgnore]` attributes respected. Type name collision detection
+  across namespaces. `HasErrors` flag for fail-fast.
+- **ContractWalker**: Non-file properties on mixed file upload records emitted as `ParamSource.FormField`.
+  Field modifier validation warning for non-static/non-readonly fields.
+- **Zod**: `Dictionary`, `StringUnion`, `InlineObject`, `TypeParam` cases added to `BuildZodExpression`.
+- **ValidatorEmitter**: Nullable types get distinct assert names (`assertFooNullable` vs `assertFoo`).
+- **Program.cs**: Compilation errors now fail-fast (return exit code 1) instead of continuing with broken compilation.
+- **EndpointBuilder**: `AcceptsFile()` added to all 4 route definition types. `Status()` throws on double-call.
+- **TsType.CollectTypeRefs**: `StringUnion`, `Primitive`, `TypeParam` explicit cases for exhaustiveness.
+
+Deferred: numeric `format` in OpenAPI (#19/#20) — requires model change to `TsType.Primitive`. Circular ref tests (#21) — existing `_visiting` guard works, just needs test coverage.
 
 ### Known Issues / Polish
 
@@ -65,6 +100,7 @@ form-encoded, and multipart request bodies, plus `default` error responses (mapp
   MSBuildWorkspace mode is the real workflow
 - No watch mode / MSBuild target for regeneration on build yet
 - No `dotnet rivet init` scaffolding command
+- `RealWorldImportTests.GitHub_Api_Imports_And_Compiles` pre-existing failure (unrelated to deep review fixes)
 
 ---
 

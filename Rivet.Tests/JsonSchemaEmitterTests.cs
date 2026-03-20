@@ -209,15 +209,15 @@ public sealed class JsonSchemaEmitterTests
         var output = EmitSchemas(source);
         var defs = ParseDefs(output);
 
-        // Monomorphised PagedResultItemDto should exist
-        Assert.True(defs.TryGetProperty("PagedResultItemDto", out var mono));
+        // Monomorphised PagedResult_ItemDto should exist
+        Assert.True(defs.TryGetProperty("PagedResult_ItemDto", out var mono));
         var itemsProp = mono.GetProperty("properties").GetProperty("items");
         Assert.Equal("array", itemsProp.GetProperty("type").GetString());
         Assert.Equal("#/$defs/ItemDto", itemsProp.GetProperty("items").GetProperty("$ref").GetString());
 
         // ContainerDto references it
         var pageProp = defs.GetProperty("ContainerDto").GetProperty("properties").GetProperty("page");
-        Assert.Equal("#/$defs/PagedResultItemDto", pageProp.GetProperty("$ref").GetString());
+        Assert.Equal("#/$defs/PagedResult_ItemDto", pageProp.GetProperty("$ref").GetString());
     }
 
     [Fact]

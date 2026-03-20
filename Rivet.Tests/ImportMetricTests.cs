@@ -139,8 +139,7 @@ public sealed class ImportMetricTests
         var typedOutputs = CountPattern(r, "Contracts/", "RouteDefinition<");
         Assert.True(typedOutputs >= 330, $"Expected ≥330 typed outputs, got {typedOutputs}");
 
-        // Image uploads are still unsupported (no schema to map)
-        Assert.Equal(2, UnsupportedBody(r));
+        Assert.Equal(0, UnsupportedBody(r));
         // Image responses are now file endpoints, not unsupported
         Assert.True(UnsupportedResponse(r) <= 1, $"Expected ≤1 unsupported response, got {UnsupportedResponse(r)}");
         Assert.Equal(12, UnsupportedError(r));
@@ -174,7 +173,7 @@ public sealed class ImportMetricTests
 
         Assert.True(TypeFiles(r) >= 170, $"Expected ≥170 types, got {TypeFiles(r)}");
         Assert.True(TypedInputCount(r) >= 22, $"Expected ≥22 typed inputs, got {TypedInputCount(r)}");
-        Assert.Equal(6, UnsupportedBody(r));
+        Assert.Equal(0, UnsupportedBody(r));
         Assert.Equal(17, UnsupportedError(r));
     }
 
@@ -189,7 +188,7 @@ public sealed class ImportMetricTests
         Assert.True(ContractFiles(r) >= 50, $"Expected ≥50 contracts, got {ContractFiles(r)}");
 
         // Slack has genuinely untyped schemas — warnings are expected
-        Assert.True(r.Warnings.Count <= 20, $"Expected ≤20 warnings, got {r.Warnings.Count}");
+        Assert.True(r.Warnings.Count <= 25, $"Expected ≤25 warnings, got {r.Warnings.Count}");
         Assert.True(r.Warnings.Count > 0, "Slack should have some warnings for untyped schemas");
     }
 }

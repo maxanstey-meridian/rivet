@@ -1,5 +1,6 @@
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -799,5 +800,118 @@ public sealed class TypeEmitterTests
         var result = Generate(source);
 
         Assert.Contains("deep: Record<string, Wrapper<string[]>[]>;", result);
+    }
+
+    [Fact]
+    public void JsonPropertyName_OverridesCamelCase()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CustomNameDto(
+                [property: JsonPropertyName("display_name")] string DisplayName,
+                string NormalProp);
+            """;
+
+        var result = Generate(source);
+
+        // display_name should be used instead of displayName
+        Assert.Contains("display_name: string;", result);
+        Assert.Contains("normalProp: string;", result);
+        Assert.DoesNotContain("displayName:", result);
+    }
+
+    [Fact]
+    public void TypeNameCollision_DifferentNamespaces_SetsHasErrors()
+    {
+        // Two types with the same simple name but different namespaces should flag an error
+        var sources = new[]
+        {
+            """
+            using Rivet;
+            namespace Alpha
+            {
+                [RivetType]
+                public sealed record TaskDto(string Id);
+            }
+            """,
+            """
+            using Rivet;
+            namespace Beta
+            {
+                [RivetType]
+                public sealed record TaskDto(string Name);
+            }
+            """,
+        };
+
+        var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
+        var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
+        var walker = Rivet.Tool.Analysis.TypeWalker.Create(compilation, discovered.RivetTypes);
+
+        Assert.True(walker.HasErrors, "TypeWalker should report error on name collision from different namespaces");
+    }
+
+    [Fact]
+    public void CollectTypeRefs_StringUnion_DoesNotThrow()
+    {
+        // StringUnion should be handled explicitly (not fall through to default)
+        var names = new HashSet<string>();
+        var type = new TsType.StringUnion(["Active", "Archived"]);
+        TsType.CollectTypeRefs(type, names);
+
+        // StringUnion has no type refs to collect
+        Assert.Empty(names);
+    }
+
+    [Fact]
+    public void CollectTypeRefs_AllVariants_Exhaustive()
+    {
+        var names = new HashSet<string>();
+
+        // Ensure all TsType variants are handled without throwing
+        TsType.CollectTypeRefs(new TsType.Primitive("string"), names);
+        TsType.CollectTypeRefs(new TsType.TypeParam("T"), names);
+        TsType.CollectTypeRefs(new TsType.StringUnion(["A"]), names);
+        TsType.CollectTypeRefs(new TsType.Nullable(new TsType.TypeRef("Foo")), names);
+        TsType.CollectTypeRefs(new TsType.Array(new TsType.TypeRef("Bar")), names);
+        TsType.CollectTypeRefs(new TsType.Dictionary(new TsType.TypeRef("Baz")), names);
+        TsType.CollectTypeRefs(new TsType.Brand("Id", new TsType.Primitive("string")), names);
+        TsType.CollectTypeRefs(new TsType.InlineObject([("k", new TsType.TypeRef("Qux"))]), names);
+        TsType.CollectTypeRefs(new TsType.Generic("G", [new TsType.TypeRef("Arg")]), names);
+
+        Assert.Contains("Foo", names);
+        Assert.Contains("Bar", names);
+        Assert.Contains("Baz", names);
+        Assert.Contains("Id", names);
+        Assert.Contains("Qux", names);
+        Assert.Contains("G", names);
+        Assert.Contains("Arg", names);
+    }
+
+    [Fact]
+    public void JsonIgnore_SkipsProperty()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record WithIgnoredDto(
+                string Visible,
+                [property: JsonIgnore] string Hidden);
+            """;
+
+        var result = Generate(source);
+
+        Assert.Contains("visible: string;", result);
+        Assert.DoesNotContain("hidden", result);
+        Assert.DoesNotContain("Hidden", result);
     }
 }

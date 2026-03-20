@@ -108,11 +108,12 @@ public sealed class SampleProjectTests : IDisposable
 
         using var http = new HttpClient { BaseAddress = new Uri(url) };
 
-        // GET /api/members → 200 + JSON array
+        // GET /api/members → 200 + JSON object (PagedResult)
         var listResponse = await http.GetAsync("/api/members", cts.Token);
         Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
         var listBody = await listResponse.Content.ReadAsStringAsync(cts.Token);
-        Assert.StartsWith("[", listBody);
+        Assert.StartsWith("{", listBody);
+        Assert.Contains("\"items\"", listBody);
 
         // POST /api/members → 201 + JSON with Id
         var invitePayload = new StringContent(
@@ -335,7 +336,7 @@ public sealed class SampleProjectTests : IDisposable
             Path.Combine(_tempDir, "rivet.ts"), ClientEmitter.EmitRivetBase());
 
         // 3. Emit schemas.ts + zod validators.ts
-        var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
+        var schemasOutput = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums, contractEndpoints);
         await File.WriteAllTextAsync(Path.Combine(_tempDir, "schemas.ts"), schemasOutput);
 
         var zodValidators = ZodValidatorEmitter.Emit(contractEndpoints, typeFileMap);
@@ -398,11 +399,14 @@ public sealed class SampleProjectTests : IDisposable
                 { status, headers: { "content-type": "application/json" } }
               );
 
-              // Valid response
+              // Valid response (PagedResult)
               if (method === "GET" && path === "/api/members") {
-                return json([
-                  { id: "a1b2c3d4-0000-0000-0000-000000000001", name: "Alice", email: "alice@example.com", role: "admin" },
-                ]);
+                return json({
+                  items: [
+                    { id: "a1b2c3d4-0000-0000-0000-000000000001", name: "Alice", email: "alice@example.com", role: "admin" },
+                  ],
+                  totalCount: 1,
+                });
               }
 
               // Valid 201 response
@@ -410,9 +414,9 @@ public sealed class SampleProjectTests : IDisposable
                 return json({ id: "a1b2c3d4-0000-0000-0000-000000000099" }, 201);
               }
 
-              // Invalid response — name should be string, not number
+              // Invalid response — totalCount should be number, not string
               if (method === "GET" && path === "/api/members/bad") {
-                return json([{ id: 123, name: 456 }]);
+                return json({ items: [{ id: 123, name: 456 }], totalCount: "not-a-number" });
               }
 
               // Void endpoints
@@ -428,10 +432,11 @@ public sealed class SampleProjectTests : IDisposable
 
             configureRivet({ baseUrl: "http://localhost:9999" });
 
-            // Valid data passes validation
-            const members = await client.list();
-            assert(Array.isArray(members), "list() should return an array");
-            assert(members[0].name === "Alice", "first member should be Alice");
+            // Valid data passes validation (PagedResult)
+            const result = await client.list();
+            assert(result.items !== undefined, "list() should return a PagedResult with items");
+            assert(result.items[0].name === "Alice", "first member should be Alice");
+            assert(result.totalCount === 1, "totalCount should be 1");
 
             // Valid invite passes
             const invited = await client.invite({ email: "new@example.com", role: "member", nickname: "newbie" });

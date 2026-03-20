@@ -14,9 +14,9 @@ namespace TaskBoard.Contracts;
 [RivetContract]
 public static class MembersContract
 {
-    /// TS: list(): Promise<MemberDto[]>
-    public static readonly RouteDefinition<List<MemberDto>> List =
-        Define.Get<List<MemberDto>>("/api/members")
+    /// TS: list(): Promise<PagedResult<MemberDto>>
+    public static readonly RouteDefinition<PagedResult<MemberDto>> List =
+        Define.Get<PagedResult<MemberDto>>("/api/members")
             .Description("List all team members");
 
     /// TS: invite(body: InviteMemberRequest): Promise<InviteMemberResponse>

@@ -88,7 +88,7 @@ public static partial class ClientEmitter
                 ...(await _config.headers?.()),
               };
               const isFormData = typeof FormData !== "undefined" && options?.body instanceof FormData;
-              if (options?.body && !isFormData) {
+              if (options?.body != null && !isFormData) {
                 headers["Content-Type"] = "application/json";
               }
               const f = _config.fetch ?? fetch;
@@ -97,7 +97,7 @@ public static partial class ClientEmitter
                 res = await f(url.toString(), {
                   method,
                   headers,
-                  body: options?.body ? (isFormData ? options.body as BodyInit : JSON.stringify(options.body)) : undefined,
+                  body: options?.body != null ? (isFormData ? options.body as BodyInit : JSON.stringify(options.body)) : undefined,
                 });
               } catch (err) {
                 const error = new RivetError(method, path, 0, undefined, undefined, { cause: err });
@@ -224,7 +224,7 @@ public static partial class ClientEmitter
         var paramParts = new List<string>();
         foreach (var p in endpoint.Params)
         {
-            paramParts.Add($"{p.Name}: {TypeEmitter.EmitTypeString(p.Type)}");
+            paramParts.Add($"{SafeParameterName(p.Name)}: {TypeEmitter.EmitTypeString(p.Type)}");
         }
 
         var paramsStr = string.Join(", ", paramParts);
@@ -232,6 +232,7 @@ public static partial class ClientEmitter
         var route = InterpolateRoute(endpoint.RouteTemplate, endpoint.Params);
 
         var fileParams = endpoint.Params.Where(p => p.Source == ParamSource.File).ToList();
+        var formFieldParams = endpoint.Params.Where(p => p.Source == ParamSource.FormField).ToList();
         var bodyParam = endpoint.Params.FirstOrDefault(p => p.Source == ParamSource.Body);
         var queryParams = endpoint.Params.Where(p => p.Source == ParamSource.Query).ToList();
 
@@ -261,11 +262,15 @@ public static partial class ClientEmitter
         }
         else if (bodyParam is not null)
         {
-            fetchOptionParts.Add($"body: {bodyParam.Name}");
+            fetchOptionParts.Add($"body: {SafeParameterName(bodyParam.Name)}");
         }
         if (queryParams.Count > 0)
         {
-            var queryEntries = queryParams.Select(p => $"{p.Name}");
+            var queryEntries = queryParams.Select(p =>
+            {
+                var safe = SafeParameterName(p.Name);
+                return safe == p.Name ? p.Name : $"{p.Name}: {safe}";
+            });
             fetchOptionParts.Add($"query: {{ {string.Join(", ", queryEntries)} }}");
         }
 
@@ -294,7 +299,19 @@ public static partial class ClientEmitter
             sb.AppendLine("  const fd = new FormData();");
             foreach (var fp in fileParams)
             {
-                sb.AppendLine($"  fd.append(\"{fp.Name}\", {fp.Name});");
+                sb.AppendLine($"  fd.append(\"{fp.Name}\", {SafeParameterName(fp.Name)});");
+            }
+            foreach (var ff in formFieldParams)
+            {
+                var safeName = SafeParameterName(ff.Name);
+                if (ff.Type is TsType.Primitive p && p.Name == "string")
+                {
+                    sb.AppendLine($"  fd.append(\"{ff.Name}\", {safeName});");
+                }
+                else
+                {
+                    sb.AppendLine($"  fd.append(\"{ff.Name}\", JSON.stringify({safeName}));");
+                }
             }
         }
 
@@ -374,17 +391,35 @@ public static partial class ClientEmitter
         return name;
     }
 
+    private static string SafeParameterName(string name)
+    {
+        if (TsReservedWords.Contains(name))
+        {
+            return $"_{name}";
+        }
+
+        return name;
+    }
+
     private static string InterpolateRoute(string template, IReadOnlyList<TsEndpointParam> allParams)
     {
         var routeParams = allParams.Where(p => p.Source == ParamSource.Route).ToList();
 
-        return RouteParamRegex().Replace(template, match =>
+        var result = RouteParamRegex().Replace(template, match =>
         {
             var paramName = match.Groups[1].Value;
             var param = routeParams.FirstOrDefault(p =>
                 string.Equals(p.Name, paramName, StringComparison.OrdinalIgnoreCase));
-            return param is not null ? $"${{{param.Name}}}" : match.Value;
+            return param is not null ? $"${{{SafeParameterName(param.Name)}}}" : match.Value;
         });
+
+        // Warn about unmatched route placeholders at generation time
+        if (RouteParamRegex().IsMatch(result))
+        {
+            Console.Error.WriteLine($"warning: unmatched route placeholder(s) in '{template}'");
+        }
+
+        return result;
     }
 
     private static HashSet<string> CollectReferencedTypeNames(IReadOnlyList<TsEndpointDefinition> endpoints)

@@ -1,0 +1,78 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Duplicate Routes Test", "version": "1.0.0" },
+  "paths": {
+    "/anything": {
+      "get": {
+        "tags": ["Anything"],
+        "summary": "Get anything",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "data": { "type": "string" } } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/anything/{anything}": {
+      "get": {
+        "tags": ["Anything"],
+        "summary": "Get anything by param",
+        "parameters": [
+          {
+            "name": "anything",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "data": { "type": "string" } } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/widgets/list": {
+      "get": {
+        "tags": ["Widgets"],
+        "operationId": "widgets_list_items",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "data": { "type": "string" } } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/widgets/all": {
+      "get": {
+        "tags": ["Widgets"],
+        "operationId": "widgets_ListItems",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "data": { "type": "string" } } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

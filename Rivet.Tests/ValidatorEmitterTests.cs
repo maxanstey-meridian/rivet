@@ -1,5 +1,6 @@
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -320,9 +321,9 @@ public sealed class ValidatorEmitterTests
 
         var (validators, _, _) = Generate(source);
 
-        // Distinct assert names for different generic specializations
-        Assert.Contains("export const assertPagedResultTaskListItemDto = typia.createAssert<PagedResult<TaskListItemDto>>();", validators);
-        Assert.Contains("export const assertPagedResultMemberDto = typia.createAssert<PagedResult<MemberDto>>();", validators);
+        // Distinct assert names for different generic specializations (underscore separator)
+        Assert.Contains("export const assertPagedResult_TaskListItemDto = typia.createAssert<PagedResult<TaskListItemDto>>();", validators);
+        Assert.Contains("export const assertPagedResult_MemberDto = typia.createAssert<PagedResult<MemberDto>>();", validators);
 
         // All nested type refs are imported
         Assert.Contains("PagedResult", validators);
@@ -417,5 +418,103 @@ public sealed class ValidatorEmitterTests
         var (zodValidators, _) = GenerateZod(source);
 
         Assert.Empty(zodValidators);
+    }
+
+    [Fact]
+    public void NullableReturnType_GetsDistinctAssertName()
+    {
+        // assertTaskDtoNullable should be distinct from assertTaskDto
+        var type = new TsType.TypeRef("TaskDto");
+        var nullableType = new TsType.Nullable(type);
+
+        var assertName = ValidatorEmitter.GetAssertName(type);
+        var nullableAssertName = ValidatorEmitter.GetAssertName(nullableType);
+
+        Assert.Equal("assertTaskDto", assertName);
+        Assert.Equal("assertTaskDtoNullable", nullableAssertName);
+        Assert.NotEqual(assertName, nullableAssertName);
+    }
+
+    [Fact]
+    public void GetAssertName_InlineObject_UsesFieldNames()
+    {
+        var inlineObj = new TsType.InlineObject([
+            ("key", new TsType.Primitive("string")),
+            ("value", new TsType.Primitive("number")),
+        ]);
+
+        var assertName = ValidatorEmitter.GetAssertName(inlineObj);
+        Assert.Equal("assertKeyValue", assertName);
+    }
+
+    [Fact]
+    public void GetAssertName_InlineObject_ManyFields_UsesObject()
+    {
+        var inlineObj = new TsType.InlineObject([
+            ("a", new TsType.Primitive("string")),
+            ("b", new TsType.Primitive("string")),
+            ("c", new TsType.Primitive("string")),
+            ("d", new TsType.Primitive("string")),
+        ]);
+
+        var assertName = ValidatorEmitter.GetAssertName(inlineObj);
+        Assert.Equal("assertObject", assertName);
+    }
+
+    [Fact]
+    public void GetAssertName_StringUnion_FewMembers_UsesNames()
+    {
+        var union = new TsType.StringUnion(["Active", "Inactive"]);
+
+        var assertName = ValidatorEmitter.GetAssertName(union);
+        Assert.Equal("assertActiveInactive", assertName);
+    }
+
+    [Fact]
+    public void GetAssertName_StringUnion_ManyMembers_UsesUnion()
+    {
+        var union = new TsType.StringUnion(["A", "B", "C", "D"]);
+
+        var assertName = ValidatorEmitter.GetAssertName(union);
+        Assert.Equal("assertEnum", assertName);
+    }
+
+    [Fact]
+    public void GetAssertName_Generic_UsesUnderscoreSeparator()
+    {
+        var generic = new TsType.Generic("PagedResult", [new TsType.TypeRef("TaskDto")]);
+
+        var assertName = ValidatorEmitter.GetAssertName(generic);
+        Assert.Equal("assertPagedResult_TaskDto", assertName);
+    }
+
+    [Fact]
+    public void ZodValidatorEmitter_Dictionary_StringUnion_InlineObject()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record MetadataDto(Dictionary<string, string> Tags);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/metadata")]
+                public static Task<MetadataDto> GetMetadata()
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (zodValidators, _) = GenerateZod(source);
+
+        // Should emit without error — Dictionary gets z.record()
+        Assert.Contains("fromJSONSchema(MetadataDtoSchema as any)", zodValidators);
     }
 }

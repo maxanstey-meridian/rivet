@@ -57,10 +57,13 @@ The generated `openapi.json` includes:
 
 ### Type representation
 
-- Generic types are monomorphised: `PagedResult<TaskDto>` becomes `PagedResultTaskDto` in the schema
-- Branded value objects (single-property records) are unwrapped to their inner primitive type (e.g., `Email` becomes `type: string`)
-- Enums are `type: string` with `enum: [...]`
-- Nullable types use `nullable: true`
+- **Generic types** are monomorphised: `PagedResult<TaskDto>` becomes `PagedResult_TaskDto` in the schema, with an `x-rivet-generic` extension that allows the [importer](/guides/openapi-import) to reconstruct the generic template
+- **Branded value objects** (single-property records) are emitted as component schemas with an `x-rivet-brand` extension (e.g., `Email` becomes `{ "type": "string", "x-rivet-brand": "Email" }`), and references use `$ref`
+- **File upload records** with `IFormFile` properties produce `multipart/form-data` schemas with `x-rivet-input-type` (preserving the record name) and `x-rivet-file` markers on file properties
+- **Enums** are `type: string` with `enum: [...]`
+- **Nullable types** use `nullable: true`
+
+The `x-rivet-*` extensions are ignored by non-Rivet consumers (valid OpenAPI 3.0). They enable [lossless round-trips](/guides/openapi-round-trips) when the spec is imported back into Rivet.
 
 ## Viewing the spec
 
@@ -73,3 +76,5 @@ The generated `openapi.json` works with any OpenAPI 3.0 tool:
 ## Consistency with import
 
 The OpenAPI emitter and the [OpenAPI importer](/guides/openapi-import) use consistent type mappings. What the emitter outputs, the importer can consume — enabling a round-trip workflow where you emit a spec, hand it to another team, and they import it back.
+
+The emitter annotates the spec with `x-rivet-*` vendor extensions so that brands, generic types, and file upload record names survive the round-trip without loss. See [OpenAPI Round-Trips](/guides/openapi-round-trips) for details.

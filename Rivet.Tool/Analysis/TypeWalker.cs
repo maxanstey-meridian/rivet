@@ -37,6 +37,9 @@ public sealed class TypeWalker
     private readonly INamedTypeSymbol? _iDictionaryType;
     private readonly INamedTypeSymbol? _iReadOnlyDictionaryType;
 
+    private readonly INamedTypeSymbol? _jsonPropertyNameType;
+    private readonly INamedTypeSymbol? _jsonIgnoreType;
+
     public TypeWalker(Compilation compilation)
     {
         // Build set of walkable assemblies: source + project references (not NuGet/framework)
@@ -69,12 +72,16 @@ public sealed class TypeWalker
         _dictionaryType = compilation.GetTypeByMetadataName("System.Collections.Generic.Dictionary`2");
         _iDictionaryType = compilation.GetTypeByMetadataName("System.Collections.Generic.IDictionary`2");
         _iReadOnlyDictionaryType = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyDictionary`2");
+
+        _jsonPropertyNameType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonPropertyNameAttribute");
+        _jsonIgnoreType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonIgnoreAttribute");
     }
 
     public IReadOnlyDictionary<string, TsTypeDefinition> Definitions => _definitions;
     public IReadOnlyDictionary<string, TsType.Brand> Brands => _brands;
     public IReadOnlyDictionary<string, TsType.StringUnion> Enums => _enums;
     public IReadOnlyDictionary<string, string?> TypeNamespaces => _typeNamespaces;
+    public bool HasErrors { get; private set; }
 
     /// <summary>
     /// Creates a walker and walks the provided [RivetType]-attributed types.
@@ -113,6 +120,20 @@ public sealed class TypeWalker
 
         if (_definitions.ContainsKey(name) || _visiting.Contains(name))
         {
+            // Check for collision: same simple name, different fully-qualified name
+            if (_definitions.ContainsKey(name))
+            {
+                var existingNs = _typeNamespaces.GetValueOrDefault(name);
+                var incomingNs = GetNamespaceGroup(definition);
+                if (existingNs != incomingNs)
+                {
+                    Console.Error.WriteLine(
+                        $"error: type name collision — '{name}' exists in namespace '{existingNs ?? "(global)"}' and '{incomingNs ?? "(global)"}'. " +
+                        "Use distinct type names or namespaces.");
+                    HasErrors = true;
+                }
+            }
+
             return;
         }
 
@@ -141,7 +162,27 @@ public sealed class TypeWalker
                 continue;
             }
 
-            var tsName = Naming.ToCamelCase(member.Name);
+            // [JsonIgnore] → skip property
+            if (_jsonIgnoreType is not null
+                && member.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIgnoreType)))
+            {
+                continue;
+            }
+
+            // [JsonPropertyName("x")] → use "x" instead of camelCase(Name)
+            string? jsonPropertyName = null;
+            if (_jsonPropertyNameType is not null)
+            {
+                var attr = member.GetAttributes()
+                    .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonPropertyNameType));
+                if (attr is not null && attr.ConstructorArguments.Length == 1
+                    && attr.ConstructorArguments[0].Value is string propName)
+                {
+                    jsonPropertyName = propName;
+                }
+            }
+
+            var tsName = jsonPropertyName ?? Naming.ToCamelCase(member.Name);
             var tsType = MapTypeCore(member.Type);
             var isOptional = IsOptionalProperty(member);
 

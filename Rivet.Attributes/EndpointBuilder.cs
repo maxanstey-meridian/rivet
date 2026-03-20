@@ -10,6 +10,7 @@ namespace Rivet;
 public sealed class RouteDefinition<TInput, TOutput>
 {
     private int _successStatus;
+    private bool _statusSet;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
@@ -29,7 +30,13 @@ public sealed class RouteDefinition<TInput, TOutput>
 
     public RouteDefinition<TInput, TOutput> Status(int statusCode)
     {
+        if (_statusSet)
+        {
+            throw new InvalidOperationException($"Status already set to {_successStatus} — cannot set to {statusCode}. Call .Status() only once.");
+        }
+
         _successStatus = statusCode;
+        _statusSet = true;
         return this;
     }
 
@@ -37,6 +44,12 @@ public sealed class RouteDefinition<TInput, TOutput>
     public RouteDefinition<TInput, TOutput> Anonymous() => this;
     public RouteDefinition<TInput, TOutput> Secure(string scheme) => this;
     public RouteDefinition<TInput, TOutput> ProducesFile(string contentType = "application/octet-stream") => this;
+
+    /// <summary>
+    /// Marks this endpoint as accepting a file upload (multipart/form-data).
+    /// The generated TS client will accept a File parameter.
+    /// </summary>
+    public RouteDefinition<TInput, TOutput> AcceptsFile() => this;
 
     /// <summary>
     /// Execute the endpoint handler with type-safe input and output.
@@ -56,6 +69,7 @@ public sealed class RouteDefinition<TInput, TOutput>
 public sealed class RouteDefinition<TOutput>
 {
     private int _successStatus;
+    private bool _statusSet;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
@@ -75,7 +89,13 @@ public sealed class RouteDefinition<TOutput>
 
     public RouteDefinition<TOutput> Status(int statusCode)
     {
+        if (_statusSet)
+        {
+            throw new InvalidOperationException($"Status already set to {_successStatus} — cannot set to {statusCode}. Call .Status() only once.");
+        }
+
         _successStatus = statusCode;
+        _statusSet = true;
         return this;
     }
 
@@ -109,6 +129,7 @@ public sealed class RouteDefinition<TOutput>
 public sealed class InputRouteDefinition<TInput>
 {
     private int _successStatus;
+    private bool _statusSet;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
@@ -128,7 +149,13 @@ public sealed class InputRouteDefinition<TInput>
 
     public InputRouteDefinition<TInput> Status(int statusCode)
     {
+        if (_statusSet)
+        {
+            throw new InvalidOperationException($"Status already set to {_successStatus} — cannot set to {statusCode}. Call .Status() only once.");
+        }
+
         _successStatus = statusCode;
+        _statusSet = true;
         return this;
     }
 
@@ -136,6 +163,12 @@ public sealed class InputRouteDefinition<TInput>
     public InputRouteDefinition<TInput> Anonymous() => this;
     public InputRouteDefinition<TInput> Secure(string scheme) => this;
     public InputRouteDefinition<TInput> ProducesFile(string contentType = "application/octet-stream") => this;
+
+    /// <summary>
+    /// Marks this endpoint as accepting a file upload (multipart/form-data).
+    /// The generated TS client will accept a File parameter.
+    /// </summary>
+    public InputRouteDefinition<TInput> AcceptsFile() => this;
 
     /// <summary>
     /// Execute the endpoint handler with type-safe input (void output).
@@ -155,6 +188,7 @@ public sealed class InputRouteDefinition<TInput>
 public sealed class RouteDefinition
 {
     private int _successStatus;
+    private bool _statusSet;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
@@ -174,7 +208,13 @@ public sealed class RouteDefinition
 
     public RouteDefinition Status(int statusCode)
     {
+        if (_statusSet)
+        {
+            throw new InvalidOperationException($"Status already set to {_successStatus} — cannot set to {statusCode}. Call .Status() only once.");
+        }
+
         _successStatus = statusCode;
+        _statusSet = true;
         return this;
     }
 
@@ -187,6 +227,12 @@ public sealed class RouteDefinition
     /// The generated TS client returns Blob; the OpenAPI spec emits the given content type with format: binary.
     /// </summary>
     public RouteDefinition ProducesFile(string contentType = "application/octet-stream") => this;
+
+    /// <summary>
+    /// Marks this endpoint as accepting a file upload (multipart/form-data).
+    /// The generated TS client will accept a File parameter.
+    /// </summary>
+    public RouteDefinition AcceptsFile() => this;
 
     /// <summary>
     /// Convert to an input-only endpoint (accepts a body, returns void).

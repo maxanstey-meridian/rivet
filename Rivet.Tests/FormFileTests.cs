@@ -153,6 +153,49 @@ public sealed class FormFileTests
     }
 
     [Fact]
+    public void EndpointWalker_MixedUpload_ClassifiesFormFields()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadResult(Guid Id);
+
+            [Route("api/documents")]
+            public sealed class DocumentsController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(typeof(UploadResult), 201)]
+                public Task<IActionResult> Upload(
+                    IFormFile file,
+                    string title,
+                    CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var typeFileMap = BuildTypeFileMap(walker);
+        var client = ClientEmitter.EmitControllerClient("documents", endpoints, typeFileMap);
+
+        // file param is File, title is a FormField appended to FormData
+        Assert.Contains("file: File, title: string", client);
+        Assert.Contains("const fd = new FormData();", client);
+        Assert.Contains("fd.append(\"file\", file);", client);
+        Assert.Contains("fd.append(\"title\", title);", client);
+    }
+
+    [Fact]
     public void Contract_IFormFile_InTInput_EmitsFormData()
     {
         var source = """

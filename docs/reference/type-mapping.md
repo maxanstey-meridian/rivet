@@ -13,14 +13,14 @@
 | `Dictionary<string, T>`, `IReadOnlyDictionary<string, T>` | `Record<string, T>` | `type: object, additionalProperties: {...}` |
 | `sealed record` | `type { ... }` (transitive discovery, including project references) | `type: object, properties: {...}` |
 | `enum` (with `JsonStringEnumConverter`) | `type Status = "A" \| "B"` | `type: string, enum: [...]` |
-| `PagedResult<T>` (generic record) | `PagedResult<T>` | Monomorphised: `PagedResultT` |
+| `PagedResult<T>` (generic record) | `PagedResult<T>` | Monomorphised: `PagedResult_TaskDto` + `x-rivet-generic` |
 | `JsonElement`, `JsonNode` | `unknown` | `{}` |
 | `JsonObject` | `Record<string, unknown>` | `type: object` |
 | `JsonArray` | `unknown[]` | `type: array` |
-| `Email(string Value)` (single-property VO) | `string & { readonly __brand: "Email" }` | `type: string` (brand unwrapped) |
+| `Email(string Value)` (single-property VO) | `string & { readonly __brand: "Email" }` | `$ref` to component schema with `x-rivet-brand` |
 
 ::: info Note
-The OpenAPI emitter maps from the TypeScript type model, which does not carry `format` or `integer` vs `number` distinctions. All numeric C# types emit as `type: number`, all string-like types emit as `type: string`, and branded value objects are unwrapped to their inner primitive. The [importer](/guides/openapi-import) does use `format` fields when reading specs — the asymmetry is intentional (richer input, simpler output).
+The OpenAPI emitter maps from the TypeScript type model, which does not carry `format` or `integer` vs `number` distinctions. All numeric C# types emit as `type: number`, all string-like types emit as `type: string`. Branded value objects are emitted as component schemas with `x-rivet-brand` so they survive [round-trips](/guides/openapi-round-trips). The [importer](/guides/openapi-import) does use `format` fields when reading specs — the asymmetry is intentional (richer input, simpler output).
 :::
 
 ## Cross-project type discovery
@@ -72,9 +72,15 @@ Multi-property records are emitted as regular object types: `Money(decimal Amoun
 
 ## Generic type monomorphisation
 
-In the OpenAPI spec, generic types are monomorphised — each concrete instantiation becomes its own schema. For example:
+In the OpenAPI spec, generic types are monomorphised — each concrete instantiation becomes its own schema with an `_` delimiter:
 
-- `PagedResult<TaskDto>` → `PagedResultTaskDto`
-- `PagedResult<MemberDto>` → `PagedResultMemberDto`
+- `PagedResult<TaskDto>` → `PagedResult_TaskDto`
+- `PagedResult<MemberDto>` → `PagedResult_MemberDto`
 
 In TypeScript, the generic is preserved as `PagedResult<T>` with a type parameter.
+
+When emitted by Rivet, each monomorphised schema carries an `x-rivet-generic` extension. The [importer](/guides/openapi-import) uses this to reconstruct the generic template — so `PagedResult_TaskDto` + `PagedResult_MemberDto` import back as a single `PagedResult<T>` record. See [OpenAPI Round-Trips](/guides/openapi-round-trips) for details.
+
+## Vendor extensions reference
+
+See [Vendor Extensions](/reference/vendor-extensions) for the full `x-rivet-*` extension spec.

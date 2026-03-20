@@ -1,0 +1,64 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Union Types Test", "version": "1.0.0" },
+  "paths": {
+    "/items": {
+      "get": {
+        "tags": ["Items"],
+        "operationId": "items_list",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ItemResponse" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ItemResponse": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/DetailDto" },
+              { "type": "array", "items": { "type": "string" } },
+              { "type": "integer" }
+            ]
+          },
+          "nullableRef": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/NullableInner" },
+              { "type": "null" }
+            ]
+          },
+          "doubleNullable": {
+            "oneOf": [
+              { "type": ["string", "null"] },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["value"]
+      },
+      "DetailDto": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" }
+        },
+        "required": ["name"]
+      },
+      "NullableInner": {
+        "type": "object",
+        "properties": {
+          "label": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

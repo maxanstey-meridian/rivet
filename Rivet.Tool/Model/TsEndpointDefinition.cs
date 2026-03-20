@@ -13,7 +13,8 @@ public sealed record TsEndpointDefinition(
     IReadOnlyList<TsResponseType> Responses,
     string? Description = null,
     EndpointSecurity? Security = null,
-    string? FileContentType = null);
+    string? FileContentType = null,
+    string? InputTypeName = null);
 
 /// <summary>
 /// Security metadata for an endpoint. null = inherit CLI default.
@@ -36,4 +37,5 @@ public enum ParamSource
     Body,
     Query,
     File,
+    FormField,
 }

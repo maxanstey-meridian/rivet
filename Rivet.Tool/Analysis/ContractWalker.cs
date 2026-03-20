@@ -72,6 +72,12 @@ public static class ContractWalker
                     continue;
                 }
 
+                if (!field.IsStatic || !field.IsReadOnly)
+                {
+                    Console.Error.WriteLine(
+                        $"warning: {type.Name}.{field.Name} should be 'static readonly' — it may not be read correctly at generation time");
+                }
+
                 var endpoint = BuildEndpointFromField(field, controllerName, compilation, typeWalker);
                 if (endpoint is not null)
                 {
@@ -244,7 +250,7 @@ public static class ContractWalker
         TsType? returnType = tOutput is not null ? typeWalker.MapType(tOutput) : null;
 
         // Build params based on HTTP method and TInput
-        var parameters = BuildParams(httpMethod, route, tInput, typeWalker, acceptsFile);
+        var (parameters, inputTypeName) = BuildParams(httpMethod, route, tInput, typeWalker, acceptsFile);
 
         // Add success response to responses list
         if (returnType is not null)
@@ -260,13 +266,13 @@ public static class ContractWalker
 
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
 
-        return new TsEndpointDefinition(name, httpMethod, route, parameters, returnType, controllerName, responses, endpointDescription, security, fileContentType);
+        return new TsEndpointDefinition(name, httpMethod, route, parameters, returnType, controllerName, responses, endpointDescription, security, fileContentType, inputTypeName);
     }
 
     private static int DefaultSuccessCode(string httpMethod) =>
         httpMethod is "POST" ? 201 : 200;
 
-    private static IReadOnlyList<TsEndpointParam> BuildParams(
+    private static (IReadOnlyList<TsEndpointParam> Params, string? InputTypeName) BuildParams(
         string httpMethod,
         string route,
         ITypeSymbol? tInput,
@@ -276,6 +282,7 @@ public static class ContractWalker
         var routeParamNames = RouteParser.ParseRouteParamNames(route);
         var parameters = new List<TsEndpointParam>();
         var hasBody = httpMethod is "POST" or "PUT" or "PATCH";
+        string? inputTypeName = null;
 
         if (hasBody)
         {
@@ -301,6 +308,7 @@ public static class ContractWalker
                 // Check if TInput is a record containing IFormFile properties
                 else if (HasFormFileProperty(tInput))
                 {
+                    inputTypeName = tInput.Name;
                     foreach (var member in tInput.GetMembers())
                     {
                         if (member is not IPropertySymbol prop || prop.IsImplicitlyDeclared)
@@ -315,8 +323,14 @@ public static class ContractWalker
                                 new TsType.Primitive("File"),
                                 ParamSource.File));
                         }
-                        // Non-file properties on a file upload record are skipped —
-                        // FormData doesn't carry typed JSON alongside the file
+                        else
+                        {
+                            // Non-file properties on a mixed upload record → form fields
+                            parameters.Add(new TsEndpointParam(
+                                Naming.ToCamelCase(prop.Name),
+                                typeWalker.MapType(prop.Type),
+                                ParamSource.FormField));
+                        }
                     }
                 }
                 else
@@ -367,7 +381,7 @@ public static class ContractWalker
             }
         }
 
-        return parameters;
+        return (parameters, inputTypeName);
     }
 
     private static bool IsFormFileType(ITypeSymbol type) =>

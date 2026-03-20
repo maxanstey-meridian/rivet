@@ -217,11 +217,20 @@ public static class EndpointWalker
 
         var parameters = new List<TsEndpointParam>();
 
+        // Pre-scan: if any parameter is IFormFile, non-route/non-file params become FormField
+        var hasFileParam = method.Parameters.Any(p => FormFileTypeNames.Contains(p.Type.ToDisplayString()));
+
         foreach (var param in method.Parameters)
         {
             var source = ClassifyParam(param, routeParamNames);
             if (source is null)
             {
+                // In mixed upload methods, unclassified params are form fields
+                if (hasFileParam)
+                {
+                    parameters.Add(new TsEndpointParam(param.Name, typeWalker.MapType(param.Type), ParamSource.FormField));
+                }
+
                 continue;
             }
 

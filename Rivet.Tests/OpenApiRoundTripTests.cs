@@ -402,8 +402,368 @@ public sealed class OpenApiRoundTripTests
         Assert.Equal("number", ((TsType.Primitive)limitParam.Type).Name);
     }
 
-    // Note: File upload does NOT survive round-trip because the emitter creates inline
-    // multipart/form-data schemas (not $refs), which the importer can't resolve back
-    // to named records. File upload is tested via KitchenSinkImportTests and
-    // OpenApiImporterTests instead.
+    [Fact]
+    public void Brand_Survives_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Email(string Value);
+
+            [RivetType]
+            public sealed record UserDto(string Name, Email Email);
+
+            [RivetContract]
+            public static class UsersContract
+            {
+                public static readonly Define GetUser =
+                    Define.Get<UserDto>("/api/users/{id}");
+            }
+            """;
+
+        var (_, walker) = RoundTrip(source);
+
+        // Brand should survive as a brand, not collapse to plain string
+        Assert.True(walker.Brands.ContainsKey("Email"),
+            $"Expected brand 'Email' but got brands: [{string.Join(", ", walker.Brands.Keys)}]");
+
+        // UserDto should reference Email as a Brand or TypeRef (not plain string)
+        var user = walker.Definitions["UserDto"];
+        var emailProp = user.Properties.First(p => p.Name == "email");
+        Assert.True(
+            emailProp.Type is TsType.Brand { Name: "Email" } or TsType.TypeRef { Name: "Email" },
+            $"Expected Brand(Email) or TypeRef(Email) but got {emailProp.Type}");
+    }
+
+    [Fact]
+    public void FileUpload_InputTypeName_Survives_RoundTrip()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadInput(IFormFile Document, string Title);
+
+            [RivetType]
+            public sealed record UploadResult(string Url);
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly Define Upload =
+                    Define.Post<UploadInput, UploadResult>("/api/files")
+                        .Status(201);
+            }
+            """;
+
+        // Forward: C# → OpenAPI
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var openApiJson = OpenApiEmitter.Emit(
+            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        // Verify the extension is in the JSON
+        var jsonDoc = System.Text.Json.JsonDocument.Parse(openApiJson);
+        var multipartSchema = jsonDoc.RootElement.GetProperty("paths")
+            .GetProperty("/api/files")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("multipart/form-data")
+            .GetProperty("schema");
+        Assert.Equal("UploadInput", multipartSchema.GetProperty("x-rivet-input-type").GetString());
+
+        // Reverse: OpenAPI → import → compile → walk
+        var importResult = OpenApiImporter.Import(
+            openApiJson, new ImportOptions("RoundTrip"));
+
+        // The input type name should be "UploadInput" (not "UploadRequest")
+        var contractFile = importResult.Files.First(f => f.FileName.Contains("Contract"));
+        Assert.Contains("UploadInput", contractFile.Content);
+
+        // Full recompile → walk: verify the record is named UploadInput and the endpoint references it
+        var recompilation = CompilationHelper.CreateCompilationFromMultiple(
+            importResult.Files.Select(f => f.Content).ToArray());
+        var (reDiscovered, reWalker) = CompilationHelper.DiscoverAndWalk(recompilation);
+        var reEndpoints = ContractWalker.Walk(recompilation, reWalker, reDiscovered.ContractTypes);
+
+        var upload = Assert.Single(reEndpoints, e => e.HttpMethod == "POST");
+        // The input type should be UploadInput (not UploadRequest or anonymous)
+        var bodyParam = Assert.Single(upload.Params, p => p.Source == ParamSource.Body);
+        Assert.True(bodyParam.Type is TsType.TypeRef { Name: "UploadInput" },
+            $"Expected TypeRef(UploadInput) but got {bodyParam.Type}");
+        // Note: File/FormField decomposition requires AspNetCore reference in the compilation,
+        // which test compilations don't have. The key assertion is that the name is preserved.
+    }
+
+    [Fact]
+    public void Generic_Survives_RoundTrip()
+    {
+        var source = """
+            using System.Collections.Generic;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record PagedResult<T>(IReadOnlyList<T> Items, int TotalCount);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define ListTasks =
+                    Define.Get<PagedResult<TaskDto>>("/api/tasks");
+            }
+            """;
+
+        var (endpoints, walker) = RoundTrip(source);
+
+        // The generic template should survive
+        Assert.True(walker.Definitions.ContainsKey("PagedResult"),
+            $"Expected generic 'PagedResult' but got definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
+
+        var pagedResult = walker.Definitions["PagedResult"];
+        Assert.True(pagedResult.TypeParameters.Count > 0,
+            "PagedResult should have type parameters");
+        Assert.Equal("T", pagedResult.TypeParameters[0]);
+
+        // Template properties should use type parameter T, not concrete type
+        var itemsProp = pagedResult.Properties.First(p => p.Name == "items");
+        Assert.True(itemsProp.Type is TsType.Array { Element: TsType.TypeParam { Name: "T" } },
+            $"Expected Array(TypeParam(T)) but got {itemsProp.Type}");
+        var countProp = pagedResult.Properties.First(p => p.Name == "totalCount");
+        Assert.IsType<TsType.Primitive>(countProp.Type);
+
+        // The endpoint return type should be Generic, not a flat TypeRef
+        var listEndpoint = endpoints.First(e => e.HttpMethod == "GET");
+        Assert.IsType<TsType.Generic>(listEndpoint.ReturnType);
+        var generic = (TsType.Generic)listEndpoint.ReturnType!;
+        Assert.Equal("PagedResult", generic.Name);
+        Assert.Single(generic.TypeArguments);
+        Assert.IsType<TsType.TypeRef>(generic.TypeArguments[0]);
+        Assert.Equal("TaskDto", ((TsType.TypeRef)generic.TypeArguments[0]).Name);
+    }
+
+    [Fact]
+    public void Generic_Multiple_Instantiations_Survive_RoundTrip()
+    {
+        var source = """
+            using System.Collections.Generic;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record UserDto(string Id, string Name);
+
+            [RivetType]
+            public sealed record PagedResult<T>(IReadOnlyList<T> Items, int TotalCount);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define ListTasks =
+                    Define.Get<PagedResult<TaskDto>>("/api/tasks");
+            }
+
+            [RivetContract]
+            public static class UsersContract
+            {
+                public static readonly Define ListUsers =
+                    Define.Get<PagedResult<UserDto>>("/api/users");
+            }
+            """;
+
+        var (endpoints, walker) = RoundTrip(source);
+
+        // Only one PagedResult template should exist (not PagedResultTaskDto + PagedResultUserDto)
+        Assert.True(walker.Definitions.ContainsKey("PagedResult"));
+        var pagedResult = walker.Definitions["PagedResult"];
+        Assert.True(pagedResult.TypeParameters.Count > 0);
+
+        // Both endpoints should use Generic return types
+        var taskEndpoint = endpoints.First(e => e.RouteTemplate == "/api/tasks");
+        Assert.IsType<TsType.Generic>(taskEndpoint.ReturnType);
+
+        var userEndpoint = endpoints.First(e => e.RouteTemplate == "/api/users");
+        Assert.IsType<TsType.Generic>(userEndpoint.ReturnType);
+    }
+
+    [Fact]
+    public void Double_RoundTrip_Is_Stable()
+    {
+        // C# → OpenAPI → C# → OpenAPI → C# should produce equivalent endpoints both times.
+        // Tests idempotency of the extension-based round-trip.
+        var source = """
+            using System.Collections.Generic;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Email(string Value);
+
+            public enum Priority { Low, Medium, High }
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title, Email AuthorEmail, Priority Priority);
+
+            [RivetType]
+            public sealed record PagedResult<T>(IReadOnlyList<T> Items, int TotalCount);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define ListTasks =
+                    Define.Get<PagedResult<TaskDto>>("/api/tasks")
+                        .Description("List all tasks");
+
+                public static readonly Define DeleteTask =
+                    Define.Delete("/api/tasks/{id}")
+                        .Status(204);
+            }
+            """;
+
+        // First round-trip
+        var (firstEndpoints, firstWalker) = RoundTrip(source);
+
+        // Second round-trip: feed the first round-trip's output back through
+        var firstCompilation = CompilationHelper.CreateCompilation(source);
+        var (firstDisc, firstWlk) = CompilationHelper.DiscoverAndWalk(firstCompilation);
+        var firstEps = ContractWalker.Walk(firstCompilation, firstWlk, firstDisc.ContractTypes);
+        var firstJson = OpenApiEmitter.Emit(
+            firstEps, firstWlk.Definitions, firstWlk.Brands, firstWlk.Enums, null);
+        var firstImport = OpenApiImporter.Import(firstJson, new ImportOptions("RoundTrip"));
+        var secondCompilation = CompilationHelper.CreateCompilationFromMultiple(
+            firstImport.Files.Select(f => f.Content).ToArray());
+        var (secondDisc, secondWlk) = CompilationHelper.DiscoverAndWalk(secondCompilation);
+        var secondEps = ContractWalker.Walk(secondCompilation, secondWlk, secondDisc.ContractTypes);
+        var secondJson = OpenApiEmitter.Emit(
+            secondEps, secondWlk.Definitions, secondWlk.Brands, secondWlk.Enums, null);
+        var secondImport = OpenApiImporter.Import(secondJson, new ImportOptions("RoundTrip"));
+        var thirdCompilation = CompilationHelper.CreateCompilationFromMultiple(
+            secondImport.Files.Select(f => f.Content).ToArray());
+        var (thirdDisc, thirdWlk) = CompilationHelper.DiscoverAndWalk(thirdCompilation);
+        var thirdEps = ContractWalker.Walk(thirdCompilation, thirdWlk, thirdDisc.ContractTypes);
+
+        // Same number of endpoints
+        Assert.Equal(firstEndpoints.Count, thirdEps.Count);
+
+        // Same routes and methods
+        foreach (var ep1 in firstEndpoints)
+        {
+            var ep3 = thirdEps.FirstOrDefault(e =>
+                e.HttpMethod == ep1.HttpMethod && e.RouteTemplate == ep1.RouteTemplate);
+            Assert.NotNull(ep3);
+        }
+
+        // Brand survived both round-trips
+        Assert.True(thirdWlk.Brands.ContainsKey("Email"),
+            $"Brand 'Email' lost after double round-trip. Brands: [{string.Join(", ", thirdWlk.Brands.Keys)}]");
+
+        // Generic survived both round-trips
+        Assert.True(thirdWlk.Definitions.ContainsKey("PagedResult"));
+        Assert.True(thirdWlk.Definitions["PagedResult"].TypeParameters.Count > 0,
+            "PagedResult lost type parameters after double round-trip");
+
+        // Enum survived
+        Assert.True(thirdWlk.Enums.ContainsKey("Priority"));
+    }
+
+    [Fact]
+    public void Brand_Refs_Resolve_In_Emitted_Spec()
+    {
+        // Verify that brand $refs point to existing component schemas
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Email(string Value);
+
+            [RivetType]
+            public sealed record UserDto(string Name, Email Email);
+
+            [RivetContract]
+            public static class UsersContract
+            {
+                public static readonly Define GetUser =
+                    Define.Get<UserDto>("/api/users/{id}");
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var json = OpenApiEmitter.Emit(
+            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        // Validate: parse as OpenAPI and check for errors
+        var readResult = Microsoft.OpenApi.OpenApiDocument.Parse(json, "json");
+        Assert.NotNull(readResult.Document);
+        var errors = readResult.Diagnostic?.Errors ?? [];
+        Assert.True(errors.Count == 0,
+            $"OpenAPI validation errors:\n{string.Join("\n", errors.Select(e => $"  - {e.Message}"))}");
+
+        // Verify brand appears as component schema
+        var doc = System.Text.Json.JsonDocument.Parse(json);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.TryGetProperty("Email", out _));
+
+        // Collect all $refs and verify they resolve
+        var refs = new List<string>();
+        CollectRefs(doc.RootElement, refs);
+        var schemaNames = new HashSet<string>();
+        foreach (var s in schemas.EnumerateObject())
+        {
+            schemaNames.Add(s.Name);
+        }
+
+        foreach (var refValue in refs)
+        {
+            var schemaName = refValue["#/components/schemas/".Length..];
+            Assert.True(schemaNames.Contains(schemaName),
+                $"Broken $ref: {refValue} — not in schemas [{string.Join(", ", schemaNames)}]");
+        }
+    }
+
+    private static void CollectRefs(System.Text.Json.JsonElement element, List<string> refs)
+    {
+        switch (element.ValueKind)
+        {
+            case System.Text.Json.JsonValueKind.Object:
+                foreach (var prop in element.EnumerateObject())
+                {
+                    if (prop.Name == "$ref" && prop.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        refs.Add(prop.Value.GetString()!);
+                    }
+                    else
+                    {
+                        CollectRefs(prop.Value, refs);
+                    }
+                }
+                break;
+            case System.Text.Json.JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    CollectRefs(item, refs);
+                }
+                break;
+        }
+    }
 }

@@ -22,6 +22,9 @@ public sealed record NotFoundDto(string Message);
 [RivetType]
 public sealed record ValidationErrorDto(string Message, Dictionary<string, string[]> Errors);
 
+[RivetType]
+public sealed record PagedResult<T>(IReadOnlyList<T> Items, int TotalCount);
+
 [Route("api/members")]
 public sealed class MembersController : ControllerBase
 {
@@ -29,8 +32,9 @@ public sealed class MembersController : ControllerBase
     public async Task<IActionResult> List(CancellationToken ct)
         => (await MembersContract.List.Invoke(async () =>
         {
-            // Must return List<MemberDto> — compiler enforced
-            return new List<MemberDto>();
+            // Must return PagedResult<MemberDto> — compiler enforced
+            var members = new List<MemberDto>();
+            return new PagedResult<MemberDto>(members, members.Count);
         })).ToActionResult();
 
     [HttpPost]

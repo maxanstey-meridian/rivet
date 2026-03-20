@@ -108,6 +108,10 @@ public static class ZodValidatorEmitter
             TsType.Array a => $"z.array({BuildZodExpression(a.Element)})",
             TsType.Nullable n => $"{BuildZodExpression(n.Inner)}.nullable()",
             TsType.Primitive p => BuildPrimitiveExpression(p),
+            TsType.Dictionary d => $"z.record(z.string(), {BuildZodExpression(d.Value)})",
+            TsType.StringUnion su => $"z.enum([{string.Join(", ", su.Members.Select(m => $"\"{m}\""))}])",
+            TsType.InlineObject obj => $"z.object({{ {string.Join(", ", obj.Fields.Select(f => $"{f.Name}: {BuildZodExpression(f.Type)}"))} }})",
+            TsType.TypeParam => "z.unknown()",
             _ => "z.unknown()",
         };
     }

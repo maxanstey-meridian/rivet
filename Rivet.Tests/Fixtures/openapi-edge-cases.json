@@ -1,0 +1,184 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Edge Cases Test", "version": "1.0.0" },
+  "paths": {
+    "/items/{item_id}": {
+      "get": {
+        "tags": ["Items"],
+        "operationId": "items_getById",
+        "summary": "Get item by ID",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "schema": {
+              "oneOf": [
+                { "type": "string" },
+                { "type": "array", "items": { "type": "string" } }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ItemDetail" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emails": {
+      "get": {
+        "tags": ["Users"],
+        "operationId": "users_listEmails",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Email" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events": {
+      "get": {
+        "tags": ["Events"],
+        "operationId": "events_list",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EventPayload" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reactions": {
+      "get": {
+        "tags": ["Reactions"],
+        "operationId": "reactions_list",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ReactionRollup" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scan/alerts": {
+      "get": {
+        "tags": ["Scanning"],
+        "operationId": "scanning_listAlerts",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ScanAlert" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ItemDetail": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" }
+        },
+        "required": ["id", "name"]
+      },
+      "Email": {
+        "type": "object",
+        "properties": {
+          "email": { "type": "string" },
+          "primary": { "type": "boolean" },
+          "verified": { "type": "boolean" }
+        },
+        "required": ["email", "primary", "verified"]
+      },
+      "ReactionRollup": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string" },
+          "+1": { "type": "integer" },
+          "-1": { "type": "integer" },
+          "laugh": { "type": "integer" },
+          "heart": { "type": "integer" }
+        },
+        "required": ["url", "+1", "-1", "laugh", "heart"]
+      },
+      "EventPayload": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/ItemDetail" },
+          { "$ref": "#/components/schemas/PublicEvent" },
+          { "$ref": "#/components/schemas/ContentDirectory" }
+        ]
+      },
+      "PublicEvent": {
+        "type": "object",
+        "description": "A public event (no properties, bare object)"
+      },
+      "ContentDirectory": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" }
+          },
+          "required": ["name"]
+        }
+      },
+      "alert-number": {
+        "type": "integer",
+        "description": "The alert number"
+      },
+      "alert-created-at": {
+        "type": "string",
+        "format": "date-time",
+        "description": "When the alert was created"
+      },
+      "alert-state": {
+        "type": "boolean",
+        "description": "Whether the alert is active"
+      },
+      "ScanAlert": {
+        "type": "object",
+        "properties": {
+          "number": { "$ref": "#/components/schemas/alert-number" },
+          "createdAt": { "$ref": "#/components/schemas/alert-created-at" },
+          "state": { "$ref": "#/components/schemas/alert-state" },
+          "name": { "type": "string" }
+        },
+        "required": ["number", "createdAt", "state", "name"]
+      }
+    }
+  }
+}

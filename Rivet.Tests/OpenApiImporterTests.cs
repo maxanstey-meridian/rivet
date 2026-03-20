@@ -1533,7 +1533,7 @@ public sealed class OpenApiImporterTests
     // ========== Unsupported content type markers ==========
 
     [Fact]
-    public void Unsupported_Body_Content_Type_Emits_Marker_Comment()
+    public void Octet_Stream_Body_Resolves_To_IFormFile()
     {
         var spec = BuildSpec(
             paths: """
@@ -1557,9 +1557,10 @@ public sealed class OpenApiImporterTests
 
         var content = FindFile(Import(spec), "UploadContract.cs");
 
-        Assert.Contains("[rivet:unsupported body content-type=application/octet-stream]", content);
-        // Should still emit the endpoint, just without input type
-        Assert.Contains("public static readonly RouteDefinition Create", content);
+        // application/octet-stream with format: binary → IFormFile input type
+        Assert.Contains("InputRouteDefinition<IFormFile>", content);
+        Assert.Contains("using Microsoft.AspNetCore.Http;", content);
+        Assert.DoesNotContain("rivet:unsupported", content);
     }
 
     [Fact]

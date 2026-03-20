@@ -35,6 +35,7 @@ export default defineConfig({
           { text: "Runtime Validation", link: "/guides/runtime-validation" },
           { text: "OpenAPI Emission", link: "/guides/openapi-emission" },
           { text: "OpenAPI Import", link: "/guides/openapi-import" },
+          { text: "OpenAPI Round-Trips", link: "/guides/openapi-round-trips" },
           { text: "Error Handling", link: "/guides/error-handling" },
           { text: "File Uploads", link: "/guides/file-uploads" },
         ],
@@ -47,6 +48,7 @@ export default defineConfig({
           { text: "Attributes", link: "/reference/attributes" },
           { text: "Client Configuration", link: "/reference/client-config" },
           { text: "Route Definition", link: "/reference/endpoint-builder" },
+          { text: "Vendor Extensions", link: "/reference/vendor-extensions" },
         ],
       },
       {

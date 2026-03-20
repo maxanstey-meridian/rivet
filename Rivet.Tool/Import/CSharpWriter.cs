@@ -21,7 +21,10 @@ internal static class CSharpWriter
         sb.AppendLine($"namespace {ns};");
         sb.AppendLine();
         sb.AppendLine("[RivetType]");
-        sb.Append($"public sealed record {record.Name}(");
+        var typeParamSuffix = record.TypeParameters is { Count: > 0 }
+            ? $"<{string.Join(", ", record.TypeParameters)}>"
+            : "";
+        sb.Append($"public sealed record {record.Name}{typeParamSuffix}(");
 
         if (record.Properties.Count == 0)
         {
@@ -75,6 +78,13 @@ internal static class CSharpWriter
     {
         var sb = new StringBuilder();
         sb.AppendLine("using System.Collections.Generic;");
+        if (contract.Fields.Any(f =>
+            f.InputType is "IFormFile" or "IFormFile?"
+            || f.OutputType is "IFormFile" or "IFormFile?"))
+        {
+            sb.AppendLine("using Microsoft.AspNetCore.Http;");
+        }
+
         sb.AppendLine("using Rivet;");
         sb.AppendLine();
         sb.AppendLine($"namespace {ns};");
@@ -226,7 +236,12 @@ internal static class CSharpWriter
 
     private static string EscapeString(string value)
     {
-        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        return value
+            .Replace("\\", "\\\\")
+            .Replace("\"", "\\\"")
+            .Replace("\n", "\\n")
+            .Replace("\r", "\\r")
+            .Replace("\t", "\\t");
     }
 }
 
