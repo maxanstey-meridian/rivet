@@ -43,7 +43,7 @@ public sealed class JsonSchemaEmitterTests
 
         var props = dto.GetProperty("properties");
         Assert.Equal("string", props.GetProperty("name").GetProperty("type").GetString());
-        Assert.Equal("number", props.GetProperty("age").GetProperty("type").GetString());
+        Assert.Equal("integer", props.GetProperty("age").GetProperty("type").GetString());
         Assert.Equal("boolean", props.GetProperty("isActive").GetProperty("type").GetString());
 
         var required = dto.GetProperty("required");

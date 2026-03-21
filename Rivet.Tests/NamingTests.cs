@@ -10,7 +10,7 @@ public sealed class NamingTests
     [InlineData("ACTIVE", "ACTIVE")] // All-caps preserved — avoids silent serialization mismatch with APIs expecting exact casing
     [InlineData("already_Good", "AlreadyGood")]
     [InlineData("a", "A")]
-    [InlineData("", "")]
+    [InlineData("", "_")]
     [InlineData("PascalCase", "PascalCase")]
     [InlineData("camelCase", "CamelCase")]
     [InlineData("with spaces", "WithSpaces")]
@@ -21,6 +21,10 @@ public sealed class NamingTests
     [InlineData("pull-request-simple", "PullRequestSimple")]
     [InlineData("waf-managed-rules_response", "WafManagedRulesResponse")]
     [InlineData("AiSingleAgentResponse--Full", "AiSingleAgentResponseFull")]
+    [InlineData("DateCreated<", "DateCreated")] // Twilio-style: angle brackets stripped
+    [InlineData("$ref", "Ref")] // Leading special char stripped, first letter uppercased
+    [InlineData("***", "_")] // All special chars stripped → fallback
+    [InlineData("#id", "Id")] // Leading # stripped, uppercased
     public void ToPascalCaseFromSegments(string input, string expected)
     {
         Assert.Equal(expected, Naming.ToPascalCaseFromSegments(input));
@@ -42,5 +46,17 @@ public sealed class NamingTests
     public void ToPascalCase(string input, string expected)
     {
         Assert.Equal(expected, Naming.ToPascalCase(input));
+    }
+
+    [Theory]
+    [InlineData("abc123", "Abc123")] // Starts lowercase → uppercase
+    [InlineData("123abc", "_123abc")] // Starts with digit → prepend _
+    [InlineData("$ref", "Ref")] // Special char stripped, uppercase
+    [InlineData("***", "_")] // All stripped → fallback
+    [InlineData("ValidName", "ValidName")] // No change
+    [InlineData("", "")]
+    public void StripInvalidIdentifierChars(string input, string expected)
+    {
+        Assert.Equal(expected, Naming.StripInvalidIdentifierChars(input));
     }
 }

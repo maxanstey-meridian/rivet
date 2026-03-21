@@ -44,6 +44,7 @@ internal sealed class SchemaMapper
         var records = new List<GeneratedRecord>();
         var enums = new List<GeneratedEnum>();
         var brands = new List<GeneratedBrand>();
+        var usedNames = new HashSet<string>();
 
         // Pre-scan: collect generic template info from x-rivet-generic extensions
         var genericTemplates = new Dictionary<string, GenericTemplateInfo>();
@@ -75,6 +76,17 @@ internal sealed class SchemaMapper
         foreach (var (key, schema) in schemas)
         {
             var name = SanitizeName(key);
+
+            // Deduplicate schema names that collide after PascalCase sanitization
+            if (!usedNames.Add(name))
+            {
+                var suffix = 2;
+                while (!usedNames.Add($"{name}_{suffix}"))
+                {
+                    suffix++;
+                }
+                name = $"{name}_{suffix}";
+            }
 
             // Skip $ref aliases — these are resolved by the library and handled inline
             if (schema is OpenApiSchemaReference)
@@ -370,6 +382,13 @@ internal sealed class SchemaMapper
 
     private string ResolveSingleType(JsonSchemaType type, IOpenApiSchema schema, string? context)
     {
+        // x-rivet-csharp-type takes precedence — exact C# type for lossless round-trips
+        var csharpType = GetExtensionString(schema, "x-rivet-csharp-type");
+        if (csharpType is not null)
+        {
+            return csharpType;
+        }
+
         if (type.HasFlag(JsonSchemaType.String))
         {
             return ResolveStringType(schema);
@@ -516,14 +535,15 @@ internal sealed class SchemaMapper
                     csharpType += "?";
                 }
 
-                properties.Add(new RecordProperty(propName, csharpType, isRequired));
+                var isDeprecated = propSchema.Deprecated;
+                properties.Add(new RecordProperty(propName, csharpType, isRequired, isDeprecated));
             }
         }
 
         return DeduplicateProperties(properties);
     }
 
-    private static List<RecordProperty> DeduplicateProperties(List<RecordProperty> properties)
+    internal static List<RecordProperty> DeduplicateProperties(List<RecordProperty> properties)
     {
         var seen = new Dictionary<string, int>();
         var result = new List<RecordProperty>(properties.Count);
@@ -765,6 +785,7 @@ internal sealed class SchemaMapper
         return schema.Format switch
         {
             "date-time" => "DateTime",
+            "date" => "DateOnly",
             "guid" or "uuid" => "Guid",
             _ => "string",
         };
@@ -777,7 +798,12 @@ internal sealed class SchemaMapper
 
     private static string ResolveNumberType(IOpenApiSchema schema)
     {
-        return schema.Format == "float" ? "float" : "double";
+        return schema.Format switch
+        {
+            "float" => "float",
+            "decimal" => "decimal",
+            _ => "double",
+        };
     }
 
     private string ResolveArrayType(IOpenApiSchema schema, string? context)
@@ -866,10 +892,27 @@ internal sealed class SchemaMapper
 
     private static GeneratedEnum MapEnum(string name, IOpenApiSchema schema)
     {
+        var seen = new Dictionary<string, int>();
         var members = new List<string>();
         foreach (var member in schema.Enum!)
         {
-            members.Add(Naming.ToPascalCaseFromSegments(member!.ToString()));
+            if (member is null)
+            {
+                continue;
+            }
+
+            var sanitized = Naming.ToPascalCaseFromSegments(member.ToString());
+            if (seen.TryGetValue(sanitized, out var count))
+            {
+                count++;
+                seen[sanitized] = count;
+                members.Add($"{sanitized}_{count}");
+            }
+            else
+            {
+                seen[sanitized] = 1;
+                members.Add(sanitized);
+            }
         }
 
         return new GeneratedEnum(name, members);
@@ -1048,7 +1091,8 @@ internal sealed record GeneratedRecord(
 internal sealed record RecordProperty(
     string Name,
     string CSharpType,
-    bool IsRequired);
+    bool IsRequired,
+    bool IsDeprecated = false);
 
 internal sealed record GeneratedEnum(
     string Name,

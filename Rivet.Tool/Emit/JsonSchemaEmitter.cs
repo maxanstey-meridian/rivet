@@ -152,10 +152,20 @@ public static class JsonSchemaEmitter
             return new Dictionary<string, object>();
         }
 
-        return new Dictionary<string, object>
+        // JSON Schema uses "integer" for int32/int64, not "number"
+        var type = p.Format is "int32" or "int64" or "int16" or "uint16" or "int8" or "uint8" ? "integer" : p.Name;
+
+        var schema = new Dictionary<string, object>
         {
-            ["type"] = p.Name,
+            ["type"] = type,
         };
+
+        if (p.Format is not null)
+        {
+            schema["format"] = p.Format;
+        }
+
+        return schema;
     }
 
     private static Dictionary<string, object> FallbackTypeParam(TsType.TypeParam tp)
@@ -171,7 +181,14 @@ public static class JsonSchemaEmitter
 
         foreach (var prop in def.Properties)
         {
-            properties[prop.Name] = MapTsTypeToSchema(prop.Type);
+            var propSchema = MapTsTypeToSchema(prop.Type);
+
+            if (prop.IsDeprecated)
+            {
+                propSchema["deprecated"] = true;
+            }
+
+            properties[prop.Name] = propSchema;
 
             if (!prop.IsOptional)
             {
@@ -203,7 +220,14 @@ public static class JsonSchemaEmitter
         foreach (var prop in genericDef.Properties)
         {
             var resolvedType = ResolveTypeParams(prop.Type, typeParamMap);
-            properties[prop.Name] = MapTsTypeToSchema(resolvedType);
+            var propSchema = MapTsTypeToSchema(resolvedType);
+
+            if (prop.IsDeprecated)
+            {
+                propSchema["deprecated"] = true;
+            }
+
+            properties[prop.Name] = propSchema;
 
             if (!prop.IsOptional)
             {

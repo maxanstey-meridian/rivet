@@ -22,12 +22,28 @@ public sealed class RealWorldImportTests
             result.Files.Select(f => f.Content).ToArray());
     }
 
+    // Stub types for imported code that references ASP.NET Core or newer runtime types
+    private const string ImportStubs = """
+        namespace Microsoft.AspNetCore.Http
+        {
+            public interface IFormFile { }
+        }
+        namespace System
+        {
+            public readonly struct DateOnly
+            {
+                public DateOnly(int year, int month, int day) { }
+            }
+        }
+        """;
+
     private static List<Diagnostic> GetCompilationErrors(ImportResult result)
     {
         // Deduplicate files by name (importer may produce duplicate entries for shared schemas)
         var uniqueFiles = result.Files
             .GroupBy(f => f.FileName)
             .Select(g => g.First().Content)
+            .Append(ImportStubs)
             .ToArray();
 
         try
@@ -48,15 +64,26 @@ public sealed class RealWorldImportTests
                 .ToList();
 
             var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
-            var refs = new MetadataReference[]
+            var refFiles = new List<string>
             {
-                MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
-                MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Runtime.dll")),
-                MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Collections.dll")),
-                MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Text.Json.dll")),
-                MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "netstandard.dll")),
-                MetadataReference.CreateFromFile(typeof(RivetTypeAttribute).Assembly.Location),
+                typeof(object).Assembly.Location,
+                Path.Combine(runtimeDir, "System.Runtime.dll"),
+                Path.Combine(runtimeDir, "System.Collections.dll"),
+                Path.Combine(runtimeDir, "System.Text.Json.dll"),
+                Path.Combine(runtimeDir, "netstandard.dll"),
+                typeof(RivetTypeAttribute).Assembly.Location,
             };
+            // Add System.Linq and System.Console for generated code that uses them
+            var extraRefs = new[] { "System.Linq.dll", "System.Console.dll" };
+            foreach (var extra in extraRefs)
+            {
+                var path = Path.Combine(runtimeDir, extra);
+                if (File.Exists(path))
+                {
+                    refFiles.Add(path);
+                }
+            }
+            var refs = refFiles.Select(f => (MetadataReference)MetadataReference.CreateFromFile(f)).ToArray();
 
             var compilation = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
                 "TestAssembly",
@@ -335,5 +362,135 @@ public sealed class RealWorldImportTests
         Assert.True(errors.Count == 0,
             $"{errors.Count} compilation errors across {result.Files.Count} files.\n" +
             $"First 10:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+    }
+
+    // ========== Large real-world specs ==========
+
+    [Fact]
+    [Trait("Category", "Slow")]
+    public void Stripe_Api_Imports_And_Compiles()
+    {
+        var result = Import(LoadFixture("openapi-stripe.json"), "Stripe");
+
+        Assert.True(result.Files.Count > 0, "Should generate files");
+        Assert.True(result.Files.Any(f => f.FileName.StartsWith("Contracts/")), "Should generate contracts");
+
+        var errors = GetCompilationErrors(result);
+        Assert.True(errors.Count == 0,
+            $"{errors.Count} compilation errors across {result.Files.Count} files.\n" +
+            $"First 10:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+    }
+
+    [Fact]
+    [Trait("Category", "Slow")]
+    public void Box_Api_Imports_And_Compiles()
+    {
+        var result = Import(LoadFixture("openapi-box.json"), "Box");
+
+        Assert.True(result.Files.Count > 0, "Should generate files");
+        Assert.True(result.Files.Any(f => f.FileName.StartsWith("Contracts/")), "Should generate contracts");
+
+        var errors = GetCompilationErrors(result);
+        Assert.True(errors.Count == 0,
+            $"{errors.Count} compilation errors across {result.Files.Count} files.\n" +
+            $"First 10:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+    }
+
+    [Fact]
+    public void Twilio_Api_Imports_And_Compiles()
+    {
+        var result = Import(LoadFixture("openapi-twilio.json"), "Twilio");
+
+        Assert.True(result.Files.Count > 0, "Should generate files");
+        Assert.True(result.Files.Any(f => f.FileName.StartsWith("Contracts/")), "Should generate contracts");
+
+        var errors = GetCompilationErrors(result);
+        Assert.True(errors.Count == 0,
+            $"{errors.Count} compilation errors across {result.Files.Count} files.\n" +
+            $"First 10:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+    }
+
+    // ========== Naming edge cases ==========
+
+    [Fact]
+    public void NamingEdgeCases_Imports_And_Compiles()
+    {
+        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
+
+        Assert.True(result.Files.Count > 0, "Should generate files");
+
+        var errors = GetCompilationErrors(result);
+        Assert.True(errors.Count == 0,
+            $"{errors.Count} compilation errors across {result.Files.Count} files.\n" +
+            $"First 10:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+    }
+
+    [Fact]
+    public void NamingEdgeCases_ReservedWords_AreEscaped()
+    {
+        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var reservedFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("ReservedWords.cs"));
+        Assert.NotNull(reservedFile);
+
+        var content = reservedFile.Content;
+
+        // C# keywords become PascalCase — "class" → "Class", "event" → "Event"
+        // These are contextual in record position and should not cause compilation errors
+        Assert.Contains("sealed record ReservedWords(", content);
+    }
+
+    [Fact]
+    public void NamingEdgeCases_SpecialCharProperties_AreValid()
+    {
+        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var specialFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("SpecialCharsModel.cs"));
+        Assert.NotNull(specialFile);
+
+        var content = specialFile.Content;
+
+        // Properties with special chars should be sanitized to valid C# identifiers
+        Assert.Contains("sealed record SpecialCharsModel(", content);
+        // No empty parameter names
+        Assert.DoesNotMatch(@",\s*\)", content);
+        Assert.DoesNotMatch(@"\(\s*,", content);
+    }
+
+    [Fact]
+    public void NamingEdgeCases_DuplicateEnums_Deduplicated()
+    {
+        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var allContent = string.Join("\n", result.Files.Select(f => f.Content));
+
+        // DuplicatingEnum: "foo-bar" and "foo_bar" both → FooBar — needs dedup
+        // Should compile without errors
+        var errors = GetCompilationErrors(result);
+        Assert.True(errors.Count == 0,
+            $"Duplicate enum compilation errors:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+    }
+
+    [Fact]
+    public void NamingEdgeCases_EmptyPropertyNames_Handled()
+    {
+        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var statusFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("StatusResponse.cs"));
+        Assert.NotNull(statusFile);
+
+        var content = statusFile.Content;
+
+        // Empty property name should either be skipped or get a fallback name
+        // Must not produce "string ," (empty parameter)
+        Assert.DoesNotContain("string ,", content);
+        Assert.DoesNotContain("string? ,", content);
+    }
+
+    [Fact]
+    public void NamingEdgeCases_SchemaNameCollision_Handled()
+    {
+        // foo_bar_schema and FooBarSchema both PascalCase to FooBarSchema
+        // Should not crash — either dedup or one wins
+        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var errors = GetCompilationErrors(result);
+        Assert.True(errors.Count == 0,
+            $"Schema collision errors:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
     }
 }

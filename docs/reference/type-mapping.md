@@ -4,10 +4,18 @@
 
 | C# | TypeScript | OpenAPI JSON Schema |
 |---|---|---|
-| `string`, `Guid` | `string` | `type: string` |
-| `int`, `long`, `decimal`, `double`, `uint`, `ulong` | `number` | `type: number` |
+| `string` | `string` | `type: string` |
+| `Guid` | `string` | `type: string, format: uuid` |
+| `int` | `number` | `type: integer, format: int32` |
+| `long` | `number` | `type: integer, format: int64` |
+| `double` | `number` | `type: number, format: double` |
+| `float` | `number` | `type: number, format: float` |
+| `decimal` | `number` | `type: number, format: decimal` |
+| `uint`, `ulong` | `number` | `type: integer` |
 | `bool` | `boolean` | `type: boolean` |
-| `DateTime`, `DateTimeOffset`, `DateOnly` | `string` | `type: string` |
+| `DateTime` | `string` | `type: string, format: date-time` |
+| `DateTimeOffset` | `string` | `type: string, format: date-time` |
+| `DateOnly` | `string` | `type: string, format: date` |
 | `T?` (nullable value/ref) | `T \| null` | `nullable: true` |
 | `List<T>`, `T[]`, `IEnumerable<T>`, `IReadOnlyList<T>` | `T[]` | `type: array, items: {...}` |
 | `Dictionary<string, T>`, `IReadOnlyDictionary<string, T>` | `Record<string, T>` | `type: object, additionalProperties: {...}` |
@@ -20,7 +28,7 @@
 | `Email(string Value)` (single-property VO) | `string & { readonly __brand: "Email" }` | `$ref` to component schema with `x-rivet-brand` |
 
 ::: info Note
-The OpenAPI emitter maps from the TypeScript type model, which does not carry `format` or `integer` vs `number` distinctions. All numeric C# types emit as `type: number`, all string-like types emit as `type: string`. Branded value objects are emitted as component schemas with `x-rivet-brand` so they survive [round-trips](/guides/openapi-round-trips). The [importer](/guides/openapi-import) does use `format` fields when reading specs — the asymmetry is intentional (richer input, simpler output).
+The OpenAPI emitter preserves `format` metadata from the intermediate type model. `int` emits as `type: integer, format: int32`, `DateTime` as `type: string, format: date-time`, etc. This enables lossless round-trips for most primitive types. Branded value objects are emitted as component schemas with `x-rivet-brand` so they survive [round-trips](/guides/openapi-round-trips).
 :::
 
 ## Cross-project type discovery
@@ -53,6 +61,7 @@ Multi-property records are emitted as regular object types: `Money(decimal Amoun
 |---|---|
 | `string` | `string` |
 | `string` + `format: date-time` | `DateTime` |
+| `string` + `format: date` | `DateOnly` |
 | `string` + `format: guid` / `uuid` | `Guid` |
 | `string` + `format: email`, `uri`, etc. | Branded value object |
 | `string` + `enum: [...]` | `enum` |
@@ -60,7 +69,10 @@ Multi-property records are emitted as regular object types: `Money(decimal Amoun
 | `integer` + `format: int64` | `long` |
 | `number` / `number` + `format: double` | `double` |
 | `number` + `format: float` | `float` |
+| `number` + `format: decimal` | `decimal` |
 | `boolean` | `bool` |
+| Any type + `x-rivet-csharp-type` | Exact C# type (`uint`, `DateTimeOffset`, `short`, etc.) |
+| Property with `deprecated: true` | `[Obsolete]` attribute |
 | `array` + `items` | `List<T>` |
 | `object` + non-empty `properties` | `sealed record` |
 | `object` + `additionalProperties` | `Dictionary<string, T>` |

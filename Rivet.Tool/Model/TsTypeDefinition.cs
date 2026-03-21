@@ -11,4 +11,4 @@ public sealed record TsTypeDefinition(
 /// <summary>
 /// A single property within a type definition.
 /// </summary>
-public sealed record TsPropertyDefinition(string Name, TsType Type, bool IsOptional);
+public sealed record TsPropertyDefinition(string Name, TsType Type, bool IsOptional, bool IsDeprecated = false);

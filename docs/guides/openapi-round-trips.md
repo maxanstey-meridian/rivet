@@ -1,17 +1,21 @@
 # OpenAPI Round-Trips
 
-When you [emit](/guides/openapi-emission) an OpenAPI spec from your C# contracts and later [import](/guides/openapi-import) it back, certain type information would normally be lost — the OpenAPI spec doesn't natively represent branded types, generic templates, or the original record name for file upload inputs.
+When you [emit](/guides/openapi-emission) an OpenAPI spec from your C# contracts and
+later [import](/guides/openapi-import) it back, certain type information would normally be lost — the OpenAPI spec
+doesn't natively represent branded types, generic templates, or the original record name for file upload inputs.
 
-Rivet solves this with `x-rivet-*` vendor extensions. These are standard OpenAPI 3.0 extensions — non-Rivet consumers ignore them, the spec stays valid.
+Rivet solves this with `x-rivet-*` vendor extensions. These are standard OpenAPI 3.0 extensions — non-Rivet consumers
+ignore them, the spec stays valid.
 
 ## What survives a round-trip
 
-| C# construct | Without extensions | With extensions |
-|---|---|---|
-| `Email(string Value)` (branded VO) | Collapses to `string` | Preserved as `Email(string Value)` |
-| `PagedResult<TaskDto>` (generic) | Flat `PagedResult_TaskDto` record | Reconstructed as `PagedResult<T>` template |
-| `UploadInput(IFormFile Doc, string Title)` | Anonymous `UploadRequest` record | Named `UploadInput` record |
-| Enums, nullable types, arrays, dicts | Already preserved | Already preserved |
+| C# construct                               | Without extensions                | With extensions                            |
+|--------------------------------------------|-----------------------------------|--------------------------------------------|
+| `Email(string Value)` (branded VO)         | Collapses to `string`             | Preserved as `Email(string Value)`         |
+| `PagedResult<TaskDto>` (generic)           | Flat `PagedResult_TaskDto` record | Reconstructed as `PagedResult<T>` template |
+| `UploadInput(IFormFile Doc, string Title)` | Anonymous `UploadRequest` record  | Named `UploadInput` record                 |
+| `DateTimeOffset`, `uint`, `short`, etc.    | Falls back to `DateTime`/`int`    | Preserved via `x-rivet-csharp-type`        |
+| Enums, nullable types, arrays, dicts       | Already preserved                 | Already preserved                          |
 
 ## How it works
 
@@ -34,7 +38,8 @@ Properties that reference it use `$ref`:
 { "email": { "$ref": "#/components/schemas/Email" } }
 ```
 
-On import, the extension tells the importer to generate a branded record (`Email(string Value)`) instead of treating it as a plain `string` alias.
+On import, the extension tells the importer to generate a branded record (`Email(string Value)`) instead of treating it
+as a plain `string` alias.
 
 ### Generics
 
@@ -87,17 +92,23 @@ A multipart endpoint with `UploadInput(IFormFile Doc, string Title)` emits:
 
 ## Double round-trips
 
-The extensions are idempotent. C# → OpenAPI → C# → OpenAPI → C# produces the same types as a single round-trip. This is tested in `OpenApiRoundTripTests.Double_RoundTrip_Is_Stable`.
+The extensions are idempotent. C# → OpenAPI → C# → OpenAPI → C# produces the same types as a single round-trip. This is
+tested in `OpenApiRoundTripTests.Double_RoundTrip_Is_Stable`.
 
 ## What doesn't survive
 
-- **Numeric format distinctions** — `int`, `long`, `double` all emit as `type: number`. On import, `integer` maps back to `int` and `number` to `double`, but `decimal` and `uint` are not distinguished.
-- **Date format distinctions** — `DateTime`, `DateTimeOffset`, `DateOnly` all emit as `type: string`. On import, `format: date-time` maps to `DateTime`.
-- **Non-format brands** — Only brands emitted by Rivet (which carry `x-rivet-brand`) survive. A third-party spec with `format: email` will still import as a brand, but the name comes from the schema key, not an extension.
+- **Non-format brands** — Only brands emitted by Rivet (which carry `x-rivet-brand`) survive. A third-party spec with
+  `format: email` will still import as a brand, but the name comes from the schema key, not an extension.
+
+All primitive C# types now survive round-trips, including `DateTimeOffset`, `uint`, `ulong`, `short`, `byte`, and `sbyte`.
+These use `x-rivet-csharp-type` to preserve the exact type when `type`+`format` alone would be ambiguous.
+Without the extension (e.g. third-party specs), the importer uses `format`-based defaults: `date-time` → `DateTime`,
+`int32` → `int`, `int64` → `long`, `number` → `double`.
 
 ## Non-Rivet consumers
 
-The extensions are invisible to tools that don't look for them. Swagger UI, Redocly, API gateways, and other OpenAPI consumers render the spec normally. The `x-` prefix is the standard mechanism for vendor extensions in OpenAPI 3.0.
+The extensions are invisible to tools that don't look for them. Swagger UI, Redocly, API gateways, and other OpenAPI
+consumers render the spec normally. The `x-` prefix is the standard mechanism for vendor extensions in OpenAPI 3.0.
 
 ## Extension reference
 

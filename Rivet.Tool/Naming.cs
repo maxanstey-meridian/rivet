@@ -31,16 +31,17 @@ internal static class Naming
     {
         if (string.IsNullOrEmpty(input))
         {
-            return input;
+            return "_";
         }
 
         // Already PascalCase — only if no delimiters present
+        // Still strip invalid chars in case input contains <, >, etc.
         if (char.IsUpper(input[0])
             && !input.Contains('_') && !input.Contains('-')
             && !input.Contains('/') && !input.Contains('.')
             && !input.Contains(' '))
         {
-            return input;
+            return StripInvalidIdentifierChars(input);
         }
 
         var parts = input.Split(['_', '-', ' ', '/', '.'], StringSplitOptions.RemoveEmptyEntries);
@@ -65,9 +66,20 @@ internal static class Naming
         var chars = input.Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray();
         var result = new string(chars);
 
-        if (result.Length > 0 && char.IsDigit(result[0]))
+        if (result.Length == 0)
+        {
+            return "_";
+        }
+
+        if (char.IsDigit(result[0]))
         {
             result = "_" + result;
+        }
+
+        // Ensure first letter is uppercase to maintain PascalCase after stripping
+        if (result.Length > 0 && char.IsLower(result[0]))
+        {
+            result = char.ToUpperInvariant(result[0]) + result[1..];
         }
 
         return result;

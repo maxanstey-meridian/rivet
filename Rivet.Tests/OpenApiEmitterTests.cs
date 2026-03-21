@@ -255,7 +255,7 @@ public sealed class OpenApiEmitterTests
         var props = taskSchema.GetProperty("properties");
         Assert.Equal("string", props.GetProperty("id").GetProperty("type").GetString());
         Assert.Equal("string", props.GetProperty("title").GetProperty("type").GetString());
-        Assert.Equal("number", props.GetProperty("priority").GetProperty("type").GetString());
+        Assert.Equal("integer", props.GetProperty("priority").GetProperty("type").GetString());
 
         var required = taskSchema.GetProperty("required");
         Assert.Equal(3, required.GetArrayLength());

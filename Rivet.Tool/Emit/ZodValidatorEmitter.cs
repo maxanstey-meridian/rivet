@@ -149,6 +149,9 @@ public static class ZodValidatorEmitter
             case TsType.Nullable n:
                 CollectSchemaImports(n.Inner, imports);
                 break;
+            case TsType.Dictionary d:
+                CollectSchemaImports(d.Value, imports);
+                break;
         }
     }
 }

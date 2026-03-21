@@ -225,13 +225,13 @@ public sealed class SampleProjectTests : IDisposable
 
               if (method === "GET" && path === "/api/members") {
                 return json([
-                  { id: "a1b2c3d4-0000-0000-0000-000000000001", name: "Alice", email: { value: "alice@example.com" }, role: "admin" },
-                  { id: "a1b2c3d4-0000-0000-0000-000000000002", name: "Bob", email: { value: "bob@example.com" }, role: "member" },
+                  { id: "a1b2c3d4-e5f6-4a7b-8c9d-000000000001", name: "Alice", email: { value: "alice@example.com" }, role: "admin" },
+                  { id: "a1b2c3d4-e5f6-4a7b-8c9d-000000000002", name: "Bob", email: { value: "bob@example.com" }, role: "member" },
                 ]);
               }
 
               if (method === "POST" && path === "/api/members") {
-                return json({ id: "a1b2c3d4-0000-0000-0000-000000000099" }, 201);
+                return json({ id: "a1b2c3d4-e5f6-4a7b-8c9d-000000000099" }, 201);
               }
 
               if (method === "DELETE" && path.startsWith("/api/members/")) {
@@ -264,7 +264,7 @@ public sealed class SampleProjectTests : IDisposable
 
             // Test invite()
             const invited = await client.invite({ email: { value: "new@example.com" }, role: "member", nickname: "newbie" });
-            assert(invited.id === "a1b2c3d4-0000-0000-0000-000000000099", "invite() should return the new member id");
+            assert(invited.id === "a1b2c3d4-e5f6-4a7b-8c9d-000000000099", "invite() should return the new member id");
 
             // Test remove() — void endpoint
             const removeResult = await client.remove("some-id");
@@ -403,7 +403,7 @@ public sealed class SampleProjectTests : IDisposable
               if (method === "GET" && path === "/api/members") {
                 return json({
                   items: [
-                    { id: "a1b2c3d4-0000-0000-0000-000000000001", name: "Alice", email: "alice@example.com", role: "admin" },
+                    { id: "a1b2c3d4-e5f6-4a7b-8c9d-000000000001", name: "Alice", email: "alice@example.com", role: "admin" },
                   ],
                   totalCount: 1,
                 });
@@ -411,7 +411,7 @@ public sealed class SampleProjectTests : IDisposable
 
               // Valid 201 response
               if (method === "POST" && path === "/api/members") {
-                return json({ id: "a1b2c3d4-0000-0000-0000-000000000099" }, 201);
+                return json({ id: "a1b2c3d4-e5f6-4a7b-8c9d-000000000099" }, 201);
               }
 
               // Invalid response — totalCount should be number, not string
@@ -440,7 +440,7 @@ public sealed class SampleProjectTests : IDisposable
 
             // Valid invite passes
             const invited = await client.invite({ email: "new@example.com", role: "member", nickname: "newbie" });
-            assert(invited.id === "a1b2c3d4-0000-0000-0000-000000000099", "invite() should return id");
+            assert(invited.id === "a1b2c3d4-e5f6-4a7b-8c9d-000000000099", "invite() should return id");
 
             // Void endpoint — no validation, should work
             const removeResult = await client.remove("some-id");
@@ -608,6 +608,232 @@ public sealed class SampleProjectTests : IDisposable
             workingDir: _tempDir);
 
         Assert.True(nodeExit == 0, $"rivetFetch variant tests failed:\n{nodeOutput}");
+    }
+
+    // ========== rivetFetch config options ==========
+
+    [Fact]
+    public async Task RivetFetch_Config_Options_Work()
+    {
+        Directory.CreateDirectory(_tempDir);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_tempDir, "rivet.ts"), ClientEmitter.EmitRivetBase());
+
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "tsconfig.json"), """
+            {
+              "compilerOptions": {
+                "target": "ES2022",
+                "module": "ES2022",
+                "moduleResolution": "bundler",
+                "strict": true,
+                "skipLibCheck": true,
+                "outDir": "./dist",
+                "declaration": false
+              },
+              "include": ["./**/*.ts"],
+              "exclude": ["node_modules"]
+            }
+            """);
+
+        var (tscExit, tscOutput) = await RunProcessAsync(
+            "npx", $"--yes tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
+            workingDir: _tempDir);
+        Assert.True(tscExit == 0, $"tsc failed:\n{tscOutput}");
+
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "test.mjs"), """
+            import { configureRivet, rivetFetch } from "./dist/rivet.js";
+
+            function assert(condition, message) {
+              if (!condition) throw new Error(`FAIL: ${message}`);
+            }
+
+            // ===== 1. onError callback =====
+            {
+              let errorReceived = null;
+              globalThis.fetch = async () => new Response(
+                JSON.stringify({ error: "boom" }),
+                { status: 500, headers: { "content-type": "application/json" } }
+              );
+              configureRivet({
+                baseUrl: "http://localhost:9999",
+                onError: (err) => { errorReceived = err; },
+              });
+
+              try {
+                await rivetFetch("GET", "/fail");
+              } catch (_) {}
+
+              assert(errorReceived !== null, "onError should have been called");
+              assert(errorReceived.status === 500, `onError error should have status 500, got: ${errorReceived.status}`);
+              assert(errorReceived.name === "RivetError", `onError error should be RivetError, got: ${errorReceived.name}`);
+            }
+
+            // ===== 2. headers function =====
+            {
+              let capturedOpts = null;
+              globalThis.fetch = async (url, opts) => {
+                capturedOpts = opts;
+                return new Response(null, { status: 200 });
+              };
+              configureRivet({
+                baseUrl: "http://localhost:9999",
+                headers: async () => ({ "X-Custom": "test-value", "Authorization": "Bearer abc" }),
+              });
+
+              await rivetFetch("GET", "/with-headers");
+
+              assert(capturedOpts !== null, "fetch should have been called");
+              assert(capturedOpts.headers["X-Custom"] === "test-value", `X-Custom header should be "test-value", got: ${capturedOpts.headers["X-Custom"]}`);
+              assert(capturedOpts.headers["Authorization"] === "Bearer abc", `Authorization header should be set, got: ${capturedOpts.headers["Authorization"]}`);
+            }
+
+            // ===== 3. fetch override =====
+            {
+              let customFetchCalled = false;
+              let customFetchUrl = null;
+              const customFetch = async (url, opts) => {
+                customFetchCalled = true;
+                customFetchUrl = url;
+                return new Response(JSON.stringify({ custom: true }), {
+                  status: 200,
+                  headers: { "content-type": "application/json" },
+                });
+              };
+
+              // Reset globalThis.fetch to something that should NOT be called
+              globalThis.fetch = async () => { throw new Error("globalThis.fetch should not be called"); };
+
+              configureRivet({
+                baseUrl: "http://localhost:9999",
+                fetch: customFetch,
+              });
+
+              const result = await rivetFetch("GET", "/custom-fetch");
+
+              assert(customFetchCalled, "custom fetch should have been called");
+              assert(customFetchUrl.includes("/custom-fetch"), `custom fetch should receive the URL, got: ${customFetchUrl}`);
+              assert(result.custom === true, "should return data from custom fetch");
+            }
+
+            // ===== 4. Falsy body values =====
+            {
+              let capturedBodies = [];
+              globalThis.fetch = async (url, opts) => {
+                capturedBodies.push(opts?.body);
+                return new Response(null, { status: 200 });
+              };
+              configureRivet({ baseUrl: "http://localhost:9999" });
+
+              // body: 0 — should not be dropped
+              await rivetFetch("POST", "/falsy", { body: 0 });
+              assert(capturedBodies[0] === "0", `body: 0 should arrive as "0", got: ${JSON.stringify(capturedBodies[0])}`);
+
+              // body: false — should not be dropped
+              await rivetFetch("POST", "/falsy", { body: false });
+              assert(capturedBodies[1] === "false", `body: false should arrive as "false", got: ${JSON.stringify(capturedBodies[1])}`);
+
+              // body: "" — should be JSON-stringified to '""'
+              await rivetFetch("POST", "/falsy", { body: "" });
+              assert(capturedBodies[2] === '""', `body: "" should arrive as '""', got: ${JSON.stringify(capturedBodies[2])}`);
+
+              // body: null — should NOT send a body
+              await rivetFetch("POST", "/falsy", { body: null });
+              assert(capturedBodies[3] === undefined, `body: null should arrive as undefined, got: ${JSON.stringify(capturedBodies[3])}`);
+
+              // body: undefined — should NOT send a body
+              await rivetFetch("POST", "/falsy", { body: undefined });
+              assert(capturedBodies[4] === undefined, `body: undefined should arrive as undefined, got: ${JSON.stringify(capturedBodies[4])}`);
+            }
+
+            console.log("All config options tests passed");
+            """);
+
+        var (nodeExit, nodeOutput) = await RunProcessAsync(
+            "node", $"\"{Path.Combine(_tempDir, "test.mjs")}\"",
+            workingDir: _tempDir);
+
+        Assert.True(nodeExit == 0, $"Config options tests failed:\n{nodeOutput}");
+    }
+
+    // ========== rivetFetch query param null handling ==========
+
+    [Fact]
+    public async Task RivetFetch_Query_Params_Null_Handling()
+    {
+        Directory.CreateDirectory(_tempDir);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_tempDir, "rivet.ts"), ClientEmitter.EmitRivetBase());
+
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "tsconfig.json"), """
+            {
+              "compilerOptions": {
+                "target": "ES2022",
+                "module": "ES2022",
+                "moduleResolution": "bundler",
+                "strict": true,
+                "skipLibCheck": true,
+                "outDir": "./dist",
+                "declaration": false
+              },
+              "include": ["./**/*.ts"],
+              "exclude": ["node_modules"]
+            }
+            """);
+
+        var (tscExit, tscOutput) = await RunProcessAsync(
+            "npx", $"--yes tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
+            workingDir: _tempDir);
+        Assert.True(tscExit == 0, $"tsc failed:\n{tscOutput}");
+
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "test.mjs"), """
+            import { configureRivet, rivetFetch } from "./dist/rivet.js";
+
+            function assert(condition, message) {
+              if (!condition) throw new Error(`FAIL: ${message}`);
+            }
+
+            let capturedUrls = [];
+            globalThis.fetch = async (url, opts) => {
+              capturedUrls.push(url);
+              return new Response(null, { status: 200 });
+            };
+            configureRivet({ baseUrl: "http://localhost:9999" });
+
+            // null and undefined values should be excluded from query string
+            await rivetFetch("GET", "/search", {
+              query: { q: "hello", page: 1, filter: null, sort: undefined, active: true, count: 0 },
+            });
+
+            const url = new URL(capturedUrls[0]);
+            assert(url.searchParams.get("q") === "hello", `q should be "hello", got: ${url.searchParams.get("q")}`);
+            assert(url.searchParams.get("page") === "1", `page should be "1", got: ${url.searchParams.get("page")}`);
+            assert(url.searchParams.has("filter") === false, "filter (null) should be excluded from query");
+            assert(url.searchParams.has("sort") === false, "sort (undefined) should be excluded from query");
+            assert(url.searchParams.get("active") === "true", `active should be "true", got: ${url.searchParams.get("active")}`);
+            assert(url.searchParams.get("count") === "0", `count (0) should be included as "0", got: ${url.searchParams.get("count")}`);
+
+            // Empty query object — no query string at all
+            capturedUrls = [];
+            await rivetFetch("GET", "/no-params", { query: {} });
+            const url2 = new URL(capturedUrls[0]);
+            assert(url2.search === "", `empty query should produce no query string, got: ${url2.search}`);
+
+            // All null/undefined — no query string
+            capturedUrls = [];
+            await rivetFetch("GET", "/all-null", { query: { a: null, b: undefined } });
+            const url3 = new URL(capturedUrls[0]);
+            assert(url3.search === "", `all-null query should produce no query string, got: ${url3.search}`);
+
+            console.log("All query param null handling tests passed");
+            """);
+
+        var (nodeExit, nodeOutput) = await RunProcessAsync(
+            "node", $"\"{Path.Combine(_tempDir, "test.mjs")}\"",
+            workingDir: _tempDir);
+
+        Assert.True(nodeExit == 0, $"Query param null handling tests failed:\n{nodeOutput}");
     }
 
     // ========== Helpers ==========

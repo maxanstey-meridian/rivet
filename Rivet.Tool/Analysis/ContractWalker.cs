@@ -253,12 +253,14 @@ public static class ContractWalker
         var (parameters, inputTypeName) = BuildParams(httpMethod, route, tInput, typeWalker, acceptsFile);
 
         // Add success response to responses list
+        // Void endpoints with typed error responses also need a success entry
+        // so the client emitter generates a discriminated union (not RivetResult<void>)
         if (returnType is not null)
         {
             var successCode = successStatusOverride ?? DefaultSuccessCode(httpMethod);
             responses.Insert(0, new TsResponseType(successCode, returnType));
         }
-        else if (fileContentType is not null || successStatusOverride is not null)
+        else if (fileContentType is not null || successStatusOverride is not null || responses.Count > 0)
         {
             var successCode = successStatusOverride ?? DefaultSuccessCode(httpMethod);
             responses.Insert(0, new TsResponseType(successCode, null));
@@ -286,10 +288,21 @@ public static class ContractWalker
 
         if (hasBody)
         {
-            // Route params from template as standalone string params (not from TInput)
+            // Route params from template — try to match types from TInput properties
             foreach (var paramName in routeParamNames)
             {
-                parameters.Add(new TsEndpointParam(paramName, new TsType.Primitive("string"), ParamSource.Route));
+                TsType paramType = new TsType.Primitive("string");
+                if (tInput is not null)
+                {
+                    var matchingProp = tInput.GetMembers().OfType<IPropertySymbol>()
+                        .FirstOrDefault(p => !p.IsImplicitlyDeclared
+                            && string.Equals(p.Name, paramName, StringComparison.OrdinalIgnoreCase));
+                    if (matchingProp is not null)
+                    {
+                        paramType = typeWalker.MapType(matchingProp.Type);
+                    }
+                }
+                parameters.Add(new TsEndpointParam(paramName, paramType, ParamSource.Route));
             }
 
             // .AcceptsFile() on the contract — add a File param
@@ -316,10 +329,17 @@ public static class ContractWalker
                             continue;
                         }
 
+                        if (typeWalker.IsJsonIgnored(prop))
+                        {
+                            continue;
+                        }
+
+                        var tsName = typeWalker.GetJsonPropertyName(prop) ?? Naming.ToCamelCase(prop.Name);
+
                         if (IsFormFileType(prop.Type))
                         {
                             parameters.Add(new TsEndpointParam(
-                                Naming.ToCamelCase(prop.Name),
+                                tsName,
                                 new TsType.Primitive("File"),
                                 ParamSource.File));
                         }
@@ -327,7 +347,7 @@ public static class ContractWalker
                         {
                             // Non-file properties on a mixed upload record → form fields
                             parameters.Add(new TsEndpointParam(
-                                Naming.ToCamelCase(prop.Name),
+                                tsName,
                                 typeWalker.MapType(prop.Type),
                                 ParamSource.FormField));
                         }
@@ -353,22 +373,30 @@ public static class ContractWalker
                         continue;
                     }
 
+                    if (typeWalker.IsJsonIgnored(prop))
+                    {
+                        continue;
+                    }
+
+                    var tsName = typeWalker.GetJsonPropertyName(prop) ?? Naming.ToCamelCase(prop.Name);
+
                     var isFormFile = prop.Type.ToDisplayString() is "Microsoft.AspNetCore.Http.IFormFile";
                     if (isFormFile)
                     {
                         parameters.Add(new TsEndpointParam(
-                            Naming.ToCamelCase(prop.Name),
+                            tsName,
                             new TsType.Primitive("File"),
                             ParamSource.File));
                         continue;
                     }
 
                     var tsType = typeWalker.MapType(prop.Type);
+                    // Route matching uses C# property name (matches template {Id}), not JSON name
                     var source = routeParamNames.Contains(prop.Name)
                         ? ParamSource.Route
                         : ParamSource.Query;
 
-                    parameters.Add(new TsEndpointParam(Naming.ToCamelCase(prop.Name), tsType, source));
+                    parameters.Add(new TsEndpointParam(tsName, tsType, source));
                 }
             }
             else

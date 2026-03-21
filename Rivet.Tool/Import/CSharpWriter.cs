@@ -38,6 +38,10 @@ internal static class CSharpWriter
         {
             var prop = record.Properties[i];
             var separator = i < record.Properties.Count - 1 ? "," : ");";
+            if (prop.IsDeprecated)
+            {
+                sb.AppendLine("    [property: Obsolete]");
+            }
             sb.AppendLine($"    {prop.CSharpType} {prop.Name}{separator}");
         }
 
@@ -77,6 +81,7 @@ internal static class CSharpWriter
     public static string WriteContract(GeneratedContract contract, string ns)
     {
         var sb = new StringBuilder();
+        sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
         if (contract.Fields.Any(f =>
             f.InputType is "IFormFile" or "IFormFile?"
@@ -115,13 +120,16 @@ internal static class CSharpWriter
             sb.AppendLine($"    // [rivet:unsupported {marker}]");
         }
 
+        // For param-only inputs (no body), don't wire the input type to the endpoint
+        var effectiveInputType = field.IsParamOnlyInput ? null : field.InputType;
+
         // Field type: RouteDefinition<TIn, TOut>, RouteDefinition<TOut>, or RouteDefinition
-        var fieldType = BuildFieldType(field.InputType, field.OutputType);
+        var fieldType = BuildFieldType(effectiveInputType, field.OutputType);
         sb.Append($"    public static readonly {fieldType} {field.FieldName} =");
         sb.AppendLine();
 
         // Factory call
-        var typeArgs = BuildTypeArgs(field.InputType, field.OutputType);
+        var typeArgs = BuildTypeArgs(effectiveInputType, field.OutputType);
         sb.Append($"        Define.{field.HttpMethod}{typeArgs}(\"{field.Route}\")");
 
         // Builder chain
@@ -192,8 +200,8 @@ internal static class CSharpWriter
             calls.Add($".Status({field.SuccessStatus})");
         }
 
-        // Input-only endpoint: type arg goes on .Accepts<T>()
-        if (field.InputType is not null && field.OutputType is null)
+        // Input-only endpoint: type arg goes on .Accepts<T>() (skip for param-only inputs)
+        if (field.InputType is not null && field.OutputType is null && !field.IsParamOnlyInput)
         {
             calls.Add($".Accepts<{field.InputType}>()");
         }
@@ -263,7 +271,8 @@ internal sealed record GeneratedEndpointField(
     bool IsAnonymous,
     string? SecurityScheme,
     IReadOnlyList<string> UnsupportedMarkers = null!,
-    string? FileContentType = null)
+    string? FileContentType = null,
+    bool IsParamOnlyInput = false)
 {
     public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
 }

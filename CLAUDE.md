@@ -62,7 +62,7 @@ Rivet has several interconnected pipelines. Changes to one often require updates
 
 ### Contract style
 
-Contracts are `[RivetContract] public static class` with `EndpointBuilder<T>` fields. **Not** abstract classes, **not** ASP.NET-coupled. The `EndpointBuilder<T>.Invoke()` method provides type-safe runtime execution. `RivetResult<T>` is framework-agnostic; the consumer provides a `ToActionResult()` bridge.
+Contracts are `[RivetContract] public static class` with `RouteDefinition<T>` fields (e.g. `RouteDefinition<TInput, TOutput>`, `RouteDefinition<TOutput>`, `InputRouteDefinition<TInput>`, `RouteDefinition`). **Not** abstract classes, **not** ASP.NET-coupled. The `.Invoke()` method provides type-safe runtime execution. `RivetResult<T>` is framework-agnostic; the consumer provides a `ToActionResult()` bridge.
 
 ASP.NET name collisions: generated contracts must include `using Endpoint = Rivet.Endpoint;` and `using EndpointBuilder = Rivet.EndpointBuilder;` aliases.
 
@@ -92,6 +92,7 @@ ASP.NET name collisions: generated contracts must include `using Endpoint = Rive
 
 **If you change type mappings (SchemaMapper, TypeWalker, TsType):**
 - Both directions must stay consistent. If you add a type mapping in SchemaMapper (OpenAPI → C#), check whether the reverse mapping exists in OpenApiEmitter (C# → OpenAPI).
+- `TsType` owns shared methods used by all emitters: `GetNameSuffix`, `MonomorphisedName`, `ResolveTypeParams`. Changes here affect ValidatorEmitter, JsonSchemaEmitter, OpenApiEmitter, and ZodValidatorEmitter simultaneously.
 - `Rivet.Tests/Fixtures/openapi-import.json` is the comprehensive fixture — it should exercise every supported type.
 
 ### Staleness hotspots

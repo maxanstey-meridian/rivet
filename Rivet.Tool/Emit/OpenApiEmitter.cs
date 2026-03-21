@@ -83,8 +83,13 @@ public static class OpenApiEmitter
             }
 
             var pathItem = (Dictionary<string, object>)existing;
+            var methodKey = ep.HttpMethod.ToLowerInvariant();
+            if (pathItem.ContainsKey(methodKey))
+            {
+                Console.Error.WriteLine($"warning: duplicate endpoint {ep.HttpMethod} {pathKey} — later definition wins");
+            }
             var operation = BuildOperation(ep, security);
-            pathItem[ep.HttpMethod.ToLowerInvariant()] = operation;
+            pathItem[methodKey] = operation;
         }
 
         return paths;
@@ -174,11 +179,29 @@ public static class OpenApiEmitter
                 multipartProps[ff.Name] = MapTsTypeToJsonSchema(ff.Type);
             }
 
+            var requiredFields = new List<string>();
+            foreach (var fp in fileParams)
+            {
+                requiredFields.Add(fp.Name);
+            }
+            foreach (var ff in formFieldParams)
+            {
+                if (ff.Type is not TsType.Nullable)
+                {
+                    requiredFields.Add(ff.Name);
+                }
+            }
+
             var multipartSchema = new Dictionary<string, object>
             {
                 ["type"] = "object",
                 ["properties"] = multipartProps,
             };
+
+            if (requiredFields.Count > 0)
+            {
+                multipartSchema["required"] = requiredFields;
+            }
 
             if (ep.InputTypeName is not null)
             {
@@ -366,10 +389,25 @@ public static class OpenApiEmitter
             return new Dictionary<string, object>();
         }
 
-        return new Dictionary<string, object>
+        // OpenAPI uses "integer" for int32/int64, not "number"
+        var type = p.Format is "int32" or "int64" or "int16" or "uint16" or "int8" or "uint8" ? "integer" : p.Name;
+
+        var schema = new Dictionary<string, object>
         {
-            ["type"] = p.Name,
+            ["type"] = type,
         };
+
+        if (p.Format is not null)
+        {
+            schema["format"] = p.Format;
+        }
+
+        if (p.CSharpType is not null)
+        {
+            schema["x-rivet-csharp-type"] = p.CSharpType;
+        }
+
+        return schema;
     }
 
     private static Dictionary<string, object> MapNullable(TsType.Nullable n)
@@ -377,11 +415,9 @@ public static class OpenApiEmitter
         // OpenAPI 3.0: nullable is a property, not a type
         if (n.Inner is TsType.Primitive p)
         {
-            return new Dictionary<string, object>
-            {
-                ["type"] = p.Name,
-                ["nullable"] = true,
-            };
+            var schema = MapPrimitive(p);
+            schema["nullable"] = true;
+            return schema;
         }
 
         var inner = MapTsTypeToJsonSchema(n.Inner);
@@ -503,7 +539,14 @@ public static class OpenApiEmitter
 
         foreach (var prop in def.Properties)
         {
-            properties[prop.Name] = MapTsTypeToJsonSchema(prop.Type);
+            var propSchema = MapTsTypeToJsonSchema(prop.Type);
+
+            if (prop.IsDeprecated)
+            {
+                propSchema["deprecated"] = true;
+            }
+
+            properties[prop.Name] = propSchema;
 
             if (!prop.IsOptional)
             {
@@ -535,7 +578,14 @@ public static class OpenApiEmitter
         foreach (var prop in genericDef.Properties)
         {
             var resolvedType = ResolveTypeParams(prop.Type, typeParamMap);
-            properties[prop.Name] = MapTsTypeToJsonSchema(resolvedType);
+            var propSchema = MapTsTypeToJsonSchema(resolvedType);
+
+            if (prop.IsDeprecated)
+            {
+                propSchema["deprecated"] = true;
+            }
+
+            properties[prop.Name] = propSchema;
 
             if (!prop.IsOptional)
             {
@@ -697,13 +747,24 @@ public static class OpenApiEmitter
     {
         return type switch
         {
-            TsType.Primitive p => p.Name switch
+            TsType.Primitive p => p.CSharpType ?? (p.Format switch
             {
-                "string" => "string",
-                "number" => "int",
-                "boolean" => "bool",
-                _ => p.Name,
-            },
+                "int32" => "int",
+                "int64" => "long",
+                "float" => "float",
+                "double" => "double",
+                "decimal" => "decimal",
+                "uuid" => "Guid",
+                "date-time" => "DateTime",
+                "date" => "DateOnly",
+                _ => p.Name switch
+                {
+                    "string" => "string",
+                    "number" => "int",
+                    "boolean" => "bool",
+                    _ => p.Name,
+                },
+            }),
             TsType.TypeRef r => r.Name,
             TsType.Array a => $"List<{GetCSharpTypeName(a.Element)}>",
             TsType.Nullable n => $"{GetCSharpTypeName(n.Inner)}?",

@@ -39,7 +39,7 @@ form-encoded, and multipart request bodies, plus `default` error responses (mapp
 - CLI: MSBuildWorkspace with multi-SDK Homebrew discovery, file output, stdout preview, --compile flag, --check flag
 - `[RivetClient]` class-level attribute: auto-discovers all public methods with HTTP attributes, no per-method
   `[RivetEndpoint]` needed. Deduplicates with `[RivetEndpoint]` if both present.
-- OpenAPI 3.1 emission: `--openapi` flag, monomorphised generics, $ref integrity, SecurityConfig support
+- OpenAPI 3.0 emission: `--openapi` flag, monomorphised generics, $ref integrity, SecurityConfig support
 - NuGet: Rivet.Attributes (netstandard2.0), dotnet-rivet (net8.0, PackAsTool)
 - Samples: AnnotationApi (attribute-based discovery), ContractApi (contract-driven discovery)
 
@@ -89,7 +89,29 @@ Batch fix of 21 confirmed bugs from Claude + Codex independent audits. Key chang
 - **EndpointBuilder**: `AcceptsFile()` added to all 4 route definition types. `Status()` throws on double-call.
 - **TsType.CollectTypeRefs**: `StringUnion`, `Primitive`, `TypeParam` explicit cases for exhaustiveness.
 
-Deferred: numeric `format` in OpenAPI (#19/#20) — requires model change to `TsType.Primitive`. Circular ref tests (#21) — existing `_visiting` guard works, just needs test coverage.
+Deferred: Circular ref tests (#21) — existing `_visiting` guard works, just needs test coverage.
+
+### Deep Review Fixes (2026-03-20)
+
+- **TsType.Primitive format metadata**: Optional `Format` field on `Primitive` — Guid→`uuid`, DateTime→`date-time`, DateOnly→`date`, int→`int32`, long→`int64`, decimal→`decimal`, float→`float`, double→`double`. Both OpenApiEmitter and JsonSchemaEmitter emit `format` when present. Round-trip now preserves type fidelity.
+- **Nullable unknown → invalid OpenAPI**: `MapNullable` now delegates to `MapPrimitive` instead of inlining `type: p.Name`, fixing `type: "unknown"` emission.
+- **Multipart `required` array**: Multipart schemas now emit `required` for file and non-nullable form field params.
+- **Duplicate endpoint warning**: `BuildPaths` warns on stderr when same path+method is overwritten.
+- **OpenAPI version docs**: Help text and CONTEXT.md corrected from "3.1" to "3.0" (emitter uses 3.0 `nullable: true` convention).
+- **ZodValidatorEmitter Dictionary**: `CollectSchemaImports` now handles `TsType.Dictionary` value types.
+- **ContractWalker `[JsonPropertyName]`/`[JsonIgnore]`**: `BuildParams` now respects these attributes on TInput properties via new `TypeWalker.IsJsonIgnored()`/`GetJsonPropertyName()` helpers.
+- **POST route param types**: Route params for mutation endpoints now match TInput property types instead of always `string`.
+- **Param-only POST import**: Mutation endpoints with path/query params but no body no longer wire the synthesized input record as `.Accepts<T>()`, preventing phantom body emission on round-trip.
+- **Unmatched route placeholders**: Emit `${"" /* unmatched: paramName */}` (valid JS) instead of leaving literal `{paramName}` (broken JS).
+- **Validated client `else` success assert**: When error responses are present, the success branch now gets validated too.
+- **Void/file endpoint error validation**: Void and file endpoints with typed error responses (`.Returns<T>(code)`) now get a discriminated union result type and error validation in the `unwrap: false` branch. Previously skipped entirely because `ReturnType == null`. Fix required: (1) ContractWalker inserts a success response entry when error responses exist, so the DU is emitted; (2) ClientEmitter gates on `hasTypedErrorResponses` not just `ReturnType`; (3) `needsAsync` updated to match.
+
+### Deep Review Fixes (2026-03-21)
+
+- **OpenAPI integer type emission**: `MapPrimitive` in both OpenApiEmitter and JsonSchemaEmitter now emits `type: "integer"` (not `"number"`) when format is `int32`/`int64`, per OpenAPI 3.0 spec. Fixes round-trip: imported integers were misidentified as `double`.
+- **Import round-trip `date`/`decimal`**: SchemaMapper now maps `format: "date"` → `DateOnly` and `format: "decimal"` → `decimal`. Closes format fidelity gaps introduced by the Primitive format metadata.
+- **Contract `using System;`**: CSharpWriter.WriteContract now emits `using System;` — needed when endpoint type parameters resolve to `DateOnly`, `Guid`, `DateTime`, etc.
+- **Dead code cleanup**: Removed unused `Naming.EscapeKeyword` + `CSharpKeywords`; removed dead uppercase branches in ContractBuilder `isMutation`; moved unmatched route placeholder warning inside Replace callback (was unreachable after the `${""}` fallback change).
 
 ### Known Issues / Polish
 
@@ -100,7 +122,7 @@ Deferred: numeric `format` in OpenAPI (#19/#20) — requires model change to `Ts
   MSBuildWorkspace mode is the real workflow
 - No watch mode / MSBuild target for regeneration on build yet
 - No `dotnet rivet init` scaffolding command
-- `RealWorldImportTests.GitHub_Api_Imports_And_Compiles` pre-existing failure (unrelated to deep review fixes)
+- `RealWorldImportTests.GitHub_Api_Imports_And_Compiles` previously had a pre-existing failure — now fixed by adding `using System;` to contract files and proper `DateOnly`/`decimal` import mappings
 
 ---
 

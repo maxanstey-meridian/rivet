@@ -287,7 +287,9 @@ public static partial class ClientEmitter
         var fullFetchStr = $", {{ {string.Join(", ", fetchOptionParts)} }}";
 
         var implReturn = $"Promise<{successType} | {resultTypeName}>";
-        var needsAsync = fileParams.Count > 0 || (validateMode != ValidateMode.None && endpoint.ReturnType is not null);
+        var hasTypedErrorResponses = endpoint.Responses.Any(r => r.DataType is not null && r.StatusCode >= 400);
+        var needsValidation = validateMode != ValidateMode.None && (endpoint.ReturnType is not null || hasTypedErrorResponses);
+        var needsAsync = fileParams.Count > 0 || needsValidation;
         var asyncKeyword = needsAsync ? "async " : "";
 
         // Implementation signature
@@ -315,10 +317,10 @@ public static partial class ClientEmitter
             }
         }
 
-        if (validateMode != ValidateMode.None && endpoint.ReturnType is not null)
+        if (needsValidation)
         {
-            var assertName = ValidatorEmitter.GetAssertName(endpoint.ReturnType);
-            if (endpoint.Responses.Any(r => r.DataType is not null))
+            // unwrap: false branch — validate error responses (and success if present)
+            if (hasTypedErrorResponses)
             {
                 sb.AppendLine($"  if (opts?.unwrap === false) {{");
                 sb.AppendLine($"    const result = await rivetFetch<{resultTypeName}>(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
@@ -327,21 +329,37 @@ public static partial class ClientEmitter
                 {
                     var responseAssert = ValidatorEmitter.GetAssertName(responses[i].DataType!);
                     var prefix = i == 0 ? "    if" : "    else if";
-                    sb.AppendLine($"{prefix} (result.status === {responses[i].StatusCode}) result.data = {responseAssert}(result.data);");
+                    sb.AppendLine($"{prefix} (result.status === {responses[i].StatusCode}) (result as any).data = {responseAssert}(result.data);");
+                }
+                if (endpoint.ReturnType is not null)
+                {
+                    var successAssert = ValidatorEmitter.GetAssertName(endpoint.ReturnType);
+                    sb.AppendLine($"    else (result as any).data = {successAssert}(result.data);");
                 }
                 sb.AppendLine("    return result;");
                 sb.AppendLine("  }");
             }
-            else
+            else if (endpoint.ReturnType is not null)
             {
+                var assertName = ValidatorEmitter.GetAssertName(endpoint.ReturnType);
                 sb.AppendLine($"  if (opts?.unwrap === false) {{");
                 sb.AppendLine($"    const result = await rivetFetch<{resultTypeName}>(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
                 sb.AppendLine($"    result.data = {assertName}(result.data);");
                 sb.AppendLine("    return result;");
                 sb.AppendLine("  }");
             }
-            sb.AppendLine($"  const data = await rivetFetch<{successType}>(\"{endpoint.HttpMethod}\", `{route}`{baseFetchStr});");
-            sb.AppendLine($"  return {assertName}(data);");
+
+            // Unwrapped return — validate success type if present, otherwise plain fetch
+            if (endpoint.ReturnType is not null)
+            {
+                var assertName = ValidatorEmitter.GetAssertName(endpoint.ReturnType);
+                sb.AppendLine($"  const data = await rivetFetch<{successType}>(\"{endpoint.HttpMethod}\", `{route}`{baseFetchStr});");
+                sb.AppendLine($"  return {assertName}(data);");
+            }
+            else
+            {
+                sb.AppendLine($"  return rivetFetch<{resultTypeName}>(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
+            }
         }
         else
         {
@@ -410,14 +428,14 @@ public static partial class ClientEmitter
             var paramName = match.Groups[1].Value;
             var param = routeParams.FirstOrDefault(p =>
                 string.Equals(p.Name, paramName, StringComparison.OrdinalIgnoreCase));
-            return param is not null ? $"${{{SafeParameterName(param.Name)}}}" : match.Value;
-        });
+            if (param is not null)
+            {
+                return $"${{{SafeParameterName(param.Name)}}}";
+            }
 
-        // Warn about unmatched route placeholders at generation time
-        if (RouteParamRegex().IsMatch(result))
-        {
-            Console.Error.WriteLine($"warning: unmatched route placeholder(s) in '{template}'");
-        }
+            Console.Error.WriteLine($"warning: unmatched route placeholder '{{{paramName}}}' in '{template}'");
+            return $"${{\"\" /* unmatched: {paramName} */}}";
+        });
 
         return result;
     }

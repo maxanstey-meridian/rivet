@@ -377,4 +377,16 @@ public sealed class ClientEmitterTests
             .Invoke(null, ["class"]) as string;
         Assert.Equal("_class", funcName2);
     }
+
+    [Fact]
+    public void SafeParameterName_ReservedWords_GetPrefixed()
+    {
+        var safeParam = typeof(ClientEmitter)
+            .GetMethod("SafeParameterName", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+
+        Assert.Equal("_class", safeParam.Invoke(null, ["class"]) as string);
+        Assert.Equal("_return", safeParam.Invoke(null, ["return"]) as string);
+        Assert.Equal("_delete", safeParam.Invoke(null, ["delete"]) as string);
+        Assert.Equal("normalName", safeParam.Invoke(null, ["normalName"]) as string);
+    }
 }

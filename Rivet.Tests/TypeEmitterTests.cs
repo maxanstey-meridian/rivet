@@ -914,4 +914,95 @@ public sealed class TypeEmitterTests
         Assert.DoesNotContain("hidden", result);
         Assert.DoesNotContain("Hidden", result);
     }
+
+    // ========== TsType shared methods ==========
+
+    [Theory]
+    [InlineData("TypeRef")]
+    [InlineData("Brand")]
+    [InlineData("Dictionary")]
+    [InlineData("TypeParam")]
+    public void GetNameSuffix_AllBranches(string variant)
+    {
+        var type = variant switch
+        {
+            "TypeRef" => (TsType)new TsType.TypeRef("Foo"),
+            "Brand" => new TsType.Brand("Email", new TsType.Primitive("string")),
+            "Dictionary" => new TsType.Dictionary(new TsType.Primitive("string")),
+            "TypeParam" => new TsType.TypeParam("T"),
+            _ => throw new ArgumentException(variant),
+        };
+
+        var suffix = TsType.GetNameSuffix(type);
+
+        var expected = variant switch
+        {
+            "TypeRef" => "Foo",
+            "Brand" => "Email",
+            "Dictionary" => "RecordString",
+            "TypeParam" => "T",
+            _ => throw new ArgumentException(variant),
+        };
+
+        Assert.Equal(expected, suffix);
+    }
+
+    [Fact]
+    public void ResolveTypeParams_SubstitutesTypeParam()
+    {
+        var map = new Dictionary<string, TsType>
+        {
+            ["T"] = new TsType.TypeRef("TaskDto"),
+        };
+
+        // Simple TypeParam
+        var resolved = TsType.ResolveTypeParams(new TsType.TypeParam("T"), map);
+        Assert.Equal(new TsType.TypeRef("TaskDto"), resolved);
+
+        // Unmatched TypeParam passes through
+        var unmatched = TsType.ResolveTypeParams(new TsType.TypeParam("U"), map);
+        Assert.Equal(new TsType.TypeParam("U"), unmatched);
+    }
+
+    [Fact]
+    public void ResolveTypeParams_RecursesIntoContainers()
+    {
+        var map = new Dictionary<string, TsType>
+        {
+            ["T"] = new TsType.TypeRef("TaskDto"),
+        };
+
+        // Array<T> → Array<TaskDto>
+        var arrayType = new TsType.Array(new TsType.TypeParam("T"));
+        var resolved = TsType.ResolveTypeParams(arrayType, map);
+        Assert.Equal(new TsType.Array(new TsType.TypeRef("TaskDto")), resolved);
+
+        // Nullable<T> → Nullable<TaskDto>
+        var nullableType = new TsType.Nullable(new TsType.TypeParam("T"));
+        resolved = TsType.ResolveTypeParams(nullableType, map);
+        Assert.Equal(new TsType.Nullable(new TsType.TypeRef("TaskDto")), resolved);
+
+        // Dictionary<T> → Dictionary<TaskDto>
+        var dictType = new TsType.Dictionary(new TsType.TypeParam("T"));
+        resolved = TsType.ResolveTypeParams(dictType, map);
+        Assert.Equal(new TsType.Dictionary(new TsType.TypeRef("TaskDto")), resolved);
+
+        // Generic<T> → Generic<TaskDto>
+        var genericType = new TsType.Generic("PagedResult", [new TsType.TypeParam("T")]);
+        resolved = TsType.ResolveTypeParams(genericType, map);
+        Assert.IsType<TsType.Generic>(resolved);
+        var resolvedGeneric = (TsType.Generic)resolved;
+        Assert.Equal("PagedResult", resolvedGeneric.Name);
+        Assert.Single(resolvedGeneric.TypeArguments);
+        Assert.Equal(new TsType.TypeRef("TaskDto"), resolvedGeneric.TypeArguments[0]);
+
+        // InlineObject with T field → InlineObject with TaskDto field
+        var inlineType = new TsType.InlineObject([("data", new TsType.TypeParam("T"))]);
+        resolved = TsType.ResolveTypeParams(inlineType, map);
+        Assert.IsType<TsType.InlineObject>(resolved);
+        var resolvedInline = (TsType.InlineObject)resolved;
+        Assert.Single(resolvedInline.Fields);
+        Assert.Equal("data", resolvedInline.Fields[0].Name);
+        Assert.Equal(new TsType.TypeRef("TaskDto"), resolvedInline.Fields[0].Type);
+    }
 }

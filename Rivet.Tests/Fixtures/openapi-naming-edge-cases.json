@@ -1,0 +1,256 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Naming Edge Cases", "version": "1.0.0" },
+  "paths": {
+    "/status": {
+      "get": {
+        "tags": ["Status"],
+        "operationId": "status_get",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StatusResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/config": {
+      "get": {
+        "tags": ["Config"],
+        "operationId": "config_get",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AppConfig" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/enums": {
+      "get": {
+        "tags": ["Enums"],
+        "operationId": "enums_list",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EnumContainer" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mixed-case": {
+      "get": {
+        "tags": ["MixedCase"],
+        "operationId": "mixedCase_get",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CaseTestResult" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reserved": {
+      "get": {
+        "tags": ["Reserved"],
+        "operationId": "reserved_get",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ReservedWords" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/nullable-enum": {
+      "get": {
+        "tags": ["Enums"],
+        "operationId": "enums_nullable",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/NullableEnumHolder" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/special-chars": {
+      "get": {
+        "tags": ["Special"],
+        "operationId": "special_get",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SpecialCharsModel" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "StatusResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "": { "type": "string", "description": "Empty string property name" },
+          "123numeric": { "type": "integer", "description": "Starts with digits" },
+          "normal_field": { "type": "string" }
+        },
+        "required": ["status"]
+      },
+      "AppConfig": {
+        "type": "object",
+        "properties": {
+          "debug": { "type": "boolean" },
+          "items": {
+            "type": "object",
+            "properties": {
+              "count": { "type": "integer" },
+              "tags": { "type": "array", "items": { "type": "string" } }
+            },
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      },
+      "EnumContainer": {
+        "type": "object",
+        "properties": {
+          "dupEnum": { "$ref": "#/components/schemas/DuplicatingEnum" },
+          "specialEnum": { "$ref": "#/components/schemas/SpecialCharEnum" },
+          "emptyValEnum": { "$ref": "#/components/schemas/EmptyValueEnum" }
+        }
+      },
+      "DuplicatingEnum": {
+        "type": "string",
+        "description": "foo-bar and foo_bar both PascalCase to FooBar",
+        "enum": ["foo-bar", "foo_bar", "baz-qux", "bazQux"]
+      },
+      "SpecialCharEnum": {
+        "type": "string",
+        "description": "Enum values with special characters",
+        "enum": ["normal", "*", ">=", "<=", "!="]
+      },
+      "EmptyValueEnum": {
+        "type": "string",
+        "description": "Enum with empty string value",
+        "enum": ["active", "", "inactive"]
+      },
+      "NullableEnumHolder": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "Nullable enum (OpenAPI 3.1 pattern)",
+            "oneOf": [
+              { "$ref": "#/components/schemas/NullableStatusEnum" },
+              { "type": "null" }
+            ]
+          }
+        }
+      },
+      "NullableStatusEnum": {
+        "type": "string",
+        "enum": ["on", "off", "standby"]
+      },
+      "foo_bar_schema": {
+        "type": "object",
+        "description": "Should PascalCase to FooBarSchema",
+        "properties": {
+          "id": { "type": "string" }
+        },
+        "required": ["id"]
+      },
+      "FooBarSchema": {
+        "type": "object",
+        "description": "Already PascalCase — collides with foo_bar_schema",
+        "properties": {
+          "name": { "type": "string" }
+        },
+        "required": ["name"]
+      },
+      "CaseTestResult": {
+        "type": "object",
+        "properties": {
+          "snakeCase": { "$ref": "#/components/schemas/foo_bar_schema" },
+          "pascalCase": { "$ref": "#/components/schemas/FooBarSchema" }
+        }
+      },
+      "ReservedWords": {
+        "type": "object",
+        "description": "Properties that are C# keywords after PascalCase",
+        "properties": {
+          "class": { "type": "string" },
+          "event": { "type": "string" },
+          "object": { "type": "string" },
+          "string": { "type": "string" },
+          "namespace": { "type": "string" },
+          "delegate": { "type": "string" },
+          "abstract": { "type": "boolean" },
+          "override": { "type": "boolean" },
+          "readonly": { "type": "boolean" },
+          "interface": { "type": "string" },
+          "operator": { "type": "string" },
+          "params": { "type": "string" },
+          "ref": { "type": "string" },
+          "out": { "type": "string" },
+          "in": { "type": "string" },
+          "is": { "type": "boolean" },
+          "as": { "type": "string" },
+          "new": { "type": "string" },
+          "null": { "type": "string" },
+          "true": { "type": "boolean" },
+          "false": { "type": "boolean" },
+          "int": { "type": "integer" },
+          "bool": { "type": "boolean" },
+          "double": { "type": "number" },
+          "float": { "type": "number" },
+          "long": { "type": "integer" },
+          "short": { "type": "integer" }
+        }
+      },
+      "SpecialCharsModel": {
+        "type": "object",
+        "description": "Properties with various special characters",
+        "properties": {
+          "@type": { "type": "string" },
+          "$ref": { "type": "string" },
+          "#id": { "type": "string" },
+          "...rest": { "type": "string" },
+          "100%": { "type": "string" },
+          "a b c": { "type": "string" },
+          "key.with.dots": { "type": "string" },
+          "kebab-case": { "type": "string" },
+          "snake_case": { "type": "string" }
+        }
+      }
+    }
+  }
+}

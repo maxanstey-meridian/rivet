@@ -39,6 +39,7 @@ public sealed class TypeWalker
 
     private readonly INamedTypeSymbol? _jsonPropertyNameType;
     private readonly INamedTypeSymbol? _jsonIgnoreType;
+    private readonly INamedTypeSymbol? _obsoleteType;
 
     public TypeWalker(Compilation compilation)
     {
@@ -75,6 +76,7 @@ public sealed class TypeWalker
 
         _jsonPropertyNameType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonPropertyNameAttribute");
         _jsonIgnoreType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonIgnoreAttribute");
+        _obsoleteType = compilation.GetTypeByMetadataName("System.ObsoleteAttribute");
     }
 
     public IReadOnlyDictionary<string, TsTypeDefinition> Definitions => _definitions;
@@ -106,6 +108,37 @@ public sealed class TypeWalker
     /// Used by EndpointWalker for parameter and return types.
     /// </summary>
     public TsType MapType(ITypeSymbol symbol) => MapTypeCore(symbol);
+
+    /// <summary>
+    /// Returns true if the property has [JsonIgnore].
+    /// </summary>
+    public bool IsJsonIgnored(IPropertySymbol prop)
+    {
+        return _jsonIgnoreType is not null
+            && prop.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIgnoreType));
+    }
+
+    /// <summary>
+    /// Returns the [JsonPropertyName] value if present, null otherwise.
+    /// </summary>
+    public string? GetJsonPropertyName(IPropertySymbol prop)
+    {
+        if (_jsonPropertyNameType is null)
+        {
+            return null;
+        }
+
+        var attr = prop.GetAttributes()
+            .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonPropertyNameType));
+
+        if (attr is not null && attr.ConstructorArguments.Length == 1
+            && attr.ConstructorArguments[0].Value is string name)
+        {
+            return name;
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Walks a named type, producing a TsTypeDefinition and recursively
@@ -185,8 +218,10 @@ public sealed class TypeWalker
             var tsName = jsonPropertyName ?? Naming.ToCamelCase(member.Name);
             var tsType = MapTypeCore(member.Type);
             var isOptional = IsOptionalProperty(member);
+            var isDeprecated = _obsoleteType is not null
+                && member.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _obsoleteType));
 
-            properties.Add(new TsPropertyDefinition(tsName, tsType, isOptional));
+            properties.Add(new TsPropertyDefinition(tsName, tsType, isOptional, isDeprecated));
         }
 
         _visiting.Remove(name);
@@ -316,14 +351,22 @@ public sealed class TypeWalker
     private TsType.Primitive? MapPrimitive(INamedTypeSymbol symbol)
     {
         // Special types via Roslyn's built-in classification (fast path)
+        // CSharpType is set only when the type can't be recovered from Name+Format alone
         var result = symbol.SpecialType switch
         {
             SpecialType.System_String => new TsType.Primitive("string"),
             SpecialType.System_Boolean => new TsType.Primitive("boolean"),
-            SpecialType.System_Int16 or SpecialType.System_Int32 or SpecialType.System_Int64
-                or SpecialType.System_UInt16 or SpecialType.System_UInt32 or SpecialType.System_UInt64
-                or SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_Decimal
-                or SpecialType.System_Byte or SpecialType.System_SByte => new TsType.Primitive("number"),
+            SpecialType.System_Int32 => new TsType.Primitive("number", "int32"),
+            SpecialType.System_UInt32 => new TsType.Primitive("number", "int32", "uint"),
+            SpecialType.System_Int64 => new TsType.Primitive("number", "int64"),
+            SpecialType.System_UInt64 => new TsType.Primitive("number", "int64", "ulong"),
+            SpecialType.System_Single => new TsType.Primitive("number", "float"),
+            SpecialType.System_Double => new TsType.Primitive("number", "double"),
+            SpecialType.System_Decimal => new TsType.Primitive("number", "decimal"),
+            SpecialType.System_Int16 => new TsType.Primitive("number", "int16", "short"),
+            SpecialType.System_UInt16 => new TsType.Primitive("number", "uint16", "ushort"),
+            SpecialType.System_Byte => new TsType.Primitive("number", "uint8", "byte"),
+            SpecialType.System_SByte => new TsType.Primitive("number", "int8", "sbyte"),
             _ => (TsType.Primitive?)null,
         };
 
@@ -333,12 +376,24 @@ public sealed class TypeWalker
         }
 
         // Non-SpecialType primitives — resolved via symbol comparison instead of ToDisplayString
-        if (SymbolEqualityComparer.Default.Equals(symbol, _guidType)
-            || SymbolEqualityComparer.Default.Equals(symbol, _dateTimeType)
-            || SymbolEqualityComparer.Default.Equals(symbol, _dateTimeOffsetType)
-            || SymbolEqualityComparer.Default.Equals(symbol, _dateOnlyType))
+        if (SymbolEqualityComparer.Default.Equals(symbol, _guidType))
         {
-            return new TsType.Primitive("string");
+            return new TsType.Primitive("string", "uuid");
+        }
+
+        if (SymbolEqualityComparer.Default.Equals(symbol, _dateTimeType))
+        {
+            return new TsType.Primitive("string", "date-time");
+        }
+
+        if (SymbolEqualityComparer.Default.Equals(symbol, _dateTimeOffsetType))
+        {
+            return new TsType.Primitive("string", "date-time", "DateTimeOffset");
+        }
+
+        if (SymbolEqualityComparer.Default.Equals(symbol, _dateOnlyType))
+        {
+            return new TsType.Primitive("string", "date");
         }
 
         if (SymbolEqualityComparer.Default.Equals(symbol, _jsonElementType)

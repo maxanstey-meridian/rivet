@@ -8,8 +8,9 @@ public abstract record TsType
 {
     private TsType() { }
 
-    /// <summary>Leaf type: "string", "number", "boolean", "unknown".</summary>
-    public sealed record Primitive(string Name) : TsType;
+    /// <summary>Leaf type: "string", "number", "boolean", "unknown". Optional Format for OpenAPI/JSON Schema.
+    /// CSharpType is set when the C# type can't be recovered from Name+Format alone (e.g. DateTimeOffset, uint).</summary>
+    public sealed record Primitive(string Name, string? Format = null, string? CSharpType = null) : TsType;
 
     /// <summary>T | null.</summary>
     public sealed record Nullable(TsType Inner) : TsType;
