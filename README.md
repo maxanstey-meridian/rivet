@@ -99,59 +99,25 @@ app.MapGet(MembersContract.List.Route, async (AppDb db, CancellationToken ct) =>
     })).ToResult());  // you write ToResult() once, same pattern as ToActionResult()
 ```
 
-## Add `--compile` → get runtime validation via typia
+## Add `--compile` → runtime validation with Zod
 
 ```bash
 dotnet rivet --project Api.csproj --output ./generated --compile
 ```
 
-Rivet generates [typia](https://typia.io) validators for your types:
-
-```csharp
-[RivetType]
-public sealed record Age(int Value);
-```
-
-```typescript
-// Generated type — number at runtime, branded at compile time
-export type Age = number & { readonly __brand: "Age" };
-
-// Generated validator — typia compiles it to:
-export const assertAge = typia.createAssert<Age>();
-```
-
-```javascript
-// What typia emits at runtime — a pure function, no reflection, no runtime schema
-export const assertAge = (input) => {
-  if (typeof input !== "number") {
-    throw new TypeGuardError({ expected: "Age", value: input });
-  }
-  
-  return input;
-};
-```
-
-Every API response is validated at the network boundary with [typia](https://typia.io) runtime assertions — not just primitives, but full object shapes, nested types, and unions. If the server sends unexpected data, you get a clear error immediately — not a silent `undefined` three components later.
-
-## Or `--compile zod` → validate with Zod 4
-
-```bash
-dotnet rivet --project Api.csproj --output ./generated --compile zod
-```
-
-Same validation wiring as typia, but backed by Zod 4's `fromJSONSchema()` — no typia transformer, no node compile step. Rivet emits a `schemas.ts` with standalone JSON Schema definitions and a `validators.ts` that wraps them:
+Rivet emits [Zod 4](https://zod.dev) validators backed by `fromJSONSchema()` — a `schemas.ts` with standalone JSON Schema definitions and a `validators.ts` that wraps them:
 
 ```typescript
 // schemas.ts — standalone JSON Schema, usable with any validator
 export const TaskItemSchema = { "$ref": "#/$defs/TaskItem", "$defs": $defs } as const;
 
-// validators.ts — cached Zod schemas, same assertFoo interface as typia
+// validators.ts — cached Zod schemas
 import { fromJSONSchema, z } from "zod";
 const _assertTaskItem = fromJSONSchema(TaskItemSchema as any);
 export const assertTaskItem = (data: unknown): TaskItem => _assertTaskItem.parse(data) as TaskItem;
 ```
 
-The generated client imports from `validators.ts` identically to the typia path — consumers don't need to know which backend is wired in.
+Every API response is validated at the network boundary — not just primitives, but full object shapes, nested types, and unions. If the server sends unexpected data, you get a clear error immediately — not a silent `undefined` three components later. Requires `zod` in your consumer project.
 
 You can also emit just the schemas without validation wiring:
 

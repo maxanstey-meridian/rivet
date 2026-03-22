@@ -16,13 +16,6 @@ public sealed class FormatRoundTripTests
 {
     // ─── Helpers ────────────────────────────────────────────────
 
-    private static string EmitSchemas(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        return JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
-    }
-
     private static JsonElement ParseDefs(string output)
     {
         var start = output.IndexOf("const $defs = ", StringComparison.Ordinal) + "const $defs = ".Length;
@@ -36,7 +29,7 @@ public sealed class FormatRoundTripTests
     {
         var compilation = CompilationHelper.CreateCompilation(csharpSource);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var openApiJson = OpenApiEmitter.Emit(
             endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
         return (endpoints, walker, openApiJson);
@@ -49,7 +42,7 @@ public sealed class FormatRoundTripTests
         var compilation = CompilationHelper.CreateCompilationFromMultiple(
             importResult.Files.Select(f => f.Content).ToArray());
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         return (endpoints, walker);
     }
 
@@ -68,7 +61,7 @@ public sealed class FormatRoundTripTests
             public sealed record IdDto(Guid Id);
             """;
 
-        var defs = ParseDefs(EmitSchemas(source));
+        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
         var prop = defs.GetProperty("IdDto").GetProperty("properties").GetProperty("id");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("uuid", prop.GetProperty("format").GetString());
@@ -87,7 +80,7 @@ public sealed class FormatRoundTripTests
             public sealed record TimedDto(DateTime CreatedAt);
             """;
 
-        var defs = ParseDefs(EmitSchemas(source));
+        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
         var prop = defs.GetProperty("TimedDto").GetProperty("properties").GetProperty("createdAt");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("date-time", prop.GetProperty("format").GetString());
@@ -106,7 +99,7 @@ public sealed class FormatRoundTripTests
             public sealed record DayDto(DateOnly Day);
             """;
 
-        var defs = ParseDefs(EmitSchemas(source));
+        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
         var prop = defs.GetProperty("DayDto").GetProperty("properties").GetProperty("day");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("date", prop.GetProperty("format").GetString());
@@ -125,7 +118,7 @@ public sealed class FormatRoundTripTests
             public sealed record AlarmDto(TimeOnly RingAt);
             """;
 
-        var defs = ParseDefs(EmitSchemas(source));
+        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
         var prop = defs.GetProperty("AlarmDto").GetProperty("properties").GetProperty("ringAt");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("time", prop.GetProperty("format").GetString());
@@ -144,7 +137,7 @@ public sealed class FormatRoundTripTests
             public sealed record LinkDto(Uri Href);
             """;
 
-        var defs = ParseDefs(EmitSchemas(source));
+        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
         var prop = defs.GetProperty("LinkDto").GetProperty("properties").GetProperty("href");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("uri", prop.GetProperty("format").GetString());
@@ -162,7 +155,7 @@ public sealed class FormatRoundTripTests
             public sealed record CountDto(int Count);
             """;
 
-        var defs = ParseDefs(EmitSchemas(source));
+        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
         var prop = defs.GetProperty("CountDto").GetProperty("properties").GetProperty("count");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("int32", prop.GetProperty("format").GetString());
@@ -182,7 +175,7 @@ public sealed class FormatRoundTripTests
             public sealed record FlagDto(uint Flags);
             """;
 
-        var defs = ParseDefs(EmitSchemas(source));
+        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
         var prop = defs.GetProperty("FlagDto").GetProperty("properties").GetProperty("flags");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("uint32", prop.GetProperty("format").GetString());
@@ -202,7 +195,7 @@ public sealed class FormatRoundTripTests
             public sealed record PixelDto(byte R, byte G, byte B);
             """;
 
-        var defs = ParseDefs(EmitSchemas(source));
+        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
         var prop = defs.GetProperty("PixelDto").GetProperty("properties").GetProperty("r");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("uint8", prop.GetProperty("format").GetString());
@@ -222,7 +215,7 @@ public sealed class FormatRoundTripTests
             public sealed record LevelDto(short Level);
             """;
 
-        var defs = ParseDefs(EmitSchemas(source));
+        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
         var prop = defs.GetProperty("LevelDto").GetProperty("properties").GetProperty("level");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("int16", prop.GetProperty("format").GetString());
@@ -242,7 +235,7 @@ public sealed class FormatRoundTripTests
             public sealed record BigDto(long BigNumber);
             """;
 
-        var defs = ParseDefs(EmitSchemas(source));
+        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
         var prop = defs.GetProperty("BigDto").GetProperty("properties").GetProperty("bigNumber");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("int64", prop.GetProperty("format").GetString());

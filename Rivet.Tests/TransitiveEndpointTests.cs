@@ -42,7 +42,7 @@ public sealed class TransitiveEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
         var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
@@ -94,7 +94,7 @@ public sealed class TransitiveEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
         var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
@@ -146,7 +146,7 @@ public sealed class TransitiveEndpointTests
 
         var compilation = CompilationHelper.CreateCompilationWithProjectReference(mainSource, domainSource);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         // Endpoint should be discovered
         Assert.Single(endpoints);

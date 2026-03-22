@@ -1,21 +1,10 @@
 using Rivet.Tool.Analysis;
-using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
 public sealed class GenericTypeTests
 {
-    private static string Generate(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var definitions = walker.Definitions.Values.ToList();
-        var brands = walker.Brands.Values.ToList();
-        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
-        return string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
-    }
-
     [Fact]
     public void GenericRecord_EmitsTypeParameter()
     {
@@ -33,7 +22,7 @@ public sealed class GenericTypeTests
                 int PageSize);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type PagedResult<T> = {", result);
         Assert.Contains("items: T[];", result);
@@ -69,7 +58,7 @@ public sealed class GenericTypeTests
         var secondType = Assert.IsType<TsType.TypeParam>(secondProp.Type);
         Assert.Equal("TSecond", secondType.Name);
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type Pair<TFirst, TSecond> = {", result);
         Assert.Contains("first: TFirst;", result);
@@ -114,7 +103,7 @@ public sealed class GenericTypeTests
         Assert.Single(pagedResult.TypeParameters);
         Assert.Equal("T", pagedResult.TypeParameters[0]);
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         // PagedResult should be emitted as a generic definition
         Assert.Contains("export type PagedResult<T> = {", result);
@@ -149,7 +138,7 @@ public sealed class GenericTypeTests
         var typeArg = Assert.IsType<TsType.Primitive>(genericType.TypeArguments[0]);
         Assert.Equal("string", typeArg.Name);
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type Wrapper<T> = {", result);
         Assert.Contains("wrapped: Wrapper<string>;", result);
@@ -168,7 +157,7 @@ public sealed class GenericTypeTests
             public sealed record FlexibleDto(string Name, JsonElement Payload);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("payload: unknown;", result);
     }
@@ -186,7 +175,7 @@ public sealed class GenericTypeTests
             public sealed record DynamicDto(string Name, JsonNode? Data);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("data: unknown | null;", result);
     }
@@ -204,7 +193,7 @@ public sealed class GenericTypeTests
             public sealed record BranchCase(string Label, JsonObject Condition);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("condition: Record<string, unknown>;", result);
     }
@@ -222,7 +211,7 @@ public sealed class GenericTypeTests
             public sealed record BatchRequest(string Name, JsonArray Items);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("items: unknown[];", result);
     }

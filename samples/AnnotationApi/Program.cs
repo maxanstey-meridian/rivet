@@ -1,4 +1,4 @@
-using TaskBoard.Application.CreateTask;
+using AnnotationApi.Application.CreateTask;
 
 var builder = WebApplication.CreateBuilder(args);
 

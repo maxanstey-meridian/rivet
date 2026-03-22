@@ -1,20 +1,7 @@
-using Rivet.Tool.Analysis;
-using Rivet.Tool.Emit;
-
 namespace Rivet.Tests;
 
 public sealed class ValueObjectTests
 {
-    private static string Generate(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var definitions = walker.Definitions.Values.ToList();
-        var brands = walker.Brands.Values.ToList();
-        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
-        return string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
-    }
-
     [Fact]
     public void SingleValueProperty_EmitsAsBrand()
     {
@@ -30,7 +17,7 @@ public sealed class ValueObjectTests
             public sealed record UserDto(Guid Id, Email Email);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("""export type Email = string & { readonly __brand: "Email" };""", result);
         Assert.Contains("email: Email;", result);
@@ -52,7 +39,7 @@ public sealed class ValueObjectTests
             public sealed record OrderDto(string Name, Quantity Qty);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("""export type Quantity = number & { readonly __brand: "Quantity" };""", result);
         Assert.Contains("qty: Quantity;", result);
@@ -76,7 +63,7 @@ public sealed class ValueObjectTests
             public sealed record PropertyDto(Guid Id, Uprn Uprn);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("""export type Uprn = string & { readonly __brand: "Uprn" };""", result);
         Assert.Contains("uprn: Uprn;", result);
@@ -96,7 +83,7 @@ public sealed class ValueObjectTests
             public sealed record ProductDto(string Name, Money Price);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         // Money should be a full object type, not a brand
         Assert.Contains("export type Money = {", result);
@@ -119,7 +106,7 @@ public sealed class ValueObjectTests
             public sealed record ThingDto(Wrapper Data);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         // Single property but not named "Value" — emit as object type
         Assert.Contains("export type Wrapper = {", result);
@@ -141,7 +128,7 @@ public sealed class ValueObjectTests
             public sealed record ContactDto(string Name, Email? Email);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("""export type Email = string & { readonly __brand: "Email" };""", result);
         Assert.Contains("email: Email | null;", result);

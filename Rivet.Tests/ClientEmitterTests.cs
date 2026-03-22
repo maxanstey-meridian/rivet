@@ -9,7 +9,7 @@ public sealed class ClientEmitterTests
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);

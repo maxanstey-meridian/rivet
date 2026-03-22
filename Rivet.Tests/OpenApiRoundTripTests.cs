@@ -17,7 +17,7 @@ public sealed class OpenApiRoundTripTests
         // Forward: C# → OpenAPI JSON
         var compilation = CompilationHelper.CreateCompilation(csharpSource);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var securityConfig = security is not null ? SecurityParser.Parse(security) : null;
         var openApiJson = OpenApiEmitter.Emit(
             endpoints, walker.Definitions, walker.Brands, walker.Enums, securityConfig);
@@ -28,7 +28,7 @@ public sealed class OpenApiRoundTripTests
         var recompilation = CompilationHelper.CreateCompilationFromMultiple(
             importResult.Files.Select(f => f.Content).ToArray());
         var (reDiscovered, rewalker) = CompilationHelper.DiscoverAndWalk(recompilation);
-        var reEndpoints = ContractWalker.Walk(recompilation, rewalker, reDiscovered.ContractTypes);
+        var reEndpoints = CompilationHelper.WalkContracts(recompilation, reDiscovered, rewalker);
 
         return (reEndpoints, rewalker);
     }
@@ -546,7 +546,7 @@ public sealed class OpenApiRoundTripTests
         // Forward: C# → OpenAPI
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var openApiJson = OpenApiEmitter.Emit(
             endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
 
@@ -573,7 +573,7 @@ public sealed class OpenApiRoundTripTests
         var recompilation = CompilationHelper.CreateCompilationFromMultiple(
             importResult.Files.Select(f => f.Content).ToArray());
         var (reDiscovered, reWalker) = CompilationHelper.DiscoverAndWalk(recompilation);
-        var reEndpoints = ContractWalker.Walk(recompilation, reWalker, reDiscovered.ContractTypes);
+        var reEndpoints = CompilationHelper.WalkContracts(recompilation, reDiscovered, reWalker);
 
         var upload = Assert.Single(reEndpoints, e => e.HttpMethod == "POST");
         // With required multipart properties, IFormFile resolves correctly and the
@@ -725,21 +725,21 @@ public sealed class OpenApiRoundTripTests
         // Second round-trip: feed the first round-trip's output back through
         var firstCompilation = CompilationHelper.CreateCompilation(source);
         var (firstDisc, firstWlk) = CompilationHelper.DiscoverAndWalk(firstCompilation);
-        var firstEps = ContractWalker.Walk(firstCompilation, firstWlk, firstDisc.ContractTypes);
+        var firstEps = CompilationHelper.WalkContracts(firstCompilation, firstDisc, firstWlk);
         var firstJson = OpenApiEmitter.Emit(
             firstEps, firstWlk.Definitions, firstWlk.Brands, firstWlk.Enums, null);
         var firstImport = OpenApiImporter.Import(firstJson, new ImportOptions("RoundTrip"));
         var secondCompilation = CompilationHelper.CreateCompilationFromMultiple(
             firstImport.Files.Select(f => f.Content).ToArray());
         var (secondDisc, secondWlk) = CompilationHelper.DiscoverAndWalk(secondCompilation);
-        var secondEps = ContractWalker.Walk(secondCompilation, secondWlk, secondDisc.ContractTypes);
+        var secondEps = CompilationHelper.WalkContracts(secondCompilation, secondDisc, secondWlk);
         var secondJson = OpenApiEmitter.Emit(
             secondEps, secondWlk.Definitions, secondWlk.Brands, secondWlk.Enums, null);
         var secondImport = OpenApiImporter.Import(secondJson, new ImportOptions("RoundTrip"));
         var thirdCompilation = CompilationHelper.CreateCompilationFromMultiple(
             secondImport.Files.Select(f => f.Content).ToArray());
         var (thirdDisc, thirdWlk) = CompilationHelper.DiscoverAndWalk(thirdCompilation);
-        var thirdEps = ContractWalker.Walk(thirdCompilation, thirdWlk, thirdDisc.ContractTypes);
+        var thirdEps = CompilationHelper.WalkContracts(thirdCompilation, thirdDisc, thirdWlk);
 
         // Same number of endpoints
         Assert.Equal(firstEndpoints.Count, thirdEps.Count);
@@ -840,7 +840,7 @@ public sealed class OpenApiRoundTripTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var json = OpenApiEmitter.Emit(
             endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
 
@@ -1033,7 +1033,7 @@ public sealed class OpenApiRoundTripTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
 
@@ -1104,13 +1104,13 @@ public sealed class OpenApiRoundTripTests
         // Second round-trip from the first round-trip's output
         var compilation = CompilationHelper.CreateCompilation(source);
         var (disc, wlk) = CompilationHelper.DiscoverAndWalk(compilation);
-        var eps = ContractWalker.Walk(compilation, wlk, disc.ContractTypes);
+        var eps = CompilationHelper.WalkContracts(compilation, disc, wlk);
         var json1 = OpenApiEmitter.Emit(eps, wlk.Definitions, wlk.Brands, wlk.Enums, null);
         var import1 = OpenApiImporter.Import(json1, new ImportOptions("RoundTrip"));
         var recomp1 = CompilationHelper.CreateCompilationFromMultiple(
             import1.Files.Select(f => f.Content).ToArray());
         var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(recomp1);
-        var eps2 = ContractWalker.Walk(recomp1, wlk2, disc2.ContractTypes);
+        var eps2 = CompilationHelper.WalkContracts(recomp1, disc2, wlk2);
         var json2 = OpenApiEmitter.Emit(eps2, wlk2.Definitions, wlk2.Brands, wlk2.Enums, null);
         var import2 = OpenApiImporter.Import(json2, new ImportOptions("RoundTrip"));
         var recomp2 = CompilationHelper.CreateCompilationFromMultiple(
@@ -1660,7 +1660,7 @@ public sealed class OpenApiRoundTripTests
         // Step 0: Original C# → OpenAPI
         var comp0 = CompilationHelper.CreateCompilation(source);
         var (disc0, wlk0) = CompilationHelper.DiscoverAndWalk(comp0);
-        var eps0 = ContractWalker.Walk(comp0, wlk0, disc0.ContractTypes);
+        var eps0 = CompilationHelper.WalkContracts(comp0, disc0, wlk0);
         var secCfg = SecurityParser.Parse(security);
         var json0 = OpenApiEmitter.Emit(eps0, wlk0.Definitions, wlk0.Brands, wlk0.Enums, secCfg);
 
@@ -1670,7 +1670,7 @@ public sealed class OpenApiRoundTripTests
         var comp1 = CompilationHelper.CreateCompilationFromMultiple(
             import1.Files.Select(f => f.Content).ToArray());
         var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
-        var eps1 = ContractWalker.Walk(comp1, wlk1, disc1.ContractTypes);
+        var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
         var json1 = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, secCfg);
 
         // Step 2 (round 2): OpenAPI → import → compile → walk → OpenAPI
@@ -1678,7 +1678,7 @@ public sealed class OpenApiRoundTripTests
         var comp2 = CompilationHelper.CreateCompilationFromMultiple(
             import2.Files.Select(f => f.Content).ToArray());
         var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(comp2);
-        var eps2 = ContractWalker.Walk(comp2, wlk2, disc2.ContractTypes);
+        var eps2 = CompilationHelper.WalkContracts(comp2, disc2, wlk2);
         var json2 = OpenApiEmitter.Emit(eps2, wlk2.Definitions, wlk2.Brands, wlk2.Enums, secCfg);
 
         // ───── Assertion group 1: OpenAPI JSON idempotency (json1 ≡ json2) ─────
@@ -2080,7 +2080,7 @@ public sealed class OpenApiRoundTripTests
         var compilation = CompilationHelper.CreateCompilationFromMultiple(
             importResult.Files.Select(f => f.Content).ToArray());
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         var searchEp = endpoints.First(e => e.HttpMethod == "GET");
         var queryParams = searchEp.Params.Where(p => p.Source == ParamSource.Query).ToList();
@@ -2269,7 +2269,7 @@ public sealed class OpenApiRoundTripTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
 
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
@@ -2332,7 +2332,7 @@ public sealed class OpenApiRoundTripTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
 
         var ep = Assert.Single(endpoints);
 

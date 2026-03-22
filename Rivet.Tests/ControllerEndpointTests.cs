@@ -9,7 +9,7 @@ public sealed class ControllerEndpointTests
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
@@ -398,7 +398,7 @@ public sealed class ControllerEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
 
         var endpoint = Assert.Single(endpoints);
         Assert.Equal(2, endpoint.Responses.Count);
@@ -441,7 +441,7 @@ public sealed class ControllerEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
 
         var endpoint = Assert.Single(endpoints);
         Assert.Equal(2, endpoint.Responses.Count);
@@ -509,7 +509,7 @@ public sealed class ControllerEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
 
         var endpoint = Assert.Single(endpoints);
         // Ok<ItemDto> should be the return type even though NoContent appears first
@@ -540,7 +540,7 @@ public sealed class ControllerEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
 
         var endpoint = Assert.Single(endpoints);
         Assert.Null(endpoint.ReturnType);
@@ -581,7 +581,7 @@ public sealed class ControllerEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
 
         var endpoint = Assert.Single(endpoints);
         Assert.Equal(2, endpoint.Responses.Count);

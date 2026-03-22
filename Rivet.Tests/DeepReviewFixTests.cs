@@ -18,16 +18,9 @@ public sealed class DeepReviewFixTests
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
         return JsonDocument.Parse(json);
-    }
-
-    private static string EmitSchemas(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        return JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
     }
 
     private static JsonElement ParseDefs(string output)
@@ -43,7 +36,7 @@ public sealed class DeepReviewFixTests
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
@@ -57,7 +50,7 @@ public sealed class DeepReviewFixTests
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
@@ -66,18 +59,6 @@ public sealed class DeepReviewFixTests
         var zodClient = string.Join("\n", controllerGroups.Select(g =>
             ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap, ValidateMode.Zod)));
         return (zodValidators, zodClient);
-    }
-
-    private static ImportResult Import(string json, string ns = "Test")
-    {
-        return OpenApiImporter.Import(json, new ImportOptions(ns));
-    }
-
-    private static string FindFile(ImportResult result, string fileName)
-    {
-        var file = result.Files.FirstOrDefault(f => f.FileName.EndsWith(fileName));
-        Assert.NotNull(file);
-        return file.Content;
     }
 
     /// <summary>
@@ -94,26 +75,6 @@ public sealed class DeepReviewFixTests
         var end = tsOutput.IndexOf(suffix, start, StringComparison.Ordinal);
         Assert.True(end >= 0, "Could not find 'as const;' in JSON Schema output");
         return tsOutput[start..end];
-    }
-
-    private static string BuildSpec(string? schemas = null, string? paths = null)
-    {
-        var schemasBlock = schemas is not null
-            ? $"\"components\": {{ \"schemas\": {{ {schemas} }} }},"
-            : "";
-
-        var pathsBlock = paths is not null
-            ? $"\"paths\": {{ {paths} }}"
-            : "\"paths\": {}";
-
-        return $$"""
-            {
-                "openapi": "3.1.0",
-                "info": { "title": "Test", "version": "1.0.0" },
-                {{schemasBlock}}
-                {{pathsBlock}}
-            }
-            """;
     }
 
     // ========== Bug 1: Scalar format metadata ==========
@@ -220,7 +181,7 @@ public sealed class DeepReviewFixTests
             public sealed record ItemDto(Guid Id, string Name);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
         var idProp = defs.GetProperty("ItemDto").GetProperty("properties").GetProperty("id");
 
@@ -335,7 +296,7 @@ public sealed class DeepReviewFixTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
@@ -512,7 +473,7 @@ public sealed class DeepReviewFixTests
     [Fact]
     public void ParamOnly_Post_Import_Wires_Input_For_RoundTrip()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             paths: """
                 "/api/items/{id}/archive": {
                     "post": {
@@ -533,8 +494,8 @@ public sealed class DeepReviewFixTests
                 }
                 """);
 
-        var result = Import(spec);
-        var content = FindFile(result, "ItemsContract.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
         // Input type should be wired so the type survives round-trip
         // (POST with path-only params uses .Accepts<T>() since there's no output type)
@@ -668,7 +629,7 @@ public sealed class DeepReviewFixTests
             public sealed record SensorDto(short Temp, byte Channel);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
         var props = defs.GetProperty("SensorDto").GetProperty("properties");
 
@@ -810,7 +771,7 @@ public sealed class DeepReviewFixTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
@@ -838,23 +799,13 @@ public sealed class DeepReviewFixTests
                 string NormalProp);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("\"display-name\": string;", result);
         Assert.Contains("\"@type\": string;", result);
         Assert.Contains("normalProp: string;", result);
         // Ensure no unquoted invalid identifiers
         Assert.DoesNotContain("display-name:", result);
-    }
-
-    private static string Generate(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var definitions = walker.Definitions.Values.ToList();
-        var brands = walker.Brands.Values.ToList();
-        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
-        return string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
     }
 
     // --- Fix 5: Multipart route param deduplication ---
@@ -974,7 +925,7 @@ public sealed class DeepReviewFixTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
@@ -983,7 +934,7 @@ public sealed class DeepReviewFixTests
         // Zod should emit format refinements from the JSON Schema
         // The Zod emitter wraps TypeRefs via fromJSONSchema, not primitive expressions directly.
         // But let's verify the Zod expression builder uses format refinements:
-        Assert.Contains("fromJSONSchema(ItemDtoSchema as any)", zodValidators);
+        Assert.Contains("fromJSONSchema(toSchema(ItemDtoSchema))", zodValidators);
     }
 
     [Fact]
@@ -1009,7 +960,7 @@ public sealed class DeepReviewFixTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
@@ -1041,7 +992,7 @@ public sealed class DeepReviewFixTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
@@ -1143,7 +1094,7 @@ public sealed class DeepReviewFixTests
         // Forward: C# → OpenAPI
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
 
         // Verify extension is emitted
@@ -1154,7 +1105,7 @@ public sealed class DeepReviewFixTests
         Assert.True(ext.GetBoolean());
 
         // Reverse: OpenAPI → import → compile → walk
-        var importResult = Import(json);
+        var importResult = CompilationHelper.Import(json);
         var recompilation = CompilationHelper.CreateCompilationFromMultiple(
             importResult.Files.Select(f => f.Content).ToArray());
         var (reDiscovered, rewalker) = CompilationHelper.DiscoverAndWalk(recompilation);
@@ -1209,7 +1160,7 @@ public sealed class DeepReviewFixTests
     public void NullableCSharpType_Survives_Import()
     {
         // Verify that nullable: true + x-rivet-csharp-type works for pure null type schemas
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "FlexDto": {
                 "type": "object",
                 "properties": {
@@ -1220,7 +1171,7 @@ public sealed class DeepReviewFixTests
             }
             """);
 
-        var result = Import(spec);
+        var result = CompilationHelper.Import(spec);
         var content = result.Files.First(f => f.Content.Contains("FlexDto")).Content;
 
         Assert.Contains("System.Text.Json.Nodes.JsonNode Required", content);
@@ -1249,7 +1200,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        var schemas = EmitSchemas(source);
+        var schemas = CompilationHelper.EmitSchemas(source);
         var json = ExtractDefsJson(schemas);
         var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -1364,7 +1315,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        var schemas = EmitSchemas(source);
+        var schemas = CompilationHelper.EmitSchemas(source);
         var json = ExtractDefsJson(schemas);
         var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;

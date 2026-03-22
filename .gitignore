@@ -7,6 +7,9 @@ obj/
 .idea/
 Solution1/
 
+# Test results
+TestResults/
+
 # Test specs
 openapi/
 

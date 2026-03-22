@@ -1,30 +1,16 @@
 using Microsoft.CodeAnalysis;
-using Rivet.Tool.Analysis;
-using Rivet.Tool.Import;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
 public sealed class OpenApiImporterTests
 {
-    private static ImportResult Import(string json, string ns = "Test", string? security = null)
-    {
-        return OpenApiImporter.Import(json, new ImportOptions(ns, security));
-    }
-
-    private static string FindFile(ImportResult result, string fileName)
-    {
-        var file = result.Files.FirstOrDefault(f => f.FileName.EndsWith(fileName));
-        Assert.NotNull(file);
-        return file.Content;
-    }
-
     // ========== SchemaMapper Tests ==========
 
     [Fact]
     public void Primitive_Types_String_Int_Long_Double_Float_Bool()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "TestDto": {
                 "type": "object",
                 "properties": {
@@ -37,10 +23,10 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["name", "count", "bigCount", "score", "rating", "active"]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
-        var content = FindFile(result, "TestDto.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "TestDto.cs");
 
         Assert.Contains("string Name", content);
         Assert.Contains("int Count", content);
@@ -53,7 +39,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void DateTime_Format_Maps_To_DateTime()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "EventDto": {
                 "type": "object",
                 "properties": {
@@ -61,16 +47,16 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["createdAt"]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
-        Assert.Contains("DateTime CreatedAt", FindFile(result, "EventDto.cs"));
+        var result = CompilationHelper.Import(spec);
+        Assert.Contains("DateTime CreatedAt", CompilationHelper.FindFile(result, "EventDto.cs"));
     }
 
     [Fact]
     public void Guid_Format_Maps_To_Guid()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "ItemDto": {
                 "type": "object",
                 "properties": {
@@ -78,24 +64,24 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["id"]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
-        Assert.Contains("Guid Id", FindFile(result, "ItemDto.cs"));
+        var result = CompilationHelper.Import(spec);
+        Assert.Contains("Guid Id", CompilationHelper.FindFile(result, "ItemDto.cs"));
     }
 
     [Fact]
     public void String_Enum_Maps_To_CSharp_Enum()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "Priority": {
                 "type": "string",
                 "enum": ["low", "medium", "high", "critical"]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
-        var content = FindFile(result, "Priority.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
 
         Assert.Contains("public enum Priority", content);
         Assert.Contains("Low", content);
@@ -107,15 +93,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Branded_Format_Maps_To_Value_Object()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "Email": {
                 "type": "string",
                 "format": "email"
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
-        var content = FindFile(result, "Email.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Email.cs");
 
         Assert.Contains("public sealed record Email(string Value)", content);
         Assert.Contains("public override string ToString() => Value;", content);
@@ -125,7 +111,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Array_Maps_To_List()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "TagList": {
                 "type": "object",
                 "properties": {
@@ -133,15 +119,15 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["tags"]
             }
-            """);
+            """, title: "API");
 
-        Assert.Contains("List<string> Tags", FindFile(Import(spec), "TagList.cs"));
+        Assert.Contains("List<string> Tags", CompilationHelper.FindFile(CompilationHelper.Import(spec), "TagList.cs"));
     }
 
     [Fact]
     public void Dictionary_Maps_To_Dictionary()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "MetadataDto": {
                 "type": "object",
                 "properties": {
@@ -149,15 +135,15 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["values"]
             }
-            """);
+            """, title: "API");
 
-        Assert.Contains("Dictionary<string, string> Values", FindFile(Import(spec), "MetadataDto.cs"));
+        Assert.Contains("Dictionary<string, string> Values", CompilationHelper.FindFile(CompilationHelper.Import(spec), "MetadataDto.cs"));
     }
 
     [Fact]
     public void Nullable_Type_Array_Maps_To_Nullable()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "TaskDto": {
                 "type": "object",
                 "properties": {
@@ -165,15 +151,15 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["description"]
             }
-            """);
+            """, title: "API");
 
-        Assert.Contains("string? Description", FindFile(Import(spec), "TaskDto.cs"));
+        Assert.Contains("string? Description", CompilationHelper.FindFile(CompilationHelper.Import(spec), "TaskDto.cs"));
     }
 
     [Fact]
     public void Object_With_Properties_Maps_To_Sealed_Record()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "TaskDto": {
                 "type": "object",
                 "properties": {
@@ -182,9 +168,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["id", "title"]
             }
-            """);
+            """, title: "API");
 
-        var content = FindFile(Import(spec), "TaskDto.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TaskDto.cs");
         Assert.Contains("[RivetType]", content);
         Assert.Contains("public sealed record TaskDto(", content);
     }
@@ -192,7 +178,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Ref_Resolution_Uses_Named_Type()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "LabelDto": {
                 "type": "object",
                 "properties": { "name": { "type": "string" } },
@@ -203,15 +189,15 @@ public sealed class OpenApiImporterTests
                 "properties": { "label": { "$ref": "#/components/schemas/LabelDto" } },
                 "required": ["label"]
             }
-            """);
+            """, title: "API");
 
-        Assert.Contains("LabelDto Label", FindFile(Import(spec), "TaskDto.cs"));
+        Assert.Contains("LabelDto Label", CompilationHelper.FindFile(CompilationHelper.Import(spec), "TaskDto.cs"));
     }
 
     [Fact]
     public void Required_Vs_Optional_Properties()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "TaskDto": {
                 "type": "object",
                 "properties": {
@@ -220,9 +206,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["id"]
             }
-            """);
+            """, title: "API");
 
-        var content = FindFile(Import(spec), "TaskDto.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TaskDto.cs");
         Assert.Contains("string Id", content);
         Assert.Contains("string? Description", content);
         Assert.DoesNotContain("string? Id", content);
@@ -231,7 +217,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void OneOf_Schema_Produces_Union_Wrapper()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "Shape": {
                 "oneOf": [
                     { "$ref": "#/components/schemas/Circle" },
@@ -248,9 +234,9 @@ public sealed class OpenApiImporterTests
                 "properties": { "side": { "type": "number" } },
                 "required": ["side"]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
+        var result = CompilationHelper.Import(spec);
         Assert.Contains(result.Files, f => f.FileName.Contains("Shape"));
         Assert.Contains(result.Files, f => f.FileName.Contains("Circle"));
         Assert.Contains(result.Files, f => f.FileName.Contains("Square"));
@@ -265,7 +251,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Contract_Output_Is_Static_Class_With_RouteDefinition_Fields()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "TaskDto": {
                     "type": "object",
@@ -291,10 +277,10 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var result = Import(spec);
-        var content = FindFile(result, "TasksContract.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "TasksContract.cs");
 
         Assert.Contains("[RivetContract]", content);
         Assert.Contains("public static class TasksContract", content);
@@ -306,7 +292,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Post_With_RequestBody_Has_Input_And_Output_Types()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "CreateTaskRequest": {
                     "type": "object",
@@ -344,9 +330,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
 
         Assert.Contains("RouteDefinition<CreateTaskRequest, TaskDto> CreateTask", content);
         Assert.Contains("Define.Post<CreateTaskRequest, TaskDto>(\"/api/tasks\")", content);
@@ -356,7 +342,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Error_Responses_Produce_Returns_Call()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "TaskDto": {
                     "type": "object",
@@ -394,16 +380,16 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
         Assert.Contains(".Returns<NotFoundDto>(404, \"Task not found\")",
-            FindFile(Import(spec), "TasksContract.cs"));
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs"));
     }
 
     [Fact]
     public void Void_Endpoint_No_Output_Type()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             paths: """
                 "/api/tasks/{id}": {
                     "delete": {
@@ -414,9 +400,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
         Assert.Contains("public static readonly RouteDefinition DeleteTask", content);
         Assert.Contains("Define.Delete(\"/api/tasks/{id}\")", content);
         Assert.Contains(".Status(204)", content);
@@ -425,7 +411,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Anonymous_Endpoint()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             paths: """
                 "/api/health": {
                     "get": {
@@ -435,15 +421,15 @@ public sealed class OpenApiImporterTests
                         "responses": { "200": { "description": "OK" } }
                     }
                 }
-                """);
+                """, title: "API");
 
-        Assert.Contains(".Anonymous()", FindFile(Import(spec), "HealthContract.cs"));
+        Assert.Contains(".Anonymous()", CompilationHelper.FindFile(CompilationHelper.Import(spec), "HealthContract.cs"));
     }
 
     [Fact]
     public void Secured_Endpoint()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             paths: """
                 "/api/admin": {
                     "delete": {
@@ -453,15 +439,15 @@ public sealed class OpenApiImporterTests
                         "responses": { "204": { "description": "No Content" } }
                     }
                 }
-                """);
+                """, title: "API");
 
-        Assert.Contains(".Secure(\"admin\")", FindFile(Import(spec), "AdminContract.cs"));
+        Assert.Contains(".Secure(\"admin\")", CompilationHelper.FindFile(CompilationHelper.Import(spec), "AdminContract.cs"));
     }
 
     [Fact]
     public void Tag_Grouping_Produces_Separate_Contracts()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "TaskDto": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] },
                 "MemberDto": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] }
@@ -469,9 +455,9 @@ public sealed class OpenApiImporterTests
             paths: """
                 "/api/tasks": { "get": { "operationId": "tasks_list", "tags": ["Tasks"], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TaskDto" } } } } } } },
                 "/api/members": { "get": { "operationId": "members_list", "tags": ["Members"], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MemberDto" } } } } } } }
-                """);
+                """, title: "API");
 
-        var result = Import(spec);
+        var result = CompilationHelper.Import(spec);
         Assert.Contains(result.Files, f => f.FileName == "Contracts/TasksContract.cs");
         Assert.Contains(result.Files, f => f.FileName == "Contracts/MembersContract.cs");
     }
@@ -479,21 +465,21 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void No_Tag_Uses_DefaultContract()
     {
-        var spec = BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(paths: """
             "/api/health": { "get": { "operationId": "healthCheck", "responses": { "200": { "description": "OK" } } } }
-            """);
+            """, title: "API");
 
-        Assert.Contains(Import(spec).Files, f => f.FileName == "Contracts/DefaultContract.cs");
+        Assert.Contains(CompilationHelper.Import(spec).Files, f => f.FileName == "Contracts/DefaultContract.cs");
     }
 
     [Fact]
     public void OperationId_Stripped_Of_Tag_Prefix()
     {
-        var spec = BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(paths: """
             "/api/tasks": { "get": { "operationId": "tasks_listAllTasks", "tags": ["Tasks"], "responses": { "200": { "description": "OK" } } } }
-            """);
+            """, title: "API");
 
-        Assert.Contains("ListAllTasks", FindFile(Import(spec), "TasksContract.cs"));
+        Assert.Contains("ListAllTasks", CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs"));
     }
 
     // ========== Fixture-based round-trip tests ==========
@@ -503,19 +489,14 @@ public sealed class OpenApiImporterTests
         return File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "openapi-import.json"));
     }
 
-    private static Compilation CompileGeneratedFiles(ImportResult result)
-    {
-        return CompilationHelper.CreateCompilationFromMultiple(
-            result.Files.Select(f => f.Content).ToArray());
-    }
 
     [Fact]
     public void Fixture_Generated_CSharp_Compiles()
     {
-        var result = Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
         Assert.Empty(result.Warnings);
 
-        var errors = CompileGeneratedFiles(result).GetDiagnostics()
+        var errors = CompilationHelper.CompileImportResult(result).GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
         Assert.Empty(errors);
     }
@@ -523,10 +504,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_Contracts_Survive_Roslyn_RoundTrip()
     {
-        var result = Import(LoadFixture(), "TaskBoard.Contracts");
-        var compilation = CompileGeneratedFiles(result);
+        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         Assert.Equal(10, endpoints.Count);
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks");
@@ -544,8 +525,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_Types_Survive_Roslyn_RoundTrip()
     {
-        var result = Import(LoadFixture(), "TaskBoard.Contracts");
-        var compilation = CompileGeneratedFiles(result);
+        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var compilation = CompilationHelper.CompileImportResult(result);
         var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
         Assert.True(walker.Definitions.ContainsKey("TaskDto"));
@@ -569,8 +550,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_TaskDto_Properties_Match_OpenAPI_Schema()
     {
-        var result = Import(LoadFixture(), "TaskBoard.Contracts");
-        var (_, walker) = CompilationHelper.DiscoverAndWalk(CompileGeneratedFiles(result));
+        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(CompilationHelper.CompileImportResult(result));
         var taskDto = walker.Definitions["TaskDto"];
 
         AssertProperty(taskDto, "id", "string");
@@ -591,10 +572,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_Endpoint_Responses_Survive_RoundTrip()
     {
-        var result = Import(LoadFixture(), "TaskBoard.Contracts");
-        var compilation = CompileGeneratedFiles(result);
+        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         var createTask = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks");
         Assert.Contains(createTask.Responses, r => r.StatusCode == 201);
@@ -611,7 +592,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_Covers_All_Supported_Type_Mappings()
     {
-        var content = FindFile(Import(LoadFixture(), "Test"), "TaskDto.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(LoadFixture(), "Test"), "TaskDto.cs");
 
         Assert.Contains("Guid Id", content);
         Assert.Contains("string Title", content);
@@ -627,13 +608,13 @@ public sealed class OpenApiImporterTests
         Assert.Contains("List<LabelDto> Labels", content);
         Assert.Contains("Dictionary<string, string> Metadata", content);
 
-        Assert.Contains("Priority?", FindFile(Import(LoadFixture(), "Test"), "PatchTaskRequest.cs"));
+        Assert.Contains("Priority?", CompilationHelper.FindFile(CompilationHelper.Import(LoadFixture(), "Test"), "PatchTaskRequest.cs"));
     }
 
     [Fact]
     public void Fixture_Covers_All_HTTP_Methods()
     {
-        var content = FindFile(Import(LoadFixture(), "Test"), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(LoadFixture(), "Test"), "TasksContract.cs");
         Assert.Contains("Define.Get<", content);
         Assert.Contains("Define.Post<", content);
         Assert.Contains("Define.Put<", content);
@@ -646,8 +627,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Multipart_FormData_Binary_Property_Maps_To_IFormFile()
     {
-        var result = Import(LoadFixture(), "Test");
-        var content = FindFile(result, "AttachFileRequest.cs");
+        var result = CompilationHelper.Import(LoadFixture(), "Test");
+        var content = CompilationHelper.FindFile(result, "AttachFileRequest.cs");
 
         Assert.Contains("IFormFile File", content);
         Assert.Contains("using Microsoft.AspNetCore.Http;", content);
@@ -657,7 +638,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Multipart_Endpoint_Uses_Request_As_InputType()
     {
-        var content = FindFile(Import(LoadFixture(), "Test"), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(LoadFixture(), "Test"), "TasksContract.cs");
 
         Assert.Contains("RouteDefinition<AttachFileRequest, AttachmentDto> Attach", content);
         Assert.Contains("Define.Post<AttachFileRequest, AttachmentDto>(\"/api/tasks/{taskId}/attachments\")", content);
@@ -666,10 +647,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Multipart_RoundTrip_Produces_File_Param()
     {
-        var result = Import(LoadFixture(), "TaskBoard.Contracts");
-        var compilation = CompileGeneratedFiles(result);
+        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         var attach = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks/{taskId}/attachments");
         Assert.Contains(attach.Params, p => p.Source == ParamSource.File && p.Name == "file");
@@ -678,7 +659,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Standalone_Multipart_Binary_Maps_To_IFormFile()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "UploadRequest": {
                     "type": "object",
@@ -718,14 +699,14 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var result = Import(spec);
-        var record = FindFile(result, "UploadRequest.cs");
+        var result = CompilationHelper.Import(spec);
+        var record = CompilationHelper.FindFile(result, "UploadRequest.cs");
         Assert.Contains("IFormFile Document", record);
         Assert.Contains("using Microsoft.AspNetCore.Http;", record);
 
-        var contract = FindFile(result, "UploadsContract.cs");
+        var contract = CompilationHelper.FindFile(result, "UploadsContract.cs");
         Assert.Contains("RouteDefinition<UploadRequest, UploadResult>", contract);
     }
 
@@ -734,7 +715,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Importer_Output_Is_V1_Static_Class_With_Typed_Builder_Fields()
     {
-        var result = Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
 
         foreach (var file in result.Files.Where(f => f.FileName.StartsWith("Contracts/")))
         {
@@ -753,8 +734,8 @@ public sealed class OpenApiImporterTests
     public void Importer_Output_Uses_RouteDefinition_Not_Bare_Define()
     {
         // Fields should be RouteDefinition<T> not Define, so Invoke is available
-        var result = Import(LoadFixture(), "TaskBoard.Contracts");
-        var content = FindFile(result, "TasksContract.cs");
+        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var content = CompilationHelper.FindFile(result, "TasksContract.cs");
 
         Assert.Contains("public static readonly RouteDefinition<", content);
         Assert.DoesNotContain("public static readonly Define ", content);
@@ -763,19 +744,19 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Importer_Security_And_Description_Preserved_In_Builder_Chain()
     {
-        var result = Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
 
         // Health endpoint has security: [] → .Anonymous()
-        Assert.Contains(".Anonymous()", FindFile(result, "HealthContract.cs"));
+        Assert.Contains(".Anonymous()", CompilationHelper.FindFile(result, "HealthContract.cs"));
 
         // Members invite has security: [{"admin": []}] → .Secure("admin")
-        Assert.Contains(".Secure(\"admin\")", FindFile(result, "MembersContract.cs"));
+        Assert.Contains(".Secure(\"admin\")", CompilationHelper.FindFile(result, "MembersContract.cs"));
 
         // Tasks list has global security → .Secure("bearer")
-        Assert.Contains(".Secure(\"bearer\")", FindFile(result, "TasksContract.cs"));
+        Assert.Contains(".Secure(\"bearer\")", CompilationHelper.FindFile(result, "TasksContract.cs"));
 
         // Descriptions present
-        Assert.Contains(".Description(\"List all tasks\")", FindFile(result, "TasksContract.cs"));
+        Assert.Contains(".Description(\"List all tasks\")", CompilationHelper.FindFile(result, "TasksContract.cs"));
     }
 
     // ========== Union ref name sanitization ==========
@@ -783,7 +764,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void OneOf_With_Hyphenated_Ref_Names_Sanitized()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "my-shape": {
                 "oneOf": [
                     { "$ref": "#/components/schemas/my-circle" },
@@ -800,10 +781,10 @@ public sealed class OpenApiImporterTests
                 "properties": { "side": { "type": "number" } },
                 "required": ["side"]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
-        var content = FindFile(result, "MyShape.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "MyShape.cs");
 
         // Ref names should be PascalCased, not raw "my-circle"
         Assert.Contains("MyCircle? AsMyCircle", content);
@@ -815,7 +796,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void AnyOf_With_Dotted_Ref_Names_Sanitized()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "shape.union": {
                 "anyOf": [
                     { "$ref": "#/components/schemas/geo.circle" },
@@ -832,10 +813,10 @@ public sealed class OpenApiImporterTests
                 "properties": { "side": { "type": "number" } },
                 "required": ["side"]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
-        var content = FindFile(result, "ShapeUnion.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "ShapeUnion.cs");
 
         Assert.Contains("GeoCircle? AsGeoCircle", content);
         Assert.Contains("GeoSquare? AsGeoSquare", content);
@@ -844,7 +825,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Sanitized_Union_Refs_Compile()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "result-union": {
                 "oneOf": [
                     { "$ref": "#/components/schemas/success-response" },
@@ -861,10 +842,10 @@ public sealed class OpenApiImporterTests
                 "properties": { "message": { "type": "string" } },
                 "required": ["message"]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
-        var errors = CompileGeneratedFiles(result).GetDiagnostics()
+        var result = CompilationHelper.Import(spec);
+        var errors = CompilationHelper.CompileImportResult(result).GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
         Assert.Empty(errors);
     }
@@ -874,7 +855,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void AllOf_With_Hyphenated_Ref_Names_Sanitized()
     {
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "base-address": {
                 "type": "object",
                 "properties": { "street": { "type": "string" } },
@@ -886,10 +867,10 @@ public sealed class OpenApiImporterTests
                     { "type": "object", "properties": { "zip": { "type": "string" } }, "required": ["zip"] }
                 ]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
-        var content = FindFile(result, "ExtendedAddress.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "ExtendedAddress.cs");
 
         Assert.Contains("string Street", content);
         Assert.Contains("string Zip", content);
@@ -901,7 +882,7 @@ public sealed class OpenApiImporterTests
     public void AllOf_Nested_Hyphenated_Refs_Compile()
     {
         // allOf referencing another allOf with hyphenated names — 3 levels deep
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "api-base": {
                 "type": "object",
                 "properties": { "id": { "type": "string" } },
@@ -919,15 +900,15 @@ public sealed class OpenApiImporterTests
                     { "type": "object", "properties": { "device": { "type": "string" } }, "required": ["device"] }
                 ]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
+        var result = CompilationHelper.Import(spec);
 
-        var errors = CompileGeneratedFiles(result).GetDiagnostics()
+        var errors = CompilationHelper.CompileImportResult(result).GetDiagnostics()
             .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error).ToList();
         Assert.Empty(errors);
 
-        var content = FindFile(result, "DeviceApiResponse.cs");
+        var content = CompilationHelper.FindFile(result, "DeviceApiResponse.cs");
         Assert.Contains("string Id", content);
         Assert.Contains("string Result", content);
         Assert.Contains("string Device", content);
@@ -990,8 +971,8 @@ public sealed class OpenApiImporterTests
             }
             """;
 
-        var result = Import(spec);
-        var content = FindFile(result, "BrandsContract.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "BrandsContract.cs");
 
         Assert.Contains("RouteDefinition<BrandPayload, BrandResult>", content);
         Assert.Contains("Define.Post<BrandPayload, BrandResult>", content);
@@ -1036,8 +1017,8 @@ public sealed class OpenApiImporterTests
             }
             """;
 
-        var result = Import(spec);
-        var content = FindFile(result, "SettingsContract.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "SettingsContract.cs");
 
         Assert.Contains("InputRouteDefinition<UpdateRequest>", content);
         Assert.Contains(".Accepts<UpdateRequest>()", content);
@@ -1067,8 +1048,8 @@ public sealed class OpenApiImporterTests
             }
             """;
 
-        var result = Import(spec);
-        var content = FindFile(result, "ThingsContract.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "ThingsContract.cs");
 
         // Unresolvable ref → no input type, just bare RouteDefinition
         Assert.DoesNotContain("InputRouteDefinition", content);
@@ -1081,7 +1062,7 @@ public sealed class OpenApiImporterTests
     public void AllOf_With_Primitive_Ref_Skips_Empty_Record()
     {
         // allOf referencing a primitive-like schema (no properties) should not emit an empty record
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "StringAlias": {
                 "type": "string"
             },
@@ -1090,9 +1071,9 @@ public sealed class OpenApiImporterTests
                     { "$ref": "#/components/schemas/StringAlias" }
                 ]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
+        var result = CompilationHelper.Import(spec);
 
         // Wrapper should not be emitted as an empty record
         Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("Wrapper.cs"));
@@ -1102,7 +1083,7 @@ public sealed class OpenApiImporterTests
     public void AllOf_With_Object_Ref_Still_Emits_Record()
     {
         // allOf referencing an object schema should still produce a record with flattened properties
-        var spec = BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(schemas: """
             "Base": {
                 "type": "object",
                 "properties": { "name": { "type": "string" } },
@@ -1114,10 +1095,10 @@ public sealed class OpenApiImporterTests
                     { "type": "object", "properties": { "extra": { "type": "string" } }, "required": ["extra"] }
                 ]
             }
-            """);
+            """, title: "API");
 
-        var result = Import(spec);
-        var content = FindFile(result, "Extended.cs");
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Extended.cs");
 
         Assert.Contains("string Name", content);
         Assert.Contains("string Extra", content);
@@ -1128,7 +1109,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Wildcard_Content_Type_Resolves_Input_Type()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "PodSpec": {
                     "type": "object",
@@ -1166,9 +1147,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "PodsContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "PodsContract.cs");
 
         Assert.Contains("RouteDefinition<PodSpec, PodResult>", content);
         Assert.Contains("Define.Post<PodSpec, PodResult>", content);
@@ -1177,7 +1158,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Wildcard_Content_Type_Resolves_Output_Type()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "StatusDto": {
                     "type": "object",
@@ -1202,9 +1183,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "StatusContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "StatusContract.cs");
 
         Assert.Contains("RouteDefinition<StatusDto>", content);
         Assert.Contains("Define.Get<StatusDto>", content);
@@ -1213,7 +1194,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Wildcard_Content_Type_Resolves_Error_Response()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "ItemDto": {
                     "type": "object",
@@ -1251,9 +1232,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "ItemsContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "ItemsContract.cs");
 
         Assert.Contains(".Returns<ErrorDto>(404, \"Not found\")", content);
     }
@@ -1261,7 +1242,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Json_Content_Type_Takes_Priority_Over_Wildcard()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "TaskDto": {
                     "type": "object",
@@ -1294,9 +1275,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
 
         // application/json should win
         Assert.Contains("RouteDefinition<TaskDto>", content);
@@ -1308,7 +1289,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Wildcard_4XX_Status_Code_Maps_To_400()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "TaskDto": {
                     "type": "object",
@@ -1346,16 +1327,16 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
         Assert.Contains(".Returns<ClientErrorDto>(400, \"Client error\")",
-            FindFile(Import(spec), "TasksContract.cs"));
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs"));
     }
 
     [Fact]
     public void Wildcard_5XX_Status_Code_Maps_To_500()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "TaskDto": {
                     "type": "object",
@@ -1393,10 +1374,10 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
         Assert.Contains(".Returns<ServerErrorDto>(500, \"Server error\")",
-            FindFile(Import(spec), "TasksContract.cs"));
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs"));
     }
 
     // ========== InputRouteDefinition<T> (input-only endpoints) ==========
@@ -1404,7 +1385,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Input_Only_Endpoint_Produces_InputRouteDefinition()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "UpdateSettingsRequest": {
                     "type": "object",
@@ -1430,9 +1411,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "SettingsContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "SettingsContract.cs");
 
         Assert.Contains("InputRouteDefinition<UpdateSettingsRequest> Update", content);
         Assert.Contains("Define.Put(\"/api/settings\")", content);
@@ -1445,7 +1426,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Input_Only_Endpoint_With_Wildcard_Content_Type()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "PodSpec": {
                     "type": "object",
@@ -1471,9 +1452,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "PodsContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "PodsContract.cs");
 
         Assert.Contains("InputRouteDefinition<PodSpec>", content);
         Assert.Contains(".Accepts<PodSpec>()", content);
@@ -1482,7 +1463,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Input_Only_Endpoint_Compiles_And_Survives_RoundTrip()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "UpdateRequest": {
                     "type": "object",
@@ -1508,19 +1489,19 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var result = Import(spec);
+        var result = CompilationHelper.Import(spec);
 
         // Compiles
-        var compilation = CompileGeneratedFiles(result);
+        var compilation = CompilationHelper.CompileImportResult(result);
         var errors = compilation.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
         Assert.Empty(errors);
 
         // Survives Roslyn walk
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         Assert.Single(endpoints);
         var endpoint = endpoints[0];
@@ -1535,7 +1516,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Octet_Stream_Body_Resolves_To_IFormFile()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             paths: """
                 "/api/upload": {
                     "post": {
@@ -1553,9 +1534,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "UploadContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "UploadContract.cs");
 
         // application/octet-stream with format: binary → IFormFile input type
         Assert.Contains("InputRouteDefinition<IFormFile>", content);
@@ -1566,7 +1547,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Unsupported_Response_Content_Type_Emits_Marker_Comment()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             paths: """
                 "/api/avatar": {
                     "get": {
@@ -1584,9 +1565,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "AvatarContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "AvatarContract.cs");
 
         Assert.Contains(".ProducesFile(\"image/png\")", content);
         Assert.Contains("public static readonly RouteDefinition Get", content);
@@ -1595,7 +1576,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Unsupported_Error_Content_Type_Emits_Marker_Comment()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "ItemDto": {
                     "type": "object",
@@ -1628,9 +1609,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "ItemsContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "ItemsContract.cs");
 
         Assert.Contains("[rivet:unsupported error status=404 content-type=text/plain]", content);
         // The typed 200 response should still work
@@ -1640,7 +1621,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Supported_Content_Types_Do_Not_Emit_Markers()
     {
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "TaskDto": {
                     "type": "object",
@@ -1665,9 +1646,9 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var content = FindFile(Import(spec), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
 
         Assert.DoesNotContain("[rivet:unsupported", content);
     }
@@ -1693,7 +1674,7 @@ public sealed class OpenApiImporterTests
     {
         // foo_bar and FooBar both PascalCase to FooBar — the second gets deduped to FooBar_2.
         // A $ref to foo_bar must resolve to FooBar_2 (the deduped name), not FooBar.
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "FooBar": {
                     "type": "object",
@@ -1727,17 +1708,17 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var result = Import(spec);
-        var consumer = FindFile(result, "Consumer.cs");
+        var result = CompilationHelper.Import(spec);
+        var consumer = CompilationHelper.FindFile(result, "Consumer.cs");
 
         // original → FooBar, snake → FooBar_2 (deduped)
         Assert.Contains("FooBar Original", consumer);
         Assert.Contains("FooBar_2 Snake", consumer);
 
         // Both types should be generated as separate records
-        var fooBar = FindFile(result, "FooBar.cs");
+        var fooBar = CompilationHelper.FindFile(result, "FooBar.cs");
         Assert.Contains("string Id", fooBar);
         var fooBar2 = result.Files.FirstOrDefault(f => f.FileName.EndsWith("FooBar_2.cs"));
         Assert.NotNull(fooBar2);
@@ -1758,7 +1739,7 @@ public sealed class OpenApiImporterTests
     {
         // POST with query params (no body) should wire the input type
         // so it survives round-trip, even though the params become body params.
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             paths: """
                 "/api/search": {
                     "post": {
@@ -1773,10 +1754,10 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var result = Import(spec);
-        var contract = FindFile(result, "ItemsContract.cs");
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
         // Input type should be wired (via .Accepts<T>() for input-only endpoints)
         Assert.Contains("SearchInput", contract);
@@ -1794,7 +1775,7 @@ public sealed class OpenApiImporterTests
     {
         // POST with a proper request body should still wire TInput as body (not query).
         // Ensures the isParamOnlyInput fix doesn't break normal POST endpoints.
-        var spec = BuildSpec(
+        var spec = CompilationHelper.BuildSpec(
             schemas: """
                 "CreateRequest": {
                     "type": "object",
@@ -1827,35 +1808,14 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """);
+                """, title: "API");
 
-        var result = Import(spec);
-        var contract = FindFile(result, "ItemsContract.cs");
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
         // Should wire input as type arg (not .Accepts<T>())
         Assert.Contains("RouteDefinition<CreateRequest, ItemDto>", contract);
         Assert.Contains("Define.Post<CreateRequest, ItemDto>", contract);
     }
 
-    // ========== Helpers ==========
-
-    private static string BuildSpec(string? schemas = null, string? paths = null)
-    {
-        var schemasBlock = schemas is not null
-            ? $"\"components\": {{ \"schemas\": {{ {schemas} }} }},"
-            : "";
-
-        var pathsBlock = paths is not null
-            ? $"\"paths\": {{ {paths} }}"
-            : "\"paths\": {}";
-
-        return $$"""
-            {
-                "openapi": "3.1.0",
-                "info": { "title": "API", "version": "1.0.0" },
-                {{schemasBlock}}
-                {{pathsBlock}}
-            }
-            """;
-    }
 }

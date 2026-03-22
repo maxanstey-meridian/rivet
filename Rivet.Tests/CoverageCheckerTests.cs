@@ -63,8 +63,8 @@ public sealed class CoverageCheckerTests
     {
         var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
-        var warnings = CoverageChecker.Check(compilation, endpoints);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var warnings = CompilationHelper.CheckCoverage(compilation, endpoints);
         return (endpoints, warnings);
     }
 

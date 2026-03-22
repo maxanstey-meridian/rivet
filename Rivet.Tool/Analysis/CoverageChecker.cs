@@ -32,14 +32,14 @@ public static class CoverageChecker
 
     public static IReadOnlyList<CoverageWarning> Check(
         Compilation compilation,
+        WellKnownTypes wkt,
         IReadOnlyList<TsEndpointDefinition> contractEndpoints)
     {
         // Step 1 — Build contract field symbol → endpoint map
         var contractAttr = compilation.GetTypeByMetadataName("Rivet.RivetContractAttribute");
         var defineType = compilation.GetTypeByMetadataName("Rivet.Define");
-        var endpointType = compilation.GetTypeByMetadataName("Rivet.Endpoint");
 
-        if (contractAttr is null || (defineType is null && endpointType is null))
+        if (contractAttr is null || defineType is null)
         {
             return [];
         }
@@ -69,7 +69,7 @@ public static class CoverageChecker
                     continue;
                 }
 
-                if (!ContractWalker.IsRivetEndpointField(field.Type, defineType, endpointType))
+                if (!ContractWalker.IsRivetEndpointField(field.Type, defineType))
                 {
                     continue;
                 }
@@ -148,7 +148,7 @@ public static class CoverageChecker
             foreach (var invocation in invocations)
             {
                 var semanticModel = compilation.GetSemanticModel(invocation.SyntaxTree);
-                var (httpMethod, route) = ResolveImplementation(invocation, semanticModel);
+                var (httpMethod, route) = ResolveImplementation(wkt, invocation, semanticModel);
 
                 if (httpMethod is null && route is null)
                 {
@@ -183,11 +183,12 @@ public static class CoverageChecker
     }
 
     private static (string? HttpMethod, string? Route) ResolveImplementation(
+        WellKnownTypes wkt,
         InvocationExpressionSyntax invocation,
         SemanticModel semanticModel)
     {
         // Try controller path: walk up to containing method with HTTP attributes
-        var controllerResult = TryResolveController(invocation, semanticModel);
+        var controllerResult = TryResolveController(wkt, invocation, semanticModel);
         if (controllerResult.HttpMethod is not null)
         {
             return controllerResult;
@@ -198,6 +199,7 @@ public static class CoverageChecker
     }
 
     private static (string? HttpMethod, string? Route) TryResolveController(
+        WellKnownTypes wkt,
         InvocationExpressionSyntax invocation,
         SemanticModel semanticModel)
     {
@@ -212,13 +214,13 @@ public static class CoverageChecker
             return (null, null);
         }
 
-        var (httpMethod, methodRoute) = EndpointWalker.ExtractHttpMethodAndRoute(methodSymbol);
+        var (httpMethod, methodRoute) = EndpointWalker.ExtractHttpMethodAndRoute(wkt, methodSymbol);
         if (httpMethod is null)
         {
             return (null, null);
         }
 
-        var controllerRoute = EndpointWalker.ExtractControllerRoute(methodSymbol.ContainingType);
+        var controllerRoute = EndpointWalker.ExtractControllerRoute(wkt, methodSymbol.ContainingType);
         var fullRoute = EndpointWalker.CombineRoutes(controllerRoute, methodRoute);
 
         if (fullRoute is not null)

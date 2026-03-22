@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Rivet.Tool.Model;
 
@@ -16,29 +17,18 @@ public sealed class TypeWalker
     private readonly Dictionary<string, string?> _typeNamespaces = new();
     private readonly HashSet<string> _visiting = new();
 
-    // Pre-resolved type symbols for fast comparison (avoids ToDisplayString in hot paths)
+    // Scalar C# types that map directly to TsType.Primitive (Guid → string/uuid, etc.)
+    private readonly ImmutableDictionary<INamedTypeSymbol, TsType.Primitive> _scalarTypes;
+
+    // JSON container types that map to non-Primitive TsTypes (special-cased in MapTypeCore)
     private readonly INamedTypeSymbol? _jsonObjectType;
     private readonly INamedTypeSymbol? _jsonArrayType;
-    private readonly INamedTypeSymbol? _guidType;
-    private readonly INamedTypeSymbol? _dateTimeType;
-    private readonly INamedTypeSymbol? _dateTimeOffsetType;
-    private readonly INamedTypeSymbol? _dateOnlyType;
-    private readonly INamedTypeSymbol? _timeOnlyType;
-    private readonly INamedTypeSymbol? _uriType;
-    private readonly INamedTypeSymbol? _jsonElementType;
-    private readonly INamedTypeSymbol? _jsonNodeType;
 
-    private readonly INamedTypeSymbol? _listType;
-    private readonly INamedTypeSymbol? _iListType;
-    private readonly INamedTypeSymbol? _iCollectionType;
-    private readonly INamedTypeSymbol? _iEnumerableType;
-    private readonly INamedTypeSymbol? _iReadOnlyListType;
-    private readonly INamedTypeSymbol? _iReadOnlyCollectionType;
+    // Generic collection/dictionary type sets for membership checks
+    private readonly ImmutableHashSet<INamedTypeSymbol> _collectionTypes;
+    private readonly ImmutableHashSet<INamedTypeSymbol> _dictionaryTypes;
 
-    private readonly INamedTypeSymbol? _dictionaryType;
-    private readonly INamedTypeSymbol? _iDictionaryType;
-    private readonly INamedTypeSymbol? _iReadOnlyDictionaryType;
-
+    // Attribute symbols for property-level metadata
     private readonly INamedTypeSymbol? _jsonPropertyNameType;
     private readonly INamedTypeSymbol? _jsonIgnoreType;
     private readonly INamedTypeSymbol? _obsoleteType;
@@ -56,31 +46,62 @@ public sealed class TypeWalker
             }
         }
 
+        // Scalar type → TsType.Primitive lookup
+        var scalars = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, TsType.Primitive>(SymbolEqualityComparer.Default);
+        AddScalar(scalars, compilation, "System.Guid", new TsType.Primitive("string", "uuid"));
+        AddScalar(scalars, compilation, "System.DateTime", new TsType.Primitive("string", "date-time"));
+        AddScalar(scalars, compilation, "System.DateTimeOffset", new TsType.Primitive("string", "date-time", "DateTimeOffset"));
+        AddScalar(scalars, compilation, "System.DateOnly", new TsType.Primitive("string", "date"));
+        AddScalar(scalars, compilation, "System.TimeOnly", new TsType.Primitive("string", "time"));
+        AddScalar(scalars, compilation, "System.Uri", new TsType.Primitive("string", "uri"));
+        AddScalar(scalars, compilation, "System.Text.Json.JsonElement", new TsType.Primitive("unknown"));
+        AddScalar(scalars, compilation, "System.Text.Json.Nodes.JsonNode", new TsType.Primitive("unknown", CSharpType: "JsonNode"));
+        _scalarTypes = scalars.ToImmutable();
+
         _jsonObjectType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonObject");
         _jsonArrayType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonArray");
-        _guidType = compilation.GetTypeByMetadataName("System.Guid");
-        _dateTimeType = compilation.GetTypeByMetadataName("System.DateTime");
-        _dateTimeOffsetType = compilation.GetTypeByMetadataName("System.DateTimeOffset");
-        _dateOnlyType = compilation.GetTypeByMetadataName("System.DateOnly");
-        _timeOnlyType = compilation.GetTypeByMetadataName("System.TimeOnly");
-        _uriType = compilation.GetTypeByMetadataName("System.Uri");
-        _jsonElementType = compilation.GetTypeByMetadataName("System.Text.Json.JsonElement");
-        _jsonNodeType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonNode");
 
-        _listType = compilation.GetTypeByMetadataName("System.Collections.Generic.List`1");
-        _iListType = compilation.GetTypeByMetadataName("System.Collections.Generic.IList`1");
-        _iCollectionType = compilation.GetTypeByMetadataName("System.Collections.Generic.ICollection`1");
-        _iEnumerableType = compilation.GetTypeByMetadataName("System.Collections.Generic.IEnumerable`1");
-        _iReadOnlyListType = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyList`1");
-        _iReadOnlyCollectionType = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyCollection`1");
+        _collectionTypes = ResolveTypeSet(compilation,
+            "System.Collections.Generic.List`1",
+            "System.Collections.Generic.IList`1",
+            "System.Collections.Generic.ICollection`1",
+            "System.Collections.Generic.IEnumerable`1",
+            "System.Collections.Generic.IReadOnlyList`1",
+            "System.Collections.Generic.IReadOnlyCollection`1");
 
-        _dictionaryType = compilation.GetTypeByMetadataName("System.Collections.Generic.Dictionary`2");
-        _iDictionaryType = compilation.GetTypeByMetadataName("System.Collections.Generic.IDictionary`2");
-        _iReadOnlyDictionaryType = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyDictionary`2");
+        _dictionaryTypes = ResolveTypeSet(compilation,
+            "System.Collections.Generic.Dictionary`2",
+            "System.Collections.Generic.IDictionary`2",
+            "System.Collections.Generic.IReadOnlyDictionary`2");
 
         _jsonPropertyNameType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonPropertyNameAttribute");
         _jsonIgnoreType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonIgnoreAttribute");
         _obsoleteType = compilation.GetTypeByMetadataName("System.ObsoleteAttribute");
+    }
+
+    private static void AddScalar(
+        ImmutableDictionary<INamedTypeSymbol, TsType.Primitive>.Builder builder,
+        Compilation compilation,
+        string metadataName,
+        TsType.Primitive mapped)
+    {
+        var symbol = compilation.GetTypeByMetadataName(metadataName);
+        if (symbol is not null)
+            builder.Add(symbol, mapped);
+    }
+
+    private static ImmutableHashSet<INamedTypeSymbol> ResolveTypeSet(
+        Compilation compilation,
+        params string[] metadataNames)
+    {
+        var builder = ImmutableHashSet.CreateBuilder<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+        foreach (var name in metadataNames)
+        {
+            var symbol = compilation.GetTypeByMetadataName(name);
+            if (symbol is not null)
+                builder.Add(symbol);
+        }
+        return builder.ToImmutable();
     }
 
     public IReadOnlyDictionary<string, TsTypeDefinition> Definitions => _definitions;
@@ -376,49 +397,11 @@ public sealed class TypeWalker
         };
 
         if (result is not null)
-        {
             return result;
-        }
 
-        // Non-SpecialType primitives — resolved via symbol comparison instead of ToDisplayString
-        if (SymbolEqualityComparer.Default.Equals(symbol, _guidType))
-        {
-            return new TsType.Primitive("string", "uuid");
-        }
-
-        if (SymbolEqualityComparer.Default.Equals(symbol, _dateTimeType))
-        {
-            return new TsType.Primitive("string", "date-time");
-        }
-
-        if (SymbolEqualityComparer.Default.Equals(symbol, _dateTimeOffsetType))
-        {
-            return new TsType.Primitive("string", "date-time", "DateTimeOffset");
-        }
-
-        if (SymbolEqualityComparer.Default.Equals(symbol, _dateOnlyType))
-        {
-            return new TsType.Primitive("string", "date");
-        }
-
-        if (SymbolEqualityComparer.Default.Equals(symbol, _timeOnlyType))
-        {
-            return new TsType.Primitive("string", "time");
-        }
-
-        if (SymbolEqualityComparer.Default.Equals(symbol, _uriType))
-        {
-            return new TsType.Primitive("string", "uri");
-        }
-
-        if (SymbolEqualityComparer.Default.Equals(symbol, _jsonElementType))
-        {
-            return new TsType.Primitive("unknown");
-        }
-        if (SymbolEqualityComparer.Default.Equals(symbol, _jsonNodeType))
-        {
-            return new TsType.Primitive("unknown", CSharpType: "JsonNode");
-        }
+        // Non-SpecialType primitives — resolved via dictionary lookup instead of per-field null checks
+        if (_scalarTypes.TryGetValue(symbol, out var scalar))
+            return scalar;
 
         return null;
     }
@@ -443,23 +426,10 @@ public sealed class TypeWalker
     }
 
     private bool IsCollectionType(INamedTypeSymbol symbol)
-    {
-        var orig = symbol.OriginalDefinition;
-        return SymbolEqualityComparer.Default.Equals(orig, _listType)
-            || SymbolEqualityComparer.Default.Equals(orig, _iListType)
-            || SymbolEqualityComparer.Default.Equals(orig, _iCollectionType)
-            || SymbolEqualityComparer.Default.Equals(orig, _iEnumerableType)
-            || SymbolEqualityComparer.Default.Equals(orig, _iReadOnlyListType)
-            || SymbolEqualityComparer.Default.Equals(orig, _iReadOnlyCollectionType);
-    }
+        => _collectionTypes.Contains(symbol.OriginalDefinition);
 
     private bool IsDictionaryType(INamedTypeSymbol symbol)
-    {
-        var orig = symbol.OriginalDefinition;
-        return SymbolEqualityComparer.Default.Equals(orig, _dictionaryType)
-            || SymbolEqualityComparer.Default.Equals(orig, _iDictionaryType)
-            || SymbolEqualityComparer.Default.Equals(orig, _iReadOnlyDictionaryType);
-    }
+        => _dictionaryTypes.Contains(symbol.OriginalDefinition);
 
     private static bool IsOptionalProperty(IPropertySymbol _)
     {

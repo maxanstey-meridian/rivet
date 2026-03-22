@@ -1,21 +1,10 @@
 using Rivet.Tool.Analysis;
-using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
 public sealed class TypeEmitterTests
 {
-    private static string Generate(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var definitions = walker.Definitions.Values.ToList();
-        var brands = walker.Brands.Values.ToList();
-        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
-        return string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
-    }
-
     [Fact]
     public void Primitives_MapCorrectly()
     {
@@ -39,7 +28,7 @@ public sealed class TypeEmitterTests
                 DateOnly BirthDate);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type SimpleDto = {", result);
         Assert.Contains("name: string;", result);
@@ -66,7 +55,7 @@ public sealed class TypeEmitterTests
             public sealed record WithNullables(int? MaybeCount, bool? MaybeActive);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("maybeCount: number | null;", result);
         Assert.Contains("maybeActive: boolean | null;", result);
@@ -84,7 +73,7 @@ public sealed class TypeEmitterTests
             public sealed record WithNullableRef(string? MaybeName);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("maybeName: string | null;", result);
     }
@@ -107,7 +96,7 @@ public sealed class TypeEmitterTests
                 IReadOnlyList<bool> Flags);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("names: string[];", result);
         Assert.Contains("counts: number[];", result);
@@ -128,7 +117,7 @@ public sealed class TypeEmitterTests
             public sealed record WithDict(Dictionary<string, int> Scores);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("scores: Record<string, number>;", result);
     }
@@ -147,7 +136,7 @@ public sealed class TypeEmitterTests
             public sealed record WithEnum(Status CurrentStatus);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         // Enum emitted as named type alias
         Assert.Contains("""export type Status = "Draft" | "Active" | "Closed";""", result);
@@ -169,7 +158,7 @@ public sealed class TypeEmitterTests
             public sealed record PersonDto(string Name, Address HomeAddress);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         // Both types should be emitted
         Assert.Contains("export type PersonDto = {", result);
@@ -193,7 +182,7 @@ public sealed class TypeEmitterTests
             public sealed record WithOptional(string Required, string? Optional);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("required: string;", result);
         Assert.Contains("optional: string | null;", result);
@@ -212,7 +201,7 @@ public sealed class TypeEmitterTests
             public sealed record WithNullableArray(List<string?> MaybeNames);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("maybeNames: (string | null)[];", result);
     }
@@ -232,7 +221,7 @@ public sealed class TypeEmitterTests
             public sealed record CommandB(int Count);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type CommandA = {", result);
         Assert.Contains("export type CommandB = {", result);
@@ -247,7 +236,7 @@ public sealed class TypeEmitterTests
             public sealed record NotAttributed(string Name);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Empty(result);
     }
@@ -278,7 +267,7 @@ public sealed class TypeEmitterTests
                 DateTime CreatedAt);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type MessageVisibility = \"Internal\" | \"Public\";", result);
         Assert.Contains("export type CreateMessageCommand = {", result);
@@ -313,7 +302,7 @@ public sealed class TypeEmitterTests
                 Dictionary<string, List<PagedResult<TaskDto>>> TasksByCategory);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type DashboardDto = {", result);
         Assert.Contains("tasksByCategory: Record<string, PagedResult<TaskDto>[]>;", result);
@@ -337,7 +326,7 @@ public sealed class TypeEmitterTests
                 List<TreeNode> Children);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type TreeNode = {", result);
         Assert.Contains("label: string;", result);
@@ -364,7 +353,7 @@ public sealed class TypeEmitterTests
                 Folder Parent);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type Folder = {", result);
         Assert.Contains("subFolders: Folder[];", result);
@@ -387,7 +376,7 @@ public sealed class TypeEmitterTests
                 Dictionary<string, Dictionary<string, bool>> RolePermissions);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("rolePermissions: Record<string, Record<string, boolean>>;", result);
     }
@@ -405,7 +394,7 @@ public sealed class TypeEmitterTests
             public sealed record Grid3D(List<List<List<int>>> Cells);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("cells: number[][][];", result);
     }
@@ -431,7 +420,7 @@ public sealed class TypeEmitterTests
                 List<string?> Suggestions);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("results: PagedResult<TaskDto | null>;", result);
         Assert.Contains("suggestions: (string | null)[];", result);
@@ -455,7 +444,7 @@ public sealed class TypeEmitterTests
             public sealed record ApiResponse(Either<ErrorDto, UserDto> Result);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type Either<TLeft, TRight> = {", result);
         Assert.Contains("export type ApiResponse = {", result);
@@ -479,7 +468,7 @@ public sealed class TypeEmitterTests
                 Dictionary<string, List<AuditEntry>> EntriesByUser);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("entriesByUser: Record<string, AuditEntry[]>;", result);
         Assert.Contains("export type AuditEntry = {", result);
@@ -501,7 +490,7 @@ public sealed class TypeEmitterTests
                 List<Dictionary<string, string>> Snapshots);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("snapshots: Record<string, string>[];", result);
     }
@@ -522,7 +511,7 @@ public sealed class TypeEmitterTests
                 Dictionary<string, ProfileDto?> Profiles);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("profiles: Record<string, ProfileDto | null>;", result);
     }
@@ -541,7 +530,7 @@ public sealed class TypeEmitterTests
                 (string Key, int Value) Pair);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type WithTuple = {", result);
         Assert.Contains("name: string;", result);
@@ -562,7 +551,7 @@ public sealed class TypeEmitterTests
                 List<(string Label, double Score)> Entries);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("entries: { label: string; score: number; }[];", result);
     }
@@ -583,7 +572,7 @@ public sealed class TypeEmitterTests
                 (TagDto Tag, int Count) Ranked);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("ranked: { tag: TagDto; count: number; };", result);
         Assert.Contains("export type TagDto = {", result);
@@ -602,7 +591,7 @@ public sealed class TypeEmitterTests
                 (string Key, int Value)? MaybePair);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("maybePair: { key: string; value: number; } | null;", result);
     }
@@ -633,7 +622,7 @@ public sealed class TypeEmitterTests
                 Wrapper<Wrapper<string>> DoubleWrapped);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("wrappedPage: Wrapper<PagedResult<PersonDto>>;", result);
         Assert.Contains("doubleWrapped: Wrapper<Wrapper<string>>;", result);
@@ -664,7 +653,7 @@ public sealed class TypeEmitterTests
                 PagedResult<Either<string, PersonDto>> PagedOfEither);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("eitherOfPaged: Either<PagedResult<PersonDto>, PagedResult<AddressDto>>;", result);
         Assert.Contains("pagedOfEither: PagedResult<Either<string, PersonDto>>;", result);
@@ -692,7 +681,7 @@ public sealed class TypeEmitterTests
                 List<Chain<PersonDto>> PersonChains);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type Chain<T> = {", result);
         Assert.Contains("value: T;", result);
@@ -723,7 +712,7 @@ public sealed class TypeEmitterTests
                 Converter<string, string>[] TransformChain);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("parser: Converter<string, number>;", result);
         Assert.Contains("complexPipe: Converter<Either<string, number>, string>;", result);
@@ -752,7 +741,7 @@ public sealed class TypeEmitterTests
                 Dictionary<string, TaggedResult<AddressDto>> TaggedAddresses);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("taggedPair: TaggedResult<{ key: string; value: number; }>;", result);
         Assert.Contains("taggedPairs: TaggedResult<{ name: string; count: number; }>[];", result);
@@ -771,7 +760,7 @@ public sealed class TypeEmitterTests
             public enum Priority { Low, Medium, High, Critical }
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type Priority =", result);
         Assert.Contains("\"Low\"", result);
@@ -797,7 +786,7 @@ public sealed class TypeEmitterTests
                 Dictionary<string, List<Wrapper<List<string>>>> Deep);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("deep: Record<string, Wrapper<string[]>[]>;", result);
     }
@@ -817,7 +806,7 @@ public sealed class TypeEmitterTests
                 string NormalProp);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         // display_name should be used instead of displayName
         Assert.Contains("display_name: string;", result);
@@ -908,7 +897,7 @@ public sealed class TypeEmitterTests
                 [property: JsonIgnore] string Hidden);
             """;
 
-        var result = Generate(source);
+        var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("visible: string;", result);
         Assert.DoesNotContain("hidden", result);

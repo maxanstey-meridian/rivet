@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace Rivet.Tool.Import;
 
@@ -129,7 +130,7 @@ internal static class CSharpWriter
 
         // Factory call
         var typeArgs = BuildTypeArgs(field.InputType, field.OutputType);
-        sb.Append($"        Define.{field.HttpMethod}{typeArgs}(\"{field.Route}\")");
+        sb.Append($"        Define.{field.HttpMethod}{typeArgs}(\"{EscapeString(field.Route)}\")");
 
         // Builder chain
         var chainCalls = BuildChainCalls(field);
@@ -235,7 +236,7 @@ internal static class CSharpWriter
         }
         else if (field.SecurityScheme is not null)
         {
-            calls.Add($".Secure(\"{field.SecurityScheme}\")");
+            calls.Add($".Secure(\"{EscapeString(field.SecurityScheme)}\")");
         }
 
         return calls;
@@ -243,39 +244,8 @@ internal static class CSharpWriter
 
     private static string EscapeString(string value)
     {
-        return value
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", "\\n")
-            .Replace("\r", "\\r")
-            .Replace("\t", "\\t");
+        var literal = SymbolDisplay.FormatLiteral(value, quote: true);
+        // Strip the surrounding quotes — callers already provide their own delimiters
+        return literal[1..^1];
     }
 }
-
-// --- Contract intermediate types ---
-
-internal sealed record GeneratedContract(
-    string ClassName,
-    IReadOnlyList<GeneratedEndpointField> Fields);
-
-internal sealed record GeneratedEndpointField(
-    string FieldName,
-    string HttpMethod,
-    string Route,
-    string? InputType,
-    string? OutputType,
-    string? Description,
-    int? SuccessStatus,
-    IReadOnlyList<GeneratedErrorResponse> ErrorResponses,
-    bool IsAnonymous,
-    string? SecurityScheme,
-    IReadOnlyList<string> UnsupportedMarkers = null!,
-    string? FileContentType = null)
-{
-    public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
-}
-
-internal sealed record GeneratedErrorResponse(
-    int StatusCode,
-    string TypeName,
-    string? Description);

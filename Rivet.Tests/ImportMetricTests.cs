@@ -101,7 +101,7 @@ public sealed class ImportMetricTests
 
         Assert.True(TypeFiles(r) >= 240, $"Expected ≥240 types, got {TypeFiles(r)}");
         Assert.True(TypedInputCount(r) >= 70, $"Expected ≥70 typed inputs, got {TypedInputCount(r)}");
-        Assert.Equal(26, UnsupportedBody(r)); // CBOR/YAML patch operations
+        Assert.Equal(26, UnsupportedBody(r)); // CBOR/YAML/json-patch operations
         Assert.Equal(0, UnsupportedError(r));
         Assert.Empty(r.Warnings);
     }

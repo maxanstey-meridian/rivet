@@ -7,7 +7,7 @@ Rivet is a CLI tool — not a source generator — that uses Roslyn to analyse y
 Source generators run inside the compiler and are limited to emitting C# code into the current compilation. Rivet needs to:
 
 - Emit `.ts` files to an arbitrary output directory
-- Optionally run `tsc` with the typia transformer
+- Optionally emit Zod validators
 - Optionally emit `openapi.json`
 - Work across project boundaries
 
@@ -23,7 +23,7 @@ A CLI tool (like `dotnet-ef` or `dotnet-format`) can do all of this. You run it 
   → Compilation
   → Walkers (ContractWalker, EndpointWalker, TypeWalker)
   → Model (TsEndpointDefinition, TsTypeDefinition)
-  → Emitters (TypeEmitter, ClientEmitter, ValidatorEmitter, OpenApiEmitter)
+  → Emitters (TypeEmitter, ClientEmitter, ZodValidatorEmitter, OpenApiEmitter)
   → .ts files + openapi.json
 ```
 
@@ -34,7 +34,7 @@ A CLI tool (like `dotnet-ef` or `dotnet-format`) can do all of this. You run it 
 5. Merges controller-sourced and contract-sourced endpoints (contract wins on collision)
 6. Groups types by C# namespace, promotes cross-referenced types to `common.ts`
 7. Emits per-controller client files and optionally `validators.ts` and `openapi.json`
-8. With `--compile`, runs `tsc` with the typia transformer to produce runtime validators; with `--compile zod`, emits JSON Schema + Zod validators (no compile step)
+8. With `--compile`, emits JSON Schema + Zod validators and re-emits clients with assertion wiring
 
 ### Reverse pipeline: OpenAPI → C#
 

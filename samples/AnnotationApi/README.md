@@ -14,7 +14,7 @@ dotnet run --project Rivet.Tool -- --project samples/AnnotationApi/AnnotationApi
 # Write to disk
 dotnet run --project Rivet.Tool -- --project samples/AnnotationApi/AnnotationApi.csproj --output /tmp/rivet-annotation
 
-# Write to disk + compile typia validators (requires Node.js)
+# Write to disk + Zod validators (requires zod in consumer project)
 dotnet run --project Rivet.Tool -- --project samples/AnnotationApi/AnnotationApi.csproj --output /tmp/rivet-annotation --compile
 
 # Preview OpenAPI spec to stdout

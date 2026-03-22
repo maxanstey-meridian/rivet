@@ -4,43 +4,21 @@ Compile-time type safety catches shape mismatches at the network boundary. If th
 
 ## What `--compile` does
 
-Rivet emits validators for every response type and re-emits the client to call them at every fetch boundary. Two backends are available:
+Rivet emits [Zod 4](https://zod.dev) validators for every response type and re-emits the client to call them at every fetch boundary.
 
-| | `--compile` (typia) | `--compile zod` |
-|---|---|---|
-| **Validation engine** | [typia](https://typia.io) — compiled to pure JS assertion functions | [Zod 4](https://zod.dev) — `fromJSONSchema()` at runtime |
-| **Requires Node.js** | Yes (for `tsc` + typia transformer) | No |
-| **Extra npm packages** | None (Rivet bundles typia setup) | `zod` in your project |
-| **Output** | `build/validators.js` (compiled) | `schemas.ts` + `validators.ts` (directly usable) |
+- **Validation engine:** Zod 4 `fromJSONSchema()` at runtime
+- **Requires:** `zod` in your consumer project
+- **Output:** `schemas.ts` (JSON Schema definitions) + `validators.ts` (Zod wrappers)
 
-Both backends produce the same `assertFoo()` interface — the client doesn't need to know which is wired in.
+The generated client imports `assertFoo()` functions from `validators.ts` and calls them on every response.
 
 ## Command
 
 ```bash
-# typia (default)
 dotnet rivet --project path/to/Api.csproj --output ./generated --compile
-
-# Zod
-dotnet rivet --project path/to/Api.csproj --output ./generated --compile zod
 ```
 
 ## Output structure
-
-### typia
-
-```
-generated/
-├── types/...
-├── client/...                 # imports from build/validators.js
-├── rivet.ts
-├── validators.ts              # typia source (assertion functions)
-└── build/
-    ├── validators.js          # compiled runtime assertions
-    └── validators.d.ts
-```
-
-### Zod
 
 ```
 generated/

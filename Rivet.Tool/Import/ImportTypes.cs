@@ -1,0 +1,56 @@
+namespace Rivet.Tool.Import;
+
+internal sealed record GenericTemplateInfo(
+    string Name,
+    IReadOnlyList<string> TypeParams,
+    Dictionary<string, string> Args);
+
+internal sealed record SchemaMapResult(
+    IReadOnlyList<GeneratedRecord> Records,
+    IReadOnlyList<GeneratedEnum> Enums,
+    IReadOnlyList<GeneratedBrand> Brands);
+
+internal sealed record GeneratedRecord(
+    string Name,
+    IReadOnlyList<RecordProperty> Properties,
+    IReadOnlyList<string>? TypeParameters = null);
+
+internal sealed record RecordProperty(
+    string Name,
+    string CSharpType,
+    bool IsRequired,
+    bool IsDeprecated = false);
+
+internal sealed record GeneratedEnum(
+    string Name,
+    IReadOnlyList<string> Members);
+
+internal sealed record GeneratedBrand(
+    string Name,
+    string InnerType);
+
+internal sealed record GeneratedContract(
+    string ClassName,
+    IReadOnlyList<GeneratedEndpointField> Fields);
+
+internal sealed record GeneratedEndpointField(
+    string FieldName,
+    string HttpMethod,
+    string Route,
+    string? InputType,
+    string? OutputType,
+    string? Description,
+    int? SuccessStatus,
+    IReadOnlyList<GeneratedErrorResponse> ErrorResponses,
+    bool IsAnonymous,
+    string? SecurityScheme,
+    IReadOnlyList<string> UnsupportedMarkers = null!,
+    string? FileContentType = null)
+{
+    public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
+}
+
+internal sealed record GeneratedErrorResponse(
+    int StatusCode,
+    string TypeName,
+    string? Description);

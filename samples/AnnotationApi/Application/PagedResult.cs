@@ -1,6 +1,6 @@
 using Rivet;
 
-namespace TaskBoard.Application;
+namespace AnnotationApi.Application;
 
 /// TS: PagedResult<T> = { items: T[]; totalCount: number; page: number; pageSize: number }
 /// Generic is preserved in TypeScript output.

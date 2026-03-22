@@ -23,7 +23,7 @@ Roslyn reads attributed classes → walkers build an intermediate model → emit
 [RivetContract] / [RivetClient]
   → ContractWalker / EndpointWalker
   → TsEndpointDefinition + TsTypeDefinition
-  → TypeEmitter, ClientEmitter, ValidatorEmitter, OpenApiEmitter
+  → TypeEmitter, ClientEmitter, ZodValidatorEmitter, OpenApiEmitter
 ```
 
 **Import (OpenAPI → C#):**

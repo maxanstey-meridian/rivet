@@ -1,29 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Rivet;
-using TaskBoard.Contracts;
+using ContractApi.Contracts;
+using ContractApi.Models;
 
-namespace TaskBoard.Controllers;
-
-[RivetType]
-public sealed record MemberDto(Guid Id, string Name, Domain.Email Email, string Role);
-
-[RivetType]
-public sealed record InviteMemberRequest(Domain.Email Email, string Role, string Nickname);
-
-[RivetType]
-public sealed record InviteMemberResponse(Guid Id);
-
-[RivetType]
-public sealed record UpdateRoleRequest(string Role);
-
-[RivetType]
-public sealed record NotFoundDto(string Message);
-
-[RivetType]
-public sealed record ValidationErrorDto(string Message, Dictionary<string, string[]> Errors);
-
-[RivetType]
-public sealed record PagedResult<T>(IReadOnlyList<T> Items, int TotalCount);
+namespace ContractApi.Controllers;
 
 [Route("api/members")]
 public sealed class MembersController : ControllerBase

@@ -1,4 +1,4 @@
-namespace TaskBoard.Domain;
+namespace AnnotationApi.Domain;
 
 /// TS: string & { readonly __brand: "TaskId" } — single-property record → branded primitive
 public sealed record TaskId(Guid Value)

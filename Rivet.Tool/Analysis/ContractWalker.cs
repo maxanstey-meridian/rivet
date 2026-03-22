@@ -1,6 +1,5 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.Operations;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
@@ -17,12 +16,12 @@ public static class ContractWalker
     /// </summary>
     public static IReadOnlyList<TsEndpointDefinition> Walk(
         Compilation compilation,
+        WellKnownTypes wkt,
         TypeWalker typeWalker,
         IReadOnlyList<INamedTypeSymbol> contractTypes)
     {
         var defineType = compilation.GetTypeByMetadataName("Rivet.Define");
-        var endpointType = compilation.GetTypeByMetadataName("Rivet.Endpoint");
-        if (defineType is null && endpointType is null)
+        if (defineType is null)
         {
             return [];
         }
@@ -44,12 +43,12 @@ public static class ContractWalker
                         continue;
                     }
 
-                    if (!EndpointWalker.HasHttpMethodAttribute(method))
+                    if (!EndpointWalker.HasHttpMethodAttribute(wkt, method))
                     {
                         continue;
                     }
 
-                    var endpoint = BuildEndpointFromMethod(method, controllerName, typeWalker);
+                    var endpoint = BuildEndpointFromMethod(wkt, method, controllerName, typeWalker);
                     if (endpoint is not null)
                     {
                         endpoints.Add(endpoint);
@@ -67,7 +66,7 @@ public static class ContractWalker
                     continue;
                 }
 
-                if (!IsRivetEndpointField(field.Type, defineType, endpointType))
+                if (!IsRivetEndpointField(field.Type, defineType))
                 {
                     continue;
                 }
@@ -78,7 +77,7 @@ public static class ContractWalker
                         $"warning: {type.Name}.{field.Name} should be 'static readonly' — it may not be read correctly at generation time");
                 }
 
-                var endpoint = BuildEndpointFromField(field, controllerName, compilation, typeWalker);
+                var endpoint = BuildEndpointFromField(field, controllerName, compilation, wkt, typeWalker);
                 if (endpoint is not null)
                 {
                     endpoints.Add(endpoint);
@@ -94,17 +93,18 @@ public static class ContractWalker
     /// Uses EndpointWalker's extraction logic with contract-style controller name derivation.
     /// </summary>
     private static TsEndpointDefinition? BuildEndpointFromMethod(
+        WellKnownTypes wkt,
         IMethodSymbol method,
         string controllerName,
         TypeWalker typeWalker)
     {
-        var (httpMethod, methodRoute) = EndpointWalker.ExtractHttpMethodAndRoute(method);
+        var (httpMethod, methodRoute) = EndpointWalker.ExtractHttpMethodAndRoute(wkt, method);
         if (httpMethod is null)
         {
             return null;
         }
 
-        var classRoute = EndpointWalker.ExtractControllerRoute(method.ContainingType);
+        var classRoute = EndpointWalker.ExtractControllerRoute(wkt, method.ContainingType);
         var fullRoute = EndpointWalker.CombineRoutes(classRoute, methodRoute);
 
         if (fullRoute is null)
@@ -114,9 +114,9 @@ public static class ContractWalker
 
         fullRoute = RouteParser.StripRouteConstraints(fullRoute);
 
-        var parameters = EndpointWalker.ExtractParams(method, typeWalker, fullRoute);
-        var responses = EndpointWalker.ExtractAllResponseTypes(method, typeWalker);
-        var returnType = EndpointWalker.ExtractReturnType(method, typeWalker);
+        var parameters = EndpointWalker.ExtractParams(wkt, method, typeWalker, fullRoute);
+        var responses = EndpointWalker.ExtractAllResponseTypes(wkt, method, typeWalker);
+        var returnType = EndpointWalker.ExtractReturnType(wkt, method, typeWalker);
         var name = Naming.ToCamelCase(method.Name);
 
         return new TsEndpointDefinition(name, httpMethod, fullRoute, parameters, returnType, controllerName, responses);
@@ -126,6 +126,7 @@ public static class ContractWalker
         IFieldSymbol field,
         string controllerName,
         Compilation compilation,
+        WellKnownTypes wkt,
         TypeWalker typeWalker)
     {
         // Get the syntax for the field initializer
@@ -250,7 +251,7 @@ public static class ContractWalker
         TsType? returnType = tOutput is not null ? typeWalker.MapType(tOutput) : null;
 
         // Build params based on HTTP method and TInput
-        var (parameters, inputTypeName) = BuildParams(httpMethod, route, tInput, typeWalker, acceptsFile);
+        var (parameters, inputTypeName) = BuildParams(wkt, httpMethod, route, tInput, typeWalker, acceptsFile);
 
         // Add success response to responses list
         // Void endpoints with typed error responses also need a success entry
@@ -275,6 +276,7 @@ public static class ContractWalker
         httpMethod is "POST" ? 201 : 200;
 
     private static (IReadOnlyList<TsEndpointParam> Params, string? InputTypeName) BuildParams(
+        WellKnownTypes wkt,
         string httpMethod,
         string route,
         ITypeSymbol? tInput,
@@ -314,12 +316,12 @@ public static class ContractWalker
             if (tInput is not null)
             {
                 // Check if TInput itself is IFormFile
-                if (IsFormFileType(tInput))
+                if (IsFormFileType(wkt, tInput))
                 {
                     parameters.Add(new TsEndpointParam("file", new TsType.Primitive("File"), ParamSource.File));
                 }
                 // Check if TInput is a record containing IFormFile properties
-                else if (HasFormFileProperty(tInput))
+                else if (HasFormFileProperty(wkt, tInput))
                 {
                     inputTypeName = tInput.Name;
                     foreach (var member in tInput.GetMembers())
@@ -342,7 +344,7 @@ public static class ContractWalker
 
                         var tsName = typeWalker.GetJsonPropertyName(prop) ?? Naming.ToCamelCase(prop.Name);
 
-                        if (IsFormFileType(prop.Type))
+                        if (IsFormFileType(wkt, prop.Type))
                         {
                             parameters.Add(new TsEndpointParam(
                                 tsName,
@@ -386,7 +388,7 @@ public static class ContractWalker
 
                     var tsName = typeWalker.GetJsonPropertyName(prop) ?? Naming.ToCamelCase(prop.Name);
 
-                    var isFormFile = prop.Type.ToDisplayString() is "Microsoft.AspNetCore.Http.IFormFile";
+                    var isFormFile = SymbolEqualityComparer.Default.Equals(prop.Type, wkt.IFormFile);
                     if (isFormFile)
                     {
                         parameters.Add(new TsEndpointParam(
@@ -418,12 +420,12 @@ public static class ContractWalker
         return (parameters, inputTypeName);
     }
 
-    private static bool IsFormFileType(ITypeSymbol type) =>
-        type.ToDisplayString() is "Microsoft.AspNetCore.Http.IFormFile";
+    private static bool IsFormFileType(WellKnownTypes wkt, ITypeSymbol type) =>
+        SymbolEqualityComparer.Default.Equals(type, wkt.IFormFile);
 
-    private static bool HasFormFileProperty(ITypeSymbol type) =>
+    private static bool HasFormFileProperty(WellKnownTypes wkt, ITypeSymbol type) =>
         type.GetMembers().OfType<IPropertySymbol>()
-            .Any(p => !p.IsImplicitlyDeclared && IsFormFileType(p.Type));
+            .Any(p => !p.IsImplicitlyDeclared && IsFormFileType(wkt, p.Type));
 
     /// <summary>
     /// Checks if the type is a (byte[], string) tuple — used for named file downloads
@@ -443,24 +445,15 @@ public static class ContractWalker
             && second.SpecialType == SpecialType.System_String;
     }
 
-    /// <summary>
-    /// Accepts Endpoint fields (v1 legacy), RouteDefinition fields (current),
-    /// and EndpointBuilder/InputEndpointBuilder fields (old name, backwards compat).
-    /// </summary>
-    internal static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? defineType, INamedTypeSymbol? endpointType)
+    internal static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? defineType)
     {
         if (defineType is not null && SymbolEqualityComparer.Default.Equals(fieldType, defineType))
         {
             return true;
         }
 
-        if (endpointType is not null && SymbolEqualityComparer.Default.Equals(fieldType, endpointType))
-        {
-            return true;
-        }
-
         if (fieldType is INamedTypeSymbol named
-            && named.Name is "RouteDefinition" or "InputRouteDefinition" or "EndpointBuilder" or "InputEndpointBuilder"
+            && named.Name is "RouteDefinition" or "InputRouteDefinition"
             && named.ContainingNamespace?.ToDisplayString() == "Rivet")
         {
             return true;
@@ -556,7 +549,7 @@ public static class ContractWalker
         // For factory calls (Get/Post/etc): first string = route, no description
         // For .Returns(statusCode, description): first string = description
         // For .Description(desc): first string = description
-        var isFactoryCall = method.ContainingType?.Name is "Define" or "Endpoint";
+        var isFactoryCall = method.ContainingType?.Name is "Define";
         string? routeArg = isFactoryCall ? stringArgs.FirstOrDefault() : null;
         string? descriptionArg = isFactoryCall ? null : stringArgs.FirstOrDefault();
 

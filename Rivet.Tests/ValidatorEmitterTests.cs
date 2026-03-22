@@ -1,4 +1,3 @@
-using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -10,13 +9,13 @@ public sealed class ValidatorEmitterTests
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
-        var validators = ValidatorEmitter.Emit(endpoints, typeFileMap);
+        var validators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
         var client = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap);
-        var validatedClient = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap, ValidateMode.Typia);
+        var validatedClient = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap, ValidateMode.Zod);
         return (validators, client, validatedClient);
     }
 
@@ -24,7 +23,7 @@ public sealed class ValidatorEmitterTests
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
@@ -34,7 +33,7 @@ public sealed class ValidatorEmitterTests
     }
 
     [Fact]
-    public void ValidatorEmitter_EmitsCreateAssert()
+    public void ValidatorEmitter_EmitsZodAssert()
     {
         var source = """
             using System;
@@ -59,11 +58,10 @@ public sealed class ValidatorEmitterTests
 
         var (validators, _, _) = Generate(source);
 
-        Assert.Contains("import typia from \"typia\";", validators);
+        Assert.Contains("import { fromJSONSchema, z } from \"zod\";", validators);
         Assert.Contains("MessageDto", validators);
-        Assert.Contains("from \"./types/", validators);
-        Assert.DoesNotContain("from \"./types/index.js\"", validators);
-        Assert.Contains("export const assertMessageDto = typia.createAssert<MessageDto>();", validators);
+        Assert.Contains("from \"./schemas.js\";", validators);
+        Assert.Contains("export const assertMessageDto = (data: unknown): MessageDto =>", validators);
     }
 
     [Fact]
@@ -98,8 +96,8 @@ public sealed class ValidatorEmitterTests
 
         var (validators, _, _) = Generate(source);
 
-        Assert.Contains("export const assertMessageDto = typia.createAssert<MessageDto>();", validators);
-        Assert.Contains("export const assertUserDto = typia.createAssert<UserDto>();", validators);
+        Assert.Contains("assertMessageDto", validators);
+        Assert.Contains("assertUserDto", validators);
     }
 
     [Fact]
@@ -158,12 +156,12 @@ public sealed class ValidatorEmitterTests
         Assert.DoesNotContain("assertMessageDto", client);
 
         // Validated client: async + assert wrapper with unwrap branching
-        Assert.Contains("""import { assertMessageDto } from "../build/validators.js";""", validatedClient);
+        Assert.Contains("""import { assertMessageDto } from "../validators.js";""", validatedClient);
         Assert.Contains("export function getMessage(id: string): Promise<MessageDto>;", validatedClient);
         Assert.Contains("export async function getMessage(id: string, opts?: { unwrap?: boolean })", validatedClient);
         // unwrap: false validates the result too
         Assert.Contains("if (opts?.unwrap === false) {", validatedClient);
-        Assert.Contains("result.data = assertMessageDto(result.data);", validatedClient);
+        Assert.Contains("assertMessageDto(result.data)", validatedClient);
         // default path validates directly
         Assert.Contains("const data = await rivetFetch<MessageDto>", validatedClient);
         Assert.Contains("return assertMessageDto(data);", validatedClient);
@@ -234,7 +232,7 @@ public sealed class ValidatorEmitterTests
         var (validators, _, validatedClient) = Generate(source);
 
         // Only one assert for ItemDto (shared return type)
-        Assert.Contains("export const assertItemDto = typia.createAssert<ItemDto>();", validators);
+        Assert.Contains("assertItemDto", validators);
         Assert.DoesNotContain("assertCreateItemCommand", validators);
 
         // GET and POST get assert wrappers, DELETE doesn't
@@ -275,15 +273,15 @@ public sealed class ValidatorEmitterTests
         var (validators, _, validatedClient) = Generate(source);
 
         // Validators emitted for both response types
-        Assert.Contains("export const assertTaskDetailDto = typia.createAssert<TaskDetailDto>();", validators);
-        Assert.Contains("export const assertNotFoundDto = typia.createAssert<NotFoundDto>();", validators);
+        Assert.Contains("assertTaskDetailDto", validators);
+        Assert.Contains("assertNotFoundDto", validators);
 
         // Validated client imports both asserters
-        Assert.Contains("""import { assertNotFoundDto, assertTaskDetailDto } from "../build/validators.js";""", validatedClient);
+        Assert.Contains("""import { assertNotFoundDto, assertTaskDetailDto } from "../validators.js";""", validatedClient);
 
         // Validated client validates each branch by status code
-        Assert.Contains("if (result.status === 200) (result as any).data = assertTaskDetailDto(result.data);", validatedClient);
-        Assert.Contains("else if (result.status === 404) (result as any).data = assertNotFoundDto(result.data);", validatedClient);
+        Assert.Contains("if (result.status === 200) return { ...result, data: assertTaskDetailDto(result.data) };", validatedClient);
+        Assert.Contains("else if (result.status === 404) return { ...result, data: assertNotFoundDto(result.data) };", validatedClient);
     }
 
     [Fact]
@@ -322,8 +320,8 @@ public sealed class ValidatorEmitterTests
         var (validators, _, _) = Generate(source);
 
         // Distinct assert names for different generic specializations (underscore separator)
-        Assert.Contains("export const assertPagedResult_TaskListItemDto = typia.createAssert<PagedResult<TaskListItemDto>>();", validators);
-        Assert.Contains("export const assertPagedResult_MemberDto = typia.createAssert<PagedResult<MemberDto>>();", validators);
+        Assert.Contains("assertPagedResult_TaskListItemDto", validators);
+        Assert.Contains("assertPagedResult_MemberDto", validators);
 
         // All nested type refs are imported
         Assert.Contains("PagedResult", validators);
@@ -358,7 +356,7 @@ public sealed class ValidatorEmitterTests
 
         Assert.Contains("import { fromJSONSchema, z } from \"zod\";", zodValidators);
         Assert.Contains("import { MessageDtoSchema } from \"./schemas.js\";", zodValidators);
-        Assert.Contains("const _assertMessageDto = fromJSONSchema(MessageDtoSchema as any);", zodValidators);
+        Assert.Contains("const _assertMessageDto = fromJSONSchema(toSchema(MessageDtoSchema));", zodValidators);
         Assert.Contains("export const assertMessageDto = (data: unknown): MessageDto => _assertMessageDto.parse(data) as MessageDto;", zodValidators);
     }
 
@@ -427,8 +425,8 @@ public sealed class ValidatorEmitterTests
         var type = new TsType.TypeRef("TaskDto");
         var nullableType = new TsType.Nullable(type);
 
-        var assertName = ValidatorEmitter.GetAssertName(type);
-        var nullableAssertName = ValidatorEmitter.GetAssertName(nullableType);
+        var assertName = ZodValidatorEmitter.GetAssertName(type);
+        var nullableAssertName = ZodValidatorEmitter.GetAssertName(nullableType);
 
         Assert.Equal("assertTaskDto", assertName);
         Assert.Equal("assertTaskDtoNullable", nullableAssertName);
@@ -443,7 +441,7 @@ public sealed class ValidatorEmitterTests
             ("value", new TsType.Primitive("number")),
         ]);
 
-        var assertName = ValidatorEmitter.GetAssertName(inlineObj);
+        var assertName = ZodValidatorEmitter.GetAssertName(inlineObj);
         Assert.Equal("assertKeyValue", assertName);
     }
 
@@ -457,7 +455,7 @@ public sealed class ValidatorEmitterTests
             ("d", new TsType.Primitive("string")),
         ]);
 
-        var assertName = ValidatorEmitter.GetAssertName(inlineObj);
+        var assertName = ZodValidatorEmitter.GetAssertName(inlineObj);
         Assert.Equal("assertObject", assertName);
     }
 
@@ -466,7 +464,7 @@ public sealed class ValidatorEmitterTests
     {
         var union = new TsType.StringUnion(["Active", "Inactive"]);
 
-        var assertName = ValidatorEmitter.GetAssertName(union);
+        var assertName = ZodValidatorEmitter.GetAssertName(union);
         Assert.Equal("assertActiveInactive", assertName);
     }
 
@@ -475,7 +473,7 @@ public sealed class ValidatorEmitterTests
     {
         var union = new TsType.StringUnion(["A", "B", "C", "D"]);
 
-        var assertName = ValidatorEmitter.GetAssertName(union);
+        var assertName = ZodValidatorEmitter.GetAssertName(union);
         Assert.Equal("assertEnum", assertName);
     }
 
@@ -484,7 +482,7 @@ public sealed class ValidatorEmitterTests
     {
         var generic = new TsType.Generic("PagedResult", [new TsType.TypeRef("TaskDto")]);
 
-        var assertName = ValidatorEmitter.GetAssertName(generic);
+        var assertName = ZodValidatorEmitter.GetAssertName(generic);
         Assert.Equal("assertPagedResult_TaskDto", assertName);
     }
 
@@ -515,6 +513,6 @@ public sealed class ValidatorEmitterTests
         var (zodValidators, _) = GenerateZod(source);
 
         // Should emit without error — Dictionary gets z.record()
-        Assert.Contains("fromJSONSchema(MetadataDtoSchema as any)", zodValidators);
+        Assert.Contains("fromJSONSchema(toSchema(MetadataDtoSchema))", zodValidators);
     }
 }

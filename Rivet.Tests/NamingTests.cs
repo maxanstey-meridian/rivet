@@ -42,6 +42,11 @@ public sealed class NamingTests
     [InlineData("Hello", "hello")]
     [InlineData("hello", "hello")]
     [InlineData("", "")]
+    [InlineData("ID", "id")] // All-caps acronym → fully lowered (JsonNamingPolicy.CamelCase)
+    [InlineData("URLPath", "urlPath")] // Leading acronym run → lowered before next word boundary
+    [InlineData("HTMLParser", "htmlParser")]
+    [InlineData("GetItem", "getItem")] // Standard PascalCase → unchanged behavior
+    [InlineData("GetByID", "getByID")] // Trailing acronym → only first char lowered
     public void ToCamelCase(string input, string expected)
     {
         Assert.Equal(expected, Naming.ToCamelCase(input));

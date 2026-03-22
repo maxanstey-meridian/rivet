@@ -15,7 +15,7 @@ dotnet tool install --global dotnet-rivet
 **Dependencies:**
 - .NET 8+ SDK
 - `Rivet.Attributes` — marker attributes and contract builders, zero dependencies
-- Node.js on PATH (only required for `--compile` with typia; not needed for `--compile zod`)
+- `zod` in your consumer project (only required for `--compile`)
 
 ## 2. Mark your types and endpoints
 
@@ -134,10 +134,8 @@ generated/
 ├── client/
 │   ├── index.ts              # barrel: export * as tasks, export * as members
 │   └── tasks.ts              # overloaded functions with typed error responses
-├── validators.ts             # typia source (inert until compiled)
-└── build/                    # (after --compile)
-    ├── validators.js          # runtime assertion functions
-    └── validators.d.ts
+├── schemas.ts                # (after --compile) JSON Schema definitions
+└── validators.ts             # (after --compile) Zod assertion wrappers
 ```
 
 Types are split by C# namespace. Types referenced across multiple groups are promoted to `common.ts`. Barrel exports let consumers import from `types/index.js` — the grouping is purely for navigating the generated code.

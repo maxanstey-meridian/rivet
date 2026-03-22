@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -7,13 +6,6 @@ namespace Rivet.Tests;
 
 public sealed class JsonSchemaEmitterTests
 {
-    private static string EmitSchemas(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        return JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
-    }
-
     private static JsonElement ParseDefs(string output)
     {
         // Extract the JSON from: const $defs = {...} as const;
@@ -35,7 +27,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record SimpleDto(string Name, int Age, bool IsActive);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         var dto = defs.GetProperty("SimpleDto");
@@ -63,7 +55,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record TimedDto(Guid Id, DateTime CreatedAt);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         var props = defs.GetProperty("TimedDto").GetProperty("properties");
@@ -83,7 +75,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record OptionalDto(string? Email);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         var emailSchema = defs.GetProperty("OptionalDto").GetProperty("properties").GetProperty("email");
@@ -106,7 +98,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record ListDto(IReadOnlyList<string> Tags);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         var tagsSchema = defs.GetProperty("ListDto").GetProperty("properties").GetProperty("tags");
@@ -127,7 +119,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record MetaDto(Dictionary<string, string> Metadata);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         var metaSchema = defs.GetProperty("MetaDto").GetProperty("properties").GetProperty("metadata");
@@ -149,7 +141,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record TaskDto(Priority Status);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         // Enum in $defs
@@ -177,7 +169,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record UserDto(string Name, AddressDto Address);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         var addressProp = defs.GetProperty("UserDto").GetProperty("properties").GetProperty("address");
@@ -206,7 +198,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record ContainerDto(PagedResult<ItemDto> Page);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         // Monomorphised PagedResult_ItemDto should exist
@@ -234,7 +226,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record ContactDto(Email Email);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         // Brand should be in $defs as its inner type
@@ -254,7 +246,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record OptionalDto(string Name, string? Nickname);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         var dto = defs.GetProperty("OptionalDto");
@@ -282,7 +274,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record SimpleDto(string Name);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
 
         // Should contain the export with $ref and $defs
         Assert.Contains("export const SimpleDtoSchema = { \"$ref\": \"#/$defs/SimpleDto\", \"$defs\": $defs } as const;", output);
@@ -300,7 +292,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record SimpleDto(string Name);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         Assert.StartsWith("// Generated by Rivet — do not edit", output);
     }
 
@@ -342,7 +334,7 @@ public sealed class JsonSchemaEmitterTests
                 Dictionary<string, string> Metadata);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         // All types present in $defs
@@ -373,7 +365,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record UserDto(string Name, AddressDto Address);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         // Verify it parsed — if JSON were invalid, ParseDefs would throw
@@ -396,7 +388,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record UserDto(AddressDto? Address);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
         var defs = ParseDefs(output);
 
         var addressProp = defs.GetProperty("UserDto").GetProperty("properties").GetProperty("address");
@@ -443,7 +435,7 @@ public sealed class JsonSchemaEmitterTests
             public sealed record UserDto(string Name, int Age, AddressDto Address);
             """;
 
-        var output = EmitSchemas(source);
+        var output = CompilationHelper.EmitSchemas(source);
 
         var tempDir = Path.Combine(Path.GetTempPath(), $"rivet-jsonschema-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);

@@ -15,17 +15,6 @@ public sealed class RealWorldImportTests
             Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
     }
 
-    private static ImportResult Import(string json, string ns = "Test")
-    {
-        return OpenApiImporter.Import(json, new ImportOptions(ns));
-    }
-
-    private static Compilation CompileGeneratedFiles(ImportResult result)
-    {
-        return CompilationHelper.CreateCompilationFromMultiple(
-            result.Files.Select(f => f.Content).ToArray());
-    }
-
     // Stub types for imported code that references ASP.NET Core or newer runtime types
     private const string ImportStubs = """
         namespace Microsoft.AspNetCore.Http
@@ -120,23 +109,23 @@ public sealed class RealWorldImportTests
     private static RoundTripResult FullRoundTrip(string fixtureName, string ns)
     {
         var json = LoadFixture(fixtureName);
-        var import1 = Import(json, ns);
+        var import1 = CompilationHelper.Import(json, ns);
 
         // Pass 1: Import → compile → walk
         var sources1 = DeduplicateFiles(import1);
         var comp1 = CompilationHelper.CreateCompilationFromMultiple(sources1);
         var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
-        var eps1 = ContractWalker.Walk(comp1, wlk1, disc1.ContractTypes);
+        var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
 
         // Emit OpenAPI from walked model
         var emittedJson = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, null);
 
         // Pass 2: Re-import emitted OpenAPI → compile → walk
-        var import2 = Import(emittedJson, ns);
+        var import2 = CompilationHelper.Import(emittedJson, ns);
         var sources2 = DeduplicateFiles(import2);
         var comp2 = CompilationHelper.CreateCompilationFromMultiple(sources2);
         var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(comp2);
-        var eps2 = ContractWalker.Walk(comp2, wlk2, disc2.ContractTypes);
+        var eps2 = CompilationHelper.WalkContracts(comp2, disc2, wlk2);
 
         return new(import1, eps1, wlk1, emittedJson, import2, eps2, wlk2);
     }
@@ -148,7 +137,7 @@ public sealed class RealWorldImportTests
     private static RoundTripResult FullRoundTripLenient(string fixtureName, string ns)
     {
         var json = LoadFixture(fixtureName);
-        var import1 = Import(json, ns);
+        var import1 = CompilationHelper.Import(json, ns);
 
         // Pass 1
         var sources1 = DeduplicateFiles(import1);
@@ -162,11 +151,11 @@ public sealed class RealWorldImportTests
         }
 
         var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
-        var eps1 = ContractWalker.Walk(comp1, wlk1, disc1.ContractTypes);
+        var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
         var emittedJson = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, null);
 
         // Pass 2
-        var import2 = Import(emittedJson, ns);
+        var import2 = CompilationHelper.Import(emittedJson, ns);
         var sources2 = DeduplicateFiles(import2);
         var comp2 = CreateCompilationLenient(sources2);
         var errors2 = comp2.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
@@ -178,7 +167,7 @@ public sealed class RealWorldImportTests
         }
 
         var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(comp2);
-        var eps2 = ContractWalker.Walk(comp2, wlk2, disc2.ContractTypes);
+        var eps2 = CompilationHelper.WalkContracts(comp2, disc2, wlk2);
 
         return new(import1, eps1, wlk1, emittedJson, import2, eps2, wlk2);
     }
@@ -405,7 +394,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Duplicate_Route_Params_Produce_Unique_Field_Names()
     {
-        var result = Import(LoadFixture("openapi-duplicate-routes.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-duplicate-routes.json"));
         var contractFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("AnythingContract.cs"));
         Assert.NotNull(contractFile);
 
@@ -421,7 +410,7 @@ public sealed class RealWorldImportTests
         Assert.Contains("GetAnythingByAnything", content);
 
         // Must compile
-        CompileGeneratedFiles(result);
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== Bug 2: Union property names with <> ==========
@@ -429,14 +418,14 @@ public sealed class RealWorldImportTests
     [Fact]
     public void OneOf_With_Collection_Types_Produces_Valid_Identifiers()
     {
-        var result = Import(LoadFixture("openapi-union-types.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-union-types.json"));
         var allContent = string.Join("\n", result.Files.Select(f => f.Content));
 
         // No angle brackets in property names
         Assert.DoesNotMatch(@"As\w*<", allContent);
 
         // Must compile
-        CompileGeneratedFiles(result);
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== Bug 3: Double nullable ==========
@@ -444,14 +433,14 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Nullable_OneOf_Does_Not_Double_Nullable()
     {
-        var result = Import(LoadFixture("openapi-union-types.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-union-types.json"));
         var allContent = string.Join("\n", result.Files.Select(f => f.Content));
 
         // No double nullable
         Assert.DoesNotContain("??", allContent);
 
         // Must compile
-        CompileGeneratedFiles(result);
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== Bug 4: Multiline descriptions ==========
@@ -459,7 +448,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Multiline_Description_Escapes_Newlines()
     {
-        var result = Import(LoadFixture("openapi-multiline-desc.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-multiline-desc.json"));
 
         var contractFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("HealthContract.cs"));
         Assert.NotNull(contractFile);
@@ -467,7 +456,7 @@ public sealed class RealWorldImportTests
         Assert.Contains("\\t", contractFile.Content);
 
         // Must compile
-        CompileGeneratedFiles(result);
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== Bug 5: Dot in synthetic record names from param context ==========
@@ -477,13 +466,13 @@ public sealed class RealWorldImportTests
     {
         // When a path/query param has a oneOf schema, the synthetic record name
         // must not contain a dot (e.g. "GetById.fields" → "GetByIdFields")
-        var result = Import(LoadFixture("openapi-edge-cases.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-edge-cases.json"));
         var allContent = string.Join("\n", result.Files.Select(f => f.Content));
 
         // No dots in record names
         Assert.DoesNotMatch(@"sealed record \S*\.\S*\(", allContent);
 
-        CompileGeneratedFiles(result);
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== Bug 6: Duplicate property names (+1/-1 → both _1) ==========
@@ -491,7 +480,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Emoji_Property_Names_Deduplicated()
     {
-        var result = Import(LoadFixture("openapi-edge-cases.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-edge-cases.json"));
         var rollupFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("ReactionRollup.cs"));
         Assert.NotNull(rollupFile);
 
@@ -506,7 +495,7 @@ public sealed class RealWorldImportTests
         Assert.Equal(1, propLines.Count(l => l.Contains(" _1,") || l.Contains(" _1)")));
         Assert.Equal(1, propLines.Count(l => l.Contains("_1_2")));
 
-        CompileGeneratedFiles(result);
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== Bug 7: Double-nullable in union variant types ==========
@@ -516,7 +505,7 @@ public sealed class RealWorldImportTests
     {
         // oneOf where an inline variant resolves to a nullable type — the union
         // property should be "type?" not "type??"
-        var result = Import(LoadFixture("openapi-union-types.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-union-types.json"));
 
         // Find the union wrapper record for "value" (which has oneOf variants)
         var allContent = string.Join("\n", result.Files.Select(f => f.Content));
@@ -529,7 +518,7 @@ public sealed class RealWorldImportTests
         // doubleNullable is oneOf: [string|null, null] — should resolve to string? not string??
         Assert.DoesNotContain("??", itemResponseFile.Content);
 
-        CompileGeneratedFiles(result);
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== Bug 8: Primitive type alias $ref resolution ==========
@@ -537,7 +526,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Ref_To_Primitive_Alias_Resolves_To_Underlying_Type()
     {
-        var result = Import(LoadFixture("openapi-edge-cases.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-edge-cases.json"));
         var alertFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("ScanAlert.cs"));
         Assert.NotNull(alertFile);
 
@@ -555,7 +544,7 @@ public sealed class RealWorldImportTests
         Assert.DoesNotContain(result.Files, f => f.FileName.Contains("AlertCreatedAt"));
         Assert.DoesNotContain(result.Files, f => f.FileName.Contains("AlertState"));
 
-        CompileGeneratedFiles(result);
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== Bug 9: Property name = record name (CS0542) ==========
@@ -563,7 +552,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Property_Name_Matching_Record_Name_Gets_Suffixed()
     {
-        var result = Import(LoadFixture("openapi-edge-cases.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-edge-cases.json"));
         var emailFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("Email.cs"));
         Assert.NotNull(emailFile);
 
@@ -575,7 +564,7 @@ public sealed class RealWorldImportTests
         // The record declaration should still be "Email"
         Assert.Contains("sealed record Email(", content);
 
-        CompileGeneratedFiles(result);
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== Bug 10: Union $ref to property-less schemas ==========
@@ -583,7 +572,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Union_Ref_To_Bare_Object_Resolves_Through()
     {
-        var result = Import(LoadFixture("openapi-edge-cases.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-edge-cases.json"));
         var payloadFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("EventPayload.cs"));
         Assert.NotNull(payloadFile);
 
@@ -597,7 +586,7 @@ public sealed class RealWorldImportTests
         // ContentDirectory is an array type → should NOT appear as "AsContentDirectory"
         Assert.DoesNotContain("ContentDirectory", content);
 
-        CompileGeneratedFiles(result);
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== Bug 1 extended: OperationId collision dedup ==========
@@ -606,7 +595,7 @@ public sealed class RealWorldImportTests
     public void OperationId_PascalCase_Collisions_Deduplicated()
     {
         // "widgets_list_items" and "widgets_ListItems" both → "ListItems" after stripping tag prefix
-        var result = Import(LoadFixture("openapi-duplicate-routes.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-duplicate-routes.json"));
         var widgetsFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("WidgetsContract.cs"));
         Assert.NotNull(widgetsFile);
 
@@ -621,7 +610,7 @@ public sealed class RealWorldImportTests
         Assert.Contains("ListItems", content);
         Assert.Contains("ListItems_2", content);
 
-        CompileGeneratedFiles(result);
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== Real-world specs — full round-trip ==========
@@ -685,7 +674,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void NamingEdgeCases_ReservedWords_AreEscaped()
     {
-        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
         var reservedFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("ReservedWords.cs"));
         Assert.NotNull(reservedFile);
 
@@ -699,7 +688,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void NamingEdgeCases_SpecialCharProperties_AreValid()
     {
-        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
         var specialFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("SpecialCharsModel.cs"));
         Assert.NotNull(specialFile);
 
@@ -715,7 +704,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void NamingEdgeCases_DuplicateEnums_Deduplicated()
     {
-        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
         var allContent = string.Join("\n", result.Files.Select(f => f.Content));
 
         // DuplicatingEnum: "foo-bar" and "foo_bar" both → FooBar — needs dedup
@@ -728,7 +717,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void NamingEdgeCases_EmptyPropertyNames_Handled()
     {
-        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
         var statusFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("StatusResponse.cs"));
         Assert.NotNull(statusFile);
 
@@ -745,7 +734,7 @@ public sealed class RealWorldImportTests
     {
         // foo_bar_schema and FooBarSchema both PascalCase to FooBarSchema
         // Should not crash — either dedup or one wins
-        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
         var errors = GetCompilationErrors(result);
         Assert.True(errors.Count == 0,
             $"Schema collision errors:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");

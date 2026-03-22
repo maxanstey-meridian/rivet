@@ -1,4 +1,4 @@
-namespace TaskBoard.Domain;
+namespace AnnotationApi.Domain;
 
 /// TS: { name: string; color: string }
 public sealed record Label(string Name, string Color);

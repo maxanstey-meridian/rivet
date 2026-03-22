@@ -1,6 +1,9 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Rivet.Tool.Analysis;
+using Rivet.Tool.Emit;
+using Rivet.Tool.Import;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -201,6 +204,27 @@ public static class CompilationHelper
         return (discovered, walker);
     }
 
+    public static IReadOnlyList<TsEndpointDefinition> WalkEndpoints(
+        Compilation compilation, DiscoveredSymbols discovered, TypeWalker walker)
+    {
+        var wkt = new WellKnownTypes(compilation);
+        return EndpointWalker.Walk(wkt, walker, discovered.EndpointMethods, discovered.ClientTypes);
+    }
+
+    public static IReadOnlyList<TsEndpointDefinition> WalkContracts(
+        Compilation compilation, DiscoveredSymbols discovered, TypeWalker walker)
+    {
+        var wkt = new WellKnownTypes(compilation);
+        return ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
+    }
+
+    public static IReadOnlyList<CoverageWarning> CheckCoverage(
+        Compilation compilation, IReadOnlyList<TsEndpointDefinition> contractEndpoints)
+    {
+        var wkt = new WellKnownTypes(compilation);
+        return CoverageChecker.Check(compilation, wkt, contractEndpoints);
+    }
+
     /// <summary>
     /// Creates a compilation where domainSource lives in a separate "project" (CompilationReference),
     /// simulating types from a referenced project assembly.
@@ -220,6 +244,70 @@ public static class CompilationHelper
             [mainTree],
             [.. CoreReferences, domainCompilation.ToMetadataReference()],
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+    }
+
+    // --- Import pipeline helpers ---
+
+    public static ImportResult Import(string json, string ns = "Test", string? security = null)
+        => OpenApiImporter.Import(json, new ImportOptions(ns, security));
+
+    public static string FindFile(ImportResult result, string fileName)
+    {
+        var file = result.Files.FirstOrDefault(f => f.FileName.EndsWith(fileName));
+        Assert.NotNull(file);
+        return file.Content;
+    }
+
+    public static Compilation CompileImportResult(ImportResult result)
+        => CreateCompilationFromMultiple(result.Files.Select(f => f.Content).ToArray());
+
+    public static string BuildSpec(string? schemas = null, string? paths = null, string title = "Test")
+    {
+        var schemasBlock = schemas is not null
+            ? $"\"components\": {{ \"schemas\": {{ {schemas} }} }},"
+            : "";
+
+        var pathsBlock = paths is not null
+            ? $"\"paths\": {{ {paths} }}"
+            : "\"paths\": {}";
+
+        return $$"""
+            {
+                "openapi": "3.1.0",
+                "info": { "title": "{{title}}", "version": "1.0.0" },
+                {{schemasBlock}}
+                {{pathsBlock}}
+            }
+            """;
+    }
+
+    // --- Emission helpers ---
+
+    public static string EmitTypes(string source)
+    {
+        var compilation = CreateCompilation(source);
+        var (_, walker) = DiscoverAndWalk(compilation);
+        var definitions = walker.Definitions.Values.ToList();
+        var brands = walker.Brands.Values.ToList();
+        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
+        return string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
+    }
+
+    public static string EmitSchemas(string source)
+    {
+        var compilation = CreateCompilation(source);
+        var (_, walker) = DiscoverAndWalk(compilation);
+        return JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums);
+    }
+
+    public static Dictionary<string, string> BuildTypeFileMap(TypeWalker walker)
+    {
+        var grouping = TypeGrouper.Group(
+            walker.Definitions.Values.ToList(),
+            walker.Brands.Values.ToList(),
+            walker.Enums,
+            walker.TypeNamespaces);
+        return grouping.BuildTypeFileMap();
     }
 
     private static MetadataReference[] GetCoreReferences()

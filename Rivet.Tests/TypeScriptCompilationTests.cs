@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 
 namespace Rivet.Tests;
@@ -428,8 +427,8 @@ public sealed class TypeScriptCompilationTests : IDisposable
         // 1. Compile C# and run Rivet analysis
         var compilation = CompilationHelper.CreateCompilation(csharpSource);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var controllerEndpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
-        var contractEndpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var controllerEndpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
+        var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         // Merge: contract wins on (ControllerName, Name) collision
         var seen = new HashSet<(string, string)>(
@@ -485,25 +484,7 @@ public sealed class TypeScriptCompilationTests : IDisposable
         var clientBarrel = TypeEmitter.EmitNamespacedBarrel(clientFileNames);
         await File.WriteAllTextAsync(Path.Combine(clientDir, "index.ts"), clientBarrel);
 
-        var validators = ValidatorEmitter.Emit(endpoints, typeFileMap);
-        if (!string.IsNullOrEmpty(validators))
-        {
-            await File.WriteAllTextAsync(
-                Path.Combine(_tempDir, "validators.ts"), validators);
-        }
-
-        // 3. Stub typia so validators.ts can resolve its import without installing the real package
-        if (!string.IsNullOrEmpty(validators))
-        {
-            var typiaDir = Path.Combine(_tempDir, "node_modules", "typia");
-            Directory.CreateDirectory(typiaDir);
-            await File.WriteAllTextAsync(Path.Combine(typiaDir, "index.d.ts"),
-                "declare const typia: { createAssert<T>(): (input: unknown) => T };\nexport default typia;\n");
-            await File.WriteAllTextAsync(Path.Combine(typiaDir, "package.json"),
-                """{"name": "typia", "main": "index.js", "types": "index.d.ts"}""");
-        }
-
-        // 4. Write tsconfig.json
+        // 3. Write tsconfig.json
         var tsconfig = """
             {
               "compilerOptions": {

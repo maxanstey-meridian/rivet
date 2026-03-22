@@ -54,7 +54,7 @@ public sealed class SampleProjectTests : IDisposable
         var sources = ReadSampleSources();
         var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         Assert.Equal(5, endpoints.Count);
 
@@ -145,7 +145,7 @@ public sealed class SampleProjectTests : IDisposable
         var sources = ReadSampleSources();
         var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var contractEndpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(
@@ -309,7 +309,7 @@ public sealed class SampleProjectTests : IDisposable
         var sources = ReadSampleSources();
         var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var contractEndpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(
@@ -855,21 +855,10 @@ public sealed class SampleProjectTests : IDisposable
 
             """;
 
-        // The controller file contains both DTOs and the controller class.
-        // The controller class uses ASP.NET types (ObjectResult, StatusCodeResult, Results)
-        // that aren't fully stubbed in CompilationHelper. We only need the DTOs for
-        // ContractWalker, so extract everything up to the controller class declaration.
-        var controllerSource = File.ReadAllText(
-            Path.Combine(SampleDir, "Controllers", "MembersController.cs"));
-        var controllerClassIndex = controllerSource.IndexOf("[Route(", StringComparison.Ordinal);
-        var dtosOnly = controllerClassIndex > 0
-            ? controllerSource[..controllerClassIndex]
-            : controllerSource;
-
         return
         [
             implicitUsings + File.ReadAllText(Path.Combine(SampleDir, "Domain", "ValueObjects.cs")),
-            implicitUsings + dtosOnly,
+            implicitUsings + File.ReadAllText(Path.Combine(SampleDir, "Models", "MemberModels.cs")),
             implicitUsings + File.ReadAllText(Path.Combine(SampleDir, "Contracts", "MembersContract.cs")),
         ];
     }

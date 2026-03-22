@@ -53,6 +53,13 @@ public static class OpenApiImporter
             files.Add(new GeneratedFile($"Types/{enumDef.Name}.cs", content));
         }
 
+        // Emit synthetic enums from inline enum properties
+        foreach (var enumDef in mapper.ExtraEnums)
+        {
+            var content = CSharpWriter.WriteEnum(enumDef, ns);
+            files.Add(new GeneratedFile($"Types/{enumDef.Name}.cs", content));
+        }
+
         foreach (var brand in schemaResult.Brands)
         {
             var content = CSharpWriter.WriteBrand(brand, ns);

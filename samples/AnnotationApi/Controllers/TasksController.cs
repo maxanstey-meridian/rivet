@@ -1,10 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Rivet;
-using TaskBoard.Application;
-using TaskBoard.Application.CreateTask;
-using TaskBoard.Domain;
+using AnnotationApi.Application;
+using AnnotationApi.Application.CreateTask;
+using AnnotationApi.Domain;
 
-namespace TaskBoard.Controllers;
+namespace AnnotationApi.Controllers;
 
 // Response DTOs — colocated with the controller that serves them
 [RivetType]

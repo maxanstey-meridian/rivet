@@ -655,9 +655,21 @@
               "y": { "type": "integer" }
             },
             "required": ["x", "y"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "paused", "canceled"]
+          },
+          "category": {
+            "type": "string",
+            "enum": ["bug", "feature", "chore"]
+          },
+          "singleTag": {
+            "type": "string",
+            "enum": ["only"]
           }
         },
-        "required": ["label", "nested"]
+        "required": ["label", "nested", "status"]
       },
       "ComposedMultiRefDto": {
         "allOf": [

@@ -1,5 +1,5 @@
-using TaskBoard.Contracts;
-using TaskBoard.Controllers;
+using ContractApi.Contracts;
+using ContractApi.Controllers;
 
 var builder = WebApplication.CreateBuilder(args);
 

@@ -1,5 +1,3 @@
-using System;
-
 namespace Rivet;
 
 [AttributeUsage(AttributeTargets.Field, Inherited = false)]

@@ -10,7 +10,7 @@ public sealed class ContractEndpointTests
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
@@ -358,8 +358,8 @@ public sealed class ContractEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var contractEndpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
-        var controllerEndpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var controllerEndpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
 
         // Both sources produce endpoints for different controllers
         Assert.Single(contractEndpoints);
@@ -392,7 +392,7 @@ public sealed class ContractEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         Assert.Single(endpoints);
         Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "TaskDto" });
@@ -561,8 +561,8 @@ public sealed class ContractEndpointTests
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var contractEndpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
-        var annotationEndpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var annotationEndpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
 
         // Merge: contract wins on collision (same as Program.cs)
         var seen = new HashSet<(string, string)>(
@@ -964,7 +964,7 @@ public sealed class ContractEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = Rivet.Tool.Analysis.ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
 
         // Success response should use application/pdf with binary schema
@@ -1051,7 +1051,7 @@ public sealed class ContractEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = Rivet.Tool.Analysis.ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
 
         Assert.Contains("application/octet-stream", json);
@@ -1107,7 +1107,7 @@ public sealed class ContractEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = Rivet.Tool.Analysis.ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
 
         Assert.Contains("application/octet-stream", json);

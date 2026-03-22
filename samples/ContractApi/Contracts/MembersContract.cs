@@ -1,8 +1,7 @@
 using Rivet;
-using TaskBoard.Controllers;
-using TaskBoard.Domain;
+using ContractApi.Models;
 
-namespace TaskBoard.Contracts;
+namespace ContractApi.Contracts;
 
 /// <summary>
 /// Contract-driven endpoint definitions for the Members API.

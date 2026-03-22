@@ -166,7 +166,7 @@ internal static class ContractBuilder
         }
 
         var recordName = $"{fieldName}Input";
-        mapper.AddExtraRecord(new GeneratedRecord(recordName, SchemaMapper.DeduplicateProperties(properties)));
+        mapper.AddExtraRecord(new GeneratedRecord(recordName, SchemaClassifier.DeduplicateProperties(properties)));
         return recordName;
     }
 

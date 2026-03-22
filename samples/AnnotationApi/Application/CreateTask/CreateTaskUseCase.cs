@@ -1,7 +1,7 @@
 using Rivet;
-using TaskBoard.Domain;
+using AnnotationApi.Domain;
 
-namespace TaskBoard.Application.CreateTask;
+namespace AnnotationApi.Application.CreateTask;
 
 /// TS: { title: string; description: string | null; priority: Priority; assigneeId: string | null; labelNames: string[] }
 [RivetType]

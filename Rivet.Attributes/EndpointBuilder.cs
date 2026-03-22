@@ -1,7 +1,9 @@
-using System;
-using System.Threading.Tasks;
-
 namespace Rivet;
+
+/// <summary>
+/// Describes an additional (non-success) response declared via .Returns&lt;T&gt;().
+/// </summary>
+public sealed record ErrorResponse(int StatusCode, Type ResponseType, string? Description);
 
 /// <summary>
 /// Route definition for endpoints with both input and output types.
@@ -11,12 +13,25 @@ public sealed class RouteDefinition<TInput, TOutput>
 {
     private int _successStatus;
     private bool _statusSet;
+    private string? _description;
+    private bool _anonymous;
+    private string? _securityScheme;
+    private string? _fileContentType;
+    private bool _acceptsFile;
+    private List<ErrorResponse>? _errorResponses;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
 
     /// <summary>The route template from the contract definition.</summary>
     public string Route { get; }
+
+    public string? EndpointDescription => _description;
+    public bool IsAnonymous => _anonymous;
+    public string? SecurityScheme => _securityScheme;
+    public string? FileContentType => _fileContentType;
+    public bool IsFileUpload => _acceptsFile;
+    public IReadOnlyList<ErrorResponse>? ErrorResponses => _errorResponses;
 
     internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
     {
@@ -25,8 +40,15 @@ public sealed class RouteDefinition<TInput, TOutput>
         _successStatus = defaultStatus;
     }
 
-    public RouteDefinition<TInput, TOutput> Returns<TResponse>(int statusCode) => this;
-    public RouteDefinition<TInput, TOutput> Returns<TResponse>(int statusCode, string description) => this;
+    public RouteDefinition<TInput, TOutput> Returns<TResponse>(int statusCode)
+        => Returns<TResponse>(statusCode, null);
+
+    public RouteDefinition<TInput, TOutput> Returns<TResponse>(int statusCode, string? description)
+    {
+        _errorResponses ??= [];
+        _errorResponses.Add(new ErrorResponse(statusCode, typeof(TResponse), description));
+        return this;
+    }
 
     public RouteDefinition<TInput, TOutput> Status(int statusCode)
     {
@@ -40,16 +62,39 @@ public sealed class RouteDefinition<TInput, TOutput>
         return this;
     }
 
-    public RouteDefinition<TInput, TOutput> Description(string description) => this;
-    public RouteDefinition<TInput, TOutput> Anonymous() => this;
-    public RouteDefinition<TInput, TOutput> Secure(string scheme) => this;
-    public RouteDefinition<TInput, TOutput> ProducesFile(string contentType = "application/octet-stream") => this;
+    public RouteDefinition<TInput, TOutput> Description(string description)
+    {
+        _description = description;
+        return this;
+    }
+
+    public RouteDefinition<TInput, TOutput> Anonymous()
+    {
+        _anonymous = true;
+        return this;
+    }
+
+    public RouteDefinition<TInput, TOutput> Secure(string scheme)
+    {
+        _securityScheme = scheme;
+        return this;
+    }
+
+    public RouteDefinition<TInput, TOutput> ProducesFile(string contentType = "application/octet-stream")
+    {
+        _fileContentType = contentType;
+        return this;
+    }
 
     /// <summary>
     /// Marks this endpoint as accepting a file upload (multipart/form-data).
     /// The generated TS client will accept a File parameter.
     /// </summary>
-    public RouteDefinition<TInput, TOutput> AcceptsFile() => this;
+    public RouteDefinition<TInput, TOutput> AcceptsFile()
+    {
+        _acceptsFile = true;
+        return this;
+    }
 
     /// <summary>
     /// Execute the endpoint handler with type-safe input and output.
@@ -70,12 +115,25 @@ public sealed class RouteDefinition<TOutput>
 {
     private int _successStatus;
     private bool _statusSet;
+    private string? _description;
+    private bool _anonymous;
+    private string? _securityScheme;
+    private string? _fileContentType;
+    private bool _acceptsFile;
+    private List<ErrorResponse>? _errorResponses;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
 
     /// <summary>The route template from the contract definition.</summary>
     public string Route { get; }
+
+    public string? EndpointDescription => _description;
+    public bool IsAnonymous => _anonymous;
+    public string? SecurityScheme => _securityScheme;
+    public string? FileContentType => _fileContentType;
+    public bool IsFileUpload => _acceptsFile;
+    public IReadOnlyList<ErrorResponse>? ErrorResponses => _errorResponses;
 
     internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
     {
@@ -84,8 +142,15 @@ public sealed class RouteDefinition<TOutput>
         _successStatus = defaultStatus;
     }
 
-    public RouteDefinition<TOutput> Returns<TResponse>(int statusCode) => this;
-    public RouteDefinition<TOutput> Returns<TResponse>(int statusCode, string description) => this;
+    public RouteDefinition<TOutput> Returns<TResponse>(int statusCode)
+        => Returns<TResponse>(statusCode, null);
+
+    public RouteDefinition<TOutput> Returns<TResponse>(int statusCode, string? description)
+    {
+        _errorResponses ??= [];
+        _errorResponses.Add(new ErrorResponse(statusCode, typeof(TResponse), description));
+        return this;
+    }
 
     public RouteDefinition<TOutput> Status(int statusCode)
     {
@@ -99,16 +164,39 @@ public sealed class RouteDefinition<TOutput>
         return this;
     }
 
-    public RouteDefinition<TOutput> Description(string description) => this;
-    public RouteDefinition<TOutput> Anonymous() => this;
-    public RouteDefinition<TOutput> Secure(string scheme) => this;
-    public RouteDefinition<TOutput> ProducesFile(string contentType = "application/octet-stream") => this;
+    public RouteDefinition<TOutput> Description(string description)
+    {
+        _description = description;
+        return this;
+    }
+
+    public RouteDefinition<TOutput> Anonymous()
+    {
+        _anonymous = true;
+        return this;
+    }
+
+    public RouteDefinition<TOutput> Secure(string scheme)
+    {
+        _securityScheme = scheme;
+        return this;
+    }
+
+    public RouteDefinition<TOutput> ProducesFile(string contentType = "application/octet-stream")
+    {
+        _fileContentType = contentType;
+        return this;
+    }
 
     /// <summary>
     /// Marks this endpoint as accepting a file upload (multipart/form-data).
     /// The generated TS client will accept a File parameter.
     /// </summary>
-    public RouteDefinition<TOutput> AcceptsFile() => this;
+    public RouteDefinition<TOutput> AcceptsFile()
+    {
+        _acceptsFile = true;
+        return this;
+    }
 
     /// <summary>
     /// Execute the endpoint handler with type-safe output.
@@ -130,12 +218,25 @@ public sealed class InputRouteDefinition<TInput>
 {
     private int _successStatus;
     private bool _statusSet;
+    internal string? _description;
+    internal bool _anonymous;
+    internal string? _securityScheme;
+    internal string? _fileContentType;
+    internal bool _acceptsFile;
+    internal List<ErrorResponse>? _errorResponses;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
 
     /// <summary>The route template from the contract definition.</summary>
     public string Route { get; }
+
+    public string? EndpointDescription => _description;
+    public bool IsAnonymous => _anonymous;
+    public string? SecurityScheme => _securityScheme;
+    public string? FileContentType => _fileContentType;
+    public bool IsFileUpload => _acceptsFile;
+    public IReadOnlyList<ErrorResponse>? ErrorResponses => _errorResponses;
 
     internal InputRouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
     {
@@ -144,8 +245,15 @@ public sealed class InputRouteDefinition<TInput>
         _successStatus = defaultStatus;
     }
 
-    public InputRouteDefinition<TInput> Returns<TResponse>(int statusCode) => this;
-    public InputRouteDefinition<TInput> Returns<TResponse>(int statusCode, string description) => this;
+    public InputRouteDefinition<TInput> Returns<TResponse>(int statusCode)
+        => Returns<TResponse>(statusCode, null);
+
+    public InputRouteDefinition<TInput> Returns<TResponse>(int statusCode, string? description)
+    {
+        _errorResponses ??= [];
+        _errorResponses.Add(new ErrorResponse(statusCode, typeof(TResponse), description));
+        return this;
+    }
 
     public InputRouteDefinition<TInput> Status(int statusCode)
     {
@@ -159,16 +267,39 @@ public sealed class InputRouteDefinition<TInput>
         return this;
     }
 
-    public InputRouteDefinition<TInput> Description(string description) => this;
-    public InputRouteDefinition<TInput> Anonymous() => this;
-    public InputRouteDefinition<TInput> Secure(string scheme) => this;
-    public InputRouteDefinition<TInput> ProducesFile(string contentType = "application/octet-stream") => this;
+    public InputRouteDefinition<TInput> Description(string description)
+    {
+        _description = description;
+        return this;
+    }
+
+    public InputRouteDefinition<TInput> Anonymous()
+    {
+        _anonymous = true;
+        return this;
+    }
+
+    public InputRouteDefinition<TInput> Secure(string scheme)
+    {
+        _securityScheme = scheme;
+        return this;
+    }
+
+    public InputRouteDefinition<TInput> ProducesFile(string contentType = "application/octet-stream")
+    {
+        _fileContentType = contentType;
+        return this;
+    }
 
     /// <summary>
     /// Marks this endpoint as accepting a file upload (multipart/form-data).
     /// The generated TS client will accept a File parameter.
     /// </summary>
-    public InputRouteDefinition<TInput> AcceptsFile() => this;
+    public InputRouteDefinition<TInput> AcceptsFile()
+    {
+        _acceptsFile = true;
+        return this;
+    }
 
     /// <summary>
     /// Execute the endpoint handler with type-safe input (void output).
@@ -189,12 +320,25 @@ public sealed class RouteDefinition
 {
     private int _successStatus;
     private bool _statusSet;
+    private string? _description;
+    private bool _anonymous;
+    private string? _securityScheme;
+    private string? _fileContentType;
+    private bool _acceptsFile;
+    private List<ErrorResponse>? _errorResponses;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
 
     /// <summary>The route template from the contract definition.</summary>
     public string Route { get; }
+
+    public string? EndpointDescription => _description;
+    public bool IsAnonymous => _anonymous;
+    public string? SecurityScheme => _securityScheme;
+    public string? FileContentType => _fileContentType;
+    public bool IsFileUpload => _acceptsFile;
+    public IReadOnlyList<ErrorResponse>? ErrorResponses => _errorResponses;
 
     internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
     {
@@ -203,8 +347,15 @@ public sealed class RouteDefinition
         _successStatus = defaultStatus;
     }
 
-    public RouteDefinition Returns<TResponse>(int statusCode) => this;
-    public RouteDefinition Returns<TResponse>(int statusCode, string description) => this;
+    public RouteDefinition Returns<TResponse>(int statusCode)
+        => Returns<TResponse>(statusCode, null);
+
+    public RouteDefinition Returns<TResponse>(int statusCode, string? description)
+    {
+        _errorResponses ??= [];
+        _errorResponses.Add(new ErrorResponse(statusCode, typeof(TResponse), description));
+        return this;
+    }
 
     public RouteDefinition Status(int statusCode)
     {
@@ -218,27 +369,58 @@ public sealed class RouteDefinition
         return this;
     }
 
-    public RouteDefinition Description(string description) => this;
-    public RouteDefinition Anonymous() => this;
-    public RouteDefinition Secure(string scheme) => this;
+    public RouteDefinition Description(string description)
+    {
+        _description = description;
+        return this;
+    }
+
+    public RouteDefinition Anonymous()
+    {
+        _anonymous = true;
+        return this;
+    }
+
+    public RouteDefinition Secure(string scheme)
+    {
+        _securityScheme = scheme;
+        return this;
+    }
 
     /// <summary>
     /// Marks this endpoint as returning a file download instead of JSON.
     /// The generated TS client returns Blob; the OpenAPI spec emits the given content type with format: binary.
     /// </summary>
-    public RouteDefinition ProducesFile(string contentType = "application/octet-stream") => this;
+    public RouteDefinition ProducesFile(string contentType = "application/octet-stream")
+    {
+        _fileContentType = contentType;
+        return this;
+    }
 
     /// <summary>
     /// Marks this endpoint as accepting a file upload (multipart/form-data).
     /// The generated TS client will accept a File parameter.
     /// </summary>
-    public RouteDefinition AcceptsFile() => this;
+    public RouteDefinition AcceptsFile()
+    {
+        _acceptsFile = true;
+        return this;
+    }
 
     /// <summary>
     /// Convert to an input-only endpoint (accepts a body, returns void).
     /// </summary>
     public InputRouteDefinition<TInput> Accepts<TInput>()
-        => new InputRouteDefinition<TInput>(Method, Route, _successStatus);
+    {
+        var def = new InputRouteDefinition<TInput>(Method, Route, _successStatus);
+        def._description = _description;
+        def._anonymous = _anonymous;
+        def._securityScheme = _securityScheme;
+        def._fileContentType = _fileContentType;
+        def._acceptsFile = _acceptsFile;
+        def._errorResponses = _errorResponses?.ToList();
+        return def;
+    }
 
     /// <summary>
     /// Execute the endpoint handler (void — no typed output).
