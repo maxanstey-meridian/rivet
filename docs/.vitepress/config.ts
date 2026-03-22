@@ -56,6 +56,7 @@ export default defineConfig({
         items: [
           { text: "How It Works", link: "/misc/how-it-works" },
           { text: "Limitations", link: "/misc/limitations" },
+          { text: "AI Disclosure", link: "/misc/ai-disclosure" },
         ],
       },
     ],

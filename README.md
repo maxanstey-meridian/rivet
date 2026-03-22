@@ -133,7 +133,7 @@ export const assertAge = (input) => {
 
 Every API response is validated at the network boundary with [typia](https://typia.io) runtime assertions — not just primitives, but full object shapes, nested types, and unions. If the server sends unexpected data, you get a clear error immediately — not a silent `undefined` three components later.
 
-## Or `--compile zod` → validate with Zod 4, no compile step
+## Or `--compile zod` → validate with Zod 4
 
 ```bash
 dotnet rivet --project Api.csproj --output ./generated --compile zod
