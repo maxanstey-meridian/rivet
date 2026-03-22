@@ -213,6 +213,7 @@ public sealed class RealWorldImportTests
             Path.Combine(runtimeDir, "System.Text.Json.dll"),
             Path.Combine(runtimeDir, "System.Memory.dll"),
             Path.Combine(runtimeDir, "netstandard.dll"),
+            Path.Combine(runtimeDir, "System.Private.Uri.dll"),
             typeof(RivetTypeAttribute).Assembly.Location,
         };
         foreach (var extra in new[] { "System.Linq.dll", "System.Console.dll" })

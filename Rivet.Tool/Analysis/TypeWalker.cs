@@ -23,6 +23,8 @@ public sealed class TypeWalker
     private readonly INamedTypeSymbol? _dateTimeType;
     private readonly INamedTypeSymbol? _dateTimeOffsetType;
     private readonly INamedTypeSymbol? _dateOnlyType;
+    private readonly INamedTypeSymbol? _timeOnlyType;
+    private readonly INamedTypeSymbol? _uriType;
     private readonly INamedTypeSymbol? _jsonElementType;
     private readonly INamedTypeSymbol? _jsonNodeType;
 
@@ -60,6 +62,8 @@ public sealed class TypeWalker
         _dateTimeType = compilation.GetTypeByMetadataName("System.DateTime");
         _dateTimeOffsetType = compilation.GetTypeByMetadataName("System.DateTimeOffset");
         _dateOnlyType = compilation.GetTypeByMetadataName("System.DateOnly");
+        _timeOnlyType = compilation.GetTypeByMetadataName("System.TimeOnly");
+        _uriType = compilation.GetTypeByMetadataName("System.Uri");
         _jsonElementType = compilation.GetTypeByMetadataName("System.Text.Json.JsonElement");
         _jsonNodeType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonNode");
 
@@ -358,9 +362,9 @@ public sealed class TypeWalker
             SpecialType.System_String => new TsType.Primitive("string"),
             SpecialType.System_Boolean => new TsType.Primitive("boolean"),
             SpecialType.System_Int32 => new TsType.Primitive("number", "int32"),
-            SpecialType.System_UInt32 => new TsType.Primitive("number", "int32", "uint"),
+            SpecialType.System_UInt32 => new TsType.Primitive("number", "uint32", "uint"),
             SpecialType.System_Int64 => new TsType.Primitive("number", "int64"),
-            SpecialType.System_UInt64 => new TsType.Primitive("number", "int64", "ulong"),
+            SpecialType.System_UInt64 => new TsType.Primitive("number", "uint64", "ulong"),
             SpecialType.System_Single => new TsType.Primitive("number", "float"),
             SpecialType.System_Double => new TsType.Primitive("number", "double"),
             SpecialType.System_Decimal => new TsType.Primitive("number", "decimal"),
@@ -395,6 +399,16 @@ public sealed class TypeWalker
         if (SymbolEqualityComparer.Default.Equals(symbol, _dateOnlyType))
         {
             return new TsType.Primitive("string", "date");
+        }
+
+        if (SymbolEqualityComparer.Default.Equals(symbol, _timeOnlyType))
+        {
+            return new TsType.Primitive("string", "time");
+        }
+
+        if (SymbolEqualityComparer.Default.Equals(symbol, _uriType))
+        {
+            return new TsType.Primitive("string", "uri");
         }
 
         if (SymbolEqualityComparer.Default.Equals(symbol, _jsonElementType))

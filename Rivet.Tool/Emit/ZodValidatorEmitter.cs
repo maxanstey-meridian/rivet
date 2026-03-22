@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Emit;
@@ -107,7 +108,7 @@ public static class ZodValidatorEmitter
             TsType.Brand b => $"fromJSONSchema({b.Name}Schema as any)",
             TsType.Array a => $"z.array({BuildZodExpression(a.Element)})",
             TsType.Nullable n => $"{BuildZodExpression(n.Inner)}.nullable()",
-            TsType.Primitive p => BuildPrimitiveExpression(p),
+            TsType.Primitive p => BuildPrimitiveSchema(p),
             TsType.Dictionary d => $"z.record(z.string(), {BuildZodExpression(d.Value)})",
             TsType.StringUnion su => $"z.enum([{string.Join(", ", su.Members.Select(m => $"\"{m}\""))}])",
             TsType.InlineObject obj => $"z.object({{ {string.Join(", ", obj.Fields.Select(f => $"{TypeEmitter.QuoteIfNeeded(f.Name)}: {BuildZodExpression(f.Type)}"))} }})",
@@ -116,34 +117,16 @@ public static class ZodValidatorEmitter
         };
     }
 
-    private static string BuildPrimitiveExpression(TsType.Primitive p)
+    private static string BuildPrimitiveSchema(TsType.Primitive p)
     {
-        var zodExpr = p.Name switch
+        if (p.Name == "unknown")
         {
-            "string" => "z.string()",
-            "number" => "z.number()",
-            "boolean" => "z.boolean()",
-            _ => "z.unknown()",
-        };
-
-        if (p.Name == "string" && p.Format is not null)
-        {
-            var refinement = p.Format switch
-            {
-                "uuid" => ".uuid()",
-                "date-time" => ".datetime()",
-                "date" => ".date()",
-                "email" => ".email()",
-                "uri" or "url" => ".url()",
-                _ => null,
-            };
-            if (refinement is not null)
-            {
-                zodExpr += refinement;
-            }
+            return "z.unknown()";
         }
 
-        return zodExpr;
+        var schema = JsonSchemaEmitter.MapPrimitive(p);
+        var json = JsonSerializer.Serialize(schema);
+        return $"fromJSONSchema({json} as any)";
     }
 
     /// <summary>

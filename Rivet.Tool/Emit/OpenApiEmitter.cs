@@ -395,8 +395,10 @@ public static class OpenApiEmitter
             return unknownSchema;
         }
 
-        // OpenAPI uses "integer" for int32/int64, not "number"
-        var type = p.Format is "int32" or "int64" or "int16" or "uint16" or "int8" or "uint8" ? "integer" : p.Name;
+        // OpenAPI uses "integer" for all integer formats, not "number"
+        var type = p.Format is "int32" or "int64" or "int16" or "uint16" or "int8" or "uint8"
+            or "uint32" or "uint64"
+            ? "integer" : p.Name;
 
         var schema = new Dictionary<string, object>
         {
@@ -406,6 +408,27 @@ public static class OpenApiEmitter
         if (p.Format is not null)
         {
             schema["format"] = p.Format;
+        }
+
+        // Integer range constraints
+        var (min, max) = p.Format switch
+        {
+            "int8" => ((long?)-128, (long?)127),
+            "uint8" => (0L, (long?)255),
+            "int16" => (-32768L, (long?)32767),
+            "uint16" => (0L, (long?)65535),
+            "int32" => (-2147483648L, (long?)2147483647),
+            "uint32" => (0L, (long?)4294967295),
+            "uint64" => (0L, (long?)null),
+            _ => ((long?)null, (long?)null),
+        };
+        if (min is not null)
+        {
+            schema["minimum"] = min.Value;
+        }
+        if (max is not null)
+        {
+            schema["maximum"] = max.Value;
         }
 
         if (p.CSharpType is not null)
@@ -802,6 +825,8 @@ public static class OpenApiEmitter
                 "uuid" => "Guid",
                 "date-time" => "DateTime",
                 "date" => "DateOnly",
+                "time" => "TimeOnly",
+                "uri" => "Uri",
                 _ => p.Name switch
                 {
                     "string" => "string",

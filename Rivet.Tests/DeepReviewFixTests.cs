@@ -580,6 +580,8 @@ public sealed class DeepReviewFixTests
     [InlineData("Guid", "Guid")]
     [InlineData("DateTime", "DateTime")]
     [InlineData("DateOnly", "DateOnly")]
+    [InlineData("TimeOnly", "TimeOnly")]
+    [InlineData("Uri", "Uri")]
     public void GetCSharpTypeName_EmitsCorrectGenericArg(string csharpType, string expectedArg)
     {
         // BUG-1: GetCSharpTypeName mapped all numeric primitives to "int"
@@ -610,7 +612,7 @@ public sealed class DeepReviewFixTests
         var suffix = csharpType switch
         {
             "long" or "double" or "float" or "decimal" => "Number",
-            "Guid" or "DateTime" or "DateOnly" => "String",
+            "Guid" or "DateTime" or "DateOnly" or "TimeOnly" or "Uri" => "String",
             _ => throw new ArgumentException(csharpType),
         };
 
@@ -985,10 +987,9 @@ public sealed class DeepReviewFixTests
     }
 
     [Fact]
-    public void Zod_Primitive_Format_Uuid_Emits_Refinement()
+    public void Zod_Primitive_Format_Uuid_Uses_FromJSONSchema()
     {
-        // Test the BuildPrimitiveExpression directly via a return type that's a raw Guid
-        // When an endpoint returns a primitive with format, the Zod emitter should chain refinements
+        // Bare Guid return type should go through fromJSONSchema, same as DTOs
         var source = """
             using System;
             using System.Threading.Tasks;
@@ -1014,11 +1015,12 @@ public sealed class DeepReviewFixTests
         var typeFileMap = typeGrouping.BuildTypeFileMap();
         var zodValidators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
 
-        Assert.Contains("z.string().uuid()", zodValidators);
+        Assert.Contains("fromJSONSchema(", zodValidators);
+        Assert.Contains("\"format\":\"uuid\"", zodValidators);
     }
 
     [Fact]
-    public void Zod_Primitive_Format_DateTime_Emits_Refinement()
+    public void Zod_Primitive_Format_DateTime_Uses_FromJSONSchema()
     {
         var source = """
             using System;
@@ -1045,7 +1047,8 @@ public sealed class DeepReviewFixTests
         var typeFileMap = typeGrouping.BuildTypeFileMap();
         var zodValidators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
 
-        Assert.Contains("z.string().datetime()", zodValidators);
+        Assert.Contains("fromJSONSchema(", zodValidators);
+        Assert.Contains("\"format\":\"date-time\"", zodValidators);
     }
 
     // --- Fix 10: OpenAPI InlineObject nullable (already fixed, verify) ---

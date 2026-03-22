@@ -822,14 +822,26 @@ internal sealed class SchemaMapper
         {
             "date-time" => "DateTime",
             "date" => "DateOnly",
+            "time" => "TimeOnly",
             "guid" or "uuid" => "Guid",
+            "uri" => "Uri",
             _ => "string",
         };
     }
 
     private static string ResolveIntegerType(IOpenApiSchema schema)
     {
-        return schema.Format == "int64" ? "long" : "int";
+        return schema.Format switch
+        {
+            "int64" => "long",
+            "int16" => "short",
+            "uint16" => "ushort",
+            "int8" => "sbyte",
+            "uint8" => "byte",
+            "uint32" => "uint",
+            "uint64" => "ulong",
+            _ => "int",
+        };
     }
 
     private static string ResolveNumberType(IOpenApiSchema schema)

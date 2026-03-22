@@ -1043,7 +1043,7 @@ public sealed class OpenApiRoundTripTests
         // Flags has x-rivet-csharp-type
         var flags = props.GetProperty("flags");
         Assert.Equal("integer", flags.GetProperty("type").GetString());
-        Assert.Equal("int32", flags.GetProperty("format").GetString());
+        Assert.Equal("uint32", flags.GetProperty("format").GetString());
         Assert.Equal("uint", flags.GetProperty("x-rivet-csharp-type").GetString());
 
         // Timestamp has x-rivet-csharp-type
@@ -1773,8 +1773,8 @@ public sealed class OpenApiRoundTripTests
         AssertPrimitive("guidVal", "string", "uuid", null);
 
         // x-rivet-csharp-type primitives — non-default C# types survive via extension
-        AssertPrimitive("uintVal", "number", "int32", "uint");
-        AssertPrimitive("ulongVal", "number", "int64", "ulong");
+        AssertPrimitive("uintVal", "number", "uint32", "uint");
+        AssertPrimitive("ulongVal", "number", "uint64", "ulong");
         AssertPrimitive("shortVal", "number", "int16", "short");
         AssertPrimitive("ushortVal", "number", "uint16", "ushort");
         AssertPrimitive("byteVal", "number", "uint8", "byte");

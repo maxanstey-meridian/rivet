@@ -145,15 +145,17 @@ public static class JsonSchemaEmitter
         };
     }
 
-    private static Dictionary<string, object> MapPrimitive(TsType.Primitive p)
+    internal static Dictionary<string, object> MapPrimitive(TsType.Primitive p)
     {
         if (p.Name == "unknown")
         {
             return new Dictionary<string, object>();
         }
 
-        // JSON Schema uses "integer" for int32/int64, not "number"
-        var type = p.Format is "int32" or "int64" or "int16" or "uint16" or "int8" or "uint8" ? "integer" : p.Name;
+        // JSON Schema uses "integer" for all integer formats, not "number"
+        var type = p.Format is "int32" or "int64" or "int16" or "uint16" or "int8" or "uint8"
+            or "uint32" or "uint64"
+            ? "integer" : p.Name;
 
         var schema = new Dictionary<string, object>
         {
@@ -163,6 +165,28 @@ public static class JsonSchemaEmitter
         if (p.Format is not null)
         {
             schema["format"] = p.Format;
+        }
+
+        // Integer range constraints — fromJSONSchema picks these up automatically
+        var (min, max) = p.Format switch
+        {
+            "int8" => ((long?)-128, (long?)127),
+            "uint8" => (0L, (long?)255),
+            "int16" => (-32768L, (long?)32767),
+            "uint16" => (0L, (long?)65535),
+            "int32" => (-2147483648L, (long?)2147483647),
+            "uint32" => (0L, (long?)4294967295),
+            // int64/uint64 exceed JS safe integer — omit range
+            "uint64" => (0L, (long?)null),
+            _ => ((long?)null, (long?)null),
+        };
+        if (min is not null)
+        {
+            schema["minimum"] = min.Value;
+        }
+        if (max is not null)
+        {
+            schema["maximum"] = max.Value;
         }
 
         return schema;
