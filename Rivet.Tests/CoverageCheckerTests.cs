@@ -290,6 +290,8 @@ public sealed class CoverageCheckerTests
         Assert.Equal("GET", warning.Expected);
         Assert.Equal("POST", warning.Actual);
         Assert.Equal("ListTasks", warning.FieldName);
+        Assert.Equal("TasksContract", warning.ContractName);
+        Assert.NotNull(warning.Location);
     }
 
     [Fact]
@@ -319,6 +321,9 @@ public sealed class CoverageCheckerTests
         var warning = Assert.Single(warnings, w => w.Kind == CoverageWarningKind.RouteMismatch);
         Assert.Equal("/api/tasks", warning.Expected);
         Assert.Equal("/api/items", warning.Actual);
+        Assert.Equal("ListTasks", warning.FieldName);
+        Assert.Equal("TasksContract", warning.ContractName);
+        Assert.NotNull(warning.Location);
     }
 
     [Fact]
@@ -339,10 +344,13 @@ public sealed class CoverageCheckerTests
         var listWarning = missing.Single(w => w.FieldName == "ListTasks");
         Assert.Equal("GET /api/tasks", listWarning.Expected);
         Assert.Equal("(none)", listWarning.Actual);
+        Assert.Equal("TasksContract", listWarning.ContractName);
+        Assert.NotNull(listWarning.Location);
 
         var removeWarning = missing.Single(w => w.FieldName == "RemoveTask");
         Assert.Equal("DELETE /api/tasks/{id}", removeWarning.Expected);
         Assert.Equal("(none)", removeWarning.Actual);
+        Assert.Equal("TasksContract", removeWarning.ContractName);
     }
 
     [Fact]
@@ -555,6 +563,8 @@ public sealed class CoverageCheckerTests
             w.FieldName == "ListTasks" && w.Kind == CoverageWarningKind.HttpMethodMismatch);
         Assert.Equal("GET", warning.Expected);
         Assert.Equal("POST", warning.Actual);
+        Assert.Equal("TasksContract", warning.ContractName);
+        Assert.NotNull(warning.Location);
     }
 
     [Fact]
@@ -587,6 +597,8 @@ public sealed class CoverageCheckerTests
             w.FieldName == "ListTasks" && w.Kind == CoverageWarningKind.RouteMismatch);
         Assert.Equal("/api/tasks", warning.Expected);
         Assert.Equal("/api/items", warning.Actual);
+        Assert.Equal("TasksContract", warning.ContractName);
+        Assert.NotNull(warning.Location);
     }
 
     // --- Multi-endpoint / edge cases ---
@@ -621,6 +633,11 @@ public sealed class CoverageCheckerTests
         var missing = warnings.Where(w => w.Kind == CoverageWarningKind.MissingImplementation).ToList();
         Assert.Equal(5, missing.Count);
         Assert.Contains(missing, w => w.ContractName == "MembersContract" && w.FieldName == "ListMembers");
+        Assert.Equal(4, missing.Count(w => w.ContractName == "TasksContract"));
+        Assert.Contains(missing, w => w.ContractName == "TasksContract" && w.FieldName == "CreateTask");
+        Assert.Contains(missing, w => w.ContractName == "TasksContract" && w.FieldName == "UpdateTask");
+        Assert.Contains(missing, w => w.ContractName == "TasksContract" && w.FieldName == "PatchTask");
+        Assert.Contains(missing, w => w.ContractName == "TasksContract" && w.FieldName == "RemoveTask");
     }
 
     [Fact]

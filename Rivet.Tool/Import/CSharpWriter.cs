@@ -73,7 +73,9 @@ internal static class CSharpWriter
         sb.AppendLine();
         sb.AppendLine($"public sealed record {brand.Name}({brand.InnerType} Value)");
         sb.AppendLine("{");
-        sb.AppendLine("    public override string ToString() => Value;");
+        sb.AppendLine(brand.InnerType == "string"
+            ? "    public override string ToString() => Value;"
+            : "    public override string ToString() => Value.ToString();");
         sb.AppendLine("}");
         return sb.ToString();
     }
@@ -120,16 +122,13 @@ internal static class CSharpWriter
             sb.AppendLine($"    // [rivet:unsupported {marker}]");
         }
 
-        // For param-only inputs (no body), don't wire the input type to the endpoint
-        var effectiveInputType = field.IsParamOnlyInput ? null : field.InputType;
-
         // Field type: RouteDefinition<TIn, TOut>, RouteDefinition<TOut>, or RouteDefinition
-        var fieldType = BuildFieldType(effectiveInputType, field.OutputType);
+        var fieldType = BuildFieldType(field.InputType, field.OutputType);
         sb.Append($"    public static readonly {fieldType} {field.FieldName} =");
         sb.AppendLine();
 
         // Factory call
-        var typeArgs = BuildTypeArgs(effectiveInputType, field.OutputType);
+        var typeArgs = BuildTypeArgs(field.InputType, field.OutputType);
         sb.Append($"        Define.{field.HttpMethod}{typeArgs}(\"{field.Route}\")");
 
         // Builder chain
@@ -200,8 +199,8 @@ internal static class CSharpWriter
             calls.Add($".Status({field.SuccessStatus})");
         }
 
-        // Input-only endpoint: type arg goes on .Accepts<T>() (skip for param-only inputs)
-        if (field.InputType is not null && field.OutputType is null && !field.IsParamOnlyInput)
+        // Input-only endpoint: type arg goes on .Accepts<T>()
+        if (field.InputType is not null && field.OutputType is null)
         {
             calls.Add($".Accepts<{field.InputType}>()");
         }
@@ -271,8 +270,7 @@ internal sealed record GeneratedEndpointField(
     bool IsAnonymous,
     string? SecurityScheme,
     IReadOnlyList<string> UnsupportedMarkers = null!,
-    string? FileContentType = null,
-    bool IsParamOnlyInput = false)
+    string? FileContentType = null)
 {
     public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
 }

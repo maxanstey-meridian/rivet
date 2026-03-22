@@ -268,13 +268,14 @@ public sealed class TypeWalker
             }
 
             // JsonObject → Record<string, unknown>, JsonArray → unknown[]
+            // CSharpType on the inner Primitive("unknown") preserves the original type for round-trips
             if (SymbolEqualityComparer.Default.Equals(namedType, _jsonObjectType))
             {
-                return new TsType.Dictionary(new TsType.Primitive("unknown"));
+                return new TsType.Dictionary(new TsType.Primitive("unknown", CSharpType: "JsonObject"));
             }
             if (SymbolEqualityComparer.Default.Equals(namedType, _jsonArrayType))
             {
-                return new TsType.Array(new TsType.Primitive("unknown"));
+                return new TsType.Array(new TsType.Primitive("unknown", CSharpType: "JsonArray"));
             }
 
             // Collections: List<T>, IEnumerable<T>, IReadOnlyList<T>, IList<T>, ICollection<T>, IReadOnlyCollection<T>
@@ -396,10 +397,13 @@ public sealed class TypeWalker
             return new TsType.Primitive("string", "date");
         }
 
-        if (SymbolEqualityComparer.Default.Equals(symbol, _jsonElementType)
-            || SymbolEqualityComparer.Default.Equals(symbol, _jsonNodeType))
+        if (SymbolEqualityComparer.Default.Equals(symbol, _jsonElementType))
         {
             return new TsType.Primitive("unknown");
+        }
+        if (SymbolEqualityComparer.Default.Equals(symbol, _jsonNodeType))
+        {
+            return new TsType.Primitive("unknown", CSharpType: "JsonNode");
         }
 
         return null;

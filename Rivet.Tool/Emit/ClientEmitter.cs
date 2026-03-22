@@ -81,7 +81,12 @@ public static partial class ClientEmitter
               const url = new URL(`${_config.baseUrl}${path}`);
               if (options?.query) {
                 for (const [k, v] of Object.entries(options.query)) {
-                  if (v != null) url.searchParams.set(k, String(v));
+                  if (v == null) continue;
+                  if (Array.isArray(v)) {
+                    for (const item of v) url.searchParams.append(k, String(item));
+                  } else {
+                    url.searchParams.set(k, String(v));
+                  }
                 }
               }
               const headers: Record<string, string> = {
@@ -430,11 +435,12 @@ public static partial class ClientEmitter
                 string.Equals(p.Name, paramName, StringComparison.OrdinalIgnoreCase));
             if (param is not null)
             {
-                return $"${{{SafeParameterName(param.Name)}}}";
+                return $"${{encodeURIComponent(String({SafeParameterName(param.Name)}))}}";
             }
 
-            Console.Error.WriteLine($"warning: unmatched route placeholder '{{{paramName}}}' in '{template}'");
-            return $"${{\"\" /* unmatched: {paramName} */}}";
+            throw new InvalidOperationException(
+                $"Route placeholder '{{{paramName}}}' in '{template}' has no matching parameter in TInput. " +
+                "Add a property with a matching name to the input type.");
         });
 
         return result;

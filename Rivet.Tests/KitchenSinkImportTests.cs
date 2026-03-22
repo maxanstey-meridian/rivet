@@ -1,6 +1,9 @@
+using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Rivet.Tool.Analysis;
+using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -69,6 +72,18 @@ public sealed class KitchenSinkImportTests
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/status");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/webhooks");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/form-submit");
+
+        // Validate return types on key endpoints
+        var getUser = endpoints.Single(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{userId}");
+        Assert.NotNull(getUser.ReturnType);
+        var getUserReturn = Assert.IsType<TsType.TypeRef>(getUser.ReturnType);
+        Assert.Equal("UserDto", getUserReturn.Name);
+
+        var deleteUser = endpoints.Single(e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/users/{userId}");
+        Assert.Null(deleteUser.ReturnType);
+
+        // Validate route params exist and have correct source
+        Assert.Contains(getUser.Params, p => p.Name == "userId" && p.Source == ParamSource.Route);
     }
 
     [Fact]
@@ -204,10 +219,14 @@ public sealed class KitchenSinkImportTests
         Assert.True(walker.Definitions.ContainsKey("AddressDto"));
 
         var projectTask = walker.Definitions["ProjectTaskDto"];
-        Assert.Contains(projectTask.Properties, p => p.Name == "assignee");
+        var assigneeProp = Assert.Single(projectTask.Properties, p => p.Name == "assignee");
+        var assigneeType = Assert.IsType<TsType.TypeRef>(assigneeProp.Type);
+        Assert.Equal("CompanyDto", assigneeType.Name);
 
         var company = walker.Definitions["CompanyDto"];
-        Assert.Contains(company.Properties, p => p.Name == "address");
+        var addressProp = Assert.Single(company.Properties, p => p.Name == "address");
+        var addressType = Assert.IsType<TsType.TypeRef>(addressProp.Type);
+        Assert.Equal("AddressDto", addressType.Name);
     }
 
     // ========== Routes ==========
@@ -665,5 +684,118 @@ public sealed class KitchenSinkImportTests
         Assert.Contains("Priority Priority", content);
         Assert.Contains("List<string> Tags", content);
         Assert.Contains("Dictionary<string, string> Metadata", content);
+    }
+
+    // ========== Full round-trip: emit → re-import ==========
+
+    [Fact]
+    public void Full_RoundTrip_Emit_And_ReImport()
+    {
+        // Pass 1: Import → compile → walk
+        var result = Import(LoadFixture());
+        var compilation = CompileGeneratedFiles(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+
+        // Emit → OpenAPI JSON
+        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        // Verify emitted JSON is well-formed and all $refs resolve
+        var doc = JsonSerializer.Deserialize<JsonElement>(json);
+        var schemas = doc.GetProperty("components").GetProperty("schemas");
+        var schemaNames = new HashSet<string>();
+        foreach (var s in schemas.EnumerateObject())
+        {
+            schemaNames.Add(s.Name);
+        }
+
+        var allRefs = new List<string>();
+        CollectRefs(doc, allRefs);
+        var brokenRefs = allRefs
+            .Where(r => r.StartsWith("#/components/schemas/"))
+            .Where(r => !schemaNames.Contains(r["#/components/schemas/".Length..]))
+            .ToList();
+        Assert.True(brokenRefs.Count == 0,
+            $"Broken $refs: {string.Join(", ", brokenRefs)}");
+
+        // Pass 2: Re-import → compile → walk
+        var result2 = Import(json);
+        var compilation2 = CompileGeneratedFiles(result2);
+        var (discovered2, walker2) = CompilationHelper.DiscoverAndWalk(compilation2);
+        var endpoints2 = ContractWalker.Walk(compilation2, walker2, discovered2.ContractTypes);
+
+        // Structural stability: endpoints preserved
+        Assert.True(endpoints2.Count >= endpoints.Count,
+            $"Lost endpoints: {endpoints.Count} → {endpoints2.Count}");
+
+        // Route templates preserved
+        var routes1 = endpoints.Select(e => $"{e.HttpMethod} {e.RouteTemplate}").OrderBy(x => x).ToList();
+        var routes2 = endpoints2.Select(e => $"{e.HttpMethod} {e.RouteTemplate}").OrderBy(x => x).ToList();
+        foreach (var route in routes1)
+        {
+            Assert.Contains(route, routes2);
+        }
+
+        // Types referenced by endpoints survive (orphan schemas are legitimately excluded)
+        var referencedNames = new HashSet<string>();
+        foreach (var ep in endpoints)
+        {
+            foreach (var p in ep.Params)
+            {
+                TsType.CollectTypeRefs(p.Type, referencedNames);
+            }
+            foreach (var r in ep.Responses)
+            {
+                if (r.DataType is not null)
+                {
+                    TsType.CollectTypeRefs(r.DataType, referencedNames);
+                }
+            }
+        }
+
+        var lostReferenced = referencedNames
+            .Where(n => walker.Definitions.ContainsKey(n) && !walker2.Definitions.ContainsKey(n))
+            .ToList();
+        Assert.True(lostReferenced.Count == 0,
+            $"Lost endpoint-referenced types: {string.Join(", ", lostReferenced)}");
+
+        // Enums and brands that were used survive
+        var lostEnums = walker.Enums.Keys
+            .Where(k => referencedNames.Contains(k))
+            .Except(walker2.Enums.Keys).ToList();
+        Assert.True(lostEnums.Count == 0,
+            $"Lost enums: {string.Join(", ", lostEnums)}");
+
+        var lostBrands = walker.Brands.Keys
+            .Where(k => referencedNames.Contains(k))
+            .Except(walker2.Brands.Keys).ToList();
+        Assert.True(lostBrands.Count == 0,
+            $"Lost brands: {string.Join(", ", lostBrands)}");
+    }
+
+    private static void CollectRefs(JsonElement element, List<string> refs)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var prop in element.EnumerateObject())
+                {
+                    if (prop.Name == "$ref" && prop.Value.ValueKind == JsonValueKind.String)
+                    {
+                        refs.Add(prop.Value.GetString()!);
+                    }
+                    else
+                    {
+                        CollectRefs(prop.Value, refs);
+                    }
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    CollectRefs(item, refs);
+                }
+                break;
+        }
     }
 }

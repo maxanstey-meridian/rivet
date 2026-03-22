@@ -68,17 +68,11 @@ internal static class ContractBuilder
 
         // Resolve input type (requestBody — $ref resolved by library)
         var inputType = ResolveInputType(operation, mapper, fieldName, unsupported);
-        var isParamOnlyInput = false;
 
         // If no body input, synthesize an input record from path/query parameters
         if (inputType is null)
         {
             inputType = ResolveParamInputType(operation, mapper, fieldName);
-            // Only flag as param-only for mutation methods (POST/PUT/PATCH) where
-            // ContractWalker would otherwise misinterpret the input as a JSON body.
-            // GET/DELETE correctly treat TInput as query/route params.
-            var isMutation = httpMethod is "post" or "put" or "patch";
-            isParamOnlyInput = inputType is not null && isMutation;
         }
 
         // Resolve output type (lowest 2xx response with JSON content)
@@ -93,7 +87,7 @@ internal static class ContractBuilder
         return new GeneratedEndpointField(
             fieldName, method, route, inputType, outputType,
             description, successStatus, errorResponses,
-            isAnonymous, securityScheme, unsupported, fileContentType, isParamOnlyInput);
+            isAnonymous, securityScheme, unsupported, fileContentType);
     }
 
     private static string? ResolveInputType(
@@ -155,6 +149,11 @@ internal static class ContractBuilder
             }
 
             var csharpType = mapper.ResolveCSharpType(param.Schema, $"{fieldName}{Naming.ToPascalCaseFromSegments(param.Name)}");
+            if (!param.Required && !csharpType.EndsWith("?"))
+            {
+                csharpType += "?";
+            }
+
             properties.Add(new RecordProperty(
                 Naming.ToPascalCaseFromSegments(param.Name),
                 csharpType,

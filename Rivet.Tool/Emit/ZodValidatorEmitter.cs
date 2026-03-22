@@ -110,7 +110,7 @@ public static class ZodValidatorEmitter
             TsType.Primitive p => BuildPrimitiveExpression(p),
             TsType.Dictionary d => $"z.record(z.string(), {BuildZodExpression(d.Value)})",
             TsType.StringUnion su => $"z.enum([{string.Join(", ", su.Members.Select(m => $"\"{m}\""))}])",
-            TsType.InlineObject obj => $"z.object({{ {string.Join(", ", obj.Fields.Select(f => $"{f.Name}: {BuildZodExpression(f.Type)}"))} }})",
+            TsType.InlineObject obj => $"z.object({{ {string.Join(", ", obj.Fields.Select(f => $"{TypeEmitter.QuoteIfNeeded(f.Name)}: {BuildZodExpression(f.Type)}"))} }})",
             TsType.TypeParam => "z.unknown()",
             _ => "z.unknown()",
         };
@@ -118,13 +118,32 @@ public static class ZodValidatorEmitter
 
     private static string BuildPrimitiveExpression(TsType.Primitive p)
     {
-        return p.Name switch
+        var zodExpr = p.Name switch
         {
             "string" => "z.string()",
             "number" => "z.number()",
             "boolean" => "z.boolean()",
             _ => "z.unknown()",
         };
+
+        if (p.Name == "string" && p.Format is not null)
+        {
+            var refinement = p.Format switch
+            {
+                "uuid" => ".uuid()",
+                "date-time" => ".datetime()",
+                "date" => ".date()",
+                "email" => ".email()",
+                "uri" or "url" => ".url()",
+                _ => null,
+            };
+            if (refinement is not null)
+            {
+                zodExpr += refinement;
+            }
+        }
+
+        return zodExpr;
     }
 
     /// <summary>
@@ -151,6 +170,16 @@ public static class ZodValidatorEmitter
                 break;
             case TsType.Dictionary d:
                 CollectSchemaImports(d.Value, imports);
+                break;
+            case TsType.InlineObject obj:
+                foreach (var (_, fieldType) in obj.Fields)
+                {
+                    CollectSchemaImports(fieldType, imports);
+                }
+                break;
+            case TsType.StringUnion:
+            case TsType.Primitive:
+            case TsType.TypeParam:
                 break;
         }
     }

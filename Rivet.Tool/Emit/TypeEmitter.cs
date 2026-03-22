@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Emit;
@@ -19,7 +20,7 @@ public static class TypeEmitter
         {
             var optional = prop.IsOptional ? "?" : "";
             var typeStr = EmitType(prop.Type);
-            sb.AppendLine($"  {prop.Name}{optional}: {typeStr};");
+            sb.AppendLine($"  {QuoteIfNeeded(prop.Name)}{optional}: {typeStr};");
         }
 
         sb.AppendLine("};");
@@ -43,7 +44,7 @@ public static class TypeEmitter
             TsType.TypeRef r => r.Name,
             TsType.Generic g => $"{g.Name}<{string.Join(", ", g.TypeArguments.Select(EmitType))}>",
             TsType.Brand b => b.Name,
-            TsType.InlineObject obj => $"{{ {string.Join("; ", obj.Fields.Select(f => $"{f.Name}: {EmitType(f.Type)}"))}; }}",
+            TsType.InlineObject obj => $"{{ {string.Join("; ", obj.Fields.Select(f => $"{QuoteIfNeeded(f.Name)}: {EmitType(f.Type)}"))}; }}",
             _ => "unknown",
         };
 
@@ -120,6 +121,13 @@ public static class TypeEmitter
         }
 
         return sb.ToString();
+    }
+
+    private static readonly Regex ValidIdentifier = new(@"^[a-zA-Z_$][a-zA-Z0-9_$]*$", RegexOptions.Compiled);
+
+    internal static string QuoteIfNeeded(string name)
+    {
+        return ValidIdentifier.IsMatch(name) ? name : $"\"{name}\"";
     }
 
     /// <summary>

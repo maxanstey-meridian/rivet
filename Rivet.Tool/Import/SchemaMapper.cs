@@ -18,6 +18,7 @@ internal sealed class SchemaMapper
     private readonly List<GeneratedRecord> _extraRecords = [];
     private readonly HashSet<string> _resolving = [];
     private readonly Dictionary<string, string> _schemaFingerprints = new();
+    private readonly Dictionary<string, string> _schemaNameMap = new();
     private int _syntheticCounter;
     private int _recursionDepth;
 
@@ -88,6 +89,9 @@ internal sealed class SchemaMapper
                 name = $"{name}_{suffix}";
             }
 
+            // Track mapping from original OpenAPI key to (possibly deduped) C# name
+            _schemaNameMap[key] = name;
+
             // Skip $ref aliases — these are resolved by the library and handled inline
             if (schema is OpenApiSchemaReference)
             {
@@ -106,7 +110,7 @@ internal sealed class SchemaMapper
                 continue;
             }
 
-            if (IsBrandedString(schema))
+            if (IsBrand(schema))
             {
                 brands.Add(MapBrand(name, schema));
                 continue;
@@ -148,8 +152,13 @@ internal sealed class SchemaMapper
             if (IsObject(schema))
             {
                 // Object with no properties → resolved inline as Dictionary, not as a record
+                // Unless marked with x-rivet-empty-record extension
                 if (schema.Properties is not { Count: > 0 })
                 {
+                    if (HasExtension(schema, "x-rivet-empty-record"))
+                    {
+                        records.Add(new GeneratedRecord(name, []));
+                    }
                     continue;
                 }
 
@@ -190,8 +199,9 @@ internal sealed class SchemaMapper
         if (schema is OpenApiSchemaReference schemaRef)
         {
             // If the target is a property-less object schema, resolve to Dictionary
-            // (no record was generated for it in MapSchemas)
-            if (IsObject(schemaRef) && schemaRef.Properties is not { Count: > 0 })
+            // (no record was generated for it in MapSchemas) — unless marked as empty record
+            if (IsObject(schemaRef) && schemaRef.Properties is not { Count: > 0 }
+                && !HasExtension(schemaRef, "x-rivet-empty-record"))
             {
                 return ResolveObjectType(schemaRef, context);
             }
@@ -239,6 +249,14 @@ internal sealed class SchemaMapper
                     record = MergeWithSiblingProperties(record, schema, allOfName);
                     _extraRecords.Add(record);
                     return allOfName + "?";
+                }
+
+                // x-rivet-csharp-type on nullable untyped schema
+                // (e.g. JsonNode? → { nullable: true, x-rivet-csharp-type: "JsonNode" })
+                var nullableCsharpType = GetExtensionString(schema, "x-rivet-csharp-type");
+                if (nullableCsharpType is not null)
+                {
+                    return ResolveJsonNodeFqn(nullableCsharpType) + "?";
                 }
 
                 return "System.Text.Json.JsonElement";
@@ -371,6 +389,13 @@ internal sealed class SchemaMapper
             return "string";
         }
 
+        // x-rivet-csharp-type on untyped schemas (e.g. JsonNode, JsonObject, JsonArray — no type field)
+        var untypedCsharpType = GetExtensionString(schema, "x-rivet-csharp-type");
+        if (untypedCsharpType is not null)
+        {
+            return ResolveJsonNodeFqn(untypedCsharpType);
+        }
+
         // Final fallback — only warn if the schema had structural properties we should have handled
         if (HasResolvableProperties(schema))
         {
@@ -386,7 +411,7 @@ internal sealed class SchemaMapper
         var csharpType = GetExtensionString(schema, "x-rivet-csharp-type");
         if (csharpType is not null)
         {
-            return csharpType;
+            return ResolveJsonNodeFqn(csharpType);
         }
 
         if (type.HasFlag(JsonSchemaType.String))
@@ -628,8 +653,14 @@ internal sealed class SchemaMapper
         return false;
     }
 
-    private static string SanitizeName(string name)
+    private string SanitizeName(string name)
     {
+        // Check if this name was mapped during MapSchemas (handles dedup collisions)
+        if (_schemaNameMap.TryGetValue(name, out var mapped))
+        {
+            return mapped;
+        }
+
         return Naming.ToPascalCaseFromSegments(name);
     }
 
@@ -729,7 +760,7 @@ internal sealed class SchemaMapper
             return true;
         }
 
-        if (IsBrandedString(schema))
+        if (IsBrand(schema))
         {
             return true;
         }
@@ -750,6 +781,11 @@ internal sealed class SchemaMapper
         }
 
         if (IsObject(schema) && schema.Properties is { Count: > 0 })
+        {
+            return true;
+        }
+
+        if (HasExtension(schema, "x-rivet-empty-record"))
         {
             return true;
         }
@@ -852,17 +888,18 @@ internal sealed class SchemaMapper
             && schema.Enum is { Count: > 0 };
     }
 
-    private static bool IsBrandedString(IOpenApiSchema schema)
+    private static bool IsBrand(IOpenApiSchema schema)
     {
-        if (!schema.Type.HasValue || !schema.Type.Value.HasFlag(JsonSchemaType.String))
-        {
-            return false;
-        }
-
-        // x-rivet-brand extension takes precedence
+        // x-rivet-brand extension is authoritative — works for any underlying type
         if (HasExtension(schema, "x-rivet-brand"))
         {
             return true;
+        }
+
+        // Heuristic: string schemas with known branded formats (email, uri, etc.)
+        if (!schema.Type.HasValue || !schema.Type.Value.HasFlag(JsonSchemaType.String))
+        {
+            return false;
         }
 
         return schema.Format is not null && BrandFormats.Contains(schema.Format);
@@ -940,6 +977,17 @@ internal sealed class SchemaMapper
             JsonSchemaType.Number => ResolveNumberType(schema),
             JsonSchemaType.Boolean => "bool",
             _ => null,
+        };
+    }
+
+    private static string ResolveJsonNodeFqn(string shortName)
+    {
+        return shortName switch
+        {
+            "JsonObject" => "System.Text.Json.Nodes.JsonObject",
+            "JsonArray" => "System.Text.Json.Nodes.JsonArray",
+            "JsonNode" => "System.Text.Json.Nodes.JsonNode",
+            _ => shortName,
         };
     }
 

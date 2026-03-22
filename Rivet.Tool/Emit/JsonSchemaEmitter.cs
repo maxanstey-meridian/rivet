@@ -190,7 +190,7 @@ public static class JsonSchemaEmitter
 
             properties[prop.Name] = propSchema;
 
-            if (!prop.IsOptional)
+            if (!prop.IsOptional && prop.Type is not TsType.Nullable)
             {
                 required.Add(prop.Name);
             }
@@ -229,7 +229,7 @@ public static class JsonSchemaEmitter
 
             properties[prop.Name] = propSchema;
 
-            if (!prop.IsOptional)
+            if (!prop.IsOptional && resolvedType is not TsType.Nullable)
             {
                 required.Add(prop.Name);
             }
@@ -257,7 +257,10 @@ public static class JsonSchemaEmitter
         foreach (var (name, fieldType) in obj.Fields)
         {
             properties[name] = MapTsTypeToSchema(fieldType);
-            required.Add(name);
+            if (fieldType is not TsType.Nullable)
+            {
+                required.Add(name);
+            }
         }
 
         var schema = new Dictionary<string, object>

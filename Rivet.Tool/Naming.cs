@@ -34,22 +34,33 @@ internal static class Naming
             return "_";
         }
 
-        // Already PascalCase — only if no delimiters present
+        // Already PascalCase — only if no delimiters present (or only trailing _N suffix)
         // Still strip invalid chars in case input contains <, >, etc.
         if (char.IsUpper(input[0])
-            && !input.Contains('_') && !input.Contains('-')
-            && !input.Contains('/') && !input.Contains('.')
-            && !input.Contains(' '))
+            && !input.Contains('-') && !input.Contains('/')
+            && !input.Contains('.') && !input.Contains(' '))
         {
-            return StripInvalidIdentifierChars(input);
+            // Allow underscore only as a trailing dedup suffix (_2, _3, etc.)
+            var underscoreIdx = input.IndexOf('_');
+            if (underscoreIdx < 0
+                || (underscoreIdx > 0 && underscoreIdx + 1 < input.Length && input[(underscoreIdx + 1)..].All(char.IsDigit)))
+            {
+                return StripInvalidIdentifierChars(input);
+            }
         }
 
         var parts = input.Split(['_', '-', ' ', '/', '.'], StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+        {
+            return "_";
+        }
+
         var result = string.Concat(parts.Select(p =>
             char.ToUpperInvariant(p[0]) + p[1..]));
 
         // Strip any remaining characters invalid in C# identifiers
-        return StripInvalidIdentifierChars(result);
+        var stripped = StripInvalidIdentifierChars(result);
+        return string.IsNullOrEmpty(stripped) ? "_" : stripped;
     }
 
     /// <summary>

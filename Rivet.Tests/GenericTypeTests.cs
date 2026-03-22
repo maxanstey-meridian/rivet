@@ -1,5 +1,6 @@
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -51,6 +52,23 @@ public sealed class GenericTypeTests
             public sealed record Pair<TFirst, TSecond>(TFirst First, TSecond Second);
             """;
 
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+
+        // Validate type parameters on the definition
+        var pair = walker.Definitions["Pair"];
+        Assert.Equal(2, pair.TypeParameters.Count);
+        Assert.Equal("TFirst", pair.TypeParameters[0]);
+        Assert.Equal("TSecond", pair.TypeParameters[1]);
+
+        // Validate property types reference type params
+        var firstProp = Assert.Single(pair.Properties, p => p.Name == "first");
+        var firstType = Assert.IsType<TsType.TypeParam>(firstProp.Type);
+        Assert.Equal("TFirst", firstType.Name);
+        var secondProp = Assert.Single(pair.Properties, p => p.Name == "second");
+        var secondType = Assert.IsType<TsType.TypeParam>(secondProp.Type);
+        Assert.Equal("TSecond", secondType.Name);
+
         var result = Generate(source);
 
         Assert.Contains("export type Pair<TFirst, TSecond> = {", result);
@@ -79,6 +97,23 @@ public sealed class GenericTypeTests
             public sealed record MessageListResult(PagedResult<MessageDto> Messages);
             """;
 
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+
+        // Validate the walker model for closed generic type arguments
+        var msgList = walker.Definitions["MessageListResult"];
+        var messagesProp = Assert.Single(msgList.Properties, p => p.Name == "messages");
+        var genericType = Assert.IsType<TsType.Generic>(messagesProp.Type);
+        Assert.Equal("PagedResult", genericType.Name);
+        Assert.Single(genericType.TypeArguments);
+        var typeArg = Assert.IsType<TsType.TypeRef>(genericType.TypeArguments[0]);
+        Assert.Equal("MessageDto", typeArg.Name);
+
+        // Validate the generic definition has its type parameter
+        var pagedResult = walker.Definitions["PagedResult"];
+        Assert.Single(pagedResult.TypeParameters);
+        Assert.Equal("T", pagedResult.TypeParameters[0]);
+
         var result = Generate(source);
 
         // PagedResult should be emitted as a generic definition
@@ -101,6 +136,18 @@ public sealed class GenericTypeTests
             [RivetType]
             public sealed record StringWrapper(Wrapper<string> Wrapped);
             """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+
+        // Validate the walker model for primitive type argument
+        var stringWrapper = walker.Definitions["StringWrapper"];
+        var wrappedProp = Assert.Single(stringWrapper.Properties, p => p.Name == "wrapped");
+        var genericType = Assert.IsType<TsType.Generic>(wrappedProp.Type);
+        Assert.Equal("Wrapper", genericType.Name);
+        Assert.Single(genericType.TypeArguments);
+        var typeArg = Assert.IsType<TsType.Primitive>(genericType.TypeArguments[0]);
+        Assert.Equal("string", typeArg.Name);
 
         var result = Generate(source);
 

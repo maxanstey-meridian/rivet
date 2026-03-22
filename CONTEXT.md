@@ -102,7 +102,7 @@ Deferred: Circular ref tests (#21) — existing `_visiting` guard works, just ne
 - **ContractWalker `[JsonPropertyName]`/`[JsonIgnore]`**: `BuildParams` now respects these attributes on TInput properties via new `TypeWalker.IsJsonIgnored()`/`GetJsonPropertyName()` helpers.
 - **POST route param types**: Route params for mutation endpoints now match TInput property types instead of always `string`.
 - **Param-only POST import**: Mutation endpoints with path/query params but no body no longer wire the synthesized input record as `.Accepts<T>()`, preventing phantom body emission on round-trip.
-- **Unmatched route placeholders**: Emit `${"" /* unmatched: paramName */}` (valid JS) instead of leaving literal `{paramName}` (broken JS).
+- **Unmatched route placeholders**: Originally emitted `${"" /* unmatched */}` — now throws `InvalidOperationException` at generation time (upgraded in batch 2).
 - **Validated client `else` success assert**: When error responses are present, the success branch now gets validated too.
 - **Void/file endpoint error validation**: Void and file endpoints with typed error responses (`.Returns<T>(code)`) now get a discriminated union result type and error validation in the `unwrap: false` branch. Previously skipped entirely because `ReturnType == null`. Fix required: (1) ContractWalker inserts a success response entry when error responses exist, so the DU is emitted; (2) ClientEmitter gates on `hasTypedErrorResponses` not just `ReturnType`; (3) `needsAsync` updated to match.
 
@@ -112,6 +112,38 @@ Deferred: Circular ref tests (#21) — existing `_visiting` guard works, just ne
 - **Import round-trip `date`/`decimal`**: SchemaMapper now maps `format: "date"` → `DateOnly` and `format: "decimal"` → `decimal`. Closes format fidelity gaps introduced by the Primitive format metadata.
 - **Contract `using System;`**: CSharpWriter.WriteContract now emits `using System;` — needed when endpoint type parameters resolve to `DateOnly`, `Guid`, `DateTime`, etc.
 - **Dead code cleanup**: Removed unused `Naming.EscapeKeyword` + `CSharpKeywords`; removed dead uppercase branches in ContractBuilder `isMutation`; moved unmatched route placeholder warning inside Replace callback (was unreachable after the `${""}` fallback change).
+
+### Deep Review Fixes (2026-03-21, batch 2)
+
+10 fixes from two independent deep reviews (Claude Opus + Codex). All verified with regression tests:
+
+- **CollectTypeRefs Brand.Inner**: Now recurses into `b.Inner` — previously a Brand wrapping a TypeRef would miss collecting the inner ref.
+- **JsonSchemaEmitter InlineObject nullable**: `BuildInlineObjectSchema()` now checks `TsType.Nullable` before adding to `required` array. Mirrors the fix already applied to OpenApiEmitter.
+- **ZodValidatorEmitter CollectSchemaImports**: Added `InlineObject` case — recurses into field types to collect schema imports. Prevents `ReferenceError` when InlineObject fields contain TypeRefs.
+- **ZodValidatorEmitter format refinements**: `BuildPrimitiveExpression` now chains `.uuid()`, `.datetime()`, `.date()`, `.email()`, `.url()` based on `Primitive.Format`. Previously all strings were just `z.string()`.
+- **TypeEmitter property name quoting**: Property names with non-identifier chars (hyphens, `@`, spaces) are now quoted in emitted TypeScript. `QuoteIfNeeded()` helper validates against `^[a-zA-Z_$][a-zA-Z0-9_$]*$`.
+- **Multipart route param deduplication**: `ContractWalker.BuildParams` now skips properties already matched as route params when decomposing IFormFile records into FormField params. Previously, a route param like `TaskId` appeared as both Route and FormField.
+- **Unmatched route placeholder → error**: `InterpolateRoute()` now throws `InvalidOperationException` instead of emitting `${"" /* unmatched */}`. Fails generation at build time rather than producing broken client code.
+- **Query param array serialization**: `rivetFetch` now handles arrays via `url.searchParams.append(k, item)` per element. Previously `String(v)` on arrays produced comma-separated values incompatible with ASP.NET model binding.
+- **Route `encodeURIComponent`**: All path parameter interpolations now wrapped in `encodeURIComponent(String(...))`. Prevents values containing `/`, `?`, `#`, spaces from altering route semantics.
+- **Empty object schema round-trip**: OpenApiEmitter adds `x-rivet-empty-record: true` extension to zero-property object schemas. SchemaMapper checks for this extension and creates an empty `GeneratedRecord` instead of falling through to `Dictionary<string, JsonElement>`.
+- **ZodValidatorEmitter InlineObject field quoting**: `BuildZodExpression` for InlineObject now uses `TypeEmitter.QuoteIfNeeded()` on field names, matching TypeEmitter's behavior. Previously non-identifier field names (hyphens, `@`) would emit invalid JS in `z.object({...})`.
+- **SchemaMapper JsonNode FQN dedup**: Extracted `ResolveJsonNodeFqn()` helper — the `JsonObject/JsonArray/JsonNode → FQN` switch was duplicated 3× across `ResolveCSharpType` call sites.
+- **test-schemas.mjs TODO syntax error**: Bare `TODO:` text (not a comment) at top level of the JS file caused `SyntaxError` on `Zod_Integration` test.
+
+### Real-World Round-Trip Tests (2026-03-21)
+
+All real-world OpenAPI fixture tests upgraded from "imports and compiles" to full belt-and-braces round-trip:
+OpenAPI → import → compile → Roslyn walk → emit OpenAPI → verify $refs → re-import → compile → walk → assert structural stability.
+
+Covers: PetStore, HTTPBin, GitHub (Slow), Stripe (Slow), Box (Slow), Twilio, NamingEdgeCases, KitchenSink.
+
+**Bugs found and fixed during this work:**
+
+- **Naming `ToPascalCaseFromSegments("_")` → empty string**: Underscore-only input (sanitized from special chars) split into zero segments. Fixed: return `"_"` when parts array is empty, and fallback when stripped result is empty.
+- **Naming dedup suffix stripped**: `FooBarSchema_2` (dedup suffix) re-PascalCased to `FooBarSchema2` on re-import. Fixed: fast path now recognizes trailing `_N` as dedup suffix, passes through unchanged.
+- **Schema name dedup not tracked for $ref resolution**: `MapSchemas` deduplicates `foo_bar_schema` → `FooBarSchema_2`, but `SanitizeName("foo_bar_schema")` in $ref resolution returned `FooBarSchema` (unsuffixed). Fixed: added `_schemaNameMap` dictionary from original OpenAPI key to deduped C# name, consulted by `SanitizeName`.
+- **POST param-only input dropped entirely**: `isParamOnlyInput` flag caused CSharpWriter to drop TInput reference for POST endpoints with query-only params. The synthetic input type was created but never referenced → lost on round-trip. Fixed: always wire TInput regardless of `isParamOnlyInput`. Trade-off: POST query params become body params after round-trip (semantically imperfect but structurally lossless).
 
 ### Known Issues / Polish
 

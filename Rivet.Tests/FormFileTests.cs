@@ -1,5 +1,6 @@
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -24,6 +25,18 @@ public sealed class FormFileTests
         var controllerGroups = ClientEmitter.GroupByController(endpoints);
         return string.Join("\n", controllerGroups.Select(g =>
             ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
+    }
+
+    private static (string Client, IReadOnlyList<TsEndpointDefinition> Endpoints) GenerateContractClientWithEndpoints(string source)
+    {
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var typeFileMap = BuildTypeFileMap(walker);
+        var controllerGroups = ClientEmitter.GroupByController(endpoints);
+        var client = string.Join("\n", controllerGroups.Select(g =>
+            ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
+        return (client, endpoints);
     }
 
     [Fact]
@@ -60,6 +73,13 @@ public sealed class FormFileTests
         var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
         var typeFileMap = BuildTypeFileMap(walker);
         var client = ClientEmitter.EmitControllerClient("files", endpoints, typeFileMap);
+
+        // Validate endpoint param types
+        var ep = Assert.Single(endpoints);
+        var fileParam = Assert.Single(ep.Params, p => p.Name == "file");
+        Assert.Equal(ParamSource.File, fileParam.Source);
+        Assert.IsType<TsType.Primitive>(fileParam.Type);
+        Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
         // Function signature takes File
         Assert.Contains("file: File", client);
@@ -108,11 +128,20 @@ public sealed class FormFileTests
         var typeFileMap = BuildTypeFileMap(walker);
         var client = ClientEmitter.EmitControllerClient("tasks", endpoints, typeFileMap);
 
+        // Validate endpoint param types
+        var ep = Assert.Single(endpoints);
+        var routeParam = Assert.Single(ep.Params, p => p.Name == "id");
+        Assert.Equal(ParamSource.Route, routeParam.Source);
+        var fileParam = Assert.Single(ep.Params, p => p.Name == "file");
+        Assert.Equal(ParamSource.File, fileParam.Source);
+        Assert.IsType<TsType.Primitive>(fileParam.Type);
+        Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
+
         // Both route param and file param
         Assert.Contains("id: string, file: File", client);
         Assert.Contains("const fd = new FormData();", client);
         Assert.Contains("fd.append(\"file\", file);", client);
-        Assert.Contains("${id}", client);
+        Assert.Contains("${encodeURIComponent(String(id))}", client);
     }
 
     [Fact]
@@ -146,6 +175,14 @@ public sealed class FormFileTests
         var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
         var typeFileMap = BuildTypeFileMap(walker);
         var client = ClientEmitter.EmitControllerClient("avatars", endpoints, typeFileMap);
+
+        // Validate endpoint param types
+        var ep = Assert.Single(endpoints);
+        var avatarParam = Assert.Single(ep.Params, p => p.Name == "avatar");
+        Assert.Equal(ParamSource.File, avatarParam.Source);
+        Assert.IsType<TsType.Primitive>(avatarParam.Type);
+        Assert.Equal("File", ((TsType.Primitive)avatarParam.Type).Name);
+        Assert.Null(ep.ReturnType);
 
         Assert.Contains("avatar: File", client);
         Assert.Contains("fd.append(\"avatar\", avatar);", client);
@@ -188,6 +225,17 @@ public sealed class FormFileTests
         var typeFileMap = BuildTypeFileMap(walker);
         var client = ClientEmitter.EmitControllerClient("documents", endpoints, typeFileMap);
 
+        // Validate endpoint param types and sources
+        var ep = Assert.Single(endpoints);
+        var fileParam = Assert.Single(ep.Params, p => p.Name == "file");
+        Assert.Equal(ParamSource.File, fileParam.Source);
+        Assert.IsType<TsType.Primitive>(fileParam.Type);
+        Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
+        var titleParam = Assert.Single(ep.Params, p => p.Name == "title");
+        Assert.Equal(ParamSource.FormField, titleParam.Source);
+        Assert.IsType<TsType.Primitive>(titleParam.Type);
+        Assert.Equal("string", ((TsType.Primitive)titleParam.Type).Name);
+
         // file param is File, title is a FormField appended to FormData
         Assert.Contains("file: File, title: string", client);
         Assert.Contains("const fd = new FormData();", client);
@@ -219,7 +267,14 @@ public sealed class FormFileTests
             }
             """;
 
-        var client = GenerateContractClient(source);
+        var (client, endpoints) = GenerateContractClientWithEndpoints(source);
+
+        // Validate endpoint param types
+        var ep = Assert.Single(endpoints);
+        var fileParam = Assert.Single(ep.Params, p => p.Name == "file");
+        Assert.Equal(ParamSource.File, fileParam.Source);
+        Assert.IsType<TsType.Primitive>(fileParam.Type);
+        Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
         // Should detect IFormFile in TInput and emit File param + FormData
         Assert.Contains("file: File", client);
@@ -253,13 +308,22 @@ public sealed class FormFileTests
             }
             """;
 
-        var client = GenerateContractClient(source);
+        var (client, endpoints) = GenerateContractClientWithEndpoints(source);
+
+        // Validate endpoint param types
+        var ep = Assert.Single(endpoints);
+        var routeParam = Assert.Single(ep.Params, p => p.Name == "id");
+        Assert.Equal(ParamSource.Route, routeParam.Source);
+        var fileParam = Assert.Single(ep.Params, p => p.Name == "file");
+        Assert.Equal(ParamSource.File, fileParam.Source);
+        Assert.IsType<TsType.Primitive>(fileParam.Type);
+        Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
         // Route param + file param
         Assert.Contains("id: string, file: File", client);
         Assert.Contains("const fd = new FormData();", client);
         Assert.Contains("fd.append(\"file\", file);", client);
-        Assert.Contains("${id}", client);
+        Assert.Contains("${encodeURIComponent(String(id))}", client);
         Assert.Contains("Promise<AttachmentResult>", client);
     }
 
@@ -284,7 +348,14 @@ public sealed class FormFileTests
             }
             """;
 
-        var client = GenerateContractClient(source);
+        var (client, endpoints) = GenerateContractClientWithEndpoints(source);
+
+        // Validate endpoint param types
+        var ep = Assert.Single(endpoints);
+        var fileParam = Assert.Single(ep.Params, p => p.Name == "file");
+        Assert.Equal(ParamSource.File, fileParam.Source);
+        Assert.IsType<TsType.Primitive>(fileParam.Type);
+        Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
         // Direct IFormFile as TInput — emits File param
         Assert.Contains("file: File", client);

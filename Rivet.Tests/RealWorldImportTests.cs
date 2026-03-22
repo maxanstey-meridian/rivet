@@ -1,5 +1,9 @@
+using System.Text.Json;
 using Microsoft.CodeAnalysis;
+using Rivet.Tool.Analysis;
+using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -96,6 +100,302 @@ public sealed class RealWorldImportTests
             return compilation.GetDiagnostics()
                 .Where(d => d.Severity == DiagnosticSeverity.Error)
                 .ToList();
+        }
+    }
+
+    // ========== Round-trip infrastructure ==========
+
+    private sealed record RoundTripResult(
+        ImportResult Import1,
+        IReadOnlyList<TsEndpointDefinition> Endpoints1,
+        TypeWalker Walker1,
+        string EmittedJson,
+        ImportResult Import2,
+        IReadOnlyList<TsEndpointDefinition> Endpoints2,
+        TypeWalker Walker2);
+
+    /// <summary>
+    /// Full belt-and-braces round-trip: OpenAPI JSON → import → compile → walk → emit OpenAPI → re-import → compile → walk.
+    /// </summary>
+    private static RoundTripResult FullRoundTrip(string fixtureName, string ns)
+    {
+        var json = LoadFixture(fixtureName);
+        var import1 = Import(json, ns);
+
+        // Pass 1: Import → compile → walk
+        var sources1 = DeduplicateFiles(import1);
+        var comp1 = CompilationHelper.CreateCompilationFromMultiple(sources1);
+        var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
+        var eps1 = ContractWalker.Walk(comp1, wlk1, disc1.ContractTypes);
+
+        // Emit OpenAPI from walked model
+        var emittedJson = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, null);
+
+        // Pass 2: Re-import emitted OpenAPI → compile → walk
+        var import2 = Import(emittedJson, ns);
+        var sources2 = DeduplicateFiles(import2);
+        var comp2 = CompilationHelper.CreateCompilationFromMultiple(sources2);
+        var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(comp2);
+        var eps2 = ContractWalker.Walk(comp2, wlk2, disc2.ContractTypes);
+
+        return new(import1, eps1, wlk1, emittedJson, import2, eps2, wlk2);
+    }
+
+    /// <summary>
+    /// Same as FullRoundTrip but uses GetCompilationErrors-style fallback for specs
+    /// that may trigger throwing in CreateCompilationFromMultiple.
+    /// </summary>
+    private static RoundTripResult FullRoundTripLenient(string fixtureName, string ns)
+    {
+        var json = LoadFixture(fixtureName);
+        var import1 = Import(json, ns);
+
+        // Pass 1
+        var sources1 = DeduplicateFiles(import1);
+        var comp1 = CreateCompilationLenient(sources1);
+        var errors1 = comp1.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        if (errors1.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Pass 1 compilation errors ({errors1.Count}):\n" +
+                string.Join("\n", errors1.Take(10).Select(e => e.ToString())));
+        }
+
+        var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
+        var eps1 = ContractWalker.Walk(comp1, wlk1, disc1.ContractTypes);
+        var emittedJson = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, null);
+
+        // Pass 2
+        var import2 = Import(emittedJson, ns);
+        var sources2 = DeduplicateFiles(import2);
+        var comp2 = CreateCompilationLenient(sources2);
+        var errors2 = comp2.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        if (errors2.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Pass 2 compilation errors ({errors2.Count}):\n" +
+                string.Join("\n", errors2.Take(10).Select(e => e.ToString())));
+        }
+
+        var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(comp2);
+        var eps2 = ContractWalker.Walk(comp2, wlk2, disc2.ContractTypes);
+
+        return new(import1, eps1, wlk1, emittedJson, import2, eps2, wlk2);
+    }
+
+    private static string[] DeduplicateFiles(ImportResult result)
+    {
+        return result.Files
+            .GroupBy(f => f.FileName)
+            .Select(g => g.First().Content)
+            .ToArray();
+    }
+
+    private static Compilation CreateCompilationLenient(string[] sources)
+    {
+        var trees = sources
+            .Select(s => Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+                s, new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
+                    Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest)))
+            .ToList();
+
+        // Add ASP.NET stubs from CompilationHelper (via reflection would be messy, so inline the stub tree)
+        trees.Add(Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+            ImportStubs, new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
+                Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest)));
+
+        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+        var refFiles = new List<string>
+        {
+            typeof(object).Assembly.Location,
+            Path.Combine(runtimeDir, "System.Runtime.dll"),
+            Path.Combine(runtimeDir, "System.Collections.dll"),
+            Path.Combine(runtimeDir, "System.Text.Json.dll"),
+            Path.Combine(runtimeDir, "System.Memory.dll"),
+            Path.Combine(runtimeDir, "netstandard.dll"),
+            typeof(RivetTypeAttribute).Assembly.Location,
+        };
+        foreach (var extra in new[] { "System.Linq.dll", "System.Console.dll" })
+        {
+            var path = Path.Combine(runtimeDir, extra);
+            if (File.Exists(path))
+            {
+                refFiles.Add(path);
+            }
+        }
+
+        var refs = refFiles.Select(f => (MetadataReference)MetadataReference.CreateFromFile(f)).ToArray();
+
+        return Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
+            "TestAssembly",
+            trees,
+            refs,
+            new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+    }
+
+    /// <summary>
+    /// Asserts the full round-trip invariants: emitted OpenAPI is valid, all $refs resolve,
+    /// and structural properties are stable between pass 1 and pass 2.
+    /// </summary>
+    private static void AssertFullRoundTrip(RoundTripResult r, string specName)
+    {
+        // --- Pass 1: endpoints + types discovered ---
+        Assert.True(r.Endpoints1.Count > 0,
+            $"{specName}: Pass 1 should discover endpoints (got 0)");
+
+        // --- Emitted OpenAPI is well-formed JSON ---
+        JsonElement emittedDoc;
+        try
+        {
+            emittedDoc = JsonSerializer.Deserialize<JsonElement>(r.EmittedJson);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"{specName}: Emitted OpenAPI is not valid JSON: {ex.Message}");
+        }
+
+        // --- All $refs resolve ---
+        var allRefs = new List<string>();
+        CollectRefs(emittedDoc, allRefs);
+        var schemaNames = new HashSet<string>();
+        if (emittedDoc.TryGetProperty("components", out var components) &&
+            components.TryGetProperty("schemas", out var schemas))
+        {
+            foreach (var s in schemas.EnumerateObject())
+            {
+                schemaNames.Add(s.Name);
+            }
+        }
+
+        var brokenRefs = allRefs
+            .Where(r2 => r2.StartsWith("#/components/schemas/"))
+            .Where(r2 => !schemaNames.Contains(r2["#/components/schemas/".Length..]))
+            .ToList();
+        Assert.True(brokenRefs.Count == 0,
+            $"{specName}: {brokenRefs.Count} broken $refs in emitted OpenAPI:\n" +
+            string.Join("\n", brokenRefs.Take(10)));
+
+        // --- Pass 2: endpoints + types discovered ---
+        Assert.True(r.Endpoints2.Count > 0,
+            $"{specName}: Pass 2 should discover endpoints (got 0)");
+
+        // --- Structural stability: endpoints ---
+        Assert.Equal(r.Endpoints1.Count, r.Endpoints2.Count);
+
+        var routes1 = r.Endpoints1
+            .Select(e => $"{e.HttpMethod} {e.RouteTemplate}")
+            .OrderBy(x => x).ToList();
+        var routes2 = r.Endpoints2
+            .Select(e => $"{e.HttpMethod} {e.RouteTemplate}")
+            .OrderBy(x => x).ToList();
+        Assert.Equal(routes1, routes2);
+
+        // --- Structural stability: endpoint-referenced types survive ---
+        // The emitter only includes types transitively referenced by endpoints.
+        // Orphan schemas (from oneOf/allOf compositions that the walker flattens)
+        // may be excluded — that's by design. Assert that everything the emitter
+        // DOES include survives the round-trip.
+        var referencedNames = new HashSet<string>();
+        foreach (var ep in r.Endpoints1)
+        {
+            foreach (var p in ep.Params)
+            {
+                TsType.CollectTypeRefs(p.Type, referencedNames);
+            }
+
+            foreach (var resp in ep.Responses)
+            {
+                if (resp.DataType is not null)
+                {
+                    TsType.CollectTypeRefs(resp.DataType, referencedNames);
+                }
+            }
+        }
+
+        var lostDefs = referencedNames
+            .Where(n => r.Walker1.Definitions.ContainsKey(n) && !r.Walker2.Definitions.ContainsKey(n))
+            .ToList();
+        Assert.True(lostDefs.Count == 0,
+            $"{specName}: Lost endpoint-referenced types on round-trip: {string.Join(", ", lostDefs)}");
+
+        var lostEnums = referencedNames
+            .Where(n => r.Walker1.Enums.ContainsKey(n) && !r.Walker2.Enums.ContainsKey(n))
+            .ToList();
+        Assert.True(lostEnums.Count == 0,
+            $"{specName}: Lost enums on round-trip: {string.Join(", ", lostEnums)}");
+
+        var lostBrands = referencedNames
+            .Where(n => r.Walker1.Brands.ContainsKey(n) && !r.Walker2.Brands.ContainsKey(n))
+            .ToList();
+        Assert.True(lostBrands.Count == 0,
+            $"{specName}: Lost brands on round-trip: {string.Join(", ", lostBrands)}");
+
+        // --- Structural stability: nothing lost per endpoint ---
+        // Params and responses may be GAINED on round-trip (normalization adds synthetic entries)
+        // but nothing should be LOST.
+        foreach (var ep1 in r.Endpoints1)
+        {
+            var ep2 = r.Endpoints2.FirstOrDefault(e =>
+                e.HttpMethod == ep1.HttpMethod && e.RouteTemplate == ep1.RouteTemplate);
+            Assert.NotNull(ep2);
+            Assert.True(ep2.Params.Count >= ep1.Params.Count,
+                $"{specName}: {ep1.HttpMethod} {ep1.RouteTemplate} lost params: " +
+                $"pass1={ep1.Params.Count} [{string.Join(", ", ep1.Params.Select(p => $"{p.Name}:{p.Source}"))}] " +
+                $"vs pass2={ep2.Params.Count} [{string.Join(", ", ep2.Params.Select(p => $"{p.Name}:{p.Source}"))}]");
+            Assert.True(ep2.Responses.Count >= ep1.Responses.Count,
+                $"{specName}: {ep1.HttpMethod} {ep1.RouteTemplate} lost responses: " +
+                $"pass1={ep1.Responses.Count} vs pass2={ep2.Responses.Count}");
+        }
+
+        // --- Structural stability: type property counts (only for surviving types) ---
+        foreach (var (name, def1) in r.Walker1.Definitions)
+        {
+            if (!r.Walker2.Definitions.TryGetValue(name, out var def2))
+            {
+                continue; // Orphan type not emitted — already checked above
+            }
+
+            Assert.Equal(def1.Properties.Count, def2.Properties.Count);
+        }
+
+        // --- Structural stability: enum member counts (only for surviving enums) ---
+        foreach (var (name, enum1) in r.Walker1.Enums)
+        {
+            if (!r.Walker2.Enums.TryGetValue(name, out _))
+            {
+                continue;
+            }
+
+            var enum2 = r.Walker2.Enums[name];
+            Assert.Equal(enum1.Members.Count, enum2.Members.Count);
+        }
+    }
+
+    private static void CollectRefs(JsonElement element, List<string> refs)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var prop in element.EnumerateObject())
+                {
+                    if (prop.Name == "$ref" && prop.Value.ValueKind == JsonValueKind.String)
+                    {
+                        refs.Add(prop.Value.GetString()!);
+                    }
+                    else
+                    {
+                        CollectRefs(prop.Value, refs);
+                    }
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    CollectRefs(item, refs);
+                }
+                break;
         }
     }
 
@@ -323,106 +623,62 @@ public sealed class RealWorldImportTests
         CompileGeneratedFiles(result);
     }
 
-    // ========== Real-world specs ==========
+    // ========== Real-world specs — full round-trip ==========
 
     [Fact]
-    public void PetStore_V3_Imports_And_Compiles()
+    public void PetStore_V3_Full_RoundTrip()
     {
-        var result = Import(LoadFixture("openapi-petstore-v3.json"), "PetStore");
-
-        Assert.True(result.Files.Count > 0, "Should generate files");
-        Assert.True(result.Files.Any(f => f.FileName.StartsWith("Contracts/")), "Should generate contracts");
-
-        // Must compile with zero errors
-        CompileGeneratedFiles(result);
+        var r = FullRoundTrip("openapi-petstore-v3.json", "PetStore");
+        AssertFullRoundTrip(r, "PetStore");
     }
 
     [Fact]
-    public void Httpbin_Imports_And_Compiles()
+    public void Httpbin_Full_RoundTrip()
     {
-        var result = Import(LoadFixture("openapi-httpbin.json"), "Httpbin");
-
-        Assert.True(result.Files.Count > 0, "Should generate files");
-        Assert.True(result.Files.Any(f => f.FileName.StartsWith("Contracts/")), "Should generate contracts");
-
-        // Must compile with zero errors
-        CompileGeneratedFiles(result);
+        var r = FullRoundTrip("openapi-httpbin.json", "Httpbin");
+        AssertFullRoundTrip(r, "Httpbin");
     }
 
     [Fact]
     [Trait("Category", "Slow")]
-    public void GitHub_Api_Imports_And_Compiles()
+    public void GitHub_Api_Full_RoundTrip()
     {
-        var result = Import(LoadFixture("openapi-github.json"), "GitHub");
-
-        Assert.True(result.Files.Count > 0, "Should generate files");
-        Assert.True(result.Files.Any(f => f.FileName.StartsWith("Contracts/")), "Should generate contracts");
-
-        var errors = GetCompilationErrors(result);
-        Assert.True(errors.Count == 0,
-            $"{errors.Count} compilation errors across {result.Files.Count} files.\n" +
-            $"First 10:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+        var r = FullRoundTripLenient("openapi-github.json", "GitHub");
+        AssertFullRoundTrip(r, "GitHub");
     }
 
-    // ========== Large real-world specs ==========
+    // ========== Large real-world specs — full round-trip ==========
 
     [Fact]
     [Trait("Category", "Slow")]
-    public void Stripe_Api_Imports_And_Compiles()
+    public void Stripe_Api_Full_RoundTrip()
     {
-        var result = Import(LoadFixture("openapi-stripe.json"), "Stripe");
-
-        Assert.True(result.Files.Count > 0, "Should generate files");
-        Assert.True(result.Files.Any(f => f.FileName.StartsWith("Contracts/")), "Should generate contracts");
-
-        var errors = GetCompilationErrors(result);
-        Assert.True(errors.Count == 0,
-            $"{errors.Count} compilation errors across {result.Files.Count} files.\n" +
-            $"First 10:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+        var r = FullRoundTripLenient("openapi-stripe.json", "Stripe");
+        AssertFullRoundTrip(r, "Stripe");
     }
 
     [Fact]
     [Trait("Category", "Slow")]
-    public void Box_Api_Imports_And_Compiles()
+    public void Box_Api_Full_RoundTrip()
     {
-        var result = Import(LoadFixture("openapi-box.json"), "Box");
-
-        Assert.True(result.Files.Count > 0, "Should generate files");
-        Assert.True(result.Files.Any(f => f.FileName.StartsWith("Contracts/")), "Should generate contracts");
-
-        var errors = GetCompilationErrors(result);
-        Assert.True(errors.Count == 0,
-            $"{errors.Count} compilation errors across {result.Files.Count} files.\n" +
-            $"First 10:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+        var r = FullRoundTripLenient("openapi-box.json", "Box");
+        AssertFullRoundTrip(r, "Box");
     }
 
     [Fact]
-    public void Twilio_Api_Imports_And_Compiles()
+    public void Twilio_Full_RoundTrip()
     {
-        var result = Import(LoadFixture("openapi-twilio.json"), "Twilio");
-
-        Assert.True(result.Files.Count > 0, "Should generate files");
-        Assert.True(result.Files.Any(f => f.FileName.StartsWith("Contracts/")), "Should generate contracts");
-
-        var errors = GetCompilationErrors(result);
-        Assert.True(errors.Count == 0,
-            $"{errors.Count} compilation errors across {result.Files.Count} files.\n" +
-            $"First 10:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+        var r = FullRoundTripLenient("openapi-twilio.json", "Twilio");
+        AssertFullRoundTrip(r, "Twilio");
     }
 
-    // ========== Naming edge cases ==========
+    // ========== Naming edge cases — full round-trip ==========
 
     [Fact]
-    public void NamingEdgeCases_Imports_And_Compiles()
+    public void NamingEdgeCases_Full_RoundTrip()
     {
-        var result = Import(LoadFixture("openapi-naming-edge-cases.json"));
-
-        Assert.True(result.Files.Count > 0, "Should generate files");
-
-        var errors = GetCompilationErrors(result);
-        Assert.True(errors.Count == 0,
-            $"{errors.Count} compilation errors across {result.Files.Count} files.\n" +
-            $"First 10:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+        var r = FullRoundTripLenient("openapi-naming-edge-cases.json", "Test");
+        AssertFullRoundTrip(r, "NamingEdgeCases");
     }
 
     [Fact]

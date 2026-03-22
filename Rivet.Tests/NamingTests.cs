@@ -25,6 +25,14 @@ public sealed class NamingTests
     [InlineData("$ref", "Ref")] // Leading special char stripped, first letter uppercased
     [InlineData("***", "_")] // All special chars stripped → fallback
     [InlineData("#id", "Id")] // Leading # stripped, uppercased
+    [InlineData("_", "_")] // Underscore-only: delimiter splits to zero parts → fallback
+    [InlineData("__", "_")] // Multiple underscores → same fallback
+    [InlineData(">=", "_")] // Operator chars stripped → fallback
+    [InlineData("FooBarSchema_2", "FooBarSchema_2")] // Dedup suffix preserved (trailing _N)
+    [InlineData("MyType_12", "MyType_12")] // Multi-digit dedup suffix preserved
+    [InlineData("foo_bar_schema", "FooBarSchema")] // Normal snake_case still PascalCased
+    [InlineData("Foo_", "Foo")] // Trailing underscore (no digits) → split, not dedup suffix
+    [InlineData("Bar_a", "BarA")] // Trailing underscore + non-digit → split
     public void ToPascalCaseFromSegments(string input, string expected)
     {
         Assert.Equal(expected, Naming.ToPascalCaseFromSegments(input));

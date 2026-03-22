@@ -118,6 +118,7 @@ public abstract record TsType
                 break;
             case Brand b:
                 names.Add(b.Name);
+                CollectTypeRefs(b.Inner, names);
                 break;
             case StringUnion:
             case Primitive:

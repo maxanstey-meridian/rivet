@@ -334,6 +334,12 @@ public static class ContractWalker
                             continue;
                         }
 
+                        // Skip properties already emitted as route params
+                        if (routeParamNames.Contains(prop.Name, StringComparer.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
                         var tsName = typeWalker.GetJsonPropertyName(prop) ?? Naming.ToCamelCase(prop.Name);
 
                         if (IsFormFileType(prop.Type))

@@ -53,12 +53,24 @@ public sealed class ContractEndpointTests
 
         // id matched to route, status + page are query
         Assert.Equal(3, ep.Params.Count);
-        Assert.Equal(ParamSource.Route, ep.Params.First(p => p.Name == "id").Source);
-        Assert.Equal(ParamSource.Query, ep.Params.First(p => p.Name == "status").Source);
-        Assert.Equal(ParamSource.Query, ep.Params.First(p => p.Name == "page").Source);
+        var idParam = ep.Params.First(p => p.Name == "id");
+        Assert.Equal(ParamSource.Route, idParam.Source);
+        Assert.True(idParam.Type is TsType.Primitive { Name: "string" });
+
+        var statusParam = ep.Params.First(p => p.Name == "status");
+        Assert.Equal(ParamSource.Query, statusParam.Source);
+        Assert.True(statusParam.Type is TsType.Primitive { Name: "string" });
+
+        var pageParam = ep.Params.First(p => p.Name == "page");
+        Assert.Equal(ParamSource.Query, pageParam.Source);
+        Assert.True(pageParam.Type is TsType.Primitive { Name: "number", Format: "int32" });
+
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "TaskDto" });
+        Assert.Equal(200, ep.Responses[0].StatusCode);
+        Assert.True(ep.Responses[0].DataType is TsType.TypeRef { Name: "TaskDto" });
 
         Assert.Contains("Promise<TaskDto>", client);
-        Assert.Contains("`/api/tasks/${id}`", client);
+        Assert.Contains("`/api/tasks/${encodeURIComponent(String(id))}`", client);
     }
 
     [Fact]
@@ -92,9 +104,13 @@ public sealed class ContractEndpointTests
         // taskId from route template as standalone string param, body from TInput
         var routeParam = ep.Params.First(p => p.Source == ParamSource.Route);
         Assert.Equal("taskId", routeParam.Name);
+        Assert.True(routeParam.Type is TsType.Primitive { Name: "string" });
 
         var bodyParam = ep.Params.First(p => p.Source == ParamSource.Body);
         Assert.Equal("body", bodyParam.Name);
+        Assert.True(bodyParam.Type is TsType.TypeRef { Name: "CreateCommentInput" });
+
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "CommentDto" });
 
         Assert.Contains("body: body", client);
     }
@@ -125,6 +141,10 @@ public sealed class ContractEndpointTests
         Assert.Equal("listTasks", ep.Name);
         Assert.Equal("GET", ep.HttpMethod);
         Assert.Empty(ep.Params);
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "TaskDto" });
+        Assert.Single(ep.Responses);
+        Assert.Equal(200, ep.Responses[0].StatusCode);
+        Assert.True(ep.Responses[0].DataType is TsType.TypeRef { Name: "TaskDto" });
         Assert.Contains("Promise<TaskDto>", client);
     }
 
@@ -155,6 +175,9 @@ public sealed class ContractEndpointTests
         Assert.Single(ep.Params);
         Assert.Equal("id", ep.Params[0].Name);
         Assert.Equal(ParamSource.Route, ep.Params[0].Source);
+        Assert.True(ep.Params[0].Type is TsType.Primitive { Name: "string" });
+
+        Assert.Null(ep.ReturnType);
 
         Assert.Contains("Promise<void>", client);
     }
@@ -188,9 +211,12 @@ public sealed class ContractEndpointTests
         var ep = endpoints[0];
 
         // 200 from TOutput + 404 from .Returns
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "TaskDto" });
         Assert.Equal(2, ep.Responses.Count);
         Assert.Equal(200, ep.Responses[0].StatusCode);
+        Assert.True(ep.Responses[0].DataType is TsType.TypeRef { Name: "TaskDto" });
         Assert.Equal(404, ep.Responses[1].StatusCode);
+        Assert.True(ep.Responses[1].DataType is TsType.TypeRef { Name: "NotFoundDto" });
     }
 
     [Fact]
@@ -220,7 +246,8 @@ public sealed class ContractEndpointTests
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
-        Assert.Contains(ep.Responses, r => r.StatusCode == 201 && r.DataType is not null);
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "CreatedDto" });
+        Assert.Contains(ep.Responses, r => r.StatusCode == 201 && r.DataType is TsType.TypeRef { Name: "CreatedDto" });
     }
 
     [Fact]
@@ -254,10 +281,14 @@ public sealed class ContractEndpointTests
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "TaskDto" });
         Assert.Equal(3, ep.Responses.Count);
         Assert.Equal(200, ep.Responses[0].StatusCode);
+        Assert.True(ep.Responses[0].DataType is TsType.TypeRef { Name: "TaskDto" });
         Assert.Equal(404, ep.Responses[1].StatusCode);
+        Assert.True(ep.Responses[1].DataType is TsType.TypeRef { Name: "NotFoundDto" });
         Assert.Equal(409, ep.Responses[2].StatusCode);
+        Assert.True(ep.Responses[2].DataType is TsType.TypeRef { Name: "ConflictDto" });
     }
 
     [Fact]
@@ -283,6 +314,8 @@ public sealed class ContractEndpointTests
 
         Assert.Single(endpoints);
         Assert.Equal("caseStatuses", endpoints[0].ControllerName);
+        Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "ItemDto" });
+
     }
 
     [Fact]
@@ -362,6 +395,7 @@ public sealed class ContractEndpointTests
         var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
 
         Assert.Single(endpoints);
+        Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "TaskDto" });
         // TaskDto should have been walked transitively
         Assert.True(walker.Definitions.ContainsKey("TaskDto"));
         Assert.True(walker.Definitions.ContainsKey("StatusDto"));
@@ -390,6 +424,9 @@ public sealed class ContractEndpointTests
 
         Assert.Single(endpoints);
         Assert.Equal("/api/tasks/{id}", endpoints[0].RouteTemplate);
+        Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "TaskDto" });
+        Assert.Single(endpoints[0].Params);
+        Assert.True(endpoints[0].Params[0].Type is TsType.Primitive { Name: "string" });
         Assert.DoesNotContain(":guid", client);
     }
 
@@ -417,6 +454,7 @@ public sealed class ContractEndpointTests
 
         Assert.Single(endpoints);
         Assert.Equal("Retrieve a single task by ID", endpoints[0].Description);
+        Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "TaskDto" });
     }
 
     [Fact]
@@ -442,6 +480,7 @@ public sealed class ContractEndpointTests
 
         Assert.Single(endpoints);
         Assert.Null(endpoints[0].Description);
+        Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "TaskDto" });
     }
 
     [Fact]
@@ -470,12 +509,16 @@ public sealed class ContractEndpointTests
         var (endpoints, _) = Generate(source);
 
         Assert.Single(endpoints);
+        Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "TaskDto" });
+
         var notFoundResponse = endpoints[0].Responses.First(r => r.StatusCode == 404);
         Assert.Equal("Task not found", notFoundResponse.Description);
+        Assert.True(notFoundResponse.DataType is TsType.TypeRef { Name: "NotFoundDto" });
 
         // Success response has no description
         var successResponse = endpoints[0].Responses.First(r => r.StatusCode == 200);
         Assert.Null(successResponse.Description);
+        Assert.True(successResponse.DataType is TsType.TypeRef { Name: "TaskDto" });
     }
 
     [Fact]
@@ -506,6 +549,9 @@ public sealed class ContractEndpointTests
 
         Assert.Single(endpoints);
         Assert.Equal("Retrieve a task", endpoints[0].Description);
+        Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "TaskDto" });
+        Assert.True(endpoints[0].Responses.First(r => r.StatusCode == 200).DataType is TsType.TypeRef { Name: "TaskDto" });
+        Assert.True(endpoints[0].Responses.First(r => r.StatusCode == 404).DataType is TsType.TypeRef { Name: "NotFoundDto" });
         Assert.Equal("Task not found", endpoints[0].Responses.First(r => r.StatusCode == 404).Description);
     }
 

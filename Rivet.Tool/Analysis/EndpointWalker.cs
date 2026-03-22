@@ -225,6 +225,12 @@ public static class EndpointWalker
             var source = ClassifyParam(param, routeParamNames);
             if (source is null)
             {
+                // Skip infrastructure types (CancellationToken, DI services, etc.)
+                if (IsInfrastructureType(param.Type))
+                {
+                    continue;
+                }
+
                 // In mixed upload methods, unclassified params are form fields
                 if (hasFileParam)
                 {
@@ -248,6 +254,23 @@ public static class EndpointWalker
     {
         "Microsoft.AspNetCore.Http.IFormFile",
     };
+
+    private static readonly HashSet<string> InfrastructureTypeNames = new()
+    {
+        "System.Threading.CancellationToken",
+    };
+
+    private static bool IsInfrastructureType(ITypeSymbol type)
+    {
+        var name = type.ToDisplayString();
+        if (InfrastructureTypeNames.Contains(name))
+        {
+            return true;
+        }
+
+        // Interface types without [From*] attributes are DI services
+        return type.TypeKind == TypeKind.Interface && !FormFileTypeNames.Contains(name);
+    }
 
     private static ParamSource? ClassifyParam(IParameterSymbol param, HashSet<string> routeParamNames)
     {

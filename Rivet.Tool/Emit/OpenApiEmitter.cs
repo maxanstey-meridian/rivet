@@ -306,17 +306,9 @@ public static class OpenApiEmitter
 
             TsType.Nullable n => MapNullable(n),
 
-            TsType.Array a => new Dictionary<string, object>
-            {
-                ["type"] = "array",
-                ["items"] = MapTsTypeToJsonSchema(a.Element),
-            },
+            TsType.Array a => BuildArraySchema(a),
 
-            TsType.Dictionary d => new Dictionary<string, object>
-            {
-                ["type"] = "object",
-                ["additionalProperties"] = MapTsTypeToJsonSchema(d.Value),
-            },
+            TsType.Dictionary d => BuildDictionarySchema(d),
 
             TsType.StringUnion su => new Dictionary<string, object>
             {
@@ -355,7 +347,10 @@ public static class OpenApiEmitter
         foreach (var (name, fieldType) in obj.Fields)
         {
             properties[name] = MapTsTypeToJsonSchema(fieldType);
-            required.Add(name);
+            if (fieldType is not TsType.Nullable)
+            {
+                required.Add(name);
+            }
         }
 
         var schema = new Dictionary<string, object>
@@ -385,8 +380,19 @@ public static class OpenApiEmitter
 
         if (p.Name == "unknown")
         {
-            Console.Error.WriteLine("warning: 'unknown' type (JsonElement/JsonNode) in OpenAPI schema — emitting as untyped");
-            return new Dictionary<string, object>();
+            if (p.CSharpType is null)
+            {
+                Console.Error.WriteLine("warning: 'unknown' type (JsonElement/JsonNode) in OpenAPI schema — emitting as untyped");
+            }
+
+            var unknownSchema = new Dictionary<string, object>();
+            // JsonNode gets x-rivet-csharp-type on the primitive itself.
+            // JsonObject/JsonArray are handled by BuildDictionarySchema/BuildArraySchema on the parent.
+            if (p.CSharpType is "JsonNode")
+            {
+                unknownSchema["x-rivet-csharp-type"] = p.CSharpType;
+            }
+            return unknownSchema;
         }
 
         // OpenAPI uses "integer" for int32/int64, not "number"
@@ -548,7 +554,7 @@ public static class OpenApiEmitter
 
             properties[prop.Name] = propSchema;
 
-            if (!prop.IsOptional)
+            if (!prop.IsOptional && prop.Type is not TsType.Nullable)
             {
                 required.Add(prop.Name);
             }
@@ -563,6 +569,45 @@ public static class OpenApiEmitter
         if (required.Count > 0)
         {
             schema["required"] = required;
+        }
+
+        if (properties.Count == 0)
+        {
+            schema["x-rivet-empty-record"] = true;
+        }
+
+        return schema;
+    }
+
+    private static Dictionary<string, object> BuildArraySchema(TsType.Array a)
+    {
+        var schema = new Dictionary<string, object>
+        {
+            ["type"] = "array",
+            ["items"] = MapTsTypeToJsonSchema(a.Element),
+        };
+
+        // Propagate CSharpType from inner unknown (JsonArray) to parent schema
+        if (a.Element is TsType.Primitive { Name: "unknown", CSharpType: not null } p)
+        {
+            schema["x-rivet-csharp-type"] = p.CSharpType;
+        }
+
+        return schema;
+    }
+
+    private static Dictionary<string, object> BuildDictionarySchema(TsType.Dictionary d)
+    {
+        var schema = new Dictionary<string, object>
+        {
+            ["type"] = "object",
+            ["additionalProperties"] = MapTsTypeToJsonSchema(d.Value),
+        };
+
+        // Propagate CSharpType from inner unknown (JsonObject) to parent schema
+        if (d.Value is TsType.Primitive { Name: "unknown", CSharpType: not null } p)
+        {
+            schema["x-rivet-csharp-type"] = p.CSharpType;
         }
 
         return schema;
@@ -587,7 +632,7 @@ public static class OpenApiEmitter
 
             properties[prop.Name] = propSchema;
 
-            if (!prop.IsOptional)
+            if (!prop.IsOptional && resolvedType is not TsType.Nullable)
             {
                 required.Add(prop.Name);
             }

@@ -49,7 +49,7 @@ public sealed class ControllerEndpointTests
 
         Assert.Contains("export function get(", client);
         Assert.Contains("Promise<ItemDto>", client);
-        Assert.Contains("\"GET\", `/api/items/${id}`", client);
+        Assert.Contains("\"GET\", `/api/items/${encodeURIComponent(String(id))}`", client);
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public sealed class ControllerEndpointTests
         var client = GenerateClient(source);
 
         // GET combines route + method segment, strips :guid constraint
-        Assert.Contains("""`/api/case-statuses/${id}`""", client);
+        Assert.Contains("""`/api/case-statuses/${encodeURIComponent(String(id))}`""", client);
         // POST uses controller route only
         Assert.Contains("""`/api/case-statuses`""", client);
     }
@@ -122,8 +122,8 @@ public sealed class ControllerEndpointTests
 
         var client = GenerateClient(source);
 
-        // {id:guid} should become ${id}, not ${id:guid}
-        Assert.Contains("${id}", client);
+        // {id:guid} should become ${encodeURIComponent(String(id))}, not ${id:guid}
+        Assert.Contains("${encodeURIComponent(String(id))}", client);
         Assert.DoesNotContain(":guid", client);
     }
 
@@ -403,9 +403,14 @@ public sealed class ControllerEndpointTests
         var endpoint = Assert.Single(endpoints);
         Assert.Equal(2, endpoint.Responses.Count);
         Assert.Equal(200, endpoint.Responses[0].StatusCode);
-        Assert.NotNull(endpoint.Responses[0].DataType);
+        Assert.True(endpoint.Responses[0].DataType is Rivet.Tool.Model.TsType.TypeRef { Name: "ItemDto" },
+            $"200 response DataType should be TypeRef(ItemDto), got {endpoint.Responses[0].DataType}");
         Assert.Equal(404, endpoint.Responses[1].StatusCode);
         Assert.Null(endpoint.Responses[1].DataType);
+
+        // ReturnType should be the unwrapped success type
+        Assert.True(endpoint.ReturnType is Rivet.Tool.Model.TsType.TypeRef { Name: "ItemDto" },
+            $"ReturnType should be TypeRef(ItemDto), got {endpoint.ReturnType}");
     }
 
     [Fact]
@@ -441,9 +446,11 @@ public sealed class ControllerEndpointTests
         var endpoint = Assert.Single(endpoints);
         Assert.Equal(2, endpoint.Responses.Count);
         Assert.Equal(201, endpoint.Responses[0].StatusCode);
-        Assert.NotNull(endpoint.Responses[0].DataType);
+        Assert.True(endpoint.Responses[0].DataType is Rivet.Tool.Model.TsType.TypeRef { Name: "ItemDto" },
+            $"201 response DataType should be TypeRef(ItemDto), got {endpoint.Responses[0].DataType}");
         Assert.Equal(409, endpoint.Responses[1].StatusCode);
-        Assert.NotNull(endpoint.Responses[1].DataType);
+        Assert.True(endpoint.Responses[1].DataType is Rivet.Tool.Model.TsType.TypeRef { Name: "ErrorDto" },
+            $"409 response DataType should be TypeRef(ErrorDto), got {endpoint.Responses[1].DataType}");
     }
 
     [Fact]

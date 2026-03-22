@@ -6,6 +6,8 @@
  * then validates objects against schemas using fromJSONSchema().
  */
 
+// TODO: format-level validation (uuid, date-time, etc.)
+
 import { readFileSync } from "node:fs";
 import { fromJSONSchema } from "zod";
 

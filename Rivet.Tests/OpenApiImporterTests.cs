@@ -1686,6 +1686,157 @@ public sealed class OpenApiImporterTests
         }
     }
 
+    // ========== Schema name dedup $ref resolution ==========
+
+    [Fact]
+    public void Deduped_Schema_Name_Resolved_In_Refs()
+    {
+        // foo_bar and FooBar both PascalCase to FooBar — the second gets deduped to FooBar_2.
+        // A $ref to foo_bar must resolve to FooBar_2 (the deduped name), not FooBar.
+        var spec = BuildSpec(
+            schemas: """
+                "FooBar": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                },
+                "foo_bar": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                },
+                "Consumer": {
+                    "type": "object",
+                    "properties": {
+                        "original": { "$ref": "#/components/schemas/FooBar" },
+                        "snake": { "$ref": "#/components/schemas/foo_bar" }
+                    },
+                    "required": ["original", "snake"]
+                }
+                """,
+            paths: """
+                "/api/test": {
+                    "get": {
+                        "operationId": "test_get",
+                        "tags": ["Test"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Consumer" } } }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var result = Import(spec);
+        var consumer = FindFile(result, "Consumer.cs");
+
+        // original → FooBar, snake → FooBar_2 (deduped)
+        Assert.Contains("FooBar Original", consumer);
+        Assert.Contains("FooBar_2 Snake", consumer);
+
+        // Both types should be generated as separate records
+        var fooBar = FindFile(result, "FooBar.cs");
+        Assert.Contains("string Id", fooBar);
+        var fooBar2 = result.Files.FirstOrDefault(f => f.FileName.EndsWith("FooBar_2.cs"));
+        Assert.NotNull(fooBar2);
+        Assert.Contains("string Name", fooBar2.Content);
+
+        // Must compile
+        var compilation = CompilationHelper.CreateCompilationFromMultiple(
+            result.Files.Select(f => f.Content).ToArray());
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error).ToList();
+        Assert.Empty(errors);
+    }
+
+    // ========== POST param-only input wiring ==========
+
+    [Fact]
+    public void Post_With_Query_Params_Wires_Input_Type()
+    {
+        // POST with query params (no body) should wire the input type
+        // so it survives round-trip, even though the params become body params.
+        var spec = BuildSpec(
+            paths: """
+                "/api/search": {
+                    "post": {
+                        "operationId": "items_search",
+                        "tags": ["Items"],
+                        "parameters": [
+                            { "name": "query", "in": "query", "required": true, "schema": { "type": "string" } },
+                            { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "format": "int32" } }
+                        ],
+                        "responses": {
+                            "200": { "description": "OK" }
+                        }
+                    }
+                }
+                """);
+
+        var result = Import(spec);
+        var contract = FindFile(result, "ItemsContract.cs");
+
+        // Input type should be wired (via .Accepts<T>() for input-only endpoints)
+        Assert.Contains("SearchInput", contract);
+        Assert.Contains("Accepts<SearchInput>", contract);
+
+        // The synthetic input type should exist with the params
+        var inputFile = result.Files.FirstOrDefault(f => f.Content.Contains("SearchInput"));
+        Assert.NotNull(inputFile);
+        Assert.Contains("string Query", inputFile.Content);
+        Assert.Contains("int? Limit", inputFile.Content);
+    }
+
+    [Fact]
+    public void Post_With_Body_Still_Uses_Body()
+    {
+        // POST with a proper request body should still wire TInput as body (not query).
+        // Ensures the isParamOnlyInput fix doesn't break normal POST endpoints.
+        var spec = BuildSpec(
+            schemas: """
+                "CreateRequest": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                },
+                "ItemDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "post": {
+                        "operationId": "items_create",
+                        "tags": ["Items"],
+                        "requestBody": {
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/CreateRequest" }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "201": {
+                                "description": "Created",
+                                "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ItemDto" } } }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var result = Import(spec);
+        var contract = FindFile(result, "ItemsContract.cs");
+
+        // Should wire input as type arg (not .Accepts<T>())
+        Assert.Contains("RouteDefinition<CreateRequest, ItemDto>", contract);
+        Assert.Contains("Define.Post<CreateRequest, ItemDto>", contract);
+    }
+
     // ========== Helpers ==========
 
     private static string BuildSpec(string? schemas = null, string? paths = null)

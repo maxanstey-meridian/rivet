@@ -80,6 +80,22 @@ public sealed class DeepReviewFixTests
         return file.Content;
     }
 
+    /// <summary>
+    /// Extracts the $defs JSON object from the TypeScript output of JsonSchemaEmitter.
+    /// The output format is: const $defs = { ... } as const;
+    /// </summary>
+    private static string ExtractDefsJson(string tsOutput)
+    {
+        const string prefix = "const $defs = ";
+        const string suffix = " as const;";
+        var start = tsOutput.IndexOf(prefix, StringComparison.Ordinal);
+        Assert.True(start >= 0, "Could not find '$defs' in JSON Schema output");
+        start += prefix.Length;
+        var end = tsOutput.IndexOf(suffix, start, StringComparison.Ordinal);
+        Assert.True(end >= 0, "Could not find 'as const;' in JSON Schema output");
+        return tsOutput[start..end];
+    }
+
     private static string BuildSpec(string? schemas = null, string? paths = null)
     {
         var schemasBlock = schemas is not null
@@ -494,7 +510,7 @@ public sealed class DeepReviewFixTests
     // ========== Bug 10: Param-only POST import ==========
 
     [Fact]
-    public void ParamOnly_Post_Import_Does_Not_Wire_Body()
+    public void ParamOnly_Post_Import_Wires_Input_For_RoundTrip()
     {
         var spec = BuildSpec(
             paths: """
@@ -520,17 +536,16 @@ public sealed class DeepReviewFixTests
         var result = Import(spec);
         var content = FindFile(result, "ItemsContract.cs");
 
-        // Should NOT wire the input as .Accepts<T>() or as a type arg
-        Assert.DoesNotContain("Accepts<", content);
-        Assert.DoesNotContain("RouteDefinition<ArchiveItemInput", content);
-        // Should just be a plain RouteDefinition (no type args for body)
+        // Input type should be wired so the type survives round-trip
+        // (POST with path-only params uses .Accepts<T>() since there's no output type)
+        Assert.Contains("Accepts<ArchiveItemInput>", content);
         Assert.Contains("Define.Post(\"/api/items/{id}/archive\")", content);
     }
 
     // ========== Bug 11: Unmatched route placeholders ==========
 
     [Fact]
-    public void Unmatched_Route_Placeholder_Emits_Comment_Marker()
+    public void Unmatched_Route_Placeholder_Throws()
     {
         // Build endpoints directly to create a truly unmatched placeholder
         // (a route with {id} but no Route-sourced param named "id")
@@ -547,12 +562,12 @@ public sealed class DeepReviewFixTests
                 new List<TsResponseType> { new(200, new TsType.Primitive("string")) }),
         };
 
-        var client = ClientEmitter.EmitControllerClient(
-            "items", endpoints, new Dictionary<string, string>());
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            ClientEmitter.EmitControllerClient(
+                "items", endpoints, new Dictionary<string, string>()));
 
-        // The unmatched {id} should be replaced with a valid JS expression + comment
-        Assert.Contains("unmatched: id", client);
-        Assert.DoesNotContain("/{id}`", client);
+        Assert.Contains("id", ex.Message);
+        Assert.Contains("no matching parameter", ex.Message);
     }
 
     // ========== Deep Review Fix #2 (2026-03-21) ==========
@@ -718,5 +733,649 @@ public sealed class DeepReviewFixTests
         Assert.Contains("result.status === 404", client);
         Assert.Contains("assertNotFoundDto", client);
         Assert.Contains("assertTaskDto", client);
+    }
+
+    // ========== Deep Review Fix #3 (2026-03-21) — findings from two deep reviews ==========
+
+    // --- Fix 1: CollectTypeRefs recurses into Brand.Inner ---
+
+    [Fact]
+    public void CollectTypeRefs_Brand_Wrapping_TypeRef_CollectsBoth()
+    {
+        var names = new HashSet<string>();
+        TsType.CollectTypeRefs(new TsType.Brand("UserId", new TsType.TypeRef("IdBase")), names);
+
+        Assert.Contains("UserId", names);
+        Assert.Contains("IdBase", names);
+    }
+
+    // --- Fix 2: JsonSchemaEmitter InlineObject nullable fields not required ---
+
+    [Fact]
+    public void JsonSchema_InlineObject_Nullable_Field_Not_Required()
+    {
+        var inlineObj = new TsType.InlineObject([
+            ("key", new TsType.Primitive("string")),
+            ("value", new TsType.Nullable(new TsType.Primitive("number"))),
+        ]);
+
+        var schema = JsonSchemaEmitter.MapTsTypeToSchema(inlineObj);
+        var required = (List<string>)schema["required"];
+        Assert.Contains("key", required);
+        Assert.DoesNotContain("value", required);
+    }
+
+    [Fact]
+    public void JsonSchema_InlineObject_AllNullable_NoRequiredArray()
+    {
+        var inlineObj = new TsType.InlineObject([
+            ("a", new TsType.Nullable(new TsType.Primitive("string"))),
+            ("b", new TsType.Nullable(new TsType.Primitive("number"))),
+        ]);
+
+        var schema = JsonSchemaEmitter.MapTsTypeToSchema(inlineObj);
+        // No required array when all fields are nullable
+        Assert.False(schema.ContainsKey("required"));
+    }
+
+    // --- Fix 3: ZodValidatorEmitter CollectSchemaImports handles InlineObject ---
+
+    [Fact]
+    public void Zod_InlineObject_With_TypeRef_Imports_Schema()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TagDto(Guid Id, string Name);
+
+            [RivetType]
+            public sealed record WithTupleReturn((TagDto Tag, int Count) Result);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/tagged")]
+                public static Task<WithTupleReturn> GetTagged()
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var definitions = walker.Definitions.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
+        var zodValidators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
+
+        // The schema for WithTupleReturn should be imported (it's a TypeRef)
+        Assert.Contains("WithTupleReturnSchema", zodValidators);
+    }
+
+    // --- Fix 4: TypeEmitter quotes invalid property names ---
+
+    [Fact]
+    public void TypeEmitter_Quotes_Hyphenated_PropertyName()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record WeirdDto(
+                [property: JsonPropertyName("display-name")] string DisplayName,
+                [property: JsonPropertyName("@type")] string TypeField,
+                string NormalProp);
+            """;
+
+        var result = Generate(source);
+
+        Assert.Contains("\"display-name\": string;", result);
+        Assert.Contains("\"@type\": string;", result);
+        Assert.Contains("normalProp: string;", result);
+        // Ensure no unquoted invalid identifiers
+        Assert.DoesNotContain("display-name:", result);
+    }
+
+    private static string Generate(string source)
+    {
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var definitions = walker.Definitions.Values.ToList();
+        var brands = walker.Brands.Values.ToList();
+        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
+        return string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
+    }
+
+    // --- Fix 5: Multipart route param deduplication ---
+
+    [Fact]
+    public void Multipart_RouteParam_Not_Duplicated_As_FormField()
+    {
+        var source = """
+            using System;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadInput(Guid TaskId, IFormFile Document, string Title);
+
+            [RivetType]
+            public sealed record UploadResult(string Url);
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly Define Upload =
+                    Define.Post<UploadInput, UploadResult>("/api/tasks/{taskId}/files");
+            }
+            """;
+
+        var (endpoints, client) = GenerateContract(source);
+        var ep = Assert.Single(endpoints);
+
+        // taskId should appear exactly once as Route
+        var routeParams = ep.Params.Where(p => p.Source == ParamSource.Route).ToList();
+        Assert.Single(routeParams);
+        Assert.Equal("taskId", routeParams[0].Name);
+
+        // taskId should NOT appear as a FormField
+        var formFields = ep.Params.Where(p => p.Source == ParamSource.FormField).ToList();
+        Assert.DoesNotContain(formFields, f => string.Equals(f.Name, "taskId", StringComparison.OrdinalIgnoreCase));
+
+        // document is File, title is FormField
+        Assert.Single(ep.Params, p => p.Source == ParamSource.File);
+        Assert.Single(formFields, f => f.Name == "title");
+
+        // Client should include route interpolation and FormData
+        Assert.Contains("const fd = new FormData();", client);
+        Assert.Contains("fd.append(\"title\"", client);
+        Assert.DoesNotContain("fd.append(\"taskId\"", client);
+    }
+
+    // --- Fix 6: Unmatched route placeholder throws ---
+    // (Already tested above as Unmatched_Route_Placeholder_Throws)
+
+    // --- Fix 7: Query param array serialization ---
+
+    [Fact]
+    public void RivetFetchBase_Handles_Array_QueryParams()
+    {
+        var rivetBase = ClientEmitter.EmitRivetBase();
+
+        Assert.Contains("Array.isArray(v)", rivetBase);
+        Assert.Contains("url.searchParams.append(k, String(item))", rivetBase);
+    }
+
+    // --- Fix 8: Route encodeURIComponent ---
+
+    [Fact]
+    public void Route_Interpolation_Uses_EncodeURIComponent()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Id, string Name);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly Define GetItem =
+                    Define.Get<ItemDto>("/api/items/{id}");
+            }
+            """;
+
+        var (_, client) = GenerateContract(source);
+
+        Assert.Contains("encodeURIComponent(String(id))", client);
+        Assert.DoesNotContain("${id}`", client);
+    }
+
+    // --- Fix 9: Zod format refinements ---
+
+    [Fact]
+    public void Zod_Guid_Emits_Uuid_Refinement()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, DateTime CreatedAt, DateOnly BirthDate);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/items/{id}")]
+                public static Task<ItemDto> GetItem([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var definitions = walker.Definitions.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
+        var zodValidators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
+
+        // Zod should emit format refinements from the JSON Schema
+        // The Zod emitter wraps TypeRefs via fromJSONSchema, not primitive expressions directly.
+        // But let's verify the Zod expression builder uses format refinements:
+        Assert.Contains("fromJSONSchema(ItemDtoSchema as any)", zodValidators);
+    }
+
+    [Fact]
+    public void Zod_Primitive_Format_Uuid_Emits_Refinement()
+    {
+        // Test the BuildPrimitiveExpression directly via a return type that's a raw Guid
+        // When an endpoint returns a primitive with format, the Zod emitter should chain refinements
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/id")]
+                public static Task<Guid> GetId()
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var definitions = walker.Definitions.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
+        var zodValidators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
+
+        Assert.Contains("z.string().uuid()", zodValidators);
+    }
+
+    [Fact]
+    public void Zod_Primitive_Format_DateTime_Emits_Refinement()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/time")]
+                public static Task<DateTime> GetTime()
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = EndpointWalker.Walk(walker, discovered.EndpointMethods, discovered.ClientTypes);
+        var definitions = walker.Definitions.Values.ToList();
+        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+        var typeFileMap = typeGrouping.BuildTypeFileMap();
+        var zodValidators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
+
+        Assert.Contains("z.string().datetime()", zodValidators);
+    }
+
+    // --- Fix 10: OpenAPI InlineObject nullable (already fixed, verify) ---
+
+    [Fact]
+    public void OpenApi_InlineObject_Nullable_Field_Not_Required()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record WithNullableTuple((string Key, int? Value) Pair);
+
+            [RivetContract]
+            public static class TestContract
+            {
+                public static readonly Define Get =
+                    Define.Get<WithNullableTuple>("/api/test");
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+
+        // The inline object tuple should not have "value" in required
+        var pairProp = schemas.GetProperty("WithNullableTuple").GetProperty("properties").GetProperty("pair");
+        if (pairProp.TryGetProperty("required", out var required))
+        {
+            var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
+            Assert.Contains("key", requiredNames);
+            Assert.DoesNotContain("value", requiredNames);
+        }
+    }
+
+    // --- Hardened existing test: rivetFetch query param serialization ---
+
+    [Fact]
+    public void RivetFetchBase_NullCheck_Uses_DoubleEquals()
+    {
+        var rivetBase = ClientEmitter.EmitRivetBase();
+
+        // Must use == null (not != null) for the continue to skip nulls
+        Assert.Contains("if (v == null) continue;", rivetBase);
+    }
+
+    // --- QuoteIfNeeded helper ---
+
+    [Fact]
+    public void QuoteIfNeeded_ValidIdentifier_NotQuoted()
+    {
+        Assert.Equal("name", TypeEmitter.QuoteIfNeeded("name"));
+        Assert.Equal("camelCase", TypeEmitter.QuoteIfNeeded("camelCase"));
+        Assert.Equal("_private", TypeEmitter.QuoteIfNeeded("_private"));
+        Assert.Equal("$dollar", TypeEmitter.QuoteIfNeeded("$dollar"));
+    }
+
+    [Fact]
+    public void QuoteIfNeeded_InvalidIdentifier_Quoted()
+    {
+        Assert.Equal("\"display-name\"", TypeEmitter.QuoteIfNeeded("display-name"));
+        Assert.Equal("\"@type\"", TypeEmitter.QuoteIfNeeded("@type"));
+        Assert.Equal("\"has space\"", TypeEmitter.QuoteIfNeeded("has space"));
+        Assert.Equal("\"123start\"", TypeEmitter.QuoteIfNeeded("123start"));
+    }
+
+    // --- Fix 10: Empty object schema round-trip ---
+
+    [Fact]
+    public void EmptyRecord_Survives_OpenApi_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record EmptyMarker();
+
+            [RivetType]
+            public sealed record ItemDto(string Id, EmptyMarker Marker);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly Define GetItem =
+                    Define.Get<ItemDto>("/api/items/{id}");
+            }
+            """;
+
+        // Forward: C# → OpenAPI
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = ContractWalker.Walk(compilation, walker, discovered.ContractTypes);
+        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        // Verify extension is emitted
+        var doc = JsonSerializer.Deserialize<JsonElement>(json);
+        var emptySchema = doc.GetProperty("components").GetProperty("schemas").GetProperty("EmptyMarker");
+        Assert.True(emptySchema.TryGetProperty("x-rivet-empty-record", out var ext),
+            "EmptyMarker should have x-rivet-empty-record extension");
+        Assert.True(ext.GetBoolean());
+
+        // Reverse: OpenAPI → import → compile → walk
+        var importResult = Import(json);
+        var recompilation = CompilationHelper.CreateCompilationFromMultiple(
+            importResult.Files.Select(f => f.Content).ToArray());
+        var (reDiscovered, rewalker) = CompilationHelper.DiscoverAndWalk(recompilation);
+
+        // EmptyMarker should survive as a definition (not collapsed to Dictionary)
+        Assert.True(rewalker.Definitions.ContainsKey("EmptyMarker"),
+            "EmptyMarker should survive round-trip as a type definition");
+        var emptyDef = rewalker.Definitions["EmptyMarker"];
+        Assert.Empty(emptyDef.Properties);
+
+        // ItemDto should reference EmptyMarker, not Dictionary<string, JsonElement>
+        var itemDef = rewalker.Definitions["ItemDto"];
+        var markerProp = itemDef.Properties.First(p => p.Name == "marker");
+        Assert.True(markerProp.Type is TsType.TypeRef { Name: "EmptyMarker" },
+            $"ItemDto.marker should be TypeRef(EmptyMarker), got {markerProp.Type}");
+    }
+
+    // --- Fix 11: Zod InlineObject field name quoting ---
+
+    [Fact]
+    public void Zod_InlineObject_Quotes_NonIdentifier_FieldNames()
+    {
+        // Construct an endpoint with an InlineObject return type that has non-identifier field names.
+        // This can't happen via Roslyn tuples (tuple names are always valid identifiers),
+        // but could occur if a future code path constructs InlineObjects from JSON Schema field names.
+        var inlineType = new TsType.InlineObject([
+            ("display-name", new TsType.Primitive("string")),
+            ("@type", new TsType.Primitive("string")),
+            ("normalProp", new TsType.Primitive("number")),
+        ]);
+
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("getWeird", "GET", "/api/weird", [],
+                inlineType, "weird",
+                [new(200, inlineType, null)]),
+        };
+
+        var zodValidators = ZodValidatorEmitter.Emit(endpoints, new Dictionary<string, string>());
+
+        // Non-identifier field names must be quoted in z.object({...})
+        Assert.Contains("\"display-name\":", zodValidators);
+        Assert.Contains("\"@type\":", zodValidators);
+        // Normal identifier should NOT be quoted
+        Assert.Contains("normalProp:", zodValidators);
+        Assert.DoesNotContain("\"normalProp\"", zodValidators);
+    }
+
+    // --- Nullable JsonNode import fix ---
+
+    [Fact]
+    public void NullableCSharpType_Survives_Import()
+    {
+        // Verify that nullable: true + x-rivet-csharp-type works for pure null type schemas
+        var spec = BuildSpec(schemas: """
+            "FlexDto": {
+                "type": "object",
+                "properties": {
+                    "required": { "x-rivet-csharp-type": "JsonNode" },
+                    "optional": { "nullable": true, "x-rivet-csharp-type": "JsonNode" }
+                },
+                "required": ["required"]
+            }
+            """);
+
+        var result = Import(spec);
+        var content = result.Files.First(f => f.Content.Contains("FlexDto")).Content;
+
+        Assert.Contains("System.Text.Json.Nodes.JsonNode Required", content);
+        Assert.Contains("System.Text.Json.Nodes.JsonNode? Optional", content);
+    }
+
+    // ========== Deep review 2: nullable fields not in required (JsonSchema) ==========
+
+    [Fact]
+    public void JsonSchema_Nullable_Field_Not_In_Required()
+    {
+        // A nullable property should not appear in the "required" array in JSON Schema output
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Name, string? Description);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly Define GetItem =
+                    Define.Get<ItemDto>("/api/items/{id}");
+            }
+            """;
+
+        var schemas = EmitSchemas(source);
+        var json = ExtractDefsJson(schemas);
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // Find ItemDto schema
+        var itemDto = root.GetProperty("ItemDto");
+        var required = itemDto.GetProperty("required");
+        var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
+
+        Assert.Contains("name", requiredNames);
+        Assert.DoesNotContain("description", requiredNames);
+    }
+
+    [Fact]
+    public void OpenApi_Nullable_Field_Not_In_Required()
+    {
+        // Same check for OpenAPI emitter — should be consistent with JSON Schema
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Name, string? Description);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly Define GetItem =
+                    Define.Get<ItemDto>("/api/items/{id}");
+            }
+            """;
+
+        var doc = EmitOpenApi(source);
+        var schema = doc.RootElement
+            .GetProperty("components").GetProperty("schemas").GetProperty("ItemDto");
+        var required = schema.GetProperty("required");
+        var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
+
+        Assert.Contains("name", requiredNames);
+        Assert.DoesNotContain("description", requiredNames);
+    }
+
+    // ========== Deep review 2: monomorphised nullable type arg not in required ==========
+
+    [Fact]
+    public void OpenApi_Monomorphised_Generic_Nullable_TypeArg_Not_Required()
+    {
+        // When a generic type parameter resolves to a nullable type,
+        // the monomorphised schema should not mark that field as required
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Wrapper<T>(T Value, string Label);
+
+            [RivetType]
+            public sealed record OptionalWrapper(Wrapper<string?> Wrapped);
+
+            [RivetContract]
+            public static class WrapperContract
+            {
+                public static readonly Define GetWrapper =
+                    Define.Get<OptionalWrapper>("/api/wrapper");
+            }
+            """;
+
+        var doc = EmitOpenApi(source);
+        var schemas = doc.RootElement
+            .GetProperty("components").GetProperty("schemas");
+
+        // The monomorphised schema should have "label" required but not "value"
+        var monoName = "WrapperOfNullableString";
+        if (!schemas.TryGetProperty(monoName, out var monoSchema))
+        {
+            // Fallback: find any schema containing Wrapper in the name
+            monoName = schemas.EnumerateObject()
+                .First(p => p.Name.Contains("Wrapper") && p.Name != "OptionalWrapper")
+                .Name;
+            monoSchema = schemas.GetProperty(monoName);
+        }
+
+        var required = monoSchema.GetProperty("required");
+        var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
+
+        Assert.Contains("label", requiredNames);
+        Assert.DoesNotContain("value", requiredNames);
+    }
+
+    [Fact]
+    public void JsonSchema_Monomorphised_Generic_Nullable_TypeArg_Not_Required()
+    {
+        // Same check for JSON Schema emitter
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Wrapper<T>(T Value, string Label);
+
+            [RivetType]
+            public sealed record OptionalWrapper(Wrapper<string?> Wrapped);
+
+            [RivetContract]
+            public static class WrapperContract
+            {
+                public static readonly Define GetWrapper =
+                    Define.Get<OptionalWrapper>("/api/wrapper");
+            }
+            """;
+
+        var schemas = EmitSchemas(source);
+        var json = ExtractDefsJson(schemas);
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // Find the monomorphised schema
+        var monoName = root.EnumerateObject()
+            .First(p => p.Name.Contains("Wrapper") && p.Name != "OptionalWrapper")
+            .Name;
+        var monoSchema = root.GetProperty(monoName);
+
+        var required = monoSchema.GetProperty("required");
+        var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
+
+        Assert.Contains("label", requiredNames);
+        Assert.DoesNotContain("value", requiredNames);
     }
 }

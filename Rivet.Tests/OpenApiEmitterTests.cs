@@ -74,10 +74,12 @@ public sealed class OpenApiEmitterTests
         Assert.Equal("id", idParam.GetProperty("name").GetString());
         Assert.Equal("path", idParam.GetProperty("in").GetString());
         Assert.True(idParam.GetProperty("required").GetBoolean());
+        Assert.Equal("string", idParam.GetProperty("schema").GetProperty("type").GetString());
 
         var statusParam = parameters[1];
         Assert.Equal("status", statusParam.GetProperty("name").GetString());
         Assert.Equal("query", statusParam.GetProperty("in").GetString());
+        Assert.Equal("string", statusParam.GetProperty("schema").GetProperty("type").GetString());
 
         // Response 200
         var resp200 = get.GetProperty("responses").GetProperty("200");
@@ -157,6 +159,12 @@ public sealed class OpenApiEmitterTests
         Assert.True(responses.TryGetProperty("200", out var resp200));
         Assert.True(responses.TryGetProperty("404", out var resp404));
 
+        // 200 response DataType → TaskDto
+        Assert.Equal("#/components/schemas/TaskDto",
+            resp200.GetProperty("content").GetProperty("application/json")
+                .GetProperty("schema").GetProperty("$ref").GetString());
+
+        // 404 response DataType → NotFoundDto
         Assert.Equal("Task not found", resp404.GetProperty("description").GetString());
         Assert.Equal("#/components/schemas/NotFoundDto",
             resp404.GetProperty("content").GetProperty("application/json")
@@ -223,7 +231,18 @@ public sealed class OpenApiEmitterTests
         var schema = multipart.GetProperty("schema");
         Assert.Equal("object", schema.GetProperty("type").GetString());
         Assert.True(schema.GetProperty("properties").TryGetProperty("document", out var fileProp));
+        Assert.Equal("string", fileProp.GetProperty("type").GetString());
         Assert.Equal("binary", fileProp.GetProperty("format").GetString());
+
+        // Response 201 DataType → UploadResult
+        var resp201 = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/files")
+            .GetProperty("post")
+            .GetProperty("responses")
+            .GetProperty("201");
+        Assert.Equal("#/components/schemas/UploadResult",
+            resp201.GetProperty("content").GetProperty("application/json")
+                .GetProperty("schema").GetProperty("$ref").GetString());
     }
 
     [Fact]
@@ -351,16 +370,33 @@ public sealed class OpenApiEmitterTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var json = doc.RootElement.GetRawText();
+        var root = doc.RootElement;
 
-        // No 3.1-style type arrays like ["string", "null"]
-        Assert.DoesNotContain("\"null\"", json);
-        // No 3.1-style { "type": "null" } in oneOf
-        Assert.DoesNotContain("\"type\": \"null\"", json);
         // Version must be 3.0.x
-        Assert.Contains("\"openapi\": \"3.0.3\"", json);
-        // Must use nullable: true instead
-        Assert.Contains("\"nullable\": true", json);
+        Assert.Equal("3.0.3", root.GetProperty("openapi").GetString());
+
+        var personSchema = root.GetProperty("components").GetProperty("schemas").GetProperty("PersonDto");
+        var props = personSchema.GetProperty("properties");
+
+        // Nullable primitive (Bio) → type + nullable: true
+        var bio = props.GetProperty("bio");
+        Assert.Equal("string", bio.GetProperty("type").GetString());
+        Assert.True(bio.GetProperty("nullable").GetBoolean());
+
+        // Nullable primitive (Age) → type + nullable: true
+        var age = props.GetProperty("age");
+        Assert.Equal("integer", age.GetProperty("type").GetString());
+        Assert.True(age.GetProperty("nullable").GetBoolean());
+
+        // Nullable ref (Address) → allOf + nullable: true, no type array
+        var address = props.GetProperty("address");
+        Assert.True(address.GetProperty("nullable").GetBoolean());
+        Assert.True(address.TryGetProperty("allOf", out _), "Nullable ref should use allOf pattern");
+
+        // No 3.1-style type arrays or { "type": "null" } anywhere
+        var json = root.GetRawText();
+        Assert.DoesNotContain("\"null\"", json);
+        Assert.DoesNotContain("\"type\": \"null\"", json);
     }
 
     [Fact]
@@ -957,7 +993,12 @@ public sealed class OpenApiEmitterTests
         Assert.NotNull(queryParam);
         Assert.NotNull(categoryParam);
         Assert.True(queryParam.Value.GetProperty("required").GetBoolean(), "Non-nullable query param should be required");
+        Assert.Equal("string", queryParam.Value.GetProperty("schema").GetProperty("type").GetString());
+
         Assert.False(categoryParam.Value.GetProperty("required").GetBoolean(), "Nullable query param should not be required");
+        Assert.Equal("string", categoryParam.Value.GetProperty("schema").GetProperty("type").GetString());
+        Assert.True(categoryParam.Value.GetProperty("schema").GetProperty("nullable").GetBoolean(),
+            "Nullable query param schema should have nullable: true");
     }
 
     [Fact]
@@ -981,6 +1022,7 @@ public sealed class OpenApiEmitterTests
 
         Assert.True(responses.TryGetProperty("204", out var resp204));
         Assert.Equal("No Content", resp204.GetProperty("description").GetString());
+        Assert.False(resp204.TryGetProperty("content", out _), "204 response should have no content");
     }
 
     [Fact]
@@ -1040,27 +1082,22 @@ public sealed class OpenApiEmitterTests
         var genericWithUnion = new TsType.Generic("Wrapper",
             [new TsType.StringUnion(["A", "B"])]);
         var schema = OpenApiEmitter.MapTsTypeToJsonSchema(genericWithUnion);
-        var json = JsonSerializer.Serialize(schema);
-
-        // The $ref should use the suffix — just verify it doesn't crash and produces a ref
-        Assert.Contains("$ref", json);
-        Assert.Contains("Wrapper_AB", json);
+        var parsed = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(schema));
+        Assert.Equal("#/components/schemas/Wrapper_AB", parsed.GetProperty("$ref").GetString());
 
         // InlineObject inside a generic
         var genericWithInline = new TsType.Generic("Wrapper",
             [new TsType.InlineObject([("key", new TsType.Primitive("string"))])]);
         var schema2 = OpenApiEmitter.MapTsTypeToJsonSchema(genericWithInline);
-        var json2 = JsonSerializer.Serialize(schema2);
-        Assert.Contains("$ref", json2);
-        Assert.Contains("Wrapper_Key", json2);
+        var parsed2 = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(schema2));
+        Assert.Equal("#/components/schemas/Wrapper_Key", parsed2.GetProperty("$ref").GetString());
 
         // Dictionary suffix
         var genericWithDict = new TsType.Generic("Wrapper",
             [new TsType.Dictionary(new TsType.Primitive("string"))]);
         var schema3 = OpenApiEmitter.MapTsTypeToJsonSchema(genericWithDict);
-        var json3 = JsonSerializer.Serialize(schema3);
-        Assert.Contains("$ref", json3);
-        Assert.Contains("Wrapper_RecordString", json3);
+        var parsed3 = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(schema3));
+        Assert.Equal("#/components/schemas/Wrapper_RecordString", parsed3.GetProperty("$ref").GetString());
     }
 
     [Fact]
@@ -1108,6 +1145,16 @@ public sealed class OpenApiEmitterTests
 
         Assert.True(schema.TryGetProperty("categoryId", out var catProp));
         Assert.Equal("number", catProp.GetProperty("type").GetString());
+
+        // Response 201 DataType → UploadResult
+        var resp201 = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/files")
+            .GetProperty("post")
+            .GetProperty("responses")
+            .GetProperty("201");
+        Assert.Equal("#/components/schemas/UploadResult",
+            resp201.GetProperty("content").GetProperty("application/json")
+                .GetProperty("schema").GetProperty("$ref").GetString());
     }
 
     [Fact]
@@ -1186,6 +1233,18 @@ public sealed class OpenApiEmitterTests
         // File properties have x-rivet-file
         var docProp = multipartSchema.GetProperty("properties").GetProperty("document");
         Assert.True(docProp.GetProperty("x-rivet-file").GetBoolean());
+        Assert.Equal("string", docProp.GetProperty("type").GetString());
+        Assert.Equal("binary", docProp.GetProperty("format").GetString());
+
+        // Response 201 DataType → UploadResult
+        var resp201 = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/files")
+            .GetProperty("post")
+            .GetProperty("responses")
+            .GetProperty("201");
+        Assert.Equal("#/components/schemas/UploadResult",
+            resp201.GetProperty("content").GetProperty("application/json")
+                .GetProperty("schema").GetProperty("$ref").GetString());
     }
 
     [Fact]
