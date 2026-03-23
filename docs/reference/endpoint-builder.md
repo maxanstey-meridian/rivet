@@ -24,8 +24,12 @@ All builder methods return the definition for chaining.
 |---|---|
 | `.Returns<T>(statusCode)` | Declare an additional response type for a status code |
 | `.Returns<T>(statusCode, description)` | Same, with a human-readable description |
-| `.Status(code)` | Override the default success status code (default: 200, or 201 for POST) |
-| `.Description(desc)` | Endpoint description, emitted to the OpenAPI spec |
+| `.Returns(statusCode)` | Declare a void error response (no body, e.g. 404, 409) |
+| `.Returns(statusCode, description)` | Same, with a human-readable description |
+| `.Status(code)` | Override the default success status code (default: 200, 201 for POST, 204 for DELETE) |
+| `.Summary(text)` | Short one-line summary, emitted to the OpenAPI `summary` field |
+| `.Description(desc)` | Detailed description, emitted to the OpenAPI `description` field |
+| `.FormEncoded()` | Mark the request body as `application/x-www-form-urlencoded` instead of JSON |
 | `.Anonymous()` | Marks endpoint as not requiring authentication |
 | `.Secure(scheme)` | Sets a named security scheme for the endpoint |
 | `.Accepts<T>()` | Convert void definition to input-only (accepts body, returns void) |

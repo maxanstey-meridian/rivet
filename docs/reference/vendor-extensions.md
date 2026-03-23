@@ -36,26 +36,26 @@ key as the name.
 
 **Type:** `string`
 
-**Purpose:** Preserves the original C# record name for file upload input types.
+**Purpose:** Preserves the original C# record name for file upload input types. Used by the importer as a fallback when the multipart schema is inlined rather than using `$ref`.
+
+**Current emitter behaviour:** When the input type has a name (i.e., it's a defined record), the emitter uses `$ref` to the component schema instead of inlining. The `x-rivet-input-type` extension is no longer emitted by the current emitter, but the importer still reads it for backwards compatibility with older specs.
 
 ```json
 {
-  "schema": {
-    "type": "object",
-    "x-rivet-input-type": "UploadInput",
-    "properties": { ... }
+  "requestBody": {
+    "content": {
+      "multipart/form-data": {
+        "schema": { "$ref": "#/components/schemas/UploadInput" }
+      }
+    }
   }
 }
 ```
 
-**Emitter:** Added by `OpenApiEmitter.BuildOperation` when `ep.InputTypeName` is set. `ContractWalker.BuildParams`
-populates `InputTypeName` from `tInput.Name` when the input record contains `IFormFile` properties.
-
 **Importer:** Read by `ContractBuilder.ResolveInputType()` — used as the context name for
-`SchemaMapper.ResolveCSharpType()` instead of the default `{fieldName}Request`.
+`SchemaMapper.ResolveCSharpType()` instead of the default `{fieldName}Request`. When the schema is a `$ref`, the type name comes from the ref path directly.
 
-**Fallback:** Without this extension, the importer synthesizes a name like `UploadRequest` from the operation's field
-name.
+**Fallback:** Without this extension (and without a `$ref`), the importer synthesizes a name like `UploadRequest` from the operation's field name.
 
 ## `x-rivet-file`
 
@@ -166,4 +166,4 @@ default format-based import would lose information.
 extension value is used as the C# type directly.
 
 **Fallback:** Without this extension (e.g. third-party specs), the importer uses format-based defaults: `int32` → `int`,
-`int64` → `long`, `date-time` → `DateTime`, `number` → `double`.
+`int64` → `long`, bare `integer` (no format) → `long`, `date-time` → `DateTime`, `number` → `double`.

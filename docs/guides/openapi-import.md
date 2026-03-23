@@ -120,11 +120,11 @@ public static class MembersContract
 {
     public static readonly RouteDefinition<List<MemberDto>> List =
         Define.Get<List<MemberDto>>("/api/members")
-            .Description("List all team members");
+            .Summary("List all team members");
 
     public static readonly RouteDefinition<GetByIdInput, MemberDto> GetById =
         Define.Get<GetByIdInput, MemberDto>("/api/members/{id}")
-            .Description("Get a member by ID")
+            .Summary("Get a member by ID")
             .Returns<ErrorDto>(404, "Member not found");
 }
 ```
@@ -217,11 +217,11 @@ output/
 
 ### What it generates
 
-- **Sealed records** for object schemas
-- **Input records** for path/query parameters (preserving types — `int`, `Guid`, etc.)
-- **Enums** for string enums
+- **Sealed records** for object schemas, with metadata attributes (`[RivetDescription]`, `[RivetConstraints]`, `[RivetDefault]`, `[RivetExample]`, `[RivetReadOnly]`, `[RivetWriteOnly]`, `[RivetFormat]`, `[RivetOptional]`) preserving schema annotations
+- **Input records** for path/query/header/cookie parameters (preserving types — `int`, `Guid`, etc.)
+- **Enums** for string enums, with `[JsonStringEnumMemberName]` attributes to preserve original member names that differ from PascalCase
 - **Branded value objects** for string types with semantic formats (`email`, `uri`, etc.)
-- **Static contract classes** with `RouteDefinition<T>` builder chains
+- **Static contract classes** with `RouteDefinition<T>` builder chains — `.Summary()` for OpenAPI `summary`, `.Description()` for `description`, `.FormEncoded()` for `application/x-www-form-urlencoded` bodies
 - Operations grouped by tag into separate contract classes
 
 ## Supported schema subset

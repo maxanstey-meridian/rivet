@@ -16,6 +16,9 @@
 | `DateTime` | `string` | `type: string, format: date-time` |
 | `DateTimeOffset` | `string` | `type: string, format: date-time` |
 | `DateOnly` | `string` | `type: string, format: date` |
+| `TimeOnly` | `string` | `type: string, format: time` |
+| `Uri` | `string` | `type: string, format: uri` |
+| `IFormFile` | `File` | `type: string, format: binary` (mapped as scalar primitive) |
 | `T?` (nullable value/ref) | `T \| null` | `nullable: true` |
 | `List<T>`, `T[]`, `IEnumerable<T>`, `IReadOnlyList<T>` | `T[]` | `type: array, items: {...}` |
 | `Dictionary<string, T>`, `IReadOnlyDictionary<string, T>` | `Record<string, T>` | `type: object, additionalProperties: {...}` |
@@ -65,7 +68,8 @@ Multi-property records are emitted as regular object types: `Money(decimal Amoun
 | `string` + `format: guid` / `uuid` | `Guid` |
 | `string` + `format: email`, `uri`, etc. | Branded value object |
 | `string` + `enum: [...]` | `enum` |
-| `integer` / `integer` + `format: int32` | `int` |
+| `integer` + `format: int32` | `int` |
+| `integer` (no format) | `long` (safe default to avoid narrowing) |
 | `integer` + `format: int64` | `long` |
 | `number` / `number` + `format: double` | `double` |
 | `number` + `format: float` | `float` |
@@ -73,6 +77,17 @@ Multi-property records are emitted as regular object types: `Money(decimal Amoun
 | `boolean` | `bool` |
 | Any type + `x-rivet-csharp-type` | Exact C# type (`uint`, `DateTimeOffset`, `short`, etc.) |
 | Property with `deprecated: true` | `[Obsolete]` attribute |
+| Property with `description` | `[RivetDescription]` attribute |
+| Property with `default` | `[RivetDefault]` attribute (JSON literal) |
+| Property with `example` | `[RivetExample]` attribute (JSON literal) |
+| Property with `readOnly: true` | `[RivetReadOnly]` attribute |
+| Property with `writeOnly: true` | `[RivetWriteOnly]` attribute |
+| Property with constraints (`minLength`, `pattern`, etc.) | `[RivetConstraints]` attribute |
+| Property not in `required` array | `[RivetOptional]` attribute |
+| String property with custom `format` | `[RivetFormat]` attribute |
+| Schema with `description` | `[RivetDescription]` on the record |
+| `enum` without explicit `type` (all string values) | `enum` (type inferred from values) |
+| Enum members with non-PascalCase names | `[JsonStringEnumMemberName]` to preserve original |
 | `array` + `items` | `List<T>` |
 | `object` + non-empty `properties` | `sealed record` |
 | `object` + `additionalProperties` | `Dictionary<string, T>` |

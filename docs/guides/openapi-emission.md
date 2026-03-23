@@ -35,12 +35,13 @@ On contract endpoints, use `.Anonymous()` and `.Secure(scheme)` to control per-e
 ```csharp
 public static readonly RouteDefinition<List<MemberDto>> List =
     Define.Get<List<MemberDto>>("/api/members")
-        .Description("List all team members")
+        .Summary("List all team members")
         .Anonymous();  // no auth required
 
 public static readonly RouteDefinition<InviteMemberRequest, InviteMemberResponse> Invite =
     Define.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
-        .Description("Invite a new team member")
+        .Summary("Invite a new team member")
+        .Description("Creates a new member invitation and sends an email notification")
         .Secure("admin");  // requires admin scheme
 ```
 
@@ -51,15 +52,17 @@ These are emitted as `security: []` (anonymous) or `security: [{ admin: [] }]` o
 The generated `openapi.json` includes:
 
 - **Paths** — one operation per endpoint, with parameters, request bodies, and response schemas
-- **Schemas** — all C# types referenced by endpoints, under `#/components/schemas`
+- **Schemas** — all C# types marked with `[RivetType]` or referenced by endpoints, under `#/components/schemas`
 - **Security schemes** — if `--security` is specified
-- **Descriptions** — from `.Description()` on contract endpoints
+- **Summary / Description** — `.Summary()` emits to the operation `summary` field, `.Description()` to `description`
+- **Property metadata** — `[RivetDescription]`, `[RivetConstraints]`, `[RivetDefault]`, `[RivetExample]`, `[RivetReadOnly]`, `[RivetWriteOnly]` attributes are emitted on property schemas
+- **Type descriptions** — `[RivetDescription]` on records emits `description` on the schema object
 
 ### Type representation
 
 - **Generic types** are monomorphised: `PagedResult<TaskDto>` becomes `PagedResult_TaskDto` in the schema, with an `x-rivet-generic` extension that allows the [importer](/guides/openapi-import) to reconstruct the generic template
 - **Branded value objects** (single-property records) are emitted as component schemas with an `x-rivet-brand` extension (e.g., `Email` becomes `{ "type": "string", "x-rivet-brand": "Email" }`), and references use `$ref`
-- **File upload records** with `IFormFile` properties produce `multipart/form-data` schemas with `x-rivet-input-type` (preserving the record name) and `x-rivet-file` markers on file properties
+- **File upload records** with `IFormFile` properties produce `multipart/form-data` schemas using `$ref` to the component schema, with `x-rivet-file` markers on file properties
 - **Enums** are `type: string` with `enum: [...]`
 - **Nullable types** use `nullable: true`
 

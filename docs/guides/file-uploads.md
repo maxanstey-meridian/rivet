@@ -26,6 +26,25 @@ export async function attach(id: string, file: File, opts?: { unwrap?: boolean }
 }
 ```
 
+## `IFormFile` in contract records
+
+`IFormFile` is a mapped scalar type in Rivet. You can use it as a property in `[RivetType]` records for multipart upload contracts:
+
+```csharp
+[RivetType]
+public sealed record UploadInput(IFormFile Document, string Title);
+
+[RivetContract]
+public static class FilesContract
+{
+    public static readonly RouteDefinition<UploadInput, UploadResult> Upload =
+        Define.Post<UploadInput, UploadResult>("/api/files")
+            .AcceptsFile();
+}
+```
+
+The emitter produces a `multipart/form-data` request body with `$ref` to the component schema. File properties are marked with `format: binary` and `x-rivet-file: true`.
+
 ## Limitations
 
 - **Single file only** — `IFormFileCollection` and `List<IFormFile>` are not supported

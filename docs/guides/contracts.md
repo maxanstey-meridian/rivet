@@ -17,27 +17,27 @@ public static class MembersContract
     // GET /api/members → List<MemberDto>
     public static readonly RouteDefinition<List<MemberDto>> List =
         Define.Get<List<MemberDto>>("/api/members")
-            .Description("List all team members");
+            .Summary("List all team members");
 
-    // POST /api/members — typed input + output, 201 default, 422 on validation failure
+    // POST /api/members — typed input + output, 201 is default for POST, 422 on validation failure
     public static readonly RouteDefinition<InviteMemberRequest, InviteMemberResponse> Invite =
         Define.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
-            .Description("Invite a new team member")
-            .Status(201)
+            .Summary("Invite a new team member")
             .Returns<ValidationErrorDto>(422, "Validation failed")
             .Secure("admin");
 
-    // DELETE /api/members/{id} — no typed I/O, 404 response declared
+    // DELETE /api/members/{id} — no typed I/O, defaults to 204, 404 response declared
     public static readonly RouteDefinition Remove =
         Define.Delete("/api/members/{id}")
-            .Description("Remove a team member")
+            .Summary("Remove a team member")
             .Returns<NotFoundDto>(404, "Member not found")
+            .Returns(409)  // void error response — no body
             .Secure("admin");
 
     // GET /api/health — no auth required
     public static readonly RouteDefinition Health =
         Define.Get("/api/health")
-            .Description("Health check")
+            .Summary("Health check")
             .Anonymous();
 }
 ```
@@ -57,7 +57,13 @@ export type InviteResult =
 export function invite(body: InviteMemberRequest): Promise<InviteMemberResponse>;
 export function invite(body: InviteMemberRequest, opts: { unwrap: false }): Promise<InviteResult>;
 
+export type RemoveResult =
+  | { status: 204; data: void; response: Response }
+  | { status: 404; data: NotFoundDto; response: Response }
+  | { status: 409; data: void; response: Response };
+
 export function remove(id: string): Promise<void>;
+export function remove(id: string, opts: { unwrap: false }): Promise<RemoveResult>;
 
 export function health(): Promise<void>;
 ```
