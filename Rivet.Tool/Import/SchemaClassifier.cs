@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.OpenApi;
@@ -17,9 +18,18 @@ internal static class SchemaClassifier
 
     internal static bool IsStringEnum(IOpenApiSchema schema)
     {
-        return schema.Type.HasValue
-            && schema.Type.Value.HasFlag(JsonSchemaType.String)
-            && schema.Enum is { Count: > 0 };
+        if (schema.Enum is not { Count: > 0 })
+            return false;
+
+        // Explicit type: string
+        if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.String))
+            return true;
+
+        // No type declared — infer from values (common in real-world specs)
+        if (!schema.Type.HasValue)
+            return schema.Enum.All(v => v is null || v is JsonNode node && node.GetValueKind() == JsonValueKind.String);
+
+        return false;
     }
 
     internal static bool IsBrand(IOpenApiSchema schema)
@@ -164,6 +174,7 @@ internal static class SchemaClassifier
     {
         return schema.Format switch
         {
+            "int32" => "int",
             "int64" => "long",
             "int16" => "short",
             "uint16" => "ushort",
@@ -171,7 +182,7 @@ internal static class SchemaClassifier
             "uint8" => "byte",
             "uint32" => "uint",
             "uint64" => "ulong",
-            _ => "int",
+            _ => "long", // bare integer (no format) → long to avoid narrowing
         };
     }
 
@@ -319,7 +330,7 @@ internal static class SchemaClassifier
     internal static GeneratedEnum MapEnum(string name, IOpenApiSchema schema)
     {
         var seen = new Dictionary<string, int>();
-        var members = new List<string>();
+        var members = new List<GeneratedEnumMember>();
         foreach (var member in schema.Enum!)
         {
             if (member is null)
@@ -327,17 +338,21 @@ internal static class SchemaClassifier
                 continue;
             }
 
-            var sanitized = Naming.ToPascalCaseFromSegments(member.ToString());
+            var original = member.ToString();
+            var sanitized = Naming.ToPascalCaseFromSegments(original);
             if (seen.TryGetValue(sanitized, out var count))
             {
                 count++;
                 seen[sanitized] = count;
-                members.Add($"{sanitized}_{count}");
+                var deduped = $"{sanitized}_{count}";
+                members.Add(new GeneratedEnumMember(deduped, original));
             }
             else
             {
                 seen[sanitized] = 1;
-                members.Add(sanitized);
+                // Only store original name if it differs from the C# name
+                var originalName = string.Equals(sanitized, original, StringComparison.Ordinal) ? null : original;
+                members.Add(new GeneratedEnumMember(sanitized, originalName));
             }
         }
 

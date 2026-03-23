@@ -35,6 +35,11 @@ internal sealed class SchemaMapper
     public void AddExtraRecord(GeneratedRecord record) => _ctx.ExtraRecords.Add(record);
 
     /// <summary>
+    /// Check if a type name was already mapped from components/schemas.
+    /// </summary>
+    public bool HasMappedSchema(string name) => _ctx.SchemaNameMap.ContainsValue(name);
+
+    /// <summary>
     /// Walk #/components/schemas and return C# type representations.
     /// </summary>
     public SchemaMapResult MapSchemas(IDictionary<string, IOpenApiSchema> schemas)
@@ -113,6 +118,8 @@ internal sealed class SchemaMapper
                 continue;
             }
 
+            var schemaDescription = string.IsNullOrEmpty(schema.Description) ? null : schema.Description;
+
             if (schema.AllOf is { Count: > 0 })
             {
                 var record = _synth.ResolveAllOfRecord(name, schema.AllOf);
@@ -124,6 +131,8 @@ internal sealed class SchemaMapper
                     continue;
                 }
 
+                if (schemaDescription is not null)
+                    record = record with { Description = schemaDescription };
                 records.Add(record);
                 continue;
             }
@@ -136,13 +145,19 @@ internal sealed class SchemaMapper
                     continue;
                 }
 
-                records.Add(_synth.ResolveUnionRecord(name, schema.OneOf));
+                var unionRecord = _synth.ResolveUnionRecord(name, schema.OneOf);
+                if (schemaDescription is not null)
+                    unionRecord = unionRecord with { Description = schemaDescription };
+                records.Add(unionRecord);
                 continue;
             }
 
             if (schema.AnyOf is { Count: > 1 })
             {
-                records.Add(_synth.ResolveUnionRecord(name, schema.AnyOf));
+                var anyOfRecord = _synth.ResolveUnionRecord(name, schema.AnyOf);
+                if (schemaDescription is not null)
+                    anyOfRecord = anyOfRecord with { Description = schemaDescription };
+                records.Add(anyOfRecord);
                 continue;
             }
 

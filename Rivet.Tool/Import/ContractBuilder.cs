@@ -63,11 +63,12 @@ internal static class ContractBuilder
         var operationId = operation.OperationId;
         var fieldName = DeriveFieldName(operationId, httpMethod, route, tag);
         var method = Naming.ToPascalCaseFromSegments(httpMethod);
-        var description = operation.Summary;
+        var summary = string.IsNullOrEmpty(operation.Summary) ? null : operation.Summary;
+        var description = string.IsNullOrEmpty(operation.Description) ? null : operation.Description;
         var unsupported = new List<string>();
 
         // Resolve input type (requestBody — $ref resolved by library)
-        var inputType = ResolveInputType(operation, mapper, fieldName, unsupported);
+        var (inputType, isFormEncoded) = ResolveInputType(operation, mapper, fieldName, unsupported);
 
         // If no body input, synthesize an input record from path/query parameters
         if (inputType is null)
@@ -86,28 +87,42 @@ internal static class ContractBuilder
 
         return new GeneratedEndpointField(
             fieldName, method, route, inputType, outputType,
-            description, successStatus, errorResponses,
-            isAnonymous, securityScheme, unsupported, fileContentType);
+            summary, description, successStatus, errorResponses,
+            isAnonymous, securityScheme, unsupported, fileContentType, isFormEncoded);
     }
 
-    private static string? ResolveInputType(
+    private static (string? InputType, bool IsFormEncoded) ResolveInputType(
         OpenApiOperation operation, SchemaMapper mapper, string fieldName, List<string> unsupported)
     {
         var content = operation.RequestBody?.Content;
         if (content is null)
         {
-            return null;
+            return (null, false);
         }
 
-        // Try content types in priority order
-        if (TryGetSchemaForContentType(content, "application/json", out var schema)
-            || TryGetSchemaForContentType(content, "application/x-www-form-urlencoded", out schema)
-            || TryGetSchemaForContentType(content, "multipart/form-data", out schema)
+        // Try content types in priority order, tracking which one matched
+        IOpenApiSchema? schema = null;
+        var isFormEncoded = false;
+
+        if (TryGetSchemaForContentType(content, "application/json", out schema))
+        {
+            // JSON — default
+        }
+        else if (TryGetSchemaForContentType(content, "application/x-www-form-urlencoded", out schema))
+        {
+            isFormEncoded = true;
+        }
+        else if (TryGetSchemaForContentType(content, "multipart/form-data", out schema)
             || TryGetSchemaForContentType(content, "*/*", out schema))
         {
+            // multipart or wildcard — not form-encoded
+        }
+
+        if (schema is not null)
+        {
             // x-rivet-input-type preserves the original record name through round-trips
-            var context = GetExtensionString(schema!, "x-rivet-input-type") ?? $"{fieldName}Request";
-            return mapper.ResolveCSharpType(schema!, context);
+            var context = GetExtensionString(schema, "x-rivet-input-type") ?? $"{fieldName}Request";
+            return (mapper.ResolveCSharpType(schema, context), isFormEncoded);
         }
 
         // Fallback: try binary or text content types with a schema
@@ -117,13 +132,13 @@ internal static class ContractBuilder
             || k.StartsWith("application/x-", StringComparison.OrdinalIgnoreCase));
         if (fallbackType is not null && TryGetSchemaForContentType(content, fallbackType, out schema))
         {
-            return mapper.ResolveCSharpType(schema!, $"{fieldName}Request");
+            return (mapper.ResolveCSharpType(schema!, $"{fieldName}Request"), false);
         }
 
         // Request body exists but uses unsupported content type(s)
         var contentTypes = string.Join(", ", content.Keys);
         unsupported.Add($"body content-type={contentTypes}");
-        return null;
+        return (null, false);
     }
 
     private static string? ResolveParamInputType(
@@ -138,7 +153,8 @@ internal static class ContractBuilder
 
         foreach (var param in operation.Parameters)
         {
-            if (param.In is not (ParameterLocation.Path or ParameterLocation.Query))
+            if (param.In is not (ParameterLocation.Path or ParameterLocation.Query
+                or ParameterLocation.Header or ParameterLocation.Cookie))
             {
                 continue;
             }
@@ -166,7 +182,13 @@ internal static class ContractBuilder
         }
 
         var recordName = $"{fieldName}Input";
-        mapper.AddExtraRecord(new GeneratedRecord(recordName, SchemaClassifier.DeduplicateProperties(properties)));
+
+        // If a schema with this name was already mapped from components/schemas, reuse it
+        if (!mapper.HasMappedSchema(recordName))
+        {
+            mapper.AddExtraRecord(new GeneratedRecord(recordName, SchemaClassifier.DeduplicateProperties(properties)));
+        }
+
         return recordName;
     }
 
@@ -258,10 +280,7 @@ internal static class ContractBuilder
             }
         }
 
-        // Only emit .Status() if non-200
-        var statusOverride = successCode != 200 ? successCode : null;
-
-        return (outputType, statusOverride, fileContentType);
+        return (outputType, successCode, fileContentType);
     }
 
     private static IReadOnlyList<GeneratedErrorResponse> ResolveErrorResponses(
@@ -317,7 +336,12 @@ internal static class ContractBuilder
                     unsupported.Add($"error status={code} content-type={contentTypes}");
                 }
             }
-            // Responses with no content block at all are intentionally void — not unsupported
+            else if (!errors.Any(e => e.StatusCode == code))
+            {
+                // Void error response (no content) — preserve the status code and description
+                var description = string.IsNullOrEmpty(response.Description) ? null : response.Description;
+                errors.Add(new GeneratedErrorResponse(code, null, description));
+            }
         }
 
         return errors;

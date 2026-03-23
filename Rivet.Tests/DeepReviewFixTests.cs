@@ -248,14 +248,22 @@ public sealed class DeepReviewFixTests
             """;
 
         using var doc = EmitOpenApi(source);
+
+        // Multipart with named input type emits $ref to component schema
         var multipart = doc.RootElement
             .GetProperty("paths").GetProperty("/api/files")
             .GetProperty("post").GetProperty("requestBody")
             .GetProperty("content").GetProperty("multipart/form-data")
             .GetProperty("schema");
+        Assert.True(multipart.TryGetProperty("$ref", out var refVal),
+            "Named multipart input should emit as $ref");
+        Assert.Equal("#/components/schemas/UploadInput", refVal.GetString());
 
-        Assert.True(multipart.TryGetProperty("required", out var required),
-            "Multipart schema should include a 'required' array");
+        // The component schema has the required array
+        var uploadSchema = doc.RootElement
+            .GetProperty("components").GetProperty("schemas").GetProperty("UploadInput");
+        Assert.True(uploadSchema.TryGetProperty("required", out var required),
+            "UploadInput schema should include a 'required' array");
 
         var requiredFields = required.EnumerateArray().Select(e => e.GetString()).ToList();
         Assert.Contains("document", requiredFields);
@@ -433,7 +441,7 @@ public sealed class DeepReviewFixTests
 
         // Should emit a result DU type
         Assert.Contains("export type DeleteItemResult =", client);
-        Assert.Contains("{ status: 200; data: void; response: Response }", client);
+        Assert.Contains("{ status: 204; data: void; response: Response }", client);
         Assert.Contains("{ status: 404; data: NotFoundDto; response: Response }", client);
 
         // Should be async (needs await for validation)
@@ -1178,12 +1186,13 @@ public sealed class DeepReviewFixTests
         Assert.Contains("System.Text.Json.Nodes.JsonNode? Optional", content);
     }
 
-    // ========== Deep review 2: nullable fields not in required (JsonSchema) ==========
+    // ========== Deep review 2: nullable fields ARE required (positional params are required) ==========
 
     [Fact]
-    public void JsonSchema_Nullable_Field_Not_In_Required()
+    public void JsonSchema_Nullable_Field_Is_Required()
     {
-        // A nullable property should not appear in the "required" array in JSON Schema output
+        // A nullable positional parameter is required (must be present) but nullable (value can be null).
+        // OpenAPI explicitly supports required + nullable.
         var source = """
             using Rivet;
 
@@ -1205,17 +1214,16 @@ public sealed class DeepReviewFixTests
         var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
-        // Find ItemDto schema
         var itemDto = root.GetProperty("ItemDto");
         var required = itemDto.GetProperty("required");
         var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
 
         Assert.Contains("name", requiredNames);
-        Assert.DoesNotContain("description", requiredNames);
+        Assert.Contains("description", requiredNames);
     }
 
     [Fact]
-    public void OpenApi_Nullable_Field_Not_In_Required()
+    public void OpenApi_Nullable_Field_Is_Required()
     {
         // Same check for OpenAPI emitter — should be consistent with JSON Schema
         var source = """
@@ -1241,13 +1249,13 @@ public sealed class DeepReviewFixTests
         var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
 
         Assert.Contains("name", requiredNames);
-        Assert.DoesNotContain("description", requiredNames);
+        Assert.Contains("description", requiredNames);
     }
 
-    // ========== Deep review 2: monomorphised nullable type arg not in required ==========
+    // ========== Deep review 2: monomorphised nullable type arg IS required ==========
 
     [Fact]
-    public void OpenApi_Monomorphised_Generic_Nullable_TypeArg_Not_Required()
+    public void OpenApi_Monomorphised_Generic_Nullable_TypeArg_Is_Required()
     {
         // When a generic type parameter resolves to a nullable type,
         // the monomorphised schema should not mark that field as required
@@ -1274,11 +1282,10 @@ public sealed class DeepReviewFixTests
         var schemas = doc.RootElement
             .GetProperty("components").GetProperty("schemas");
 
-        // The monomorphised schema should have "label" required but not "value"
+        // Both fields are required — Value is nullable but still a required constructor param
         var monoName = "WrapperOfNullableString";
         if (!schemas.TryGetProperty(monoName, out var monoSchema))
         {
-            // Fallback: find any schema containing Wrapper in the name
             monoName = schemas.EnumerateObject()
                 .First(p => p.Name.Contains("Wrapper") && p.Name != "OptionalWrapper")
                 .Name;
@@ -1289,11 +1296,11 @@ public sealed class DeepReviewFixTests
         var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
 
         Assert.Contains("label", requiredNames);
-        Assert.DoesNotContain("value", requiredNames);
+        Assert.Contains("value", requiredNames);
     }
 
     [Fact]
-    public void JsonSchema_Monomorphised_Generic_Nullable_TypeArg_Not_Required()
+    public void JsonSchema_Monomorphised_Generic_Nullable_TypeArg_Is_Required()
     {
         // Same check for JSON Schema emitter
         var source = """
@@ -1320,7 +1327,6 @@ public sealed class DeepReviewFixTests
         var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
-        // Find the monomorphised schema
         var monoName = root.EnumerateObject()
             .First(p => p.Name.Contains("Wrapper") && p.Name != "OptionalWrapper")
             .Name;
@@ -1330,6 +1336,6 @@ public sealed class DeepReviewFixTests
         var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
 
         Assert.Contains("label", requiredNames);
-        Assert.DoesNotContain("value", requiredNames);
+        Assert.Contains("value", requiredNames);
     }
 }

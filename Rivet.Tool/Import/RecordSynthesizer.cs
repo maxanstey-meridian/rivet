@@ -1,4 +1,5 @@
 using Microsoft.OpenApi;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Import;
 
@@ -124,7 +125,38 @@ internal sealed class RecordSynthesizer(
                 }
 
                 var isDeprecated = propSchema.Deprecated;
-                properties.Add(new RecordProperty(propName, csharpType, isRequired, isDeprecated));
+
+                // Preserve custom string format (uri-template, currency, etc.)
+                string? format = null;
+                if (csharpType is "string" or "string?" && propSchema.Format is not null)
+                {
+                    format = propSchema.Format;
+                }
+
+                // Preserve default value
+                string? defaultValue = null;
+                if (propSchema.Default is not null)
+                {
+                    defaultValue = propSchema.Default.ToJsonString();
+                }
+
+                // Preserve constraints
+                var constraints = ExtractConstraints(propSchema);
+
+                // Preserve description, example, readOnly, writeOnly
+                var description = string.IsNullOrEmpty(propSchema.Description) ? null : propSchema.Description;
+
+                string? example = null;
+                if (propSchema.Example is not null)
+                {
+                    example = propSchema.Example.ToJsonString();
+                }
+
+                var isReadOnly = propSchema.ReadOnly;
+                var isWriteOnly = propSchema.WriteOnly;
+
+                properties.Add(new RecordProperty(propName, csharpType, isRequired, isDeprecated, format, defaultValue, constraints,
+                    description, example, isReadOnly, isWriteOnly));
             }
         }
 
@@ -161,8 +193,9 @@ internal sealed class RecordSynthesizer(
         }
 
         var properties = ExtractProperties(schema, name);
+        var description = string.IsNullOrEmpty(schema.Description) ? null : schema.Description;
         ctx.Resolving.Remove(name);
-        return new GeneratedRecord(name, properties);
+        return new GeneratedRecord(name, properties, Description: description);
     }
 
     public GeneratedRecord? BuildGenericTemplateRecord(
@@ -199,6 +232,24 @@ internal sealed class RecordSynthesizer(
         }
 
         return new GeneratedRecord(templateName, templateProps, info.TypeParams);
+    }
+
+    private static TsPropertyConstraints? ExtractConstraints(IOpenApiSchema schema)
+    {
+        var c = new TsPropertyConstraints(
+            MinLength: schema.MinLength.HasValue ? (int)schema.MinLength.Value : null,
+            MaxLength: schema.MaxLength.HasValue ? (int)schema.MaxLength.Value : null,
+            Pattern: schema.Pattern,
+            Minimum: double.TryParse(schema.Minimum?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var min) ? min : null,
+            Maximum: double.TryParse(schema.Maximum?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var max) ? max : null,
+            ExclusiveMinimum: double.TryParse(schema.ExclusiveMinimum?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var exMin) ? exMin : null,
+            ExclusiveMaximum: double.TryParse(schema.ExclusiveMaximum?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var exMax) ? exMax : null,
+            MultipleOf: double.TryParse(schema.MultipleOf?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mulOf) ? mulOf : null,
+            MinItems: schema.MinItems.HasValue ? (int)schema.MinItems.Value : null,
+            MaxItems: schema.MaxItems.HasValue ? (int)schema.MaxItems.Value : null,
+            UniqueItems: schema.UniqueItems == true ? true : null);
+
+        return c.HasAny ? c : null;
     }
 
     private string SanitizeName(string name)

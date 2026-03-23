@@ -29,7 +29,7 @@ public sealed class OpenApiImporterTests
         var content = CompilationHelper.FindFile(result, "TestDto.cs");
 
         Assert.Contains("string Name", content);
-        Assert.Contains("int Count", content);
+        Assert.Contains("long Count", content);
         Assert.Contains("long BigCount", content);
         Assert.Contains("double Score", content);
         Assert.Contains("float Rating", content);
@@ -286,7 +286,7 @@ public sealed class OpenApiImporterTests
         Assert.Contains("public static class TasksContract", content);
         Assert.Contains("public static readonly RouteDefinition<TaskDto> List", content);
         Assert.Contains("Define.Get<TaskDto>(\"/api/tasks\")", content);
-        Assert.Contains(".Description(\"List all tasks\")", content);
+        Assert.Contains(".Summary(\"List all tasks\")", content);
     }
 
     [Fact]
@@ -336,7 +336,8 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains("RouteDefinition<CreateTaskRequest, TaskDto> CreateTask", content);
         Assert.Contains("Define.Post<CreateTaskRequest, TaskDto>(\"/api/tasks\")", content);
-        Assert.Contains(".Status(201)", content);
+        // 201 is the default for POST — no .Status() emitted
+        Assert.DoesNotContain(".Status(", content);
     }
 
     [Fact]
@@ -405,7 +406,8 @@ public sealed class OpenApiImporterTests
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
         Assert.Contains("public static readonly RouteDefinition DeleteTask", content);
         Assert.Contains("Define.Delete(\"/api/tasks/{id}\")", content);
-        Assert.Contains(".Status(204)", content);
+        // 204 is the default for DELETE — no .Status() emitted
+        Assert.DoesNotContain(".Status(", content);
     }
 
     [Fact]
@@ -540,8 +542,8 @@ public sealed class OpenApiImporterTests
         Assert.True(walker.Definitions.ContainsKey("HealthDto"));
 
         Assert.True(walker.Enums.ContainsKey("Priority"));
-        Assert.Contains("Low", walker.Enums["Priority"].Members);
-        Assert.Contains("Critical", walker.Enums["Priority"].Members);
+        Assert.Contains("low", walker.Enums["Priority"].Members);
+        Assert.Contains("critical", walker.Enums["Priority"].Members);
 
         Assert.True(walker.Brands.ContainsKey("Email"));
         Assert.True(walker.Brands.ContainsKey("Website"));
@@ -600,7 +602,7 @@ public sealed class OpenApiImporterTests
         Assert.Contains("Priority Priority", content);
         Assert.Contains("double Score", content);
         Assert.Contains("float Rating", content);
-        Assert.Contains("int ViewCount", content);
+        Assert.Contains("long ViewCount", content);
         Assert.Contains("long TotalBytes", content);
         Assert.Contains("bool IsArchived", content);
         Assert.Contains("DateTime CreatedAt", content);
@@ -755,8 +757,8 @@ public sealed class OpenApiImporterTests
         // Tasks list has global security → .Secure("bearer")
         Assert.Contains(".Secure(\"bearer\")", CompilationHelper.FindFile(result, "TasksContract.cs"));
 
-        // Descriptions present
-        Assert.Contains(".Description(\"List all tasks\")", CompilationHelper.FindFile(result, "TasksContract.cs"));
+        // Summary present
+        Assert.Contains(".Summary(\"List all tasks\")", CompilationHelper.FindFile(result, "TasksContract.cs"));
     }
 
     // ========== Union ref name sanitization ==========
@@ -1818,4 +1820,574 @@ public sealed class OpenApiImporterTests
         Assert.Contains("Define.Post<CreateRequest, ItemDto>", contract);
     }
 
+    // ========== Header/Cookie parameter synthesis ==========
+
+    [Fact]
+    public void Header_Parameter_Included_In_Synthesized_Input_Record()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ItemDto": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" }
+                    },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "ListItems",
+                        "parameters": [
+                            {
+                                "name": "X-Tenant-Id",
+                                "in": "header",
+                                "required": true,
+                                "schema": { "type": "string" }
+                            },
+                            {
+                                "name": "X-Trace-Id",
+                                "in": "header",
+                                "required": false,
+                                "schema": { "type": "string" }
+                            }
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "array",
+                                            "items": { "$ref": "#/components/schemas/ItemDto" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var inputContent = CompilationHelper.FindFile(result, "ListItemsInput.cs");
+
+        Assert.Contains("string XTenantId", inputContent);
+        Assert.Contains("string? XTraceId", inputContent);
+    }
+
+    [Fact]
+    public void Cookie_Parameter_Included_In_Synthesized_Input_Record()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ProfileDto": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" }
+                    },
+                    "required": ["name"]
+                }
+                """,
+            paths: """
+                "/api/profile": {
+                    "get": {
+                        "operationId": "GetProfile",
+                        "parameters": [
+                            {
+                                "name": "session_id",
+                                "in": "cookie",
+                                "required": true,
+                                "schema": { "type": "string" }
+                            }
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ProfileDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var inputContent = CompilationHelper.FindFile(result, "GetProfileInput.cs");
+
+        Assert.Contains("string SessionId", inputContent);
+    }
+
+    // ========== HasMappedSchema dedup guard ==========
+
+    [Fact]
+    public void Param_Input_Record_Reuses_Existing_Schema_When_Name_Matches()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ListItemsInput": {
+                    "type": "object",
+                    "properties": {
+                        "page": { "type": "integer" },
+                        "limit": { "type": "integer" }
+                    },
+                    "required": ["page", "limit"]
+                },
+                "ItemDto": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" }
+                    },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "ListItems",
+                        "parameters": [
+                            {
+                                "name": "page",
+                                "in": "query",
+                                "required": true,
+                                "schema": { "type": "integer" }
+                            }
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "array",
+                                            "items": { "$ref": "#/components/schemas/ItemDto" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // Should use the existing schema, not generate a duplicate
+        var inputFiles = result.Files.Where(f => f.FileName.Contains("ListItemsInput")).ToList();
+        Assert.Single(inputFiles);
+
+        // The existing schema has both page and limit; should compile
+        var content = inputFiles[0].Content;
+        Assert.Contains("long Page", content);
+        Assert.Contains("long Limit", content);
+    }
+
+    // ========== IsStringEnum type inference from values ==========
+
+    [Fact]
+    public void Enum_Without_Type_Field_Inferred_From_String_Values()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "StatusDto": {
+                    "enum": ["active", "inactive", "pending"]
+                },
+                "ItemDto": {
+                    "type": "object",
+                    "properties": {
+                        "status": { "$ref": "#/components/schemas/StatusDto" }
+                    },
+                    "required": ["status"]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "ListItems",
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "array",
+                                            "items": { "$ref": "#/components/schemas/ItemDto" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var enumContent = CompilationHelper.FindFile(result, "StatusDto.cs");
+
+        Assert.Contains("public enum StatusDto", enumContent);
+        Assert.Contains("Active", enumContent);
+        Assert.Contains("Inactive", enumContent);
+        Assert.Contains("Pending", enumContent);
+
+        // Original names preserved via [JsonStringEnumMemberName]
+        Assert.Contains("[JsonStringEnumMemberName(\"active\")]", enumContent);
+
+        // Should compile
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var diags = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        Assert.Empty(diags);
+    }
+
+    // ========== allOf/anyOf schema descriptions ==========
+
+    [Fact]
+    public void AllOf_Schema_Description_Emitted_As_RivetDescription()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "BaseDto": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" }
+                    },
+                    "required": ["id"]
+                },
+                "ExtendedDto": {
+                    "description": "An extended data transfer object",
+                    "allOf": [
+                        { "$ref": "#/components/schemas/BaseDto" },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string" }
+                            },
+                            "required": ["name"]
+                        }
+                    ]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "GetItem",
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ExtendedDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "ExtendedDto.cs");
+
+        Assert.Contains("[RivetDescription(\"An extended data transfer object\")]", content);
+    }
+
+    [Fact]
+    public void AnyOf_Schema_Description_Survives_Import()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "FlexibleValueDto": {
+                    "description": "A value that can be a string or number",
+                    "anyOf": [
+                        { "type": "string" },
+                        { "type": "number" }
+                    ]
+                }
+                """,
+            paths: """
+                "/api/values": {
+                    "get": {
+                        "operationId": "GetValue",
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/FlexibleValueDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "FlexibleValueDto.cs");
+
+        Assert.Contains("[RivetDescription(\"A value that can be a string or number\")]", content);
+    }
+
+    // ========== GAP-6: Multipart $ref without x-rivet-input-type ==========
+
+    [Fact]
+    public void Multipart_Ref_Without_Extension_Resolves_Type_Name()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "UploadPayload": {
+                    "type": "object",
+                    "properties": {
+                        "file": { "type": "string", "format": "binary" },
+                        "title": { "type": "string" }
+                    },
+                    "required": ["file", "title"]
+                },
+                "UploadResult": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" }
+                    },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/uploads": {
+                    "post": {
+                        "operationId": "Upload",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "multipart/form-data": {
+                                    "schema": { "$ref": "#/components/schemas/UploadPayload" }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "201": {
+                                "description": "Created",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/UploadResult" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "Contract.cs");
+
+        // The input type should be "UploadPayload", not "UploadRequest" (synthesized name)
+        Assert.Contains("UploadPayload", contract);
+        Assert.DoesNotContain("UploadRequest", contract);
+    }
+
+    // ========== BUG-1: minLength: 0 must survive import ==========
+
+    [Fact]
+    public void MinLength_Zero_Preserved_Through_Import()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ItemDto": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "minLength": 0,
+                            "maxLength": 255
+                        }
+                    },
+                    "required": ["name"]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "GetItem",
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "ItemDto.cs");
+
+        // minLength: 0 should be preserved as MinLength = 0 in the constraint attribute
+        Assert.Contains("MinLength = 0", content);
+        Assert.Contains("MaxLength = 255", content);
+    }
+
+    // ========== oneOf schema description ==========
+
+    [Fact]
+    public void OneOf_Schema_Description_Survives_Import()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Shape": {
+                    "description": "A geometric shape",
+                    "oneOf": [
+                        { "$ref": "#/components/schemas/Circle" },
+                        { "$ref": "#/components/schemas/Square" }
+                    ]
+                },
+                "Circle": {
+                    "type": "object",
+                    "properties": { "radius": { "type": "number" } },
+                    "required": ["radius"]
+                },
+                "Square": {
+                    "type": "object",
+                    "properties": { "side": { "type": "number" } },
+                    "required": ["side"]
+                }
+                """);
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Shape.cs");
+
+        Assert.Contains("[RivetDescription(\"A geometric shape\")]", content);
+    }
+
+    // ========== Summary and Description imported separately ==========
+
+    [Fact]
+    public void Summary_And_Description_Imported_Separately()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ItemDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "items_list",
+                        "tags": ["Items"],
+                        "summary": "List items",
+                        "description": "Returns all items with pagination support",
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "ItemsContract.cs");
+
+        Assert.Contains(".Summary(\"List items\")", content);
+        Assert.Contains(".Description(\"Returns all items with pagination support\")", content);
+    }
+
+    [Fact]
+    public void Summary_Only_Does_Not_Emit_Description_Call()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ItemDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "items_list",
+                        "tags": ["Items"],
+                        "summary": "List items",
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "ItemsContract.cs");
+
+        Assert.Contains(".Summary(\"List items\")", content);
+        Assert.DoesNotContain(".Description(", content);
+    }
+
+    [Fact]
+    public void Description_Only_Does_Not_Emit_Summary_Call()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ItemDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "items_list",
+                        "tags": ["Items"],
+                        "description": "Returns all items with pagination support",
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "ItemsContract.cs");
+
+        Assert.DoesNotContain(".Summary(", content);
+        Assert.Contains(".Description(\"Returns all items with pagination support\")", content);
+    }
 }

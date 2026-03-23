@@ -468,4 +468,174 @@ public sealed class JsonSchemaEmitterTests
             Directory.Delete(tempDir, true);
         }
     }
+
+    // ========== GAP-5: Metadata attributes in JSON Schema output ==========
+
+    [Fact]
+    public void Property_Description_Emitted_In_JsonSchema()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(
+                [property: RivetDescription("The item name")] string Name,
+                [property: RivetDescription("Count of items")] int Count);
+            """;
+
+        var output = CompilationHelper.EmitSchemas(source);
+        var defs = ParseDefs(output);
+        var nameSchema = defs.GetProperty("ItemDto").GetProperty("properties").GetProperty("name");
+
+        Assert.True(nameSchema.TryGetProperty("description", out var desc),
+            "JSON Schema should include 'description' on property");
+        Assert.Equal("The item name", desc.GetString());
+    }
+
+    [Fact]
+    public void Property_Default_Emitted_In_JsonSchema()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ConfigDto(
+                [property: RivetDefault("10")] int PageSize,
+                [property: RivetDefault("\"hello\"")] string Greeting);
+            """;
+
+        var output = CompilationHelper.EmitSchemas(source);
+        var defs = ParseDefs(output);
+        var pageSizeSchema = defs.GetProperty("ConfigDto").GetProperty("properties").GetProperty("pageSize");
+
+        Assert.True(pageSizeSchema.TryGetProperty("default", out var def),
+            "JSON Schema should include 'default' on property");
+        Assert.Equal(10, def.GetInt32());
+    }
+
+    [Fact]
+    public void Property_Example_Emitted_In_JsonSchema()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UserDto(
+                [property: RivetExample("\"john@example.com\"")] string Email);
+            """;
+
+        var output = CompilationHelper.EmitSchemas(source);
+        var defs = ParseDefs(output);
+        var emailSchema = defs.GetProperty("UserDto").GetProperty("properties").GetProperty("email");
+
+        Assert.True(emailSchema.TryGetProperty("example", out var ex),
+            "JSON Schema should include 'example' on property");
+        Assert.Equal("john@example.com", ex.GetString());
+    }
+
+    [Fact]
+    public void Property_ReadOnly_WriteOnly_Emitted_In_JsonSchema()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(
+                [property: RivetReadOnly] string Id,
+                [property: RivetWriteOnly] string Secret,
+                string Name);
+            """;
+
+        var output = CompilationHelper.EmitSchemas(source);
+        var defs = ParseDefs(output);
+        var props = defs.GetProperty("ItemDto").GetProperty("properties");
+
+        Assert.True(props.GetProperty("id").TryGetProperty("readOnly", out var ro) && ro.GetBoolean(),
+            "JSON Schema should include 'readOnly: true' on property");
+        Assert.True(props.GetProperty("secret").TryGetProperty("writeOnly", out var wo) && wo.GetBoolean(),
+            "JSON Schema should include 'writeOnly: true' on property");
+        Assert.False(props.GetProperty("name").TryGetProperty("readOnly", out _),
+            "Non-annotated property should not have readOnly");
+    }
+
+    [Fact]
+    public void Type_Description_Emitted_In_JsonSchema()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetDescription("A simple item")]
+            [RivetType]
+            public sealed record ItemDto(string Name);
+            """;
+
+        var output = CompilationHelper.EmitSchemas(source);
+        var defs = ParseDefs(output);
+        var itemSchema = defs.GetProperty("ItemDto");
+
+        Assert.True(itemSchema.TryGetProperty("description", out var desc),
+            "JSON Schema should include 'description' on type");
+        Assert.Equal("A simple item", desc.GetString());
+    }
+
+    // ========== GAP-7: Monomorphised generic metadata in JSON Schema ==========
+
+    [Fact]
+    public void Monomorphised_Generic_Preserves_Metadata_In_JsonSchema()
+    {
+        var source = """
+            using System.Collections.Generic;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record PagedResult<T>(
+                [property: RivetDescription("Items in this page")]
+                [property: RivetConstraints(MinItems = 0, MaxItems = 50)]
+                List<T> Items,
+                [property: RivetDefault("1")]
+                int Page);
+
+            [RivetType]
+            public sealed record TaskDto(string Title);
+
+            [RivetContract]
+            public static class TaskContract
+            {
+                public static readonly RouteDefinition<PagedResult<TaskDto>> List =
+                    Define.Get<PagedResult<TaskDto>>("/api/tasks");
+            }
+            """;
+
+        // Must pass endpoints so the generic instance collector finds PagedResult<TaskDto>
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var output = JsonSchemaEmitter.Emit(walker.Definitions, walker.Brands, walker.Enums, endpoints);
+        var defs = ParseDefs(output);
+
+        // Find the monomorphised schema (PagedResult_TaskDto)
+        var monoName = defs.EnumerateObject()
+            .First(p => p.Name.Contains("PagedResult")).Name;
+        var mono = defs.GetProperty(monoName);
+        var items = mono.GetProperty("properties").GetProperty("items");
+
+        Assert.Equal("Items in this page", items.GetProperty("description").GetString());
+        Assert.Equal(0, items.GetProperty("minItems").GetInt32());
+        Assert.Equal(50, items.GetProperty("maxItems").GetInt32());
+
+        var page = mono.GetProperty("properties").GetProperty("page");
+        Assert.Equal(1, page.GetProperty("default").GetInt32());
+    }
 }

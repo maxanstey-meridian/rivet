@@ -6,9 +6,39 @@ namespace Rivet.Tool.Model;
 public sealed record TsTypeDefinition(
     string Name,
     IReadOnlyList<string> TypeParameters,
-    IReadOnlyList<TsPropertyDefinition> Properties);
+    IReadOnlyList<TsPropertyDefinition> Properties,
+    string? Description = null);
 
 /// <summary>
 /// A single property within a type definition.
 /// </summary>
-public sealed record TsPropertyDefinition(string Name, TsType Type, bool IsOptional, bool IsDeprecated = false);
+public sealed record TsPropertyDefinition(
+    string Name,
+    TsType Type,
+    bool IsOptional,
+    bool IsDeprecated = false,
+    string? Format = null,
+    string? DefaultValue = null,
+    TsPropertyConstraints? Constraints = null,
+    string? Description = null,
+    string? Example = null,
+    bool IsReadOnly = false,
+    bool IsWriteOnly = false);
+
+public sealed record TsPropertyConstraints(
+    int? MinLength = null,
+    int? MaxLength = null,
+    string? Pattern = null,
+    double? Minimum = null,
+    double? Maximum = null,
+    double? ExclusiveMinimum = null,
+    double? ExclusiveMaximum = null,
+    double? MultipleOf = null,
+    int? MinItems = null,
+    int? MaxItems = null,
+    bool? UniqueItems = null)
+{
+    public bool HasAny => MinLength.HasValue || MaxLength.HasValue || Pattern is not null
+        || Minimum.HasValue || Maximum.HasValue || ExclusiveMinimum.HasValue || ExclusiveMaximum.HasValue
+        || MultipleOf.HasValue || MinItems.HasValue || MaxItems.HasValue || UniqueItems == true;
+}

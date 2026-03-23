@@ -550,7 +550,7 @@ public sealed class OpenApiRoundTripTests
         var openApiJson = OpenApiEmitter.Emit(
             endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
 
-        // Verify the extension is in the JSON
+        // Verify the multipart schema uses $ref to the named input type
         var jsonDoc = System.Text.Json.JsonDocument.Parse(openApiJson);
         var multipartSchema = jsonDoc.RootElement.GetProperty("paths")
             .GetProperty("/api/files")
@@ -559,11 +559,12 @@ public sealed class OpenApiRoundTripTests
             .GetProperty("content")
             .GetProperty("multipart/form-data")
             .GetProperty("schema");
-        Assert.Equal("UploadInput", multipartSchema.GetProperty("x-rivet-input-type").GetString());
+        Assert.Equal("#/components/schemas/UploadInput", multipartSchema.GetProperty("$ref").GetString());
 
         // Reverse: OpenAPI → import → compile → walk
         var importResult = OpenApiImporter.Import(
             openApiJson, new ImportOptions("RoundTrip"));
+
 
         // The input type name should be "UploadInput" (not "UploadRequest")
         var contractFile = importResult.Files.First(f => f.FileName.Contains("Contract"));
@@ -798,21 +799,25 @@ public sealed class OpenApiRoundTripTests
         Assert.True(taskDef.Properties.First(p => p.Name == "priority").Type is TsType.TypeRef { Name: "Priority" },
             $"Expected TypeRef(Priority) but got {taskDef.Properties.First(p => p.Name == "priority").Type}");
 
-        // OpenAPI JSON idempotency: compare schema names and path sets
-        // (full string equality may differ due to dictionary iteration order)
-        var firstDoc = JsonSerializer.Deserialize<JsonElement>(firstJson);
+        // OpenAPI JSON idempotency: the second import round-trip should be stable.
+        // The first round may introduce synthesized input types (e.g. DeleteTaskInput from path params)
+        // that didn't exist in the original hand-written C#. After that, the pipeline should be stable.
+        var thirdJson = OpenApiEmitter.Emit(
+            thirdEps, thirdWlk.Definitions, thirdWlk.Brands, thirdWlk.Enums, null);
+
         var secondDoc = JsonSerializer.Deserialize<JsonElement>(secondJson);
-        var firstSchemas = firstDoc.GetProperty("components").GetProperty("schemas")
-            .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
+        var thirdDoc = JsonSerializer.Deserialize<JsonElement>(thirdJson);
         var secondSchemas = secondDoc.GetProperty("components").GetProperty("schemas")
             .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
-        Assert.Equal(firstSchemas, secondSchemas);
-
-        var firstPaths = firstDoc.GetProperty("paths")
+        var thirdSchemas = thirdDoc.GetProperty("components").GetProperty("schemas")
             .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
+        Assert.Equal(secondSchemas, thirdSchemas);
+
         var secondPaths = secondDoc.GetProperty("paths")
             .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
-        Assert.Equal(firstPaths, secondPaths);
+        var thirdPaths = thirdDoc.GetProperty("paths")
+            .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
+        Assert.Equal(secondPaths, thirdPaths);
     }
 
     [Fact]
@@ -2236,11 +2241,11 @@ public sealed class OpenApiRoundTripTests
     }
 
     /// <summary>
-    /// Nullable properties must NOT be in the required array.
-    /// required + nullable is semantically contradictory and breaks most OpenAPI consumers.
+    /// Nullable positional constructor parameters are required + nullable in OpenAPI.
+    /// The property must be present but its value can be null.
     /// </summary>
     [Fact]
-    public void NullableProperties_NotInRequiredArray()
+    public void NullableProperties_AreRequiredAndNullable()
     {
         var source = """
             using System;
@@ -2278,17 +2283,15 @@ public sealed class OpenApiRoundTripTests
             .EnumerateArray().Select(e => e.GetString()!).ToList();
         var props = schema.GetProperty("properties");
 
-        // Non-nullable fields MUST be in required
+        // All positional params are required — both nullable and non-nullable
         Assert.Contains("name", required);
         Assert.Contains("age", required);
         Assert.Contains("id", required);
         Assert.Contains("createdAt", required);
-
-        // Nullable fields MUST NOT be in required
-        Assert.DoesNotContain("bio", required);
-        Assert.DoesNotContain("score", required);
-        Assert.DoesNotContain("optionalRef", required);
-        Assert.DoesNotContain("deletedAt", required);
+        Assert.Contains("bio", required);
+        Assert.Contains("score", required);
+        Assert.Contains("optionalRef", required);
+        Assert.Contains("deletedAt", required);
 
         // Nullable fields should still have nullable: true
         Assert.True(props.GetProperty("bio").GetProperty("nullable").GetBoolean());
@@ -2346,6 +2349,122 @@ public sealed class OpenApiRoundTripTests
         var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
         Assert.DoesNotContain("\"ct\"", json);
         Assert.DoesNotContain("CancellationToken", json);
+    }
+
+    // ========== Form-encoded content type round-trip ==========
+
+    [Fact]
+    public void FormEncoded_ContentType_Survives_RoundTrip()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "CreateAccountRequest": {
+                    "type": "object",
+                    "properties": {
+                        "email": { "type": "string" },
+                        "business_profile": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string" },
+                                "url": { "type": "string" }
+                            }
+                        }
+                    },
+                    "required": ["email"]
+                },
+                "Account": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" },
+                        "email": { "type": "string" }
+                    },
+                    "required": ["id", "email"]
+                }
+                """,
+            paths: """
+                "/v1/accounts": {
+                    "post": {
+                        "operationId": "CreateAccount",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/x-www-form-urlencoded": {
+                                    "schema": { "$ref": "#/components/schemas/CreateAccountRequest" }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/Account" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "Stripe");
+
+        // Import → compile → walk → emit OpenAPI
+        var result = CompilationHelper.Import(spec);
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        // The emitted spec must use form-urlencoded, not JSON, for the request body
+        Assert.Contains("application/x-www-form-urlencoded", emittedJson);
+        Assert.DoesNotContain("\"application/json\"", emittedJson.Split("requestBody")[1].Split("responses")[0]);
+    }
+
+    // ========== Void error response round-trip ==========
+
+    [Fact]
+    public void Void_Error_Response_Survives_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            [RivetType]
+            public sealed record ItemDto(string Name);
+
+            [RivetContract]
+            public static class ItemContract
+            {
+                public static readonly RouteDefinition<ItemDto, ItemDto> Update =
+                    Define.Put<ItemDto, ItemDto>("/api/items/{id}")
+                        .Returns(404, "Not found")
+                        .Returns(409);
+            }
+            """;
+
+        // Forward: C# → OpenAPI
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (disc, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, disc, walker);
+        var firstJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        // Reverse: OpenAPI → import → compile → walk
+        var importResult = CompilationHelper.Import(firstJson);
+        var comp2 = CompilationHelper.CompileImportResult(importResult);
+        var (disc2, walker2) = CompilationHelper.DiscoverAndWalk(comp2);
+        var endpoints2 = CompilationHelper.WalkContracts(comp2, disc2, walker2);
+
+        var ep = Assert.Single(endpoints2);
+
+        // Void 404 with description
+        var resp404 = ep.Responses.FirstOrDefault(r => r.StatusCode == 404);
+        Assert.NotNull(resp404);
+        Assert.Null(resp404.DataType);
+        Assert.Equal("Not found", resp404.Description);
+
+        // Void 409 without description
+        var resp409 = ep.Responses.FirstOrDefault(r => r.StatusCode == 409);
+        Assert.NotNull(resp409);
+        Assert.Null(resp409.DataType);
     }
 
     // ========== Comprehensive C# → OpenAPI → C# round-trip ==========
@@ -2684,5 +2803,171 @@ public sealed class OpenApiRoundTripTests
         var patch = endpoints.First(e => e.HttpMethod == "PATCH" && e.RouteTemplate == "/api/tasks/{id}");
         Assert.Contains(patch.Responses, r => r.StatusCode == 204);
         Assert.Single(patch.Params, p => p.Source == ParamSource.Route);
+    }
+
+    // ========== GAP-1: default/example round-trip through import ==========
+
+    [Fact]
+    public void Default_And_Example_Survive_Import_RoundTrip()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ConfigDto": {
+                    "type": "object",
+                    "properties": {
+                        "locale": { "type": "string", "default": "en" },
+                        "pageSize": { "type": "integer", "format": "int32", "default": 25 },
+                        "greeting": { "type": "string", "example": "Hello world" }
+                    },
+                    "required": ["locale", "pageSize", "greeting"]
+                }
+                """,
+            paths: """
+                "/api/config": {
+                    "get": {
+                        "operationId": "GetConfig",
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ConfigDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        // Import → compile → walk → emit OpenAPI
+        var result = CompilationHelper.Import(spec);
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var emitted = JsonSerializer.Deserialize<JsonElement>(emittedJson);
+
+        var props = emitted.GetProperty("components").GetProperty("schemas")
+            .GetProperty("ConfigDto").GetProperty("properties");
+
+        // default values survive
+        Assert.Equal("en", props.GetProperty("locale").GetProperty("default").GetString());
+        Assert.Equal(25, props.GetProperty("pageSize").GetProperty("default").GetInt32());
+
+        // example survives
+        Assert.Equal("Hello world", props.GetProperty("greeting").GetProperty("example").GetString());
+    }
+
+    // ========== GAP-2: readOnly/writeOnly round-trip through import ==========
+
+    [Fact]
+    public void ReadOnly_WriteOnly_Survive_Import_RoundTrip()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "UserDto": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "readOnly": true },
+                        "password": { "type": "string", "writeOnly": true },
+                        "name": { "type": "string" }
+                    },
+                    "required": ["id", "password", "name"]
+                }
+                """,
+            paths: """
+                "/api/users": {
+                    "get": {
+                        "operationId": "GetUser",
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/UserDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var result = CompilationHelper.Import(spec);
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var emitted = JsonSerializer.Deserialize<JsonElement>(emittedJson);
+
+        var props = emitted.GetProperty("components").GetProperty("schemas")
+            .GetProperty("UserDto").GetProperty("properties");
+
+        Assert.True(props.GetProperty("id").GetProperty("readOnly").GetBoolean());
+        Assert.True(props.GetProperty("password").GetProperty("writeOnly").GetBoolean());
+        Assert.False(props.GetProperty("name").TryGetProperty("readOnly", out _));
+        Assert.False(props.GetProperty("name").TryGetProperty("writeOnly", out _));
+    }
+
+    // ========== GAP-6: Description-only import round-trip stability ==========
+
+    [Fact]
+    public void Description_Only_Endpoint_RoundTrip_Is_Stable()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ItemDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "ListItems",
+                        "description": "Returns all items with filtering",
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        // First round-trip: OpenAPI → import → compile → walk → emit
+        var result1 = CompilationHelper.Import(spec);
+        var comp1 = CompilationHelper.CompileImportResult(result1);
+        var (disc1, walker1) = CompilationHelper.DiscoverAndWalk(comp1);
+        var eps1 = CompilationHelper.WalkContracts(comp1, disc1, walker1);
+        var json1 = OpenApiEmitter.Emit(eps1, walker1.Definitions, walker1.Brands, walker1.Enums, null);
+
+        // Second round-trip: should be stable
+        var result2 = CompilationHelper.Import(json1);
+        var comp2 = CompilationHelper.CompileImportResult(result2);
+        var (disc2, walker2) = CompilationHelper.DiscoverAndWalk(comp2);
+        var eps2 = CompilationHelper.WalkContracts(comp2, disc2, walker2);
+        var json2 = OpenApiEmitter.Emit(eps2, walker2.Definitions, walker2.Brands, walker2.Enums, null);
+
+        // The description should not be duplicated as summary — only description should exist
+        var doc1 = JsonSerializer.Deserialize<JsonElement>(json1);
+        var op1 = doc1.GetProperty("paths").GetProperty("/api/items").GetProperty("get");
+        Assert.True(op1.TryGetProperty("description", out _), "description should be present");
+        Assert.False(op1.TryGetProperty("summary", out _),
+            "summary should NOT be present when only description was in the original spec");
+
+        // Second pass should be identical to first
+        var doc2 = JsonSerializer.Deserialize<JsonElement>(json2);
+        var op2 = doc2.GetProperty("paths").GetProperty("/api/items").GetProperty("get");
+        Assert.Equal(
+            op1.GetProperty("description").GetString(),
+            op2.GetProperty("description").GetString());
     }
 }

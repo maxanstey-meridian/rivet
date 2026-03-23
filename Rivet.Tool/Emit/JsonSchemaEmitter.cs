@@ -147,6 +147,15 @@ public static class JsonSchemaEmitter
 
     internal static Dictionary<string, object> MapPrimitive(TsType.Primitive p)
     {
+        if (p.Name == "File")
+        {
+            return new Dictionary<string, object>
+            {
+                ["type"] = "string",
+                ["format"] = "binary",
+            };
+        }
+
         if (p.Name == "unknown")
         {
             return new Dictionary<string, object>();
@@ -206,15 +215,10 @@ public static class JsonSchemaEmitter
         foreach (var prop in def.Properties)
         {
             var propSchema = MapTsTypeToSchema(prop.Type);
-
-            if (prop.IsDeprecated)
-            {
-                propSchema["deprecated"] = true;
-            }
-
+            SchemaEnricher.EnrichPropertySchema(propSchema, prop);
             properties[prop.Name] = propSchema;
 
-            if (!prop.IsOptional && prop.Type is not TsType.Nullable)
+            if (!prop.IsOptional)
             {
                 required.Add(prop.Name);
             }
@@ -225,6 +229,11 @@ public static class JsonSchemaEmitter
             ["type"] = "object",
             ["properties"] = properties,
         };
+
+        if (def.Description is not null)
+        {
+            schema["description"] = def.Description;
+        }
 
         if (required.Count > 0)
         {
@@ -245,15 +254,10 @@ public static class JsonSchemaEmitter
         {
             var resolvedType = ResolveTypeParams(prop.Type, typeParamMap);
             var propSchema = MapTsTypeToSchema(resolvedType);
-
-            if (prop.IsDeprecated)
-            {
-                propSchema["deprecated"] = true;
-            }
-
+            SchemaEnricher.EnrichPropertySchema(propSchema, prop);
             properties[prop.Name] = propSchema;
 
-            if (!prop.IsOptional && resolvedType is not TsType.Nullable)
+            if (!prop.IsOptional)
             {
                 required.Add(prop.Name);
             }

@@ -64,7 +64,8 @@ public sealed class OpenApiEmitterTests
 
         Assert.Equal("tasks_getTask", get.GetProperty("operationId").GetString());
         Assert.Equal("Tasks", get.GetProperty("tags")[0].GetString());
-        Assert.Equal("Retrieve a single task by ID", get.GetProperty("summary").GetString());
+        Assert.False(get.TryGetProperty("summary", out _), "Description-only should not set summary");
+        Assert.Equal("Retrieve a single task by ID", get.GetProperty("description").GetString());
 
         // Parameters: id (path), status (query)
         var parameters = get.GetProperty("parameters");
@@ -616,7 +617,8 @@ public sealed class OpenApiEmitterTests
             .GetProperty("/api/tasks/{id}")
             .GetProperty("get");
 
-        Assert.Equal("Get a task", get.GetProperty("summary").GetString());
+        Assert.False(get.TryGetProperty("summary", out _), "Description-only should not set summary");
+        Assert.Equal("Get a task", get.GetProperty("description").GetString());
         Assert.Equal("Task not found",
             get.GetProperty("responses").GetProperty("404").GetProperty("description").GetString());
     }
@@ -1214,6 +1216,11 @@ public sealed class OpenApiEmitterTests
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
             ["UploadResult"] = new("UploadResult", [], [new TsPropertyDefinition("url", new TsType.Primitive("string"), false)]),
+            ["UploadInput"] = new("UploadInput", [],
+            [
+                new TsPropertyDefinition("document", new TsType.Primitive("File"), false),
+                new TsPropertyDefinition("title", new TsType.Primitive("string"), false),
+            ]),
         };
 
         using var doc = EmitOpenApiFromModel(endpoints, definitions,
@@ -1227,11 +1234,12 @@ public sealed class OpenApiEmitterTests
             .GetProperty("multipart/form-data")
             .GetProperty("schema");
 
-        // x-rivet-input-type preserves the record name
-        Assert.Equal("UploadInput", multipartSchema.GetProperty("x-rivet-input-type").GetString());
+        // Named input type emits as $ref
+        Assert.Equal("#/components/schemas/UploadInput", multipartSchema.GetProperty("$ref").GetString());
 
-        // File properties have x-rivet-file
-        var docProp = multipartSchema.GetProperty("properties").GetProperty("document");
+        // The component schema has x-rivet-file on file properties
+        var uploadSchema = doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("UploadInput");
+        var docProp = uploadSchema.GetProperty("properties").GetProperty("document");
         Assert.True(docProp.GetProperty("x-rivet-file").GetBoolean());
         Assert.Equal("string", docProp.GetProperty("type").GetString());
         Assert.Equal("binary", docProp.GetProperty("format").GetString());
@@ -1310,5 +1318,39 @@ public sealed class OpenApiEmitterTests
                 }
                 break;
         }
+    }
+
+    // ========== Description-only does not bleed into summary ==========
+
+    [Fact]
+    public void Endpoint_Description_Only_Does_Not_Set_Summary()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Name);
+
+            [RivetContract]
+            public static class ItemContract
+            {
+                public static readonly RouteDefinition<ItemDto> GetItem =
+                    Define.Get<ItemDto>("/api/items/{id}")
+                        .Description("Retrieves an item by ID");
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var operation = doc.RootElement
+            .GetProperty("paths").GetProperty("/api/items/{id}")
+            .GetProperty("get");
+
+        Assert.False(operation.TryGetProperty("summary", out _),
+            "Description-only endpoint should not have a summary field");
+        Assert.True(operation.TryGetProperty("description", out var desc),
+            "Operation should have a 'description' field");
+        Assert.Equal("Retrieves an item by ID", desc.GetString());
     }
 }

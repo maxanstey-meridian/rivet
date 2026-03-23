@@ -186,9 +186,11 @@ public static class ContractWalker
         // .Status(statusCode), .Description(desc), .Anonymous(), .Secure(scheme), .ProducesFile(contentType)
         var responses = new List<TsResponseType>();
         int? successStatusOverride = null;
+        string? endpointSummary = null;
         string? endpointDescription = null;
         EndpointSecurity? security = null;
         var acceptsFile = false;
+        var isFormEncoded = false;
         string? fileContentType = null;
 
         for (var i = 1; i < chain.Count; i++)
@@ -202,30 +204,42 @@ public static class ContractWalker
             {
                 acceptsFile = true;
             }
+            else if (call.MethodName == "FormEncoded")
+            {
+                isFormEncoded = true;
+            }
             else if (call.MethodName == "Returns" && call.TypeArgs.Count == 1 && call.StatusCodeArg is not null)
             {
                 var tsType = typeWalker.MapType(call.TypeArgs[0]);
-                responses.Add(new TsResponseType(call.StatusCodeArg.Value, tsType, call.DescriptionArg));
+                responses.Add(new TsResponseType(call.StatusCodeArg.Value, tsType, call.StringArg));
+            }
+            else if (call.MethodName == "Returns" && call.TypeArgs.Count == 0 && call.StatusCodeArg is not null)
+            {
+                responses.Add(new TsResponseType(call.StatusCodeArg.Value, null, call.StringArg));
             }
             else if (call.MethodName == "Status" && call.StatusCodeArg is not null)
             {
                 successStatusOverride = call.StatusCodeArg.Value;
             }
-            else if (call.MethodName == "Description" && call.DescriptionArg is not null)
+            else if (call.MethodName == "Summary" && call.StringArg is not null)
             {
-                endpointDescription = call.DescriptionArg;
+                endpointSummary = call.StringArg;
+            }
+            else if (call.MethodName == "Description" && call.StringArg is not null)
+            {
+                endpointDescription = call.StringArg;
             }
             else if (call.MethodName == "Anonymous")
             {
                 security = new EndpointSecurity(true);
             }
-            else if (call.MethodName == "Secure" && call.DescriptionArg is not null)
+            else if (call.MethodName == "Secure" && call.StringArg is not null)
             {
-                security = new EndpointSecurity(false, call.DescriptionArg);
+                security = new EndpointSecurity(false, call.StringArg);
             }
             else if (call.MethodName == "ProducesFile")
             {
-                fileContentType = call.DescriptionArg ?? "application/octet-stream";
+                fileContentType = call.StringArg ?? "application/octet-stream";
             }
         }
 
@@ -261,7 +275,8 @@ public static class ContractWalker
             var successCode = successStatusOverride ?? DefaultSuccessCode(httpMethod);
             responses.Insert(0, new TsResponseType(successCode, returnType));
         }
-        else if (fileContentType is not null || successStatusOverride is not null || responses.Count > 0)
+        else if (fileContentType is not null || successStatusOverride is not null || responses.Count > 0
+            || DefaultSuccessCode(httpMethod) != 200)
         {
             var successCode = successStatusOverride ?? DefaultSuccessCode(httpMethod);
             responses.Insert(0, new TsResponseType(successCode, null));
@@ -269,11 +284,11 @@ public static class ContractWalker
 
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
 
-        return new TsEndpointDefinition(name, httpMethod, route, parameters, returnType, controllerName, responses, endpointDescription, security, fileContentType, inputTypeName);
+        return new TsEndpointDefinition(name, httpMethod, route, parameters, returnType, controllerName, responses, endpointSummary, endpointDescription, security, fileContentType, inputTypeName, isFormEncoded);
     }
 
     private static int DefaultSuccessCode(string httpMethod) =>
-        httpMethod is "POST" ? 201 : 200;
+        httpMethod switch { "POST" => 201, "DELETE" => 204, _ => 200 };
 
     private static (IReadOnlyList<TsEndpointParam> Params, string? InputTypeName) BuildParams(
         WellKnownTypes wkt,
@@ -485,7 +500,7 @@ public static class ContractWalker
         IReadOnlyList<ITypeSymbol> TypeArgs,
         string? RouteArg,
         int? StatusCodeArg,
-        string? DescriptionArg);
+        string? StringArg);
 
     /// <summary>
     /// Walks the invocation chain from the initializer expression using syntax + GetSymbolInfo.

@@ -56,6 +56,7 @@ public sealed class TypeWalker
         AddScalar(scalars, compilation, "System.Uri", new TsType.Primitive("string", "uri"));
         AddScalar(scalars, compilation, "System.Text.Json.JsonElement", new TsType.Primitive("unknown"));
         AddScalar(scalars, compilation, "System.Text.Json.Nodes.JsonNode", new TsType.Primitive("unknown", CSharpType: "JsonNode"));
+        AddScalar(scalars, compilation, "Microsoft.AspNetCore.Http.IFormFile", new TsType.Primitive("File"));
         _scalarTypes = scalars.ToImmutable();
 
         _jsonObjectType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonObject");
@@ -246,11 +247,80 @@ public sealed class TypeWalker
             var isDeprecated = _obsoleteType is not null
                 && member.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _obsoleteType));
 
-            properties.Add(new TsPropertyDefinition(tsName, tsType, isOptional, isDeprecated));
+            // Read metadata attributes
+            string? format = null;
+            string? defaultValue = null;
+            TsPropertyConstraints? constraints = null;
+            string? description = null;
+            string? example = null;
+            var isReadOnly = false;
+            var isWriteOnly = false;
+            foreach (var attr in member.GetAttributes())
+            {
+                var attrName = attr.AttributeClass?.Name;
+                if (attrName is "RivetFormatAttribute" && attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is string fmt)
+                {
+                    format = fmt;
+                }
+                else if (attrName is "RivetDefaultAttribute" && attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is string def)
+                {
+                    defaultValue = def;
+                }
+                else if (attrName is "RivetConstraintsAttribute")
+                {
+                    constraints = ReadConstraints(attr);
+                }
+                else if (attrName is "RivetDescriptionAttribute" && attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is string desc)
+                {
+                    description = desc;
+                }
+                else if (attrName is "RivetExampleAttribute" && attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is string ex)
+                {
+                    example = ex;
+                }
+                else if (attrName is "RivetReadOnlyAttribute")
+                {
+                    isReadOnly = true;
+                }
+                else if (attrName is "RivetWriteOnlyAttribute")
+                {
+                    isWriteOnly = true;
+                }
+            }
+
+            // Apply format to the TsType if it's a primitive without one already
+            if (format is not null && tsType is TsType.Primitive { Format: null } p)
+            {
+                tsType = p with { Format = format };
+            }
+            else if (format is not null && tsType is TsType.Nullable { Inner: TsType.Primitive { Format: null } np })
+            {
+                tsType = new TsType.Nullable(np with { Format = format });
+            }
+
+            properties.Add(new TsPropertyDefinition(tsName, tsType, isOptional, isDeprecated, format, defaultValue, constraints,
+                description, example, isReadOnly, isWriteOnly));
+        }
+
+        // Read type-level [RivetDescription] attribute
+        string? typeDescription = null;
+        foreach (var attr in definition.GetAttributes())
+        {
+            if (attr.AttributeClass?.Name is "RivetDescriptionAttribute"
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is string td)
+            {
+                typeDescription = td;
+                break;
+            }
         }
 
         _visiting.Remove(name);
-        _definitions[name] = new TsTypeDefinition(name, typeParams, properties);
+        _definitions[name] = new TsTypeDefinition(name, typeParams, properties, typeDescription);
         _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
     }
 
@@ -323,7 +393,18 @@ public sealed class TypeWalker
                     var members = namedType.GetMembers()
                         .OfType<IFieldSymbol>()
                         .Where(f => f.HasConstantValue)
-                        .Select(f => f.Name)
+                        .Select(f =>
+                        {
+                            // Check for [JsonStringEnumMemberName("original")] attribute
+                            var attr = f.GetAttributes().FirstOrDefault(a =>
+                                a.AttributeClass?.Name is "JsonStringEnumMemberNameAttribute");
+                            if (attr?.ConstructorArguments.Length > 0
+                                && attr.ConstructorArguments[0].Value is string original)
+                            {
+                                return original;
+                            }
+                            return f.Name;
+                        })
                         .ToList();
 
                     _enums[namedType.Name] = new TsType.StringUnion(members);
@@ -431,12 +512,33 @@ public sealed class TypeWalker
     private bool IsDictionaryType(INamedTypeSymbol symbol)
         => _dictionaryTypes.Contains(symbol.OriginalDefinition);
 
-    private static bool IsOptionalProperty(IPropertySymbol _)
+    private static TsPropertyConstraints? ReadConstraints(AttributeData attr)
     {
-        // All record properties are required in the TS output.
-        // Nullable affects the type (T | null), not presence.
-        // TODO: support default parameter values as optional when needed.
-        return false;
+        int? GetInt(string name) => attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is int v && v >= 0 ? v : null;
+        double? GetDouble(string name) => attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is double v && !double.IsNaN(v) ? v : null;
+        string? GetString(string name) => attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value as string;
+        bool? GetBool(string name) => attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is true ? true : null;
+
+        var c = new TsPropertyConstraints(
+            MinLength: GetInt("MinLength"),
+            MaxLength: GetInt("MaxLength"),
+            Pattern: GetString("Pattern"),
+            Minimum: GetDouble("Minimum"),
+            Maximum: GetDouble("Maximum"),
+            ExclusiveMinimum: GetDouble("ExclusiveMinimum"),
+            ExclusiveMaximum: GetDouble("ExclusiveMaximum"),
+            MultipleOf: GetDouble("MultipleOf"),
+            MinItems: GetInt("MinItems"),
+            MaxItems: GetInt("MaxItems"),
+            UniqueItems: GetBool("UniqueItems"));
+
+        return c.HasAny ? c : null;
+    }
+
+    private static bool IsOptionalProperty(IPropertySymbol prop)
+    {
+        return prop.GetAttributes().Any(a =>
+            a.AttributeClass?.Name is "RivetOptionalAttribute");
     }
 
     /// <summary>

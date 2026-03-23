@@ -1207,4 +1207,357 @@ public sealed class ContractEndpointTests
         inputRoute.Status(201);
         Assert.Throws<InvalidOperationException>(() => inputRoute.Status(204));
     }
+
+    // ========== GAP-1: FormEncoded forward pipeline ==========
+
+    [Fact]
+    public void FormEncoded_Sets_IsFormEncoded_On_Endpoint()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginRequest(string Email, string Password);
+
+            [RivetType]
+            public sealed record TokenResponse(string Token);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly RouteDefinition<LoginRequest, TokenResponse> Login =
+                    Define.Post<LoginRequest, TokenResponse>("/api/auth/login")
+                        .FormEncoded();
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+        var ep = Assert.Single(endpoints);
+
+        Assert.True(ep.IsFormEncoded, "Endpoint should have IsFormEncoded=true");
+
+        // Client should emit URLSearchParams for form-encoded body
+        Assert.Contains("URLSearchParams", client);
+        Assert.Contains("formEncoded: true", client);
+    }
+
+    [Fact]
+    public void FormEncoded_OpenApi_Emits_FormUrlencoded_ContentType()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginRequest(string Email, string Password);
+
+            [RivetType]
+            public sealed record TokenResponse(string Token);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly RouteDefinition<LoginRequest, TokenResponse> Login =
+                    Define.Post<LoginRequest, TokenResponse>("/api/auth/login")
+                        .FormEncoded();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        Assert.Contains("application/x-www-form-urlencoded", json);
+        Assert.DoesNotContain("\"application/json\"", json.Split("requestBody")[1].Split("responses")[0]);
+    }
+
+    // ========== GAP-2: Void error responses forward pipeline ==========
+
+    [Fact]
+    public void Returns_Without_Type_Creates_Void_Response()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Name);
+
+            [RivetContract]
+            public static class ItemContract
+            {
+                public static readonly RouteDefinition<ItemDto, ItemDto> Update =
+                    Define.Put<ItemDto, ItemDto>("/api/items/{id}")
+                        .Returns(404, "Not found")
+                        .Returns(409);
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+        var ep = Assert.Single(endpoints);
+
+        // 404 with description, no data type
+        var resp404 = ep.Responses.FirstOrDefault(r => r.StatusCode == 404);
+        Assert.NotNull(resp404);
+        Assert.Null(resp404.DataType);
+        Assert.Equal("Not found", resp404.Description);
+
+        // 409 with no description, no data type
+        var resp409 = ep.Responses.FirstOrDefault(r => r.StatusCode == 409);
+        Assert.NotNull(resp409);
+        Assert.Null(resp409.DataType);
+
+        // Client result DU should have void for both
+        Assert.Contains("status: 404; data: void", client);
+        Assert.Contains("status: 409; data: void", client);
+    }
+
+    [Fact]
+    public void Returns_Without_Type_OpenApi_Emits_No_Content_Block()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Name);
+
+            [RivetContract]
+            public static class ItemContract
+            {
+                public static readonly RouteDefinition<ItemDto, ItemDto> Update =
+                    Define.Put<ItemDto, ItemDto>("/api/items/{id}")
+                        .Returns(404);
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var doc = System.Text.Json.JsonDocument.Parse(json);
+
+        var resp404 = doc.RootElement
+            .GetProperty("paths").GetProperty("/api/items/{id}")
+            .GetProperty("put").GetProperty("responses")
+            .GetProperty("404");
+
+        Assert.False(resp404.TryGetProperty("content", out _),
+            "Void 404 response should have no content block");
+    }
+
+    // ========== GAP-3: JsonStringEnumMemberName forward pipeline ==========
+
+    [Fact]
+    public void JsonStringEnumMemberName_Preserves_Original_In_Forward_Pipeline()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            public enum Status
+            {
+                [JsonStringEnumMemberName("in-progress")]
+                InProgress,
+                [JsonStringEnumMemberName("on_hold")]
+                OnHold,
+                Done
+            }
+
+            [RivetType]
+            public sealed record ItemDto(string Name, Status Status);
+
+            [RivetContract]
+            public static class ItemContract
+            {
+                public static readonly RouteDefinition<ItemDto> GetItem =
+                    Define.Get<ItemDto>("/api/items/{id}");
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+
+        var statusEnum = walker.Enums["Status"];
+        Assert.Contains("in-progress", statusEnum.Members);
+        Assert.Contains("on_hold", statusEnum.Members);
+        Assert.Contains("Done", statusEnum.Members);
+        Assert.DoesNotContain("InProgress", statusEnum.Members);
+        Assert.DoesNotContain("OnHold", statusEnum.Members);
+    }
+
+    // ========== GAP-4: DELETE default 204 isolated forward test ==========
+
+    [Fact]
+    public void Delete_Without_Status_Defaults_To_204()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class ItemContract
+            {
+                public static readonly RouteDefinition DeleteItem =
+                    Define.Delete("/api/items/{id}");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+        var ep = Assert.Single(endpoints);
+
+        var successResp = ep.Responses.FirstOrDefault(r => r.StatusCode is >= 200 and < 300);
+        Assert.NotNull(successResp);
+        Assert.Equal(204, successResp.StatusCode);
+    }
+
+    // ========== GAP-5: FormEncoded on all route definition types ==========
+
+    [Fact]
+    public void FormEncoded_Works_On_OutputOnly_RouteDefinition()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TokenResponse(string Token);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly RouteDefinition<TokenResponse> Login =
+                    Define.Post<TokenResponse>("/api/auth/login")
+                        .FormEncoded();
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+        var ep = Assert.Single(endpoints);
+        Assert.True(ep.IsFormEncoded);
+    }
+
+    [Fact]
+    public void FormEncoded_Works_On_InputOnly_RouteDefinition()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginRequest(string Email, string Password);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly InputRouteDefinition<LoginRequest> Login =
+                    Define.Delete("/api/auth/session")
+                        .Accepts<LoginRequest>()
+                        .FormEncoded();
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+        var ep = Assert.Single(endpoints);
+        Assert.True(ep.IsFormEncoded);
+    }
+
+    [Fact]
+    public void FormEncoded_Works_On_Bare_RouteDefinition()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly RouteDefinition Logout =
+                    Define.Post("/api/auth/logout")
+                        .FormEncoded();
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+        var ep = Assert.Single(endpoints);
+        Assert.True(ep.IsFormEncoded);
+    }
+
+    // ========== Summary / Description separation ==========
+
+    [Fact]
+    public void Summary_And_Description_Stored_Separately()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Name);
+
+            [RivetContract]
+            public static class ItemContract
+            {
+                public static readonly RouteDefinition<ItemDto> GetItem =
+                    Define.Get<ItemDto>("/api/items/{id}")
+                        .Summary("Get an item")
+                        .Description("Retrieves a single item by its unique identifier");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+        var ep = Assert.Single(endpoints);
+
+        Assert.Equal("Get an item", ep.Summary);
+        Assert.Equal("Retrieves a single item by its unique identifier", ep.Description);
+    }
+
+    [Fact]
+    public void Summary_And_Description_Emit_Separately_In_OpenApi()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Name);
+
+            [RivetContract]
+            public static class ItemContract
+            {
+                public static readonly RouteDefinition<ItemDto> GetItem =
+                    Define.Get<ItemDto>("/api/items/{id}")
+                        .Summary("Get an item")
+                        .Description("Retrieves a single item by its unique identifier");
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var doc = System.Text.Json.JsonDocument.Parse(json);
+
+        var operation = doc.RootElement
+            .GetProperty("paths").GetProperty("/api/items/{id}")
+            .GetProperty("get");
+
+        Assert.Equal("Get an item", operation.GetProperty("summary").GetString());
+        Assert.Equal("Retrieves a single item by its unique identifier",
+            operation.GetProperty("description").GetString());
+    }
 }

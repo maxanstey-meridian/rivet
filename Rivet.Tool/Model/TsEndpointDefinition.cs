@@ -11,10 +11,12 @@ public sealed record TsEndpointDefinition(
     TsType? ReturnType,
     string ControllerName,
     IReadOnlyList<TsResponseType> Responses,
+    string? Summary = null,
     string? Description = null,
     EndpointSecurity? Security = null,
     string? FileContentType = null,
-    string? InputTypeName = null);
+    string? InputTypeName = null,
+    bool IsFormEncoded = false);
 
 /// <summary>
 /// Security metadata for an endpoint. null = inherit CLI default.

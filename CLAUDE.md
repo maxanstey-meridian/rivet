@@ -19,11 +19,6 @@
 - `JsonStringEnumConverter` globally.
 - Colocate `Command` and `Result` records with their use case class.
 
-## CONTEXT.md
-
-Working mental model of this project. Update in-place throughout sessions (non-obvious things only). Tell me when you
-update it. Remove resolved items.
-
 ## Rivet architecture
 
 ### Two pipelines

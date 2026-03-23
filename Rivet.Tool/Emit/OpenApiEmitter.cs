@@ -21,11 +21,8 @@ public static class OpenApiEmitter
         IReadOnlyDictionary<string, TsType.StringUnion> enums,
         SecurityConfig? security)
     {
-        // Collect all referenced type names transitively
-        var referencedTypes = CollectReferencedTypes(endpoints, definitions);
-
         var paths = BuildPaths(endpoints, security);
-        var schemas = BuildSchemas(endpoints, definitions, brands, enums, referencedTypes);
+        var schemas = BuildSchemas(endpoints, definitions, brands, enums);
 
         var doc = new Dictionary<string, object>
         {
@@ -105,9 +102,14 @@ public static class OpenApiEmitter
             ["tags"] = new List<string> { UpperFirst(ep.ControllerName) },
         };
 
+        if (ep.Summary is not null)
+        {
+            operation["summary"] = ep.Summary;
+        }
+
         if (ep.Description is not null)
         {
-            operation["summary"] = ep.Description;
+            operation["description"] = ep.Description;
         }
 
         // Parameters (route + query)
@@ -163,49 +165,57 @@ public static class OpenApiEmitter
         // Request body
         if (fileParams.Count > 0)
         {
-            var multipartProps = new Dictionary<string, object>();
-            foreach (var fp in fileParams)
-            {
-                var filePropSchema = new Dictionary<string, object>
-                {
-                    ["type"] = "string",
-                    ["format"] = "binary",
-                    ["x-rivet-file"] = true,
-                };
-                multipartProps[fp.Name] = filePropSchema;
-            }
-            foreach (var ff in formFieldParams)
-            {
-                multipartProps[ff.Name] = MapTsTypeToJsonSchema(ff.Type);
-            }
-
-            var requiredFields = new List<string>();
-            foreach (var fp in fileParams)
-            {
-                requiredFields.Add(fp.Name);
-            }
-            foreach (var ff in formFieldParams)
-            {
-                if (ff.Type is not TsType.Nullable)
-                {
-                    requiredFields.Add(ff.Name);
-                }
-            }
-
-            var multipartSchema = new Dictionary<string, object>
-            {
-                ["type"] = "object",
-                ["properties"] = multipartProps,
-            };
-
-            if (requiredFields.Count > 0)
-            {
-                multipartSchema["required"] = requiredFields;
-            }
+            Dictionary<string, object> multipartSchema;
 
             if (ep.InputTypeName is not null)
             {
-                multipartSchema["x-rivet-input-type"] = ep.InputTypeName;
+                // Named input type — emit as $ref so the schema appears once in components
+                multipartSchema = new Dictionary<string, object>
+                {
+                    ["$ref"] = $"#/components/schemas/{ep.InputTypeName}",
+                };
+            }
+            else
+            {
+                // Anonymous file upload — inline the schema
+                var multipartProps = new Dictionary<string, object>();
+                foreach (var fp in fileParams)
+                {
+                    multipartProps[fp.Name] = new Dictionary<string, object>
+                    {
+                        ["type"] = "string",
+                        ["format"] = "binary",
+                        ["x-rivet-file"] = true,
+                    };
+                }
+                foreach (var ff in formFieldParams)
+                {
+                    multipartProps[ff.Name] = MapTsTypeToJsonSchema(ff.Type);
+                }
+
+                var requiredFields = new List<string>();
+                foreach (var fp in fileParams)
+                {
+                    requiredFields.Add(fp.Name);
+                }
+                foreach (var ff in formFieldParams)
+                {
+                    if (ff.Type is not TsType.Nullable)
+                    {
+                        requiredFields.Add(ff.Name);
+                    }
+                }
+
+                multipartSchema = new Dictionary<string, object>
+                {
+                    ["type"] = "object",
+                    ["properties"] = multipartProps,
+                };
+
+                if (requiredFields.Count > 0)
+                {
+                    multipartSchema["required"] = requiredFields;
+                }
             }
 
             operation["requestBody"] = new Dictionary<string, object>
@@ -222,12 +232,15 @@ public static class OpenApiEmitter
         }
         else if (bodyParam is not null)
         {
+            var bodyContentType = ep.IsFormEncoded
+                ? "application/x-www-form-urlencoded"
+                : "application/json";
             operation["requestBody"] = new Dictionary<string, object>
             {
                 ["required"] = true,
                 ["content"] = new Dictionary<string, object>
                 {
-                    ["application/json"] = new Dictionary<string, object>
+                    [bodyContentType] = new Dictionary<string, object>
                     {
                         ["schema"] = MapTsTypeToJsonSchema(bodyParam.Type),
                     },
@@ -373,6 +386,7 @@ public static class OpenApiEmitter
         {
             return new Dictionary<string, object>
             {
+                ["x-rivet-file"] = true,
                 ["type"] = "string",
                 ["format"] = "binary",
             };
@@ -479,18 +493,12 @@ public static class OpenApiEmitter
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
-        IReadOnlyDictionary<string, TsType.StringUnion> enums,
-        HashSet<string> referencedTypes)
+        IReadOnlyDictionary<string, TsType.StringUnion> enums)
     {
         var schemas = new Dictionary<string, object>();
 
         foreach (var (name, def) in definitions)
         {
-            if (!referencedTypes.Contains(name))
-            {
-                continue;
-            }
-
             if (def.TypeParameters.Count > 0)
             {
                 // Generic definitions are emitted as monomorphised variants — skip the template
@@ -500,9 +508,9 @@ public static class OpenApiEmitter
             schemas[name] = BuildObjectSchema(def);
         }
 
-        // Monomorphised generics: find all Generic type refs used by endpoints
+        // Monomorphised generics: find all Generic type refs used across definitions and endpoints
         var genericInstances = new Dictionary<string, TsType.Generic>();
-        CollectGenericInstances(endpoints, definitions, referencedTypes, genericInstances);
+        CollectGenericInstances(endpoints, definitions, genericInstances);
 
         foreach (var (monoName, generic) in genericInstances)
         {
@@ -533,11 +541,6 @@ public static class OpenApiEmitter
         // Brands as schemas with x-rivet-brand extension
         foreach (var (name, brand) in brands)
         {
-            if (!referencedTypes.Contains(name))
-            {
-                continue;
-            }
-
             var brandSchema = MapTsTypeToJsonSchema(brand.Inner);
             brandSchema["x-rivet-brand"] = name;
             schemas[name] = brandSchema;
@@ -546,11 +549,6 @@ public static class OpenApiEmitter
         // Enums as string schemas
         foreach (var (name, su) in enums)
         {
-            if (!referencedTypes.Contains(name))
-            {
-                continue;
-            }
-
             schemas[name] = new Dictionary<string, object>
             {
                 ["type"] = "string",
@@ -569,15 +567,10 @@ public static class OpenApiEmitter
         foreach (var prop in def.Properties)
         {
             var propSchema = MapTsTypeToJsonSchema(prop.Type);
-
-            if (prop.IsDeprecated)
-            {
-                propSchema["deprecated"] = true;
-            }
-
+            SchemaEnricher.EnrichPropertySchema(propSchema, prop);
             properties[prop.Name] = propSchema;
 
-            if (!prop.IsOptional && prop.Type is not TsType.Nullable)
+            if (!prop.IsOptional)
             {
                 required.Add(prop.Name);
             }
@@ -588,6 +581,11 @@ public static class OpenApiEmitter
             ["type"] = "object",
             ["properties"] = properties,
         };
+
+        if (def.Description is not null)
+        {
+            schema["description"] = def.Description;
+        }
 
         if (required.Count > 0)
         {
@@ -647,15 +645,10 @@ public static class OpenApiEmitter
         {
             var resolvedType = ResolveTypeParams(prop.Type, typeParamMap);
             var propSchema = MapTsTypeToJsonSchema(resolvedType);
-
-            if (prop.IsDeprecated)
-            {
-                propSchema["deprecated"] = true;
-            }
-
+            SchemaEnricher.EnrichPropertySchema(propSchema, prop);
             properties[prop.Name] = propSchema;
 
-            if (!prop.IsOptional && resolvedType is not TsType.Nullable)
+            if (!prop.IsOptional)
             {
                 required.Add(prop.Name);
             }
@@ -678,61 +671,9 @@ public static class OpenApiEmitter
     private static TsType ResolveTypeParams(TsType type, Dictionary<string, TsType> map)
         => TsType.ResolveTypeParams(type, map);
 
-    private static HashSet<string> CollectReferencedTypes(
-        IReadOnlyList<TsEndpointDefinition> endpoints,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions)
-    {
-        var names = new HashSet<string>();
-
-        foreach (var ep in endpoints)
-        {
-            foreach (var param in ep.Params)
-            {
-                TsType.CollectTypeRefs(param.Type, names);
-            }
-
-            foreach (var resp in ep.Responses)
-            {
-                if (resp.DataType is not null)
-                {
-                    TsType.CollectTypeRefs(resp.DataType, names);
-                }
-            }
-        }
-
-        // Transitively collect refs from referenced definitions
-        var queue = new Queue<string>(names);
-        while (queue.Count > 0)
-        {
-            var name = queue.Dequeue();
-
-            if (!definitions.TryGetValue(name, out var def))
-            {
-                continue;
-            }
-
-            var newRefs = new HashSet<string>();
-            foreach (var prop in def.Properties)
-            {
-                TsType.CollectTypeRefs(prop.Type, newRefs);
-            }
-
-            foreach (var n in newRefs)
-            {
-                if (names.Add(n))
-                {
-                    queue.Enqueue(n);
-                }
-            }
-        }
-
-        return names;
-    }
-
     private static void CollectGenericInstances(
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
-        HashSet<string> referencedTypes,
         Dictionary<string, TsType.Generic> genericInstances)
     {
         // Walk endpoint params and responses for Generic type usages
@@ -752,14 +693,9 @@ public static class OpenApiEmitter
             }
         }
 
-        // Walk definitions' properties
-        foreach (var (name, def) in definitions)
+        // Walk all definitions' properties (all schemas are emitted, so all generics must be monomorphised)
+        foreach (var (_, def) in definitions)
         {
-            if (!referencedTypes.Contains(name))
-            {
-                continue;
-            }
-
             foreach (var prop in def.Properties)
             {
                 CollectGenericsFromType(prop.Type, genericInstances);

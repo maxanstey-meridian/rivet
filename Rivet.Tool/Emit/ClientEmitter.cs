@@ -161,7 +161,15 @@ public static partial class ClientEmitter
         }
         else if (bodyParam is not null)
         {
-            fetchOptionParts.Add($"body: {SafeParameterName(bodyParam.Name)}");
+            if (endpoint.IsFormEncoded)
+            {
+                fetchOptionParts.Add($"body: new URLSearchParams({SafeParameterName(bodyParam.Name)} as Record<string, string>)");
+                fetchOptionParts.Add("formEncoded: true");
+            }
+            else
+            {
+                fetchOptionParts.Add($"body: {SafeParameterName(bodyParam.Name)}");
+            }
         }
         if (queryParams.Count > 0)
         {

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -21,6 +22,10 @@ internal static class CSharpWriter
         sb.AppendLine();
         sb.AppendLine($"namespace {ns};");
         sb.AppendLine();
+        if (record.Description is not null)
+        {
+            sb.AppendLine($"[RivetDescription(\"{EscapeString(record.Description)}\")]");
+        }
         sb.AppendLine("[RivetType]");
         var typeParamSuffix = record.TypeParameters is { Count: > 0 }
             ? $"<{string.Join(", ", record.TypeParameters)}>"
@@ -39,9 +44,53 @@ internal static class CSharpWriter
         {
             var prop = record.Properties[i];
             var separator = i < record.Properties.Count - 1 ? "," : ");";
+            if (!prop.IsRequired)
+            {
+                sb.AppendLine("    [property: RivetOptional]");
+            }
+            if (prop.Format is not null)
+            {
+                sb.AppendLine($"    [property: RivetFormat(\"{prop.Format}\")]");
+            }
             if (prop.IsDeprecated)
             {
                 sb.AppendLine("    [property: Obsolete]");
+            }
+            if (prop.Description is not null)
+            {
+                sb.AppendLine($"    [property: RivetDescription(\"{EscapeString(prop.Description)}\")]");
+            }
+            if (prop.DefaultValue is not null)
+            {
+                sb.AppendLine($"    [property: RivetDefault(\"{EscapeString(prop.DefaultValue)}\")]");
+            }
+            if (prop.Example is not null)
+            {
+                sb.AppendLine($"    [property: RivetExample(\"{EscapeString(prop.Example)}\")]");
+            }
+            if (prop.IsReadOnly)
+            {
+                sb.AppendLine("    [property: RivetReadOnly]");
+            }
+            if (prop.IsWriteOnly)
+            {
+                sb.AppendLine("    [property: RivetWriteOnly]");
+            }
+            if (prop.Constraints is { HasAny: true } c)
+            {
+                var parts = new List<string>();
+                if (c.MinLength.HasValue) parts.Add($"MinLength = {c.MinLength}");
+                if (c.MaxLength.HasValue) parts.Add($"MaxLength = {c.MaxLength}");
+                if (c.Pattern is not null) parts.Add($"Pattern = \"{EscapeString(c.Pattern)}\"");
+                if (c.Minimum.HasValue) parts.Add($"Minimum = {c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}");
+                if (c.Maximum.HasValue) parts.Add($"Maximum = {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)}");
+                if (c.ExclusiveMinimum.HasValue) parts.Add($"ExclusiveMinimum = {c.ExclusiveMinimum.Value.ToString(CultureInfo.InvariantCulture)}");
+                if (c.ExclusiveMaximum.HasValue) parts.Add($"ExclusiveMaximum = {c.ExclusiveMaximum.Value.ToString(CultureInfo.InvariantCulture)}");
+                if (c.MultipleOf.HasValue) parts.Add($"MultipleOf = {c.MultipleOf.Value.ToString(CultureInfo.InvariantCulture)}");
+                if (c.MinItems.HasValue) parts.Add($"MinItems = {c.MinItems}");
+                if (c.MaxItems.HasValue) parts.Add($"MaxItems = {c.MaxItems}");
+                if (c.UniqueItems == true) parts.Add("UniqueItems = true");
+                sb.AppendLine($"    [property: RivetConstraints({string.Join(", ", parts)})]");
             }
             sb.AppendLine($"    {prop.CSharpType} {prop.Name}{separator}");
         }
@@ -51,7 +100,14 @@ internal static class CSharpWriter
 
     public static string WriteEnum(GeneratedEnum enumDef, string ns)
     {
+        var needsJsonImport = enumDef.Members.Any(m => m.OriginalName is not null);
+
         var sb = new StringBuilder();
+        if (needsJsonImport)
+        {
+            sb.AppendLine("using System.Text.Json.Serialization;");
+            sb.AppendLine();
+        }
         sb.AppendLine($"namespace {ns};");
         sb.AppendLine();
         sb.AppendLine($"public enum {enumDef.Name}");
@@ -59,8 +115,13 @@ internal static class CSharpWriter
 
         for (var i = 0; i < enumDef.Members.Count; i++)
         {
+            var member = enumDef.Members[i];
             var separator = i < enumDef.Members.Count - 1 ? "," : "";
-            sb.AppendLine($"    {enumDef.Members[i]}{separator}");
+            if (member.OriginalName is not null)
+            {
+                sb.AppendLine($"    [JsonStringEnumMemberName(\"{member.OriginalName}\")]");
+            }
+            sb.AppendLine($"    {member.CSharpName}{separator}");
         }
 
         sb.AppendLine("}");
@@ -190,12 +251,19 @@ internal static class CSharpWriter
     {
         var calls = new List<string>();
 
+        if (field.Summary is not null)
+        {
+            calls.Add($".Summary(\"{EscapeString(field.Summary)}\")");
+        }
+
         if (field.Description is not null)
         {
             calls.Add($".Description(\"{EscapeString(field.Description)}\")");
         }
 
-        if (field.SuccessStatus is not null)
+        // Emit .Status() when the code differs from the HTTP method default
+        var defaultStatus = field.HttpMethod switch { "Post" => 201, "Delete" => 204, _ => 200 };
+        if (field.SuccessStatus is not null && field.SuccessStatus != defaultStatus)
         {
             calls.Add($".Status({field.SuccessStatus})");
         }
@@ -208,14 +276,33 @@ internal static class CSharpWriter
 
         foreach (var error in field.ErrorResponses)
         {
-            if (error.Description is not null)
+            if (error.TypeName is not null)
             {
-                calls.Add($".Returns<{error.TypeName}>({error.StatusCode}, \"{EscapeString(error.Description)}\")");
+                if (error.Description is not null)
+                {
+                    calls.Add($".Returns<{error.TypeName}>({error.StatusCode}, \"{EscapeString(error.Description)}\")");
+                }
+                else
+                {
+                    calls.Add($".Returns<{error.TypeName}>({error.StatusCode})");
+                }
             }
             else
             {
-                calls.Add($".Returns<{error.TypeName}>({error.StatusCode})");
+                if (error.Description is not null)
+                {
+                    calls.Add($".Returns({error.StatusCode}, \"{EscapeString(error.Description)}\")");
+                }
+                else
+                {
+                    calls.Add($".Returns({error.StatusCode})");
+                }
             }
+        }
+
+        if (field.IsFormEncoded)
+        {
+            calls.Add(".FormEncoded()");
         }
 
         if (field.FileContentType is not null)

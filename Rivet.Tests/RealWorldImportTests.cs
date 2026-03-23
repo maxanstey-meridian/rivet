@@ -488,7 +488,7 @@ public sealed class RealWorldImportTests
 
         // Both +1 and -1 strip to _1 — dedup should make the second _1_2
         var propLines = content.Split('\n')
-            .Where(l => l.Trim().StartsWith("int") || l.Trim().StartsWith("string"))
+            .Where(l => l.Trim().StartsWith("long") || l.Trim().StartsWith("string"))
             .ToList();
 
         // Should have exactly one _1 and one _1_2 (not two _1)
@@ -532,8 +532,8 @@ public sealed class RealWorldImportTests
 
         var content = alertFile.Content;
 
-        // alert-number (integer) → should resolve to "int", not "AlertNumber"
-        Assert.Contains("int Number", content);
+        // alert-number (integer) → should resolve to "long", not "AlertNumber"
+        Assert.Contains("long Number", content);
         // alert-created-at (string, date-time) → should resolve to "DateTime", not "AlertCreatedAt"
         Assert.Contains("DateTime CreatedAt", content);
         // alert-state (boolean) → should resolve to "bool", not "AlertState"
