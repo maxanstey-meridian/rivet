@@ -16,8 +16,8 @@ ignore them, the spec stays valid.
 | `UploadInput(IFormFile Doc, string Title)` | Anonymous `UploadRequest` record  | Named `UploadInput` record (via `$ref`)    |
 | `DateTimeOffset`, `uint`, `short`, etc.    | Falls back to `DateTime`/`int`    | Preserved via `x-rivet-csharp-type`        |
 | Enums, nullable types, arrays, dicts       | Already preserved                 | Already preserved                          |
-| Property metadata (description, etc.)      | Lost                              | Preserved via `[Rivet*]` attributes        |
-| Enum member names (`in-progress`)          | PascalCased (`InProgress`)        | Preserved via `[JsonStringEnumMemberName]` |
+| Property metadata (description, etc.)      | Lost                              | Preserved automatically                    |
+| Enum member names (`in-progress`)          | PascalCased (`InProgress`)        | Preserved automatically                    |
 | Form-encoded bodies                        | Converted to JSON                 | Preserved via `.FormEncoded()`             |
 | Void error responses (404 no body)         | Dropped                           | Preserved via `.Returns(statusCode)`       |
 
@@ -114,10 +114,15 @@ tested in `OpenApiRoundTripTests.Double_RoundTrip_Is_Stable`.
 
 ## What also survives
 
-- **Property metadata** — `description`, `default`, `example`, `readOnly`, `writeOnly`, and validation constraints (`minLength`, `maxLength`, `pattern`, `minimum`, `maximum`, etc.) are preserved through `[RivetDescription]`, `[RivetDefault]`, `[RivetExample]`, `[RivetReadOnly]`, `[RivetWriteOnly]`, `[RivetConstraints]`, and `[RivetFormat]` attributes
-- **Type descriptions** — schema-level `description` is preserved via `[RivetDescription]` on the record
-- **Enum member names** — non-PascalCase enum values (e.g., `in-progress`, `my_status`) are preserved via `[JsonStringEnumMemberName]` attributes
+These are handled transparently — no user action required:
+
+- **Property metadata** — `description`, `default`, `example`, `readOnly`, `writeOnly`, and validation constraints are preserved through generated attributes on the C# records (see [Metadata Attributes](/reference/attributes#metadata-attributes) for details)
+- **Type descriptions** — schema-level `description` is preserved on the generated record
+- **Enum member names** — non-PascalCase values (e.g., `in-progress`, `my_status`) keep their original wire format automatically
 - **Summary / Description** — OpenAPI `summary` and `description` are preserved as separate `.Summary()` and `.Description()` builder calls
+
+These use builder methods you'll see in the generated contracts:
+
 - **Form-encoded bodies** — `application/x-www-form-urlencoded` content type is preserved via `.FormEncoded()`
 - **Void error responses** — error responses without a body (e.g., 404 with no content) are preserved via `.Returns(statusCode)`
 

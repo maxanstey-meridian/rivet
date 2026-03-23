@@ -173,12 +173,8 @@ dotnet rivet --from-openapi spec.json --namespace MyApp.Contracts --output ./src
 ```
 
 ```csharp
-// Generated — sealed records, enums with name preservation, typed contract with builder chain
-[JsonStringEnumMemberName("low")]
-Low,
-[JsonStringEnumMemberName("medium")]
-Medium,
-// ...
+// Generated — sealed records, enums, typed contract with builder chain
+public enum Priority { Low, Medium, High, Critical }
 
 public sealed record TaskDto(Guid Id, string Title, Priority Priority);
 
