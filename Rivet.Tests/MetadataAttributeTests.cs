@@ -726,13 +726,12 @@ public sealed class MetadataAttributeTests
 
     private static string ExtractDefsJson(string tsOutput)
     {
-        const string prefix = "const $defs = ";
-        const string suffix = " as const;";
-        var start = tsOutput.IndexOf(prefix, StringComparison.Ordinal);
-        Assert.True(start >= 0, "Could not find '$defs' in JSON Schema output");
-        start += prefix.Length;
-        var end = tsOutput.IndexOf(suffix, start, StringComparison.Ordinal);
-        Assert.True(end >= 0, "Could not find 'as const;' in JSON Schema output");
+        const string marker = "= ";
+        var lineStart = tsOutput.IndexOf("const $defs", StringComparison.Ordinal);
+        Assert.True(lineStart >= 0, "Could not find '$defs' in JSON Schema output");
+        var start = tsOutput.IndexOf(marker, lineStart, StringComparison.Ordinal) + marker.Length;
+        var end = tsOutput.IndexOf(";\n", start, StringComparison.Ordinal);
+        Assert.True(end >= 0, "Could not find end of $defs in JSON Schema output");
         return tsOutput[start..end];
     }
 }

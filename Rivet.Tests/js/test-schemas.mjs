@@ -20,10 +20,11 @@ if (!schemasPath) {
 // Read and strip TS-only syntax to get evaluable JS
 let code = readFileSync(schemasPath, "utf-8");
 
-// Remove "as const" annotations (TS-only)
-code = code.replaceAll(" as const", "");
-
-// Remove export keywords to get plain variable declarations
+// Remove TS-only syntax to get evaluable JS
+code = code.replace(/^import type .*;\n/gm, "");
+code = code.replace(/^type .*;\n/gm, "");
+code = code.replace(/: Record<string, JSONSchema>/g, "");
+code = code.replace(/: JSONSchema/g, "");
 code = code.replaceAll("export ", "");
 
 // Evaluate in a function scope to capture the variables

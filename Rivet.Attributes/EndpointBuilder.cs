@@ -3,7 +3,7 @@ namespace Rivet;
 /// <summary>
 /// Describes an additional (non-success) response declared via .Returns&lt;T&gt;().
 /// </summary>
-public sealed record ErrorResponse(int StatusCode, Type? ResponseType, string? Description);
+public sealed record RouteErrorResponse(int StatusCode, Type? ResponseType, string? Description);
 
 /// <summary>
 /// Shared builder state and fluent methods for all RouteDefinition variants.
@@ -20,7 +20,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     private string? _fileContentType;
     private bool _acceptsFile;
     private bool _formEncoded;
-    private List<ErrorResponse>? _errorResponses;
+    private List<RouteErrorResponse>? _errorResponses;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
@@ -35,7 +35,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public string? FileContentType => _fileContentType;
     public bool IsFileUpload => _acceptsFile;
     public bool IsFormEncoded => _formEncoded;
-    public IReadOnlyList<ErrorResponse>? ErrorResponses => _errorResponses;
+    public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses => _errorResponses;
 
     /// <summary>The resolved success status code (for use in Invoke).</summary>
     protected int SuccessStatus => _successStatus;
@@ -99,7 +99,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public TSelf Returns<TResponse>(int statusCode, string? description)
     {
         _errorResponses ??= [];
-        _errorResponses.Add(new ErrorResponse(statusCode, typeof(TResponse), description));
+        _errorResponses.Add(new RouteErrorResponse(statusCode, typeof(TResponse), description));
         return (TSelf)this;
     }
 
@@ -109,7 +109,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public TSelf Returns(int statusCode, string? description)
     {
         _errorResponses ??= [];
-        _errorResponses.Add(new ErrorResponse(statusCode, null, description));
+        _errorResponses.Add(new RouteErrorResponse(statusCode, null, description));
         return (TSelf)this;
     }
 

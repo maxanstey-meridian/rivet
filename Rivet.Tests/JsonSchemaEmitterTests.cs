@@ -8,9 +8,11 @@ public sealed class JsonSchemaEmitterTests
 {
     private static JsonElement ParseDefs(string output)
     {
-        // Extract the JSON from: const $defs = {...} as const;
-        var start = output.IndexOf("const $defs = ", StringComparison.Ordinal) + "const $defs = ".Length;
-        var end = output.IndexOf(" as const;", start, StringComparison.Ordinal);
+        // Extract the JSON from: const $defs: Record<string, JSONSchema> = {...};
+        const string prefix = "= ";
+        var lineStart = output.IndexOf("const $defs", StringComparison.Ordinal);
+        var start = output.IndexOf(prefix, lineStart, StringComparison.Ordinal) + prefix.Length;
+        var end = output.IndexOf(";\n", start, StringComparison.Ordinal);
         var json = output[start..end];
         return JsonDocument.Parse(json).RootElement;
     }
@@ -277,7 +279,7 @@ public sealed class JsonSchemaEmitterTests
         var output = CompilationHelper.EmitSchemas(source);
 
         // Should contain the export with $ref and $defs
-        Assert.Contains("export const SimpleDtoSchema = { \"$ref\": \"#/$defs/SimpleDto\", \"$defs\": $defs } as const;", output);
+        Assert.Contains("export const SimpleDtoSchema: JSONSchema = { \"$ref\": \"#/$defs/SimpleDto\", \"$defs\": $defs };", output);
     }
 
     [Fact]

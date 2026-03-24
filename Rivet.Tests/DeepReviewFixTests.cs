@@ -25,8 +25,10 @@ public sealed class DeepReviewFixTests
 
     private static JsonElement ParseDefs(string output)
     {
-        var start = output.IndexOf("const $defs = ", StringComparison.Ordinal) + "const $defs = ".Length;
-        var end = output.IndexOf(" as const;", start, StringComparison.Ordinal);
+        const string marker = "= ";
+        var lineStart = output.IndexOf("const $defs", StringComparison.Ordinal);
+        var start = output.IndexOf(marker, lineStart, StringComparison.Ordinal) + marker.Length;
+        var end = output.IndexOf(";\n", start, StringComparison.Ordinal);
         var json = output[start..end];
         return JsonDocument.Parse(json).RootElement;
     }
@@ -63,17 +65,15 @@ public sealed class DeepReviewFixTests
 
     /// <summary>
     /// Extracts the $defs JSON object from the TypeScript output of JsonSchemaEmitter.
-    /// The output format is: const $defs = { ... } as const;
     /// </summary>
     private static string ExtractDefsJson(string tsOutput)
     {
-        const string prefix = "const $defs = ";
-        const string suffix = " as const;";
-        var start = tsOutput.IndexOf(prefix, StringComparison.Ordinal);
-        Assert.True(start >= 0, "Could not find '$defs' in JSON Schema output");
-        start += prefix.Length;
-        var end = tsOutput.IndexOf(suffix, start, StringComparison.Ordinal);
-        Assert.True(end >= 0, "Could not find 'as const;' in JSON Schema output");
+        const string marker = "= ";
+        var lineStart = tsOutput.IndexOf("const $defs", StringComparison.Ordinal);
+        Assert.True(lineStart >= 0, "Could not find '$defs' in JSON Schema output");
+        var start = tsOutput.IndexOf(marker, lineStart, StringComparison.Ordinal) + marker.Length;
+        var end = tsOutput.IndexOf(";\n", start, StringComparison.Ordinal);
+        Assert.True(end >= 0, "Could not find end of $defs in JSON Schema output");
         return tsOutput[start..end];
     }
 
@@ -942,7 +942,7 @@ public sealed class DeepReviewFixTests
         // Zod should emit format refinements from the JSON Schema
         // The Zod emitter wraps TypeRefs via fromJSONSchema, not primitive expressions directly.
         // But let's verify the Zod expression builder uses format refinements:
-        Assert.Contains("fromJSONSchema(toSchema(ItemDtoSchema))", zodValidators);
+        Assert.Contains("fromJSONSchema(ItemDtoSchema)", zodValidators);
     }
 
     [Fact]

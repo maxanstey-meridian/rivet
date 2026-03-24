@@ -356,7 +356,7 @@ public sealed class ValidatorEmitterTests
 
         Assert.Contains("import { fromJSONSchema, z } from \"zod\";", zodValidators);
         Assert.Contains("import { MessageDtoSchema } from \"./schemas.js\";", zodValidators);
-        Assert.Contains("const _assertMessageDto = fromJSONSchema(toSchema(MessageDtoSchema));", zodValidators);
+        Assert.Contains("const _assertMessageDto = fromJSONSchema(MessageDtoSchema);", zodValidators);
         Assert.Contains("export const assertMessageDto = (data: unknown): MessageDto => _assertMessageDto.parse(data) as MessageDto;", zodValidators);
     }
 
@@ -513,6 +513,6 @@ public sealed class ValidatorEmitterTests
         var (zodValidators, _) = GenerateZod(source);
 
         // Should emit without error — Dictionary gets z.record()
-        Assert.Contains("fromJSONSchema(toSchema(MetadataDtoSchema))", zodValidators);
+        Assert.Contains("fromJSONSchema(MetadataDtoSchema)", zodValidators);
     }
 }

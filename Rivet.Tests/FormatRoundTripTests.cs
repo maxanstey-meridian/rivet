@@ -18,8 +18,10 @@ public sealed class FormatRoundTripTests
 
     private static JsonElement ParseDefs(string output)
     {
-        var start = output.IndexOf("const $defs = ", StringComparison.Ordinal) + "const $defs = ".Length;
-        var end = output.IndexOf(" as const;", start, StringComparison.Ordinal);
+        const string marker = "= ";
+        var lineStart = output.IndexOf("const $defs", StringComparison.Ordinal);
+        var start = output.IndexOf(marker, lineStart, StringComparison.Ordinal) + marker.Length;
+        var end = output.IndexOf(";\n", start, StringComparison.Ordinal);
         var json = output[start..end];
         return JsonDocument.Parse(json).RootElement;
     }

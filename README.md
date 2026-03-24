@@ -109,11 +109,17 @@ Rivet emits [Zod 4](https://zod.dev) validators backed by `fromJSONSchema()` —
 
 ```typescript
 // schemas.ts — standalone JSON Schema, usable with any validator
-export const TaskItemSchema = { "$ref": "#/$defs/TaskItem", "$defs": $defs } as const;
+import type { core } from "zod";
+type JSONSchema = core.JSONSchema.JSONSchema;
 
-// validators.ts — cached Zod schemas
+const $defs: Record<string, JSONSchema> = { /* all type definitions */ };
+export const TaskItemSchema: JSONSchema = { "$ref": "#/$defs/TaskItem", "$defs": $defs };
+
+// validators.ts — cached Zod schemas from the JSON Schema definitions
 import { fromJSONSchema, z } from "zod";
-const _assertTaskItem = fromJSONSchema(TaskItemSchema as any);
+import { TaskItemSchema } from "./schemas.js";
+
+const _assertTaskItem = fromJSONSchema(TaskItemSchema);
 export const assertTaskItem = (data: unknown): TaskItem => _assertTaskItem.parse(data) as TaskItem;
 ```
 
