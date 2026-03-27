@@ -81,7 +81,8 @@ internal static class CliParser
         {
             return new RivetOptions(
                 fromContractPath, outputDir, mode, files.ToArray(),
-                OpenApiPath: openApiPath, DefaultSecurity: defaultSecurity, FromContractPath: fromContractPath);
+                OpenApiPath: openApiPath, DefaultSecurity: defaultSecurity,
+                Quiet: quiet, JsonSchema: jsonSchema, FromContractPath: fromContractPath);
         }
 
         // Import mode doesn't need a project path

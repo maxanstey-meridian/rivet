@@ -56,6 +56,40 @@ public sealed class FromContractTests
     }
 
     [Fact]
+    public async Task FromContract_QuietFlag_SuppressesStdout()
+    {
+        var repoRoot = PublishFixture.FindRepoRoot();
+        var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
+        var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
+
+        var (exitCode, output) = await PublishFixture.RunProcessAsync(
+            "dotnet",
+            $"run --project \"{csproj}\" -- --from \"{fixture}\" --quiet",
+            repoRoot);
+
+        Assert.True(exitCode == 0, $"--from --quiet failed (exit {exitCode}):\n{output}");
+        Assert.DoesNotContain("ProductDto", output);
+        Assert.DoesNotContain("===", output);
+    }
+
+    [Fact]
+    public async Task FromContract_JsonSchemaFlag_EmitsSchemaInPreview()
+    {
+        var repoRoot = PublishFixture.FindRepoRoot();
+        var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
+        var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
+
+        var (exitCode, output) = await PublishFixture.RunProcessAsync(
+            "dotnet",
+            $"run --project \"{csproj}\" -- --from \"{fixture}\" --jsonschema",
+            repoRoot);
+
+        Assert.True(exitCode == 0, $"--from --jsonschema failed (exit {exitCode}):\n{output}");
+        Assert.Contains("=== schemas.ts ===", output);
+        Assert.Contains("ProductDto", output);
+    }
+
+    [Fact]
     public async Task FromContract_InvalidPath_FailsGracefully()
     {
         var repoRoot = PublishFixture.FindRepoRoot();

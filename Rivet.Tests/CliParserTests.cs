@@ -41,6 +41,28 @@ public sealed class CliParserTests
     }
 
     [Fact]
+    public void ParseArgs_FromFlag_ForwardsJsonSchemaFlag()
+    {
+        var args = new[] { "--from", "contracts.json", "--output", "./out", "--jsonschema" };
+
+        var options = CliParser.ParseArgs(args);
+
+        Assert.NotNull(options);
+        Assert.True(options!.JsonSchema, "--jsonschema should be forwarded when using --from");
+    }
+
+    [Fact]
+    public void ParseArgs_FromFlag_ForwardsQuietFlag()
+    {
+        var args = new[] { "--from", "contracts.json", "--quiet" };
+
+        var options = CliParser.ParseArgs(args);
+
+        Assert.NotNull(options);
+        Assert.True(options!.Quiet, "--quiet should be forwarded when using --from");
+    }
+
+    [Fact]
     public void PrintUsage_IncludesFromFlag()
     {
         var originalError = Console.Error;
