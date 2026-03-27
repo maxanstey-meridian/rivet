@@ -64,3 +64,6 @@ Psalm-style `array{width: int, height: int}` shapes are supported via docblock p
 
 - **Generic DTO support** — parse `@template` docblocks to support `Page<T>`-style patterns
 - **Validation constraint extraction** — read Laravel `$rules` arrays and Form Request validation
+- **Branded types** — no natural PHP equivalent; no way to distinguish a wrapper DTO from a regular one
+- **Auto-discovery without framework** — plain PHP projects with no router require explicit config to locate contracts
+- **Watch mode** — re-reflect on file change for dev-loop convenience
