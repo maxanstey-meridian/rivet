@@ -68,9 +68,13 @@ class EndpointBuilder
                 $referencedFqcns[$typeName] = true;
             } else {
                 $source = isset($routeParamNames[$param->getName()]) ? 'route' : 'query';
+                $parsedType = TypeParser::parse($typeName);
+                if ($paramType->allowsNull()) {
+                    $parsedType = ['kind' => 'nullable', 'inner' => $parsedType];
+                }
                 $params[] = [
                     'name' => $param->getName(),
-                    'type' => TypeParser::parse($typeName),
+                    'type' => $parsedType,
                     'source' => $source,
                 ];
             }

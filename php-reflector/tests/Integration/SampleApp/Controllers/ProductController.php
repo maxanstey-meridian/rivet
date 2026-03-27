@@ -21,8 +21,12 @@ class ProductController
 
     #[RivetRoute('GET', '/products')]
     #[RivetResponse('list<ProductDto>')]
-    public function index(string $status, int $page): void {}
+    public function index(string $status, int $page, ?string $search): void {}
 
     #[RivetRoute('DELETE', '/products/{id}')]
     public function destroy(int $id): void {}
+
+    #[RivetRoute('GET', '/products/paginated')]
+    #[RivetResponse('Collection<ProductDto>')]
+    public function paginated(int $page): void {}
 }

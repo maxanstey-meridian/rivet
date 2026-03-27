@@ -21,6 +21,7 @@ class LaravelE2ETest extends TestCase
             ['httpMethod' => 'POST', 'uri' => '/products', 'controller' => ProductController::class, 'action' => 'store'],
             ['httpMethod' => 'GET', 'uri' => '/products', 'controller' => ProductController::class, 'action' => 'index'],
             ['httpMethod' => 'DELETE', 'uri' => '/products/{id}', 'controller' => ProductController::class, 'action' => 'destroy'],
+            ['httpMethod' => 'GET', 'uri' => '/products/paginated', 'controller' => ProductController::class, 'action' => 'paginated'],
             ['httpMethod' => 'GET', 'uri' => '/users/{id}', 'controller' => UserController::class, 'action' => 'show'],
         ];
 
@@ -31,7 +32,7 @@ class LaravelE2ETest extends TestCase
     {
         $endpoints = self::$result['endpoints'];
 
-        $this->assertCount(5, $endpoints);
+        $this->assertCount(6, $endpoints);
         $this->assertSame('show', $endpoints[0]['name']);
         $this->assertSame('product', $endpoints[0]['controllerName']);
     }
@@ -61,11 +62,28 @@ class LaravelE2ETest extends TestCase
     {
         $ep = $this->findEndpoint('index');
 
-        $this->assertCount(2, $ep['params']);
+        $this->assertCount(3, $ep['params']);
         $this->assertSame('status', $ep['params'][0]['name']);
         $this->assertSame('query', $ep['params'][0]['source']);
         $this->assertSame('page', $ep['params'][1]['name']);
         $this->assertSame('query', $ep['params'][1]['source']);
+    }
+
+    public function testNullableQueryParamEmitsNullableType(): void
+    {
+        $ep = $this->findEndpoint('index');
+
+        $search = null;
+        foreach ($ep['params'] as $p) {
+            if ($p['name'] === 'search') {
+                $search = $p;
+                break;
+            }
+        }
+        $this->assertNotNull($search, 'Param "search" not found');
+        $this->assertSame('query', $search['source']);
+        $this->assertSame('nullable', $search['type']['kind']);
+        $this->assertSame('string', $search['type']['inner']['type']);
     }
 
     public function testIndexResponseIsArray(): void
@@ -189,9 +207,9 @@ class LaravelE2ETest extends TestCase
         $this->assertSame([1, 2, 3], $rating['type']['values']);
     }
 
-    public function testFiveEndpointsTotal(): void
+    public function testSixEndpointsTotal(): void
     {
-        $this->assertCount(5, self::$result['endpoints']);
+        $this->assertCount(6, self::$result['endpoints']);
     }
 
     public function testUserDtoNotDuplicated(): void
@@ -216,6 +234,52 @@ class LaravelE2ETest extends TestCase
         $priorityEnum = $this->findEnum('Priority');
         $this->assertArrayHasKey('intValues', $priorityEnum);
         $this->assertSame([1, 2, 3], $priorityEnum['intValues']);
+    }
+
+    public function testGenericResponseTypeRefsDiscovered(): void
+    {
+        $ep = $this->findEndpointByRoute('/products/paginated');
+
+        $this->assertSame('generic', $ep['returnType']['kind']);
+        $this->assertSame('Collection', $ep['returnType']['name']);
+        $this->assertCount(1, $ep['returnType']['typeArgs']);
+        $this->assertSame('ref', $ep['returnType']['typeArgs'][0]['kind']);
+        $this->assertSame('ProductDto', $ep['returnType']['typeArgs'][0]['name']);
+
+        // ProductDto should still be discovered through the generic wrapper
+        $typeNames = array_column(self::$result['types'], 'name');
+        $this->assertContains('ProductDto', $typeNames);
+    }
+
+    public function testArrayOfEnumPropertyEmitsCorrectly(): void
+    {
+        $filter = $this->findType('ProductFilterDto');
+        $priorities = $this->findProp($filter, 'priorities');
+
+        $this->assertSame('array', $priorities['type']['kind']);
+        $this->assertSame('ref', $priorities['type']['element']['kind']);
+        $this->assertSame('Priority', $priorities['type']['element']['name']);
+
+        // Priority enum should still be present (not lost by being nested in array)
+        $enumNames = array_column(self::$result['enums'], 'name');
+        $this->assertContains('Priority', $enumNames);
+    }
+
+    public function testUserShowEndpointReflectsCorrectly(): void
+    {
+        $ep = $this->findEndpointByRoute('/users/{id}');
+
+        $this->assertSame('show', $ep['name']);
+        $this->assertSame('GET', $ep['httpMethod']);
+        $this->assertSame('user', $ep['controllerName']);
+
+        $this->assertCount(1, $ep['params']);
+        $this->assertSame('id', $ep['params'][0]['name']);
+        $this->assertSame('route', $ep['params'][0]['source']);
+        $this->assertSame(['kind' => 'primitive', 'type' => 'number', 'format' => 'int32'], $ep['params'][0]['type']);
+
+        $this->assertSame('ref', $ep['returnType']['kind']);
+        $this->assertSame('UserDto', $ep['returnType']['name']);
     }
 
     public function testFullContractMatchesGoldenFile(): void
@@ -262,6 +326,16 @@ class LaravelE2ETest extends TestCase
             }
         }
         $this->fail("Endpoint '{$name}' not found");
+    }
+
+    private function findEndpointByRoute(string $routeTemplate): array
+    {
+        foreach (self::$result['endpoints'] as $ep) {
+            if ($ep['routeTemplate'] === $routeTemplate) {
+                return $ep;
+            }
+        }
+        $this->fail("Endpoint with route '{$routeTemplate}' not found");
     }
 
     private function findEnum(string $name): array

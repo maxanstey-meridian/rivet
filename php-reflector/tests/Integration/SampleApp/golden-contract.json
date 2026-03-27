@@ -167,6 +167,17 @@
                         "format": "int32"
                     },
                     "optional": false
+                },
+                {
+                    "name": "priorities",
+                    "type": {
+                        "kind": "array",
+                        "element": {
+                            "kind": "ref",
+                            "name": "Priority"
+                        }
+                    },
+                    "optional": false
                 }
             ]
         },
@@ -326,6 +337,17 @@
                         "format": "int32"
                     },
                     "source": "query"
+                },
+                {
+                    "name": "search",
+                    "type": {
+                        "kind": "nullable",
+                        "inner": {
+                            "kind": "primitive",
+                            "type": "string"
+                        }
+                    },
+                    "source": "query"
                 }
             ],
             "returnType": {
@@ -365,6 +387,48 @@
                 }
             ],
             "responses": []
+        },
+        {
+            "name": "paginated",
+            "httpMethod": "GET",
+            "routeTemplate": "/products/paginated",
+            "controllerName": "product",
+            "params": [
+                {
+                    "name": "page",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "number",
+                        "format": "int32"
+                    },
+                    "source": "query"
+                }
+            ],
+            "returnType": {
+                "kind": "generic",
+                "name": "Collection",
+                "typeArgs": [
+                    {
+                        "kind": "ref",
+                        "name": "ProductDto"
+                    }
+                ]
+            },
+            "responses": [
+                {
+                    "statusCode": 200,
+                    "dataType": {
+                        "kind": "generic",
+                        "name": "Collection",
+                        "typeArgs": [
+                            {
+                                "kind": "ref",
+                                "name": "ProductDto"
+                            }
+                        ]
+                    }
+                }
+            ]
         },
         {
             "name": "show",
