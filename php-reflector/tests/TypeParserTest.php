@@ -273,4 +273,20 @@ class TypeParserTest extends TestCase
             TypeParser::parse('-1')
         );
     }
+
+    public function testParseNullableStringLiteralUnion(): void
+    {
+        $this->assertSame(
+            ['kind' => 'nullable', 'inner' => ['kind' => 'stringUnion', 'values' => ['a', 'b']]],
+            TypeParser::parse("'a'|'b'|null")
+        );
+    }
+
+    public function testParseNullableIntLiteralUnion(): void
+    {
+        $this->assertSame(
+            ['kind' => 'nullable', 'inner' => ['kind' => 'intUnion', 'values' => [1, 2]]],
+            TypeParser::parse('1|2|null')
+        );
+    }
 }

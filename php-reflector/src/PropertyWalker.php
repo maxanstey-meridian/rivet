@@ -81,6 +81,7 @@ class PropertyWalker
             $docType = $this->extractVarType($prop);
             if ($docType !== null) {
                 $resolved = TypeParser::parse($docType);
+                $this->enqueueRefsFromType($resolved, $prop->getDeclaringClass()->getNamespaceName());
             } else {
                 trigger_error("Property {$prop->getDeclaringClass()->getName()}::\${$prop->getName()} is array without @var", E_USER_WARNING);
                 $resolved = ['kind' => 'primitive', 'type' => 'unknown'];
@@ -111,6 +112,35 @@ class PropertyWalker
         }
 
         return $resolved;
+    }
+
+    private function enqueueRefsFromType(array $typeNode, string $namespace): void
+    {
+        if ($typeNode['kind'] === 'ref') {
+            $name = $typeNode['name'];
+            // Resolve short name to FQCN using the declaring class's namespace
+            $fqcn = $namespace !== '' ? $namespace . '\\' . $name : $name;
+            if (is_subclass_of($fqcn, \BackedEnum::class)) {
+                $this->collectEnum($fqcn);
+            } elseif (class_exists($fqcn)) {
+                $this->enqueue($fqcn);
+            }
+            return;
+        }
+
+        // Recurse into compound types
+        foreach (['inner', 'element', 'value'] as $key) {
+            if (isset($typeNode[$key]) && is_array($typeNode[$key])) {
+                $this->enqueueRefsFromType($typeNode[$key], $namespace);
+            }
+        }
+        if (isset($typeNode['properties']) && is_array($typeNode['properties'])) {
+            foreach ($typeNode['properties'] as $prop) {
+                if (isset($prop['type'])) {
+                    $this->enqueueRefsFromType($prop['type'], $namespace);
+                }
+            }
+        }
     }
 
     private function extractVarType(\ReflectionProperty $prop): ?string

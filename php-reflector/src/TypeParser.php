@@ -61,47 +61,55 @@ class TypeParser
             $this->skipWhitespace();
         }
 
-        $nullIndex = null;
-        foreach ($members as $i => $m) {
+        // Extract null from the union if present
+        $hasNull = false;
+        $nonNull = [];
+        foreach ($members as $m) {
             if ($m === ['kind' => 'primitive', 'type' => 'null']) {
-                $nullIndex = $i;
-                break;
+                $hasNull = true;
+            } else {
+                $nonNull[] = $m;
             }
         }
 
-        if ($nullIndex !== null && count($members) === 2) {
-            $other = $members[$nullIndex === 0 ? 1 : 0];
-            return ['kind' => 'nullable', 'inner' => $other];
+        // Single non-null member + null → nullable
+        if ($hasNull && count($nonNull) === 1) {
+            return ['kind' => 'nullable', 'inner' => $nonNull[0]];
         }
 
+        // Process remaining members (with or without null extracted)
+        $remaining = $hasNull ? $nonNull : $members;
+
         $allStringUnions = true;
-        foreach ($members as $m) {
+        foreach ($remaining as $m) {
             if ($m['kind'] !== 'stringUnion') {
                 $allStringUnions = false;
                 break;
             }
         }
-        if ($allStringUnions) {
+        if ($allStringUnions && $remaining !== []) {
             $values = [];
-            foreach ($members as $m) {
+            foreach ($remaining as $m) {
                 array_push($values, ...$m['values']);
             }
-            return ['kind' => 'stringUnion', 'values' => $values];
+            $result = ['kind' => 'stringUnion', 'values' => $values];
+            return $hasNull ? ['kind' => 'nullable', 'inner' => $result] : $result;
         }
 
         $allIntUnions = true;
-        foreach ($members as $m) {
+        foreach ($remaining as $m) {
             if ($m['kind'] !== 'intUnion') {
                 $allIntUnions = false;
                 break;
             }
         }
-        if ($allIntUnions) {
+        if ($allIntUnions && $remaining !== []) {
             $values = [];
-            foreach ($members as $m) {
+            foreach ($remaining as $m) {
                 array_push($values, ...$m['values']);
             }
-            return ['kind' => 'intUnion', 'values' => $values];
+            $result = ['kind' => 'intUnion', 'values' => $values];
+            return $hasNull ? ['kind' => 'nullable', 'inner' => $result] : $result;
         }
 
         throw new \RuntimeException('Unsupported union type: only T|null, string literal, and int literal unions are supported');

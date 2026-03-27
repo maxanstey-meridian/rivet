@@ -446,4 +446,37 @@ public sealed class PhpRoundTripTests
         Assert.Contains("export type ChildDto", ts);
         Assert.Contains("export type ParentDto", ts);
     }
+
+    [Fact]
+    public void NullableRef_And_NullableArray_Emit_Correctly()
+    {
+        var json = """
+            {
+                "types": [
+                    {
+                        "name": "ProfileDto",
+                        "typeParameters": [],
+                        "properties": [
+                            { "name": "address", "type": { "kind": "nullable", "inner": { "kind": "ref", "name": "AddressDto" } }, "optional": false },
+                            { "name": "tags", "type": { "kind": "nullable", "inner": { "kind": "array", "element": { "kind": "primitive", "type": "string" } } }, "optional": false }
+                        ]
+                    },
+                    {
+                        "name": "AddressDto",
+                        "typeParameters": [],
+                        "properties": [
+                            { "name": "street", "type": { "kind": "primitive", "type": "string" }, "optional": false }
+                        ]
+                    }
+                ],
+                "enums": [],
+                "endpoints": []
+            }
+            """;
+
+        var ts = CompilationHelper.EmitTypesFromJson(json);
+
+        Assert.Contains("  address: AddressDto | null;", ts);
+        Assert.Contains("  tags: string[] | null;", ts);
+    }
 }

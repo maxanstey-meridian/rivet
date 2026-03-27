@@ -7,6 +7,10 @@ namespace Rivet\PhpReflector\Tests;
 use PHPUnit\Framework\TestCase;
 use Rivet\PhpReflector\PropertyWalker;
 use Rivet\PhpReflector\Tests\Fixtures\AddressDto;
+use Rivet\PhpReflector\Tests\Fixtures\AddressListDto;
+use Rivet\PhpReflector\Tests\Fixtures\AnotherOrderDto;
+use Rivet\PhpReflector\Tests\Fixtures\NullableArrayDto;
+use Rivet\PhpReflector\Tests\Fixtures\NullableEnumDto;
 use Rivet\PhpReflector\Tests\Fixtures\NullableDto;
 use Rivet\PhpReflector\Tests\Fixtures\OrderDto;
 use Rivet\PhpReflector\Tests\Fixtures\PersonDto;
@@ -187,5 +191,46 @@ class PropertyWalkerTest extends TestCase
             ['kind' => 'intUnion', 'values' => [1, 2, 3]],
             $result['types'][0]['properties'][0]['type']
         );
+    }
+
+    public function testDocblockRefTransitivelyWalked(): void
+    {
+        $result = PropertyWalker::walk(AddressListDto::class);
+
+        $typeNames = array_column($result['types'], 'name');
+        $this->assertContains('AddressListDto', $typeNames);
+        $this->assertContains('AddressDto', $typeNames);
+        $this->assertCount(2, $result['types']);
+    }
+
+    public function testNullableBackedEnum(): void
+    {
+        $result = PropertyWalker::walk(NullableEnumDto::class);
+
+        $type = $result['types'][0];
+        $this->assertSame(
+            ['kind' => 'nullable', 'inner' => ['kind' => 'ref', 'name' => 'Status']],
+            $type['properties'][0]['type']
+        );
+        $this->assertCount(1, $result['enums']);
+        $this->assertSame('Status', $result['enums'][0]['name']);
+    }
+
+    public function testNullableArrayWithDocblock(): void
+    {
+        $result = PropertyWalker::walk(NullableArrayDto::class);
+
+        $this->assertSame(
+            ['kind' => 'nullable', 'inner' => ['kind' => 'array', 'element' => ['kind' => 'primitive', 'type' => 'string']]],
+            $result['types'][0]['properties'][0]['type']
+        );
+    }
+
+    public function testEnumDeduplicationAcrossDtos(): void
+    {
+        $result = PropertyWalker::walk(OrderDto::class, AnotherOrderDto::class);
+
+        $this->assertCount(1, $result['enums']);
+        $this->assertSame('Status', $result['enums'][0]['name']);
     }
 }
