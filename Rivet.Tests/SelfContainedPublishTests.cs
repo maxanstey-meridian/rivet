@@ -18,6 +18,14 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     }
 
     [Fact]
+    public void SelfContained_Binary_Exists_After_Publish()
+    {
+        Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
+        Assert.True(File.Exists(_fixture.BinaryPath),
+            $"Expected binary at {_fixture.BinaryPath} but it does not exist");
+    }
+
+    [Fact]
     public async Task SelfContained_Binary_ShowsUsage()
     {
         Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
@@ -43,6 +51,47 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
         Assert.True(exitCode == 0, $"Import failed (exit {exitCode}):\n{output}");
         Assert.Contains("// ===", output);
         Assert.Contains("Pet", output);
+    }
+
+    [Fact]
+    public async Task SelfContained_Binary_WritesOutputToDirectory()
+    {
+        Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
+
+        var repoRoot = PublishFixture.FindRepoRoot();
+        var fixtureFile = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "openapi-petstore-v3.json");
+        var outputDir = Path.Combine(Path.GetTempPath(), $"rivet-output-test-{Guid.NewGuid():N}");
+
+        try
+        {
+            var (exitCode, output) = await PublishFixture.RunProcessAsync(
+                _fixture.BinaryPath,
+                $"--from-openapi \"{fixtureFile}\" --namespace PetStore --output \"{outputDir}\"");
+
+            Assert.True(exitCode == 0, $"Import with --output failed (exit {exitCode}):\n{output}");
+
+            var generatedFiles = Directory.GetFiles(outputDir, "*.cs", SearchOption.AllDirectories);
+            Assert.NotEmpty(generatedFiles);
+            Assert.Contains("Generated", output);
+        }
+        finally
+        {
+            if (Directory.Exists(outputDir))
+                Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SelfContained_Binary_InvalidFilePath_FailsGracefully()
+    {
+        Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
+
+        var (exitCode, output) = await PublishFixture.RunProcessAsync(
+            _fixture.BinaryPath,
+            "--from-openapi /nonexistent/path/spec.json --namespace Ns");
+
+        Assert.NotEqual(0, exitCode);
+        Assert.DoesNotContain("Unhandled exception", output);
     }
 }
 

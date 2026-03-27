@@ -275,6 +275,12 @@ static async Task<int> Run(string[] args)
 
 static int RunImport(RivetOptions options)
 {
+    if (!File.Exists(options.FromOpenApiPath!))
+    {
+        Console.Error.WriteLine($"error: file not found: {options.FromOpenApiPath}");
+        return 1;
+    }
+
     var json = File.ReadAllText(options.FromOpenApiPath!);
     var importOptions = new ImportOptions(
         options.ImportNamespace ?? "Generated",
