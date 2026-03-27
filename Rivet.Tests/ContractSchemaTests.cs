@@ -185,6 +185,48 @@ public sealed class ContractSchemaTests
     }
 
     [Fact]
+    public void Deeply_Nested_Types_Validate()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Dto"] = new("Dto", [], [
+                new("scores", new TsType.Array(new TsType.Nullable(new TsType.TypeRef("Score"))), false),
+                new("tags", new TsType.Dictionary(new TsType.Array(new TsType.Primitive("string"))), false),
+            ]),
+        };
+
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var result = Validate(json);
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void Property_Missing_Required_Fields_Rejected()
+    {
+        // Missing "optional" field
+        var json = """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"primitive","type":"string"}}]}],"enums":[],"endpoints":[]}""";
+        var result = Validate(json);
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Property_Missing_Type_Rejected()
+    {
+        // Missing "type" field
+        var json = """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","optional":false}]}],"enums":[],"endpoints":[]}""";
+        var result = Validate(json);
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Empty_StringUnion_Values_Rejected()
+    {
+        var json = """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"stringUnion","values":[]},"optional":false}]}],"enums":[],"endpoints":[]}""";
+        var result = Validate(json);
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
     public void Invalid_ParamSource_Rejected()
     {
         var json = """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"x","type":{"kind":"primitive","type":"string"},"source":"header"}],"controllerName":"C","responses":[]}]}""";

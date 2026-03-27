@@ -55,7 +55,7 @@
           "type": "object",
           "properties": {
             "kind": { "const": "stringUnion" },
-            "values": { "type": "array", "items": { "type": "string" } }
+            "values": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
           },
           "required": ["kind", "values"],
           "additionalProperties": false

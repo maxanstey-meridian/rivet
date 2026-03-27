@@ -167,6 +167,10 @@ public sealed class ContractEmitterTests
         Assert.Equal("ref", responses[0].GetProperty("dataType").GetProperty("kind").GetString());
         Assert.Equal(404, responses[1].GetProperty("statusCode").GetInt32());
         Assert.False(responses[1].TryGetProperty("dataType", out _));
+        Assert.Equal("Not found", responses[1].GetProperty("description").GetString());
+
+        // 200 response has no description — omitted
+        Assert.False(responses[0].TryGetProperty("description", out _));
     }
 
     [Fact]
@@ -316,6 +320,168 @@ public sealed class ContractEmitterTests
         Assert.Equal("Create an order", ep.GetProperty("summary").GetString());
         Assert.False(ep.TryGetProperty("description", out _));
         Assert.False(ep.TryGetProperty("security", out _));
+    }
+
+    [Fact]
+    public void Deeply_Nested_Type_Compositions_Serialize()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Dto"] = new("Dto", [], [
+                // List<int?> → Array(Nullable(Primitive))
+                new("scores", new TsType.Array(new TsType.Nullable(new TsType.TypeRef("Score"))), false),
+                // Dictionary<string, string[]> → Dictionary(Array(Primitive))
+                new("tags", new TsType.Dictionary(new TsType.Array(new TsType.Primitive("string"))), false),
+            ]),
+        };
+
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        using var doc = JsonDocument.Parse(json);
+        var props = doc.RootElement.GetProperty("types")[0].GetProperty("properties");
+
+        // Array(Nullable(TypeRef))
+        var scores = props[0].GetProperty("type");
+        Assert.Equal("array", scores.GetProperty("kind").GetString());
+        var inner = scores.GetProperty("element");
+        Assert.Equal("nullable", inner.GetProperty("kind").GetString());
+        Assert.Equal("ref", inner.GetProperty("inner").GetProperty("kind").GetString());
+        Assert.Equal("Score", inner.GetProperty("inner").GetProperty("name").GetString());
+
+        // Dictionary(Array(Primitive))
+        var tags = props[1].GetProperty("type");
+        Assert.Equal("dictionary", tags.GetProperty("kind").GetString());
+        var dictVal = tags.GetProperty("value");
+        Assert.Equal("array", dictVal.GetProperty("kind").GetString());
+        Assert.Equal("primitive", dictVal.GetProperty("element").GetProperty("kind").GetString());
+        Assert.Equal("string", dictVal.GetProperty("element").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public void Property_Constraint_Values_Serialize()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Dto"] = new("Dto", [], [
+                new("name", new TsType.Primitive("string"), false,
+                    Constraints: new TsPropertyConstraints(MinLength: 1, MaxLength: 100, Pattern: "^[a-z]+$")),
+                new("score", new TsType.Primitive("number"), false,
+                    Constraints: new TsPropertyConstraints(Minimum: 0, Maximum: 999.5,
+                        ExclusiveMinimum: -1, ExclusiveMaximum: 1000, MultipleOf: 0.5)),
+                new("tags", new TsType.Array(new TsType.Primitive("string")), false,
+                    Constraints: new TsPropertyConstraints(MinItems: 1, MaxItems: 10, UniqueItems: true)),
+            ]),
+        };
+
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        using var doc = JsonDocument.Parse(json);
+        var props = doc.RootElement.GetProperty("types")[0].GetProperty("properties");
+
+        // String constraints
+        var nameConstraints = props[0].GetProperty("constraints");
+        Assert.Equal(1, nameConstraints.GetProperty("minLength").GetInt32());
+        Assert.Equal(100, nameConstraints.GetProperty("maxLength").GetInt32());
+        Assert.Equal("^[a-z]+$", nameConstraints.GetProperty("pattern").GetString());
+
+        // Numeric constraints
+        var scoreConstraints = props[1].GetProperty("constraints");
+        Assert.Equal(0, scoreConstraints.GetProperty("minimum").GetDouble());
+        Assert.Equal(999.5, scoreConstraints.GetProperty("maximum").GetDouble());
+        Assert.Equal(-1, scoreConstraints.GetProperty("exclusiveMinimum").GetDouble());
+        Assert.Equal(1000, scoreConstraints.GetProperty("exclusiveMaximum").GetDouble());
+        Assert.Equal(0.5, scoreConstraints.GetProperty("multipleOf").GetDouble());
+
+        // Array constraints
+        var tagConstraints = props[2].GetProperty("constraints");
+        Assert.Equal(1, tagConstraints.GetProperty("minItems").GetInt32());
+        Assert.Equal(10, tagConstraints.GetProperty("maxItems").GetInt32());
+        Assert.True(tagConstraints.GetProperty("uniqueItems").GetBoolean());
+    }
+
+    [Fact]
+    public void Endpoint_Summary_And_Description_Both_Emit()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "getUser",
+            "GET",
+            "/api/users/{id}",
+            [new TsEndpointParam("id", new TsType.Primitive("number"), ParamSource.Route)],
+            new TsType.TypeRef("UserDto"),
+            "UsersController",
+            [new TsResponseType(200, new TsType.TypeRef("UserDto"))],
+            Summary: "Get a user by ID",
+            Description: "Returns the full user profile including nested address data.");
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType.StringUnion>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var ep = doc.RootElement.GetProperty("endpoints")[0];
+
+        Assert.Equal("Get a user by ID", ep.GetProperty("summary").GetString());
+        Assert.Equal("Returns the full user profile including nested address data.", ep.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public void TypeParameters_Emitted_On_Type_Definition()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["PagedResult"] = new("PagedResult", ["T", "U"], [
+                new("items", new TsType.Array(new TsType.TypeParam("T")), false),
+                new("meta", new TsType.TypeParam("U"), false),
+            ]),
+        };
+
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        using var doc = JsonDocument.Parse(json);
+        var typeParams = doc.RootElement.GetProperty("types")[0].GetProperty("typeParameters");
+
+        Assert.Equal(2, typeParams.GetArrayLength());
+        Assert.Equal("T", typeParams[0].GetString());
+        Assert.Equal("U", typeParams[1].GetString());
+    }
+
+    [Fact]
+    public void Property_Metadata_Fields_Serialize()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Dto"] = new("Dto", [], [
+                new("allMeta", new TsType.Primitive("string"), false,
+                    IsDeprecated: true,
+                    Format: "email",
+                    DefaultValue: "user@example.com",
+                    Description: "The user email",
+                    Example: "alice@example.com",
+                    IsReadOnly: true,
+                    IsWriteOnly: false),
+                new("bare", new TsType.Primitive("string"), false),
+            ]),
+        };
+
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        using var doc = JsonDocument.Parse(json);
+        var props = doc.RootElement.GetProperty("types")[0].GetProperty("properties");
+
+        // Property with all metadata
+        var full = props[0];
+        Assert.True(full.GetProperty("deprecated").GetBoolean());
+        Assert.Equal("email", full.GetProperty("format").GetString());
+        Assert.Equal("user@example.com", full.GetProperty("defaultValue").GetString());
+        Assert.Equal("The user email", full.GetProperty("description").GetString());
+        Assert.Equal("alice@example.com", full.GetProperty("example").GetString());
+        Assert.True(full.GetProperty("readOnly").GetBoolean());
+
+        // writeOnly: false should be omitted (WhenWritingDefault)
+        Assert.False(full.TryGetProperty("writeOnly", out _));
+
+        // Bare property: default-valued booleans omitted
+        var bare = props[1];
+        Assert.False(bare.TryGetProperty("deprecated", out _));
+        Assert.False(bare.TryGetProperty("format", out _));
+        Assert.False(bare.TryGetProperty("defaultValue", out _));
+        Assert.False(bare.TryGetProperty("description", out _));
+        Assert.False(bare.TryGetProperty("example", out _));
+        Assert.False(bare.TryGetProperty("readOnly", out _));
+        Assert.False(bare.TryGetProperty("writeOnly", out _));
     }
 
     [Fact]
