@@ -6,7 +6,7 @@ namespace Rivet\PhpReflector\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Rivet\PhpReflector\ResponseResolver;
-use Rivet\PhpReflector\Tests\Fixtures\NoResponseController;
+use Rivet\PhpReflector\Tests\Fixtures\NoRouteController;
 use Rivet\PhpReflector\Tests\Fixtures\OrderResponseController;
 use Rivet\PhpReflector\Tests\Fixtures\ScalarResponseController;
 
@@ -14,7 +14,7 @@ class ResponseResolverTest extends TestCase
 {
     public function testMissingAttributeReturnsNull(): void
     {
-        $method = new \ReflectionMethod(NoResponseController::class, 'index');
+        $method = new \ReflectionMethod(NoRouteController::class, 'index');
         $result = ResponseResolver::resolve($method);
 
         $this->assertNull($result);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Rivet\PhpReflector\Symfony;
 
 use Rivet\PhpReflector\ContractEmitter;
+use Rivet\PhpReflector\Diagnostics;
 use Rivet\PhpReflector\SymfonyRouteWalker;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -30,6 +31,17 @@ class RivetReflectCommand extends Command
     {
         $routes = SymfonyRouteWalker::fromRouteCollection($this->router->getRouteCollection());
         $contract = SymfonyRouteWalker::walk($routes);
+
+        /** @var Diagnostics $diagnostics */
+        $diagnostics = $contract['diagnostics'];
+        foreach ($diagnostics->formatMessages() as $line) {
+            $output->writeln("<comment>$line</comment>");
+        }
+
+        if ($diagnostics->hasErrors()) {
+            return Command::FAILURE;
+        }
+
         $json = ContractEmitter::emit($contract);
 
         $out = $input->getOption('out');

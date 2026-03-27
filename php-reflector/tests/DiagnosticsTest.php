@@ -9,7 +9,7 @@ use Rivet\PhpReflector\Diagnostics;
 use Rivet\PhpReflector\PropertyWalker;
 use Rivet\PhpReflector\ControllerWalker;
 use Rivet\PhpReflector\EndpointBuilder;
-use Rivet\PhpReflector\Tests\Fixtures\BrokenRefDto;
+use Rivet\PhpReflector\Tests\BrokenFixtures\BrokenRefDto;
 use Rivet\PhpReflector\Tests\Fixtures\OrderItemLooseDto;
 use Rivet\PhpReflector\Tests\Fixtures\SampleController;
 
@@ -86,15 +86,17 @@ class DiagnosticsTest extends TestCase
         $this->assertStringContainsString('OrderItemLooseDto', $all[0]['message']);
     }
 
-    public function testUnresolvableRefEmitsWarning(): void
+    public function testUnresolvableRefEmitsError(): void
     {
         $result = PropertyWalker::walk(BrokenRefDto::class);
 
         $diag = $result['diagnostics'];
-        $warnings = array_filter($diag->all(), fn ($item) => $item['severity'] === 'warning');
-        $this->assertCount(1, $warnings);
-        $warning = array_values($warnings)[0];
-        $this->assertStringContainsString('NonExistentClass', $warning['message']);
+        $this->assertTrue($diag->hasErrors());
+
+        $errors = array_filter($diag->all(), fn ($item) => $item['severity'] === 'error');
+        $this->assertCount(1, $errors);
+        $error = array_values($errors)[0];
+        $this->assertStringContainsString('NonExistentClass', $error['message']);
     }
 
     public function testMissingResponseDiagnostic(): void
@@ -116,13 +118,32 @@ class DiagnosticsTest extends TestCase
         $this->assertSame([], $destroy['responses']);
     }
 
+    public function testFormatMessages(): void
+    {
+        $diag = new Diagnostics();
+        $diag->warning('Missing type info', ['property' => 'foo']);
+        $diag->error('Bad class ref', ['class' => 'Bar']);
+
+        $lines = $diag->formatMessages();
+
+        $this->assertCount(2, $lines);
+        $this->assertStringContainsString('[warning]', $lines[0]);
+        $this->assertStringContainsString('Missing type info', $lines[0]);
+        $this->assertStringContainsString('[error]', $lines[1]);
+        $this->assertStringContainsString('Bad class ref', $lines[1]);
+    }
+
+    public function testFormatMessagesEmptyReturnsEmpty(): void
+    {
+        $diag = new Diagnostics();
+        $this->assertSame([], $diag->formatMessages());
+    }
+
     public function testErrorsHaltReflection(): void
     {
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/Bad class/');
+        $this->expectExceptionMessageMatches('/NonExistentClass/');
 
-        $diagnostics = new Diagnostics();
-        $diagnostics->error('Bad class ref');
-        EndpointBuilder::buildContract([], [], $diagnostics);
+        EndpointBuilder::buildContract([], [BrokenRefDto::class => true]);
     }
 }

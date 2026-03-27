@@ -6,10 +6,21 @@ namespace Rivet\PhpReflector;
 
 class ReflectCommand
 {
+    /** @var resource */
+    private $stderr;
+
+    /**
+     * @param resource|null $stderr Stream for diagnostic output (defaults to STDERR)
+     */
+    public function __construct($stderr = null)
+    {
+        $this->stderr = $stderr ?? STDERR;
+    }
+
     public function run(string $dir, string $out): int
     {
         if (!is_dir($dir)) {
-            fwrite(STDERR, "Error: directory does not exist: {$dir}\n");
+            fwrite($this->stderr, "Error: directory does not exist: {$dir}\n");
             return 1;
         }
 
@@ -31,6 +42,17 @@ class ReflectCommand
         );
 
         $contract = PropertyWalker::walk(...array_values($classes));
+
+        /** @var Diagnostics $diagnostics */
+        $diagnostics = $contract['diagnostics'];
+        foreach ($diagnostics->formatMessages() as $line) {
+            fwrite($this->stderr, $line . "\n");
+        }
+
+        if ($diagnostics->hasErrors()) {
+            return 1;
+        }
+
         $json = ContractEmitter::emit($contract);
         file_put_contents($out, $json . "\n");
 

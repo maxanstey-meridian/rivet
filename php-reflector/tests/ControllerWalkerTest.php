@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Rivet\PhpReflector\ControllerWalker;
 use Rivet\PhpReflector\Tests\Fixtures\AnotherController;
 use Rivet\PhpReflector\Tests\Fixtures\InlineResponseController;
-use Rivet\PhpReflector\Tests\Fixtures\NoResponseController;
+use Rivet\PhpReflector\Tests\Fixtures\NoRouteController;
 use Rivet\PhpReflector\Tests\Fixtures\SampleController;
 
 class ControllerWalkerTest extends TestCase
@@ -24,7 +24,7 @@ class ControllerWalkerTest extends TestCase
 
     public function testEmptyControllerReturnsNoEndpoints(): void
     {
-        $result = ControllerWalker::walk(NoResponseController::class);
+        $result = ControllerWalker::walk(NoRouteController::class);
 
         $this->assertSame([], $result['endpoints']);
         $this->assertSame([], $result['types']);

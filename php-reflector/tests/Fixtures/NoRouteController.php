@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Rivet\PhpReflector\Tests\Fixtures;
 
-class NoResponseController
+class NoRouteController
 {
     public function index(): void {}
 }

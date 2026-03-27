@@ -39,4 +39,58 @@ class ReflectCommandTest extends TestCase
         $command = new ReflectCommand();
         $this->assertSame(1, $command->run('/nonexistent', '/dev/null'));
     }
+
+    public function testDiagnosticsWrittenToStderr(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+        $stderrFile = sys_get_temp_dir() . '/rivet-stderr-' . uniqid() . '.txt';
+        $stderr = fopen($stderrFile, 'w');
+
+        try {
+            $command = new ReflectCommand($stderr);
+            $exitCode = $command->run(__DIR__ . '/Fixtures', $tmpFile);
+
+            fclose($stderr);
+            $stderrOutput = file_get_contents($stderrFile);
+
+            $this->assertSame(0, $exitCode);
+            // Fixtures/OrderItemLooseDto has untyped array → warning
+            $this->assertStringContainsString('[warning]', $stderrOutput);
+            $this->assertStringContainsString('OrderItemLooseDto', $stderrOutput);
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+            if (file_exists($stderrFile)) {
+                unlink($stderrFile);
+            }
+        }
+    }
+
+    public function testErrorDiagnosticsReturnExitCode1(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+        $stderrFile = sys_get_temp_dir() . '/rivet-stderr-' . uniqid() . '.txt';
+        $stderr = fopen($stderrFile, 'w');
+
+        try {
+            $command = new ReflectCommand($stderr);
+            $exitCode = $command->run(__DIR__ . '/BrokenFixtures', $tmpFile);
+
+            fclose($stderr);
+            $stderrOutput = file_get_contents($stderrFile);
+
+            $this->assertSame(1, $exitCode);
+            $this->assertStringContainsString('[error]', $stderrOutput);
+            $this->assertStringContainsString('NonExistentClass', $stderrOutput);
+            $this->assertFileDoesNotExist($tmpFile);
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+            if (file_exists($stderrFile)) {
+                unlink($stderrFile);
+            }
+        }
+    }
 }

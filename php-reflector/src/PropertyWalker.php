@@ -126,8 +126,10 @@ class PropertyWalker
                 $this->collectEnum($fqcn);
             } elseif (class_exists($fqcn)) {
                 $this->enqueue($fqcn);
-            } else {
+            } elseif ($this->isKnownShortName($name) || $typeNode['kind'] === 'generic') {
                 $this->diagnostics->warning("Unresolvable class reference: $name", ['fqcn' => $fqcn]);
+            } else {
+                $this->diagnostics->error("Unresolvable class reference: $name", ['fqcn' => $fqcn]);
             }
             // For generic types, also recurse into typeArgs
             if (isset($typeNode['typeArgs']) && is_array($typeNode['typeArgs'])) {
@@ -151,6 +153,21 @@ class PropertyWalker
                 }
             }
         }
+    }
+
+    private function isKnownShortName(string $name): bool
+    {
+        foreach ($this->visited as $fqcn => $_) {
+            if ((new \ReflectionClass($fqcn))->getShortName() === $name) {
+                return true;
+            }
+        }
+        foreach ($this->collectedEnums as $fqcn => $_) {
+            if ((new \ReflectionEnum($fqcn))->getShortName() === $name) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function extractVarType(\ReflectionProperty $prop): ?string

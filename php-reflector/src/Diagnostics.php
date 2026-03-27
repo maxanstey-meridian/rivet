@@ -34,6 +34,15 @@ class Diagnostics
         array_push($this->items, ...$other->items);
     }
 
+    /** @return list<string> */
+    public function formatMessages(): array
+    {
+        return array_map(
+            fn (array $item) => "[{$item['severity']}] {$item['message']}",
+            $this->items,
+        );
+    }
+
     /** @return list<array{severity: string, message: string, context: array}> */
     public function all(): array
     {
