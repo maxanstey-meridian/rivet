@@ -79,6 +79,14 @@ class EndpointBuilder
         $returnType = ResponseResolver::resolve($method);
 
         if ($returnType !== null) {
+            $responseAttrs = $method->getAttributes(\Rivet\PhpReflector\Attribute\RivetResponse::class);
+            if ($responseAttrs !== []) {
+                $attrType = $responseAttrs[0]->newInstance()->type;
+                if (class_exists($attrType)) {
+                    $referencedFqcns[$attrType] = true;
+                }
+            }
+
             $namespace = $ref->getNamespaceName();
             self::collectRefsFromType($returnType, $namespace, $referencedFqcns);
         }
