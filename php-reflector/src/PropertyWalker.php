@@ -133,6 +133,12 @@ class PropertyWalker
         $this->collectedEnums[$fqcn] = true;
 
         $ref = new \ReflectionEnum($fqcn);
+        $backingType = $ref->getBackingType();
+        if (!$backingType instanceof \ReflectionNamedType || $backingType->getName() !== 'string') {
+            trigger_error("Int-backed enum {$fqcn} is not supported in contract format", E_USER_WARNING);
+            return;
+        }
+
         $values = [];
         foreach ($ref->getCases() as $case) {
             $values[] = $case->getBackingValue();

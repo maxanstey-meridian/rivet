@@ -17,6 +17,7 @@ use Rivet\PhpReflector\Tests\Fixtures\ProfileDto;
 use Rivet\PhpReflector\Tests\Fixtures\PriorityDto;
 use Rivet\PhpReflector\Tests\Fixtures\ResponseDto;
 use Rivet\PhpReflector\Tests\Fixtures\TagContainerDto;
+use Rivet\PhpReflector\Tests\Fixtures\TaskDto;
 
 class PropertyWalkerTest extends TestCase
 {
@@ -164,5 +165,23 @@ class PropertyWalkerTest extends TestCase
 
         $this->assertCount(1, $result['enums']);
         $this->assertSame('Status', $result['enums'][0]['name']);
+    }
+
+    public function testIntBackedEnumWarnsAndEmitsRef(): void
+    {
+        $warning = null;
+        set_error_handler(function (int $errno, string $errstr) use (&$warning) {
+            $warning = $errstr;
+            return true;
+        }, E_USER_WARNING);
+
+        $result = PropertyWalker::walk(TaskDto::class);
+        restore_error_handler();
+
+        $this->assertCount(1, $result['types']);
+        $this->assertSame(['kind' => 'ref', 'name' => 'Priority'], $result['types'][0]['properties'][1]['type']);
+        $this->assertCount(0, $result['enums']);
+        $this->assertNotNull($warning);
+        $this->assertStringContainsString('Priority', $warning);
     }
 }
