@@ -34,6 +34,26 @@ class ReflectCommandTest extends TestCase
         }
     }
 
+    public function testRivetTypeClassesAppearInOutput(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+
+        try {
+            $command = new ReflectCommand();
+            $exitCode = $command->run(__DIR__ . '/Fixtures', $tmpFile);
+
+            $this->assertSame(0, $exitCode);
+
+            $decoded = json_decode(file_get_contents($tmpFile), true);
+            $typeNames = array_column($decoded['types'], 'name');
+            $this->assertContains('SharedConfigDto', $typeNames);
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+        }
+    }
+
     public function testRunWithMissingDirReturnsError(): void
     {
         $command = new ReflectCommand();

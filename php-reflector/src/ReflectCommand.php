@@ -41,6 +41,10 @@ class ReflectCommand
             class_exists($fqcn) && !enum_exists($fqcn) && !interface_exists($fqcn)
         );
 
+        // Ensure #[RivetType]-annotated classes are always included
+        $rivetTypes = TypeCollector::collect(...$fqcns);
+        $classes = array_unique(array_merge($classes, $rivetTypes));
+
         $contract = PropertyWalker::walk(...array_values($classes));
 
         /** @var Diagnostics $diagnostics */
