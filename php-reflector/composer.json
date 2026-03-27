@@ -2,6 +2,13 @@
     "name": "rivet/php-reflector",
     "description": "PHP reflection utilities for Rivet contract generation",
     "type": "library",
+    "license": "MIT",
+    "keywords": ["rivet", "reflection", "typescript", "codegen", "dto", "contract"],
+    "homepage": "https://github.com/maxanstey-meridian/rivet",
+    "support": {
+        "issues": "https://github.com/maxanstey-meridian/rivet/issues",
+        "source": "https://github.com/maxanstey-meridian/rivet/tree/main/php-reflector"
+    },
     "autoload": {
         "psr-4": {
             "Rivet\\PhpReflector\\": "src/"
