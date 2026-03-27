@@ -48,6 +48,40 @@ class LaravelRivetTypeTest extends TestCase
         $this->assertSame(1, $personCount);
     }
 
+    public function testNonAutoloadedDirectoryRequiresFileLoading(): void
+    {
+        $dir = sys_get_temp_dir() . '/rivet_test_' . uniqid();
+        mkdir($dir, 0755, true);
+        $className = 'TempRivetDto_' . uniqid();
+        $fqcn = 'Rivet\\TempTest\\' . $className;
+        file_put_contents($dir . '/' . $className . '.php', <<<PHP
+        <?php
+        namespace Rivet\\TempTest;
+        use Rivet\\PhpReflector\\Attribute\\RivetType;
+        #[RivetType]
+        class {$className} {
+            public string \$value;
+        }
+        PHP);
+
+        try {
+            $allFqcns = ClassFinder::find($dir);
+            $this->assertContains($fqcn, $allFqcns, 'ClassFinder should tokenize the class');
+
+            // Without require_once, TypeCollector silently skips (class not loaded)
+            $withoutLoad = TypeCollector::collect(...$allFqcns);
+            $this->assertSame([], $withoutLoad, 'TypeCollector should find nothing without loading');
+
+            // After require_once, TypeCollector should discover it
+            require_once $dir . '/' . $className . '.php';
+            $withLoad = TypeCollector::collect(...$allFqcns);
+            $this->assertContains($fqcn, $withLoad, 'TypeCollector should find class after loading');
+        } finally {
+            @unlink($dir . '/' . $className . '.php');
+            @rmdir($dir);
+        }
+    }
+
     public function testDiscoveryPipelineFindsRivetTypesFromDirectory(): void
     {
         $dir = __DIR__ . '/Fixtures';

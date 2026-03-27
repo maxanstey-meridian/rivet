@@ -25,6 +25,17 @@ class RivetReflectCommand extends Command
         $extraFqcns = [];
         if (is_dir($dir)) {
             $allFqcns = ClassFinder::find($dir);
+
+            // Require files so reflection works on non-autoloaded dirs
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+            );
+            foreach ($iterator as $file) {
+                if ($file->getExtension() === 'php') {
+                    require_once $file->getPathname();
+                }
+            }
+
             $extraFqcns = TypeCollector::collect(...$allFqcns);
         }
 
