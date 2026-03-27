@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Rivet.Tool.Model;
 
 /// <summary>
@@ -15,15 +17,15 @@ public sealed record TsTypeDefinition(
 public sealed record TsPropertyDefinition(
     string Name,
     TsType Type,
-    bool IsOptional,
-    bool IsDeprecated = false,
+    [property: JsonPropertyName("optional")] bool IsOptional,
+    [property: JsonPropertyName("deprecated"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsDeprecated = false,
     string? Format = null,
     string? DefaultValue = null,
     TsPropertyConstraints? Constraints = null,
     string? Description = null,
     string? Example = null,
-    bool IsReadOnly = false,
-    bool IsWriteOnly = false);
+    [property: JsonPropertyName("readOnly"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsReadOnly = false,
+    [property: JsonPropertyName("writeOnly"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsWriteOnly = false);
 
 public sealed record TsPropertyConstraints(
     int? MinLength = null,

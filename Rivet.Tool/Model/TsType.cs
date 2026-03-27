@@ -1,9 +1,12 @@
+using System.Text.Json.Serialization;
+
 namespace Rivet.Tool.Model;
 
 /// <summary>
 /// Intermediate representation of a TypeScript type expression.
 /// Produced by the type walker, consumed by the emitter.
 /// </summary>
+[JsonConverter(typeof(TsTypeJsonConverter))]
 public abstract record TsType
 {
     private TsType() { }
