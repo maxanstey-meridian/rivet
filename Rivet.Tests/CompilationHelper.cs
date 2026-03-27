@@ -281,6 +281,15 @@ public static class CompilationHelper
             """;
     }
 
+    // --- JSON contract helpers ---
+
+    public static string EmitTypesFromJson(string json)
+    {
+        var (types, enums) = JsonContractReader.Read(json);
+        var grouping = TypeGrouper.Group(types, [], enums, new Dictionary<string, string?>());
+        return string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
+    }
+
     // --- Emission helpers ---
 
     public static string EmitTypes(string source)
