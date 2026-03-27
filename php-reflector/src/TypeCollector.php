@@ -22,7 +22,7 @@ class TypeCollector
                 continue;
             }
 
-            if ($ref->isEnum() || $ref->isInterface()) {
+            if ($ref->isEnum() || $ref->isInterface() || $ref->isAbstract() || $ref->isTrait()) {
                 continue;
             }
 
