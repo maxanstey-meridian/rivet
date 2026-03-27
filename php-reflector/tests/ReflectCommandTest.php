@@ -47,6 +47,41 @@ class ReflectCommandTest extends TestCase
             $decoded = json_decode(file_get_contents($tmpFile), true);
             $typeNames = array_column($decoded['types'], 'name');
             $this->assertContains('SharedConfigDto', $typeNames);
+
+            // SharedConfigDto passes both the main filter AND TypeCollector,
+            // so it appears in both lists before array_unique merges them.
+            // Assert it appears exactly once — proving deduplication works.
+            $this->assertSame(
+                1,
+                count(array_keys($typeNames, 'SharedConfigDto')),
+                'SharedConfigDto must appear exactly once after deduplication'
+            );
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+        }
+    }
+
+    public function testOutputTypeNamesAreUnique(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+
+        try {
+            $command = new ReflectCommand();
+            $exitCode = $command->run(__DIR__ . '/Fixtures', $tmpFile);
+
+            $this->assertSame(0, $exitCode);
+
+            $decoded = json_decode(file_get_contents($tmpFile), true);
+            $typeNames = array_column($decoded['types'], 'name');
+
+            // TypeCollector merge + array_unique must not produce duplicates
+            $this->assertSame(
+                $typeNames,
+                array_unique($typeNames),
+                'Output type names must be unique — no duplicates from merge'
+            );
         } finally {
             if (file_exists($tmpFile)) {
                 unlink($tmpFile);
