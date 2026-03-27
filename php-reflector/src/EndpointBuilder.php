@@ -44,6 +44,7 @@ class EndpointBuilder
         string $httpMethod,
         string $routeTemplate,
         array &$referencedFqcns,
+        ?Diagnostics $diagnostics = null,
     ): array {
         $controllerName = lcfirst(preg_replace('/Controller$/', '', $ref->getShortName()));
 
@@ -95,6 +96,13 @@ class EndpointBuilder
             self::collectRefsFromType($returnType, $namespace, $referencedFqcns);
         }
 
+        if ($returnType === null) {
+            $diagnostics?->warning(
+                "Method {$ref->getShortName()}::{$method->getName()} has #[RivetRoute] but no #[RivetResponse]",
+                ['controller' => $ref->getName(), 'method' => $method->getName()],
+            );
+        }
+
         $responses = $returnType !== null
             ? [['statusCode' => 200, 'dataType' => $returnType]]
             : [];
@@ -115,6 +123,7 @@ class EndpointBuilder
      */
     public static function walkRoutes(array $routes): array
     {
+        $diagnostics = new Diagnostics();
         $endpoints = [];
         $referencedFqcns = [];
 
@@ -128,20 +137,32 @@ class EndpointBuilder
                 $route['httpMethod'],
                 $route['uri'],
                 $referencedFqcns,
+                $diagnostics,
             );
         }
 
-        return self::buildContract($endpoints, $referencedFqcns);
+        return self::buildContract($endpoints, $referencedFqcns, $diagnostics);
     }
 
-    public static function buildContract(array $endpoints, array $referencedFqcns): array
+    public static function buildContract(array $endpoints, array $referencedFqcns, ?Diagnostics $diagnostics = null): array
     {
         if ($referencedFqcns !== []) {
             $walked = PropertyWalker::walk(...array_keys($referencedFqcns));
         } else {
-            $walked = ['types' => [], 'enums' => []];
+            $walked = ['types' => [], 'enums' => [], 'diagnostics' => new Diagnostics()];
         }
 
-        return ['types' => $walked['types'], 'enums' => $walked['enums'], 'endpoints' => $endpoints];
+        $effectiveDiag = $diagnostics ?? new Diagnostics();
+        if (isset($walked['diagnostics'])) {
+            $effectiveDiag->merge($walked['diagnostics']);
+        }
+
+        if ($effectiveDiag->hasErrors()) {
+            $errors = array_filter($effectiveDiag->all(), fn ($item) => $item['severity'] === 'error');
+            $messages = array_map(fn ($item) => $item['message'], $errors);
+            throw new \RuntimeException('Reflection errors: ' . implode('; ', $messages));
+        }
+
+        return ['types' => $walked['types'], 'enums' => $walked['enums'], 'endpoints' => $endpoints, 'diagnostics' => $effectiveDiag];
     }
 }

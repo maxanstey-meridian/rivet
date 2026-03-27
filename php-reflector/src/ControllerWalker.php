@@ -10,6 +10,7 @@ class ControllerWalker
 {
     public static function walk(string ...$classNames): array
     {
+        $diagnostics = new Diagnostics();
         $endpoints = [];
         $referencedFqcns = [];
 
@@ -30,10 +31,11 @@ class ControllerWalker
                     $route->method,
                     $route->route,
                     $referencedFqcns,
+                    $diagnostics,
                 );
             }
         }
 
-        return EndpointBuilder::buildContract($endpoints, $referencedFqcns);
+        return EndpointBuilder::buildContract($endpoints, $referencedFqcns, $diagnostics);
     }
 }

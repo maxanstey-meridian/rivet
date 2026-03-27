@@ -71,22 +71,15 @@ class DtoConventionsTest extends TestCase
 
     public function testUntypedArrayEmitsWarning(): void
     {
-        $warning = null;
-        set_error_handler(function (int $errno, string $errstr) use (&$warning) {
-            $warning = $errstr;
-            return true;
-        }, E_USER_WARNING);
+        $result = PropertyWalker::walk(OrderItemLooseDto::class);
 
-        try {
-            $result = PropertyWalker::walk(OrderItemLooseDto::class);
-        } finally {
-            restore_error_handler();
-        }
-
-        $this->assertNotNull($warning);
-        $this->assertStringContainsString('OrderItemLooseDto', $warning);
-        $this->assertStringContainsString('extras', $warning);
-        $this->assertStringContainsString('@var', $warning);
+        $diag = $result['diagnostics'];
+        $all = $diag->all();
+        $this->assertCount(1, $all);
+        $this->assertSame('warning', $all[0]['severity']);
+        $this->assertStringContainsString('OrderItemLooseDto', $all[0]['message']);
+        $this->assertStringContainsString('extras', $all[0]['message']);
+        $this->assertStringContainsString('@var', $all[0]['message']);
 
         $extras = $result['types'][0]['properties'][1];
         $this->assertSame('extras', $extras['name']);

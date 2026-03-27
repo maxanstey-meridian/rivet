@@ -134,19 +134,17 @@ class PropertyWalkerTest extends TestCase
 
     public function testArrayWithoutDocblockMapsToUnknown(): void
     {
-        $warning = null;
-        set_error_handler(function (int $errno, string $errstr) use (&$warning) {
-            $warning = $errstr;
-            return true;
-        }, E_USER_WARNING);
-
         $result = PropertyWalker::walk(LooseDto::class);
-        restore_error_handler();
 
         $this->assertSame(['kind' => 'primitive', 'type' => 'unknown'], $result['types'][0]['properties'][0]['type']);
-        $this->assertNotNull($warning);
-        $this->assertStringContainsString('items', $warning);
-        $this->assertStringContainsString('@var', $warning);
+
+        $diag = $result['diagnostics'];
+        $all = $diag->all();
+        $warnings = array_filter($all, fn ($item) => $item['severity'] === 'warning');
+        $this->assertNotEmpty($warnings);
+        $warning = array_values($warnings)[0];
+        $this->assertStringContainsString('items', $warning['message']);
+        $this->assertStringContainsString('@var', $warning['message']);
     }
 
     public function testNullableClassRef(): void

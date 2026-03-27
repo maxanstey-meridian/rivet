@@ -19,7 +19,9 @@ class LaravelRouteWalkerTest extends TestCase
     {
         $result = LaravelRouteWalker::walk([]);
 
-        $this->assertSame(['types' => [], 'enums' => [], 'endpoints' => []], $result);
+        $this->assertSame([], $result['types']);
+        $this->assertSame([], $result['enums']);
+        $this->assertSame([], $result['endpoints']);
     }
 
     public function testSingleGetRouteProducesEndpoint(): void

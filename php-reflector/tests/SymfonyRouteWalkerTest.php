@@ -95,7 +95,9 @@ class SymfonyRouteWalkerTest extends TestCase
     {
         $result = SymfonyRouteWalker::walk([]);
 
-        $this->assertSame(['types' => [], 'enums' => [], 'endpoints' => []], $result);
+        $this->assertSame([], $result['types']);
+        $this->assertSame([], $result['enums']);
+        $this->assertSame([], $result['endpoints']);
     }
 
     public function testReferencedTypesWalked(): void

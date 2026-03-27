@@ -21,14 +21,17 @@ class PropertyWalker
     /** @var array<string, true> */
     private array $collectedEnums = [];
 
+    private Diagnostics $diagnostics;
+
     public static function walk(string ...$classNames): array
     {
         $walker = new self();
+        $walker->diagnostics = new Diagnostics();
         foreach ($classNames as $fqcn) {
             $walker->enqueue($fqcn);
         }
         $walker->processQueue();
-        return ['types' => $walker->types, 'enums' => $walker->enums, 'endpoints' => []];
+        return ['types' => $walker->types, 'enums' => $walker->enums, 'endpoints' => [], 'diagnostics' => $walker->diagnostics];
     }
 
     private function enqueue(string $fqcn): void
@@ -83,7 +86,7 @@ class PropertyWalker
                 $resolved = TypeParser::parse($docType);
                 $this->enqueueRefsFromType($resolved, $prop->getDeclaringClass()->getNamespaceName());
             } else {
-                trigger_error("Property {$prop->getDeclaringClass()->getName()}::\${$prop->getName()} is array without @var", E_USER_WARNING);
+                $this->diagnostics->warning("Property {$prop->getDeclaringClass()->getName()}::\${$prop->getName()} is array without @var");
                 $resolved = ['kind' => 'primitive', 'type' => 'unknown'];
             }
 
@@ -123,6 +126,8 @@ class PropertyWalker
                 $this->collectEnum($fqcn);
             } elseif (class_exists($fqcn)) {
                 $this->enqueue($fqcn);
+            } else {
+                $this->diagnostics->warning("Unresolvable class reference: $name", ['fqcn' => $fqcn]);
             }
             // For generic types, also recurse into typeArgs
             if (isset($typeNode['typeArgs']) && is_array($typeNode['typeArgs'])) {
