@@ -10,6 +10,8 @@ use Rivet\PhpReflector\PropertyWalker;
 use Rivet\PhpReflector\ControllerWalker;
 use Rivet\PhpReflector\EndpointBuilder;
 use Rivet\PhpReflector\Tests\BrokenFixtures\BrokenRefDto;
+use Rivet\PhpReflector\Tests\BrokenFixtures\KnownShortNameRefDto;
+use Rivet\PhpReflector\Tests\Fixtures\AddressDto;
 use Rivet\PhpReflector\Tests\Fixtures\OrderItemLooseDto;
 use Rivet\PhpReflector\Tests\Fixtures\SampleController;
 
@@ -71,6 +73,26 @@ class DiagnosticsTest extends TestCase
         $this->assertTrue($a->hasErrors());
     }
 
+    public function testMergeDoesNotCorruptSource(): void
+    {
+        $a = new Diagnostics();
+        $a->warning('from a');
+
+        $b = new Diagnostics();
+        $b->error('from b');
+        $b->warning('also from b');
+
+        $a->merge($b);
+
+        // $b must be unchanged
+        $bAll = $b->all();
+        $this->assertCount(2, $bAll);
+        $this->assertSame('error', $bAll[0]['severity']);
+        $this->assertSame('from b', $bAll[0]['message']);
+        $this->assertSame('warning', $bAll[1]['severity']);
+        $this->assertSame('also from b', $bAll[1]['message']);
+    }
+
     public function testUntypedArrayDiagnostic(): void
     {
         $result = PropertyWalker::walk(OrderItemLooseDto::class);
@@ -97,6 +119,20 @@ class DiagnosticsTest extends TestCase
         $this->assertCount(1, $errors);
         $error = array_values($errors)[0];
         $this->assertStringContainsString('NonExistentClass', $error['message']);
+    }
+
+    public function testKnownShortNameRefEmitsWarningNotError(): void
+    {
+        // Walk AddressDto first so it's in $visited, then walk KnownShortNameRefDto
+        // which references AddressDto by short name from a different namespace
+        $result = PropertyWalker::walk(AddressDto::class, KnownShortNameRefDto::class);
+
+        $diag = $result['diagnostics'];
+        $this->assertFalse($diag->hasErrors(), 'Known short name ref should not produce errors');
+
+        $warnings = array_filter($diag->all(), fn ($item) => $item['severity'] === 'warning');
+        $addrWarnings = array_filter($warnings, fn ($item) => str_contains($item['message'], 'AddressDto'));
+        $this->assertCount(1, $addrWarnings, 'Should emit exactly one warning for unresolvable-but-known AddressDto');
     }
 
     public function testMissingResponseDiagnostic(): void
@@ -137,6 +173,26 @@ class DiagnosticsTest extends TestCase
     {
         $diag = new Diagnostics();
         $this->assertSame([], $diag->formatMessages());
+    }
+
+    public function testCollectRefsFromTypeHandlesGenericKind(): void
+    {
+        $typeNode = [
+            'kind' => 'generic',
+            'name' => 'Collection',
+            'typeArgs' => [
+                ['kind' => 'ref', 'name' => 'PersonDto'],
+            ],
+        ];
+
+        $fqcns = [];
+        $namespace = 'Rivet\\PhpReflector\\Tests\\Fixtures';
+        EndpointBuilder::collectRefsFromType($typeNode, $namespace, $fqcns);
+
+        // The generic container 'Collection' won't resolve, but the typeArg 'PersonDto' should
+        $this->assertArrayHasKey('Rivet\\PhpReflector\\Tests\\Fixtures\\PersonDto', $fqcns);
+        // 'Collection' itself should NOT be in fqcns (it's not a real class)
+        $this->assertArrayNotHasKey('Rivet\\PhpReflector\\Tests\\Fixtures\\Collection', $fqcns);
     }
 
     public function testErrorsHaltReflection(): void

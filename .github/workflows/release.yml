@@ -34,6 +34,8 @@ jobs:
             mv Rivet.Tool rivet-${{ matrix.rid }}
           fi
 
+      # Only linux-x64 can be smoke-tested on ubuntu-latest. macOS/Windows
+      # coverage comes from existing [Category=Local] tests run by devs natively.
       - name: Smoke test (linux-x64 only)
         if: matrix.rid == 'linux-x64'
         run: |

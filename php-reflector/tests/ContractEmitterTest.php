@@ -119,6 +119,60 @@ class ContractEmitterTest extends TestCase
         $this->assertStringNotContainsString(': null', $json);
     }
 
+    public function testStripNullsInListReindexes(): void
+    {
+        $contract = [
+            'types' => [
+                [
+                    'name' => 'Test',
+                    'typeParameters' => [],
+                    'properties' => [
+                        ['name' => 'a', 'type' => ['kind' => 'primitive', 'type' => 'string'], 'optional' => false],
+                        null,
+                        ['name' => 'c', 'type' => ['kind' => 'primitive', 'type' => 'number', 'format' => 'int32'], 'optional' => false],
+                    ],
+                ],
+            ],
+            'enums' => [],
+            'endpoints' => [],
+        ];
+
+        $json = ContractEmitter::emit($contract);
+        $decoded = json_decode($json, true);
+
+        // Null element stripped, remaining elements re-indexed as [0, 1]
+        $this->assertCount(2, $decoded['types'][0]['properties']);
+        $this->assertSame('a', $decoded['types'][0]['properties'][0]['name']);
+        $this->assertSame('c', $decoded['types'][0]['properties'][1]['name']);
+        // Ensure valid JSON array, not object
+        $this->assertStringNotContainsString('"0":', $json);
+    }
+
+    public function testStripNullsInMapRemovesKey(): void
+    {
+        $contract = [
+            'types' => [],
+            'enums' => [],
+            'endpoints' => [
+                [
+                    'name' => 'show',
+                    'httpMethod' => 'GET',
+                    'routeTemplate' => '/items/{id}',
+                    'controllerName' => 'item',
+                    'params' => [],
+                    'returnType' => null,
+                    'responses' => [],
+                ],
+            ],
+        ];
+
+        $json = ContractEmitter::emit($contract);
+        $decoded = json_decode($json, true);
+
+        $this->assertArrayNotHasKey('returnType', $decoded['endpoints'][0]);
+        $this->assertSame('show', $decoded['endpoints'][0]['name']);
+    }
+
     public function testStripNullsPreservesIndexedArrays(): void
     {
         $contract = [

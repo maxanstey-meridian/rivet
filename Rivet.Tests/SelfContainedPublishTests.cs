@@ -95,6 +95,26 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     }
 
     [Fact]
+    public void ReleaseWorkflow_DotnetVersion_CanBuild_CsprojTarget()
+    {
+        var repoRoot = PublishFixture.FindRepoRoot();
+
+        var csproj = File.ReadAllText(Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj"));
+        var tfmMatch = System.Text.RegularExpressions.Regex.Match(csproj, @"<TargetFramework>net(\d+)\.\d+</TargetFramework>");
+        Assert.True(tfmMatch.Success, "Could not parse TargetFramework from csproj");
+        var csprojMajor = int.Parse(tfmMatch.Groups[1].Value);
+
+        var releaseYml = File.ReadAllText(Path.Combine(repoRoot, ".github", "workflows", "release.yml"));
+        var sdkMatch = System.Text.RegularExpressions.Regex.Match(releaseYml, @"dotnet-version:\s*""(\d+)\.\d+\.x""");
+        Assert.True(sdkMatch.Success, "Could not parse dotnet-version from release.yml");
+        var sdkMajor = int.Parse(sdkMatch.Groups[1].Value);
+
+        // .NET SDK major version must be >= target framework major version (backwards compatible)
+        Assert.True(sdkMajor >= csprojMajor,
+            $"release.yml uses .NET SDK {sdkMajor}.x but csproj targets net{csprojMajor}.0 — SDK must be >= target");
+    }
+
+    [Fact]
     public async Task DotnetPack_StillSucceeds_WithSingleFileConditional()
     {
         var repoRoot = PublishFixture.FindRepoRoot();

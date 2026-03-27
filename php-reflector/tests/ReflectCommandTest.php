@@ -67,6 +67,28 @@ class ReflectCommandTest extends TestCase
         }
     }
 
+    public function testRunProducesEmptyEndpoints(): void
+    {
+        // ReflectCommand uses PropertyWalker::walk() which only reflects DTOs,
+        // not ControllerWalker — so endpoints are always empty.
+        // Endpoint discovery requires the framework-specific walkers (Laravel/Symfony).
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+
+        try {
+            $command = new ReflectCommand();
+            $exitCode = $command->run(__DIR__ . '/Fixtures', $tmpFile);
+
+            $this->assertSame(0, $exitCode);
+
+            $decoded = json_decode(file_get_contents($tmpFile), true);
+            $this->assertSame([], $decoded['endpoints']);
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+        }
+    }
+
     public function testErrorDiagnosticsReturnExitCode1(): void
     {
         $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
