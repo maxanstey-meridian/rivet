@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Rivet\PhpReflector\Tests;
 
 use PHPUnit\Framework\TestCase;
+use Rivet\PhpReflector\ClassFinder;
 use Rivet\PhpReflector\LaravelRouteWalker;
 use Rivet\PhpReflector\Tests\Fixtures\SampleController;
 use Rivet\PhpReflector\Tests\Fixtures\SharedConfigDto;
+use Rivet\PhpReflector\TypeCollector;
 
 class LaravelRivetTypeTest extends TestCase
 {
@@ -44,5 +46,34 @@ class LaravelRivetTypeTest extends TestCase
         $typeNames = array_column($result['types'], 'name');
         $personCount = count(array_filter($typeNames, fn($n) => $n === 'PersonDto'));
         $this->assertSame(1, $personCount);
+    }
+
+    public function testDiscoveryPipelineFindsRivetTypesFromDirectory(): void
+    {
+        $dir = __DIR__ . '/Fixtures';
+        $allFqcns = ClassFinder::find($dir);
+        $rivetTypes = TypeCollector::collect(...$allFqcns);
+
+        $result = LaravelRouteWalker::walk([], $rivetTypes);
+
+        $typeNames = array_column($result['types'], 'name');
+        $this->assertContains('SharedConfigDto', $typeNames);
+    }
+
+    public function testDiscoveryPipelineMergesWithRouteTypes(): void
+    {
+        $dir = __DIR__ . '/Fixtures';
+        $allFqcns = ClassFinder::find($dir);
+        $rivetTypes = TypeCollector::collect(...$allFqcns);
+
+        $routes = [
+            ['httpMethod' => 'GET', 'uri' => '/orders/{id}', 'controller' => SampleController::class, 'action' => 'show'],
+        ];
+
+        $result = LaravelRouteWalker::walk($routes, $rivetTypes);
+
+        $typeNames = array_column($result['types'], 'name');
+        $this->assertContains('OrderDto', $typeNames, 'Route-derived type should be present');
+        $this->assertContains('SharedConfigDto', $typeNames, 'RivetType-discovered type should be present');
     }
 }

@@ -6,19 +6,29 @@ namespace Rivet\PhpReflector\Laravel;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Route;
+use Rivet\PhpReflector\ClassFinder;
 use Rivet\PhpReflector\ContractEmitter;
 use Rivet\PhpReflector\Diagnostics;
 use Rivet\PhpReflector\LaravelRouteWalker;
+use Rivet\PhpReflector\TypeCollector;
 
 class RivetReflectCommand extends Command
 {
-    protected $signature = 'rivet:reflect {--out= : Output file path}';
+    protected $signature = 'rivet:reflect {--out= : Output file path} {--dir= : Directory to scan for #[RivetType] classes}';
     protected $description = 'Generate Rivet contract JSON from Laravel routes';
 
     public function handle(): int
     {
         $routes = LaravelRouteWalker::fromRouteCollection(Route::getRoutes());
-        $contract = LaravelRouteWalker::walk($routes);
+
+        $dir = $this->option('dir') ?? app_path();
+        $extraFqcns = [];
+        if (is_dir($dir)) {
+            $allFqcns = ClassFinder::find($dir);
+            $extraFqcns = TypeCollector::collect(...$allFqcns);
+        }
+
+        $contract = LaravelRouteWalker::walk($routes, $extraFqcns);
 
         /** @var Diagnostics $diagnostics */
         $diagnostics = $contract['diagnostics'];
