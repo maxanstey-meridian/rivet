@@ -121,7 +121,7 @@ class EndpointBuilder
     /**
      * @param array<array{httpMethod: string, uri: string, controller: string, action: string}> $routes
      */
-    public static function walkRoutes(array $routes): array
+    public static function walkRoutes(array $routes, array $extraFqcns = []): array
     {
         $diagnostics = new Diagnostics();
         $endpoints = [];
@@ -141,11 +141,15 @@ class EndpointBuilder
             );
         }
 
-        return self::buildContract($endpoints, $referencedFqcns, $diagnostics);
+        return self::buildContract($endpoints, $referencedFqcns, $diagnostics, $extraFqcns);
     }
 
-    public static function buildContract(array $endpoints, array $referencedFqcns, ?Diagnostics $diagnostics = null): array
+    public static function buildContract(array $endpoints, array $referencedFqcns, ?Diagnostics $diagnostics = null, array $extraFqcns = []): array
     {
+        if ($extraFqcns !== []) {
+            $referencedFqcns += array_fill_keys($extraFqcns, true);
+        }
+
         if ($referencedFqcns !== []) {
             $walked = PropertyWalker::walk(...array_keys($referencedFqcns));
         } else {
