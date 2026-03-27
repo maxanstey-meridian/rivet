@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Rivet.Tool.Model;
 
 /// <summary>
@@ -16,7 +18,7 @@ public sealed record TsEndpointDefinition(
     EndpointSecurity? Security = null,
     string? FileContentType = null,
     string? InputTypeName = null,
-    bool IsFormEncoded = false);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFormEncoded = false);
 
 /// <summary>
 /// Security metadata for an endpoint. null = inherit CLI default.
