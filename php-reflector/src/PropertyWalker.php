@@ -116,14 +116,19 @@ class PropertyWalker
 
     private function enqueueRefsFromType(array $typeNode, string $namespace): void
     {
-        if ($typeNode['kind'] === 'ref') {
+        if ($typeNode['kind'] === 'ref' || $typeNode['kind'] === 'generic') {
             $name = $typeNode['name'];
-            // Resolve short name to FQCN using the declaring class's namespace
             $fqcn = $namespace !== '' ? $namespace . '\\' . $name : $name;
             if (is_subclass_of($fqcn, \BackedEnum::class)) {
                 $this->collectEnum($fqcn);
             } elseif (class_exists($fqcn)) {
                 $this->enqueue($fqcn);
+            }
+            // For generic types, also recurse into typeArgs
+            if (isset($typeNode['typeArgs']) && is_array($typeNode['typeArgs'])) {
+                foreach ($typeNode['typeArgs'] as $arg) {
+                    $this->enqueueRefsFromType($arg, $namespace);
+                }
             }
             return;
         }

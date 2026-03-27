@@ -9,6 +9,7 @@ use Rivet\PhpReflector\PropertyWalker;
 use Rivet\PhpReflector\Tests\Fixtures\AddressDto;
 use Rivet\PhpReflector\Tests\Fixtures\AddressListDto;
 use Rivet\PhpReflector\Tests\Fixtures\AnotherOrderDto;
+use Rivet\PhpReflector\Tests\Fixtures\GenericRefDto;
 use Rivet\PhpReflector\Tests\Fixtures\NullableArrayDto;
 use Rivet\PhpReflector\Tests\Fixtures\NullableEnumDto;
 use Rivet\PhpReflector\Tests\Fixtures\NullableDto;
@@ -232,5 +233,14 @@ class PropertyWalkerTest extends TestCase
 
         $this->assertCount(1, $result['enums']);
         $this->assertSame('Status', $result['enums'][0]['name']);
+    }
+
+    public function testGenericTypeArgTransitivelyWalked(): void
+    {
+        $result = PropertyWalker::walk(GenericRefDto::class);
+
+        $typeNames = array_column($result['types'], 'name');
+        $this->assertContains('GenericRefDto', $typeNames);
+        $this->assertContains('AddressDto', $typeNames);
     }
 }
