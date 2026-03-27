@@ -47,22 +47,6 @@ class LaravelRouteWalker
      */
     public static function walk(array $routes): array
     {
-        $endpoints = [];
-        $referencedFqcns = [];
-
-        foreach ($routes as $route) {
-            $ref = new \ReflectionClass($route['controller']);
-            $method = $ref->getMethod($route['action']);
-
-            $endpoints[] = EndpointBuilder::buildEndpoint(
-                $ref,
-                $method,
-                $route['httpMethod'],
-                $route['uri'],
-                $referencedFqcns,
-            );
-        }
-
-        return EndpointBuilder::buildContract($endpoints, $referencedFqcns);
+        return EndpointBuilder::walkRoutes($routes);
     }
 }

@@ -98,6 +98,30 @@ class EndpointBuilder
         ];
     }
 
+    /**
+     * @param array<array{httpMethod: string, uri: string, controller: string, action: string}> $routes
+     */
+    public static function walkRoutes(array $routes): array
+    {
+        $endpoints = [];
+        $referencedFqcns = [];
+
+        foreach ($routes as $route) {
+            $ref = new \ReflectionClass($route['controller']);
+            $method = $ref->getMethod($route['action']);
+
+            $endpoints[] = self::buildEndpoint(
+                $ref,
+                $method,
+                $route['httpMethod'],
+                $route['uri'],
+                $referencedFqcns,
+            );
+        }
+
+        return self::buildContract($endpoints, $referencedFqcns);
+    }
+
     public static function buildContract(array $endpoints, array $referencedFqcns): array
     {
         if ($referencedFqcns !== []) {
