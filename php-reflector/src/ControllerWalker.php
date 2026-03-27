@@ -49,7 +49,7 @@ class ControllerWalker
                         $source = isset($routeParamNames[$param->getName()]) ? 'route' : 'query';
                         $params[] = [
                             'name' => $param->getName(),
-                            'type' => self::mapScalarType($typeName),
+                            'type' => TypeParser::parse($typeName),
                             'source' => $source,
                         ];
                     }
@@ -64,13 +64,19 @@ class ControllerWalker
                     }
                 }
 
+                $returnType = ResponseResolver::resolve($method);
+                $responses = $returnType !== null
+                    ? [['statusCode' => 200, 'dataType' => $returnType]]
+                    : [];
+
                 $endpoints[] = [
                     'name' => $method->getName(),
                     'httpMethod' => $route->method,
                     'routeTemplate' => $route->route,
                     'controllerName' => $controllerName,
                     'params' => $params,
-                    'returnType' => ResponseResolver::resolve($method),
+                    'returnType' => $returnType,
+                    'responses' => $responses,
                 ];
             }
         }
@@ -84,15 +90,4 @@ class ControllerWalker
         return ['types' => $walked['types'], 'enums' => $walked['enums'], 'endpoints' => $endpoints];
     }
 
-    private const SCALAR_MAP = [
-        'string' => ['kind' => 'primitive', 'type' => 'string'],
-        'int'    => ['kind' => 'primitive', 'type' => 'number', 'format' => 'int32'],
-        'float'  => ['kind' => 'primitive', 'type' => 'number', 'format' => 'double'],
-        'bool'   => ['kind' => 'primitive', 'type' => 'boolean'],
-    ];
-
-    private static function mapScalarType(string $typeName): array
-    {
-        return self::SCALAR_MAP[$typeName] ?? ['kind' => 'primitive', 'type' => 'unknown'];
-    }
 }

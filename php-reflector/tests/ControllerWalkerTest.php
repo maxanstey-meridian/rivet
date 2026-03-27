@@ -45,10 +45,24 @@ class ControllerWalkerTest extends TestCase
         $this->assertSame(['kind' => 'ref', 'name' => 'OrderDto'], $show['returnType']);
     }
 
+    public function testResponsesArrayPopulated(): void
+    {
+        $show = $this->findEndpoint('show');
+        $this->assertCount(1, $show['responses']);
+        $this->assertSame(200, $show['responses'][0]['statusCode']);
+        $this->assertSame(['kind' => 'ref', 'name' => 'OrderDto'], $show['responses'][0]['dataType']);
+    }
+
     public function testMissingResponseIsNull(): void
     {
         $destroy = $this->findEndpoint('destroy');
         $this->assertNull($destroy['returnType']);
+    }
+
+    public function testMissingResponseHasEmptyResponses(): void
+    {
+        $destroy = $this->findEndpoint('destroy');
+        $this->assertSame([], $destroy['responses']);
     }
 
     public function testResponseTypesWalked(): void
