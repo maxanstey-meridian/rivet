@@ -82,6 +82,51 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     }
 
     [Fact]
+    public async Task SelfContained_Binary_EmitsFromContractJson()
+    {
+        Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
+
+        var repoRoot = PublishFixture.FindRepoRoot();
+        var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
+
+        var (exitCode, output) = await PublishFixture.RunProcessAsync(
+            _fixture.BinaryPath,
+            $"--from \"{fixture}\"");
+
+        Assert.True(exitCode == 0, $"--from failed (exit {exitCode}):\n{output}");
+        Assert.Contains("ProductDto", output);
+        Assert.Contains("getProduct", output);
+    }
+
+    [Fact]
+    public async Task SelfContained_Binary_FromContract_WritesOutputToDirectory()
+    {
+        Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
+
+        var repoRoot = PublishFixture.FindRepoRoot();
+        var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
+        var outputDir = Path.Combine(Path.GetTempPath(), $"rivet-from-publish-test-{Guid.NewGuid():N}");
+
+        try
+        {
+            var (exitCode, output) = await PublishFixture.RunProcessAsync(
+                _fixture.BinaryPath,
+                $"--from \"{fixture}\" --output \"{outputDir}\"");
+
+            Assert.True(exitCode == 0, $"--from --output failed (exit {exitCode}):\n{output}");
+
+            var tsFiles = Directory.GetFiles(outputDir, "*.ts", SearchOption.AllDirectories);
+            Assert.NotEmpty(tsFiles);
+            Assert.Contains("Generated", output);
+        }
+        finally
+        {
+            if (Directory.Exists(outputDir))
+                Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SelfContained_Binary_InvalidFilePath_FailsGracefully()
     {
         Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");

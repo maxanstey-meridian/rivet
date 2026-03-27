@@ -1,0 +1,35 @@
+{
+    "types": [
+        {
+            "name": "ProductDto",
+            "typeParameters": [],
+            "properties": [
+                { "name": "id", "type": { "kind": "primitive", "type": "number", "format": "int32" }, "optional": false },
+                { "name": "title", "type": { "kind": "primitive", "type": "string" }, "optional": false },
+                { "name": "status", "type": { "kind": "ref", "name": "ProductStatus" }, "optional": false }
+            ]
+        }
+    ],
+    "enums": [
+        { "name": "ProductStatus", "values": ["active", "draft"] }
+    ],
+    "endpoints": [
+        {
+            "name": "getProduct",
+            "httpMethod": "GET",
+            "routeTemplate": "/products/{id}",
+            "controllerName": "product",
+            "params": [
+                {
+                    "name": "id",
+                    "type": { "kind": "primitive", "type": "number", "format": "int32" },
+                    "source": "route"
+                }
+            ],
+            "returnType": { "kind": "ref", "name": "ProductDto" },
+            "responses": [
+                { "statusCode": 200, "dataType": { "kind": "ref", "name": "ProductDto" } }
+            ]
+        }
+    ]
+}

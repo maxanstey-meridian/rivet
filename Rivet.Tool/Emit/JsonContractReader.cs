@@ -16,7 +16,7 @@ public static class JsonContractReader
         Converters = { new TsTypeJsonConverter(), new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    public static (IReadOnlyList<TsTypeDefinition> Types, Dictionary<string, TsType> Enums) Read(string json)
+    public static (IReadOnlyList<TsTypeDefinition> Types, Dictionary<string, TsType> Enums, IReadOnlyList<TsEndpointDefinition> Endpoints) Read(string json)
     {
         var contract = JsonSerializer.Deserialize<ContractEmitter.RivetContract>(json, Options)
             ?? throw new JsonException("Failed to deserialize contract JSON.");
@@ -30,6 +30,8 @@ public static class JsonContractReader
                 enums[e.Name] = new TsType.StringUnion(e.Values!);
         }
 
-        return (contract.Types, enums);
+        var endpoints = contract.Endpoints ?? [];
+
+        return (contract.Types, enums, endpoints);
     }
 }

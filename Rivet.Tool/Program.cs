@@ -17,6 +17,12 @@ static async Task<int> Run(string[] args)
         return 1;
     }
 
+    // Contract JSON mode: JSON → TypeScript (same emitters as Roslyn path)
+    if (options.FromContractPath is not null)
+    {
+        return await RunFromContract(options);
+    }
+
     // Import mode: OpenAPI → C# contracts
     if (options.FromOpenApiPath is not null)
     {
@@ -268,6 +274,170 @@ static async Task<int> Run(string[] args)
             Console.Write(schemasOutput);
         }
 
+    }
+
+    return 0;
+}
+
+static async Task<int> RunFromContract(RivetOptions options)
+{
+    var contractPath = options.FromContractPath!;
+    if (!File.Exists(contractPath))
+    {
+        Console.Error.WriteLine($"error: file not found: {contractPath}");
+        return 1;
+    }
+
+    var sw = Stopwatch.StartNew();
+    var json = await File.ReadAllTextAsync(contractPath);
+    var (types, enums, endpoints) = JsonContractReader.Read(json);
+
+    var definitions = types.ToList();
+    var typeGrouping = TypeGrouper.Group(definitions, [], enums, new Dictionary<string, string?>());
+    var typeFileMap = typeGrouping.BuildTypeFileMap();
+    var mode = options.Mode;
+
+    if (mode == "compile" && options.OutputDir is null)
+    {
+        Console.Error.WriteLine("Error: --compile requires --output <dir>.");
+        return 1;
+    }
+
+    if (options.OutputDir is not null)
+    {
+        var outputDir = options.OutputDir;
+        Directory.CreateDirectory(outputDir);
+
+        // Types
+        var typesDir = Path.Combine(outputDir, "types");
+        Directory.CreateDirectory(typesDir);
+
+        var typeFileNames = new List<string>();
+        foreach (var group in typeGrouping.Groups)
+        {
+            var content = TypeEmitter.EmitGroupFile(group);
+            var filePath = Path.Combine(typesDir, $"{group.FileName}.ts");
+            await File.WriteAllTextAsync(filePath, content);
+            Console.WriteLine($"  types/{group.FileName}.ts → {filePath}");
+            typeFileNames.Add(group.FileName);
+        }
+
+        var typesBarrel = TypeEmitter.EmitNamespacedBarrel(typeFileNames);
+        await File.WriteAllTextAsync(Path.Combine(typesDir, "index.ts"), typesBarrel);
+        Console.WriteLine($"  types/index.ts → {Path.Combine(typesDir, "index.ts")}");
+
+        // Client
+        if (endpoints.Count > 0)
+        {
+            var rivetBasePath = Path.Combine(outputDir, "rivet.ts");
+            await File.WriteAllTextAsync(rivetBasePath, ClientEmitter.EmitRivetBase());
+            Console.WriteLine($"  rivet.ts → {rivetBasePath}");
+
+            var clientDir = Path.Combine(outputDir, "client");
+            Directory.CreateDirectory(clientDir);
+
+            var controllerGroups = ClientEmitter.GroupByController(endpoints);
+            var clientFileNames = new List<string>();
+            foreach (var (controllerName, controllerEndpoints) in controllerGroups)
+            {
+                var clientContent = ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints, typeFileMap);
+                var clientPath = Path.Combine(clientDir, $"{controllerName}.ts");
+                await File.WriteAllTextAsync(clientPath, clientContent);
+                Console.WriteLine($"  client/{controllerName}.ts → {clientPath}");
+                clientFileNames.Add(controllerName);
+            }
+
+            var clientBarrel = TypeEmitter.EmitNamespacedBarrel(clientFileNames);
+            await File.WriteAllTextAsync(Path.Combine(clientDir, "index.ts"), clientBarrel);
+            Console.WriteLine($"  client/index.ts → {Path.Combine(clientDir, "index.ts")}");
+        }
+
+        // OpenAPI
+        if (options.OpenApiPath is not null)
+        {
+            var defs = types.ToDictionary(t => t.Name);
+            var brands = new Dictionary<string, TsType.Brand>();
+            var securityConfig = SecurityParser.Parse(options.DefaultSecurity);
+            var openApiJson = OpenApiEmitter.Emit(endpoints, defs, brands, enums, securityConfig);
+            var openApiFilePath = Path.Combine(outputDir, options.OpenApiPath);
+            await File.WriteAllTextAsync(openApiFilePath, openApiJson);
+            Console.WriteLine($"  {options.OpenApiPath} → {openApiFilePath}");
+        }
+
+        // JSON Schema + Zod
+        if (options.JsonSchema || mode == "compile")
+        {
+            var defs = types.ToDictionary(t => t.Name);
+            var brands = new Dictionary<string, TsType.Brand>();
+            var schemasOutput = JsonSchemaEmitter.Emit(defs, brands, enums, endpoints);
+            var schemasPath = Path.Combine(outputDir, "schemas.ts");
+            await File.WriteAllTextAsync(schemasPath, schemasOutput);
+            Console.WriteLine($"  schemas.ts → {schemasPath}");
+        }
+
+        Console.WriteLine($"Generated {definitions.Count} types, {endpoints.Count} endpoints in {FormatElapsed(sw.Elapsed)}.");
+
+        if (mode == "compile" && endpoints.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Emitting Zod validators...");
+
+            var zodValidators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
+            if (zodValidators.Length > 0)
+            {
+                var zodPath = Path.Combine(outputDir, "validators.ts");
+                await File.WriteAllTextAsync(zodPath, zodValidators);
+                Console.WriteLine($"  validators.ts → {zodPath}");
+            }
+
+            var clientDir = Path.Combine(outputDir, "client");
+            var controllerGroups = ClientEmitter.GroupByController(endpoints);
+            foreach (var (controllerName, controllerEndpoints) in controllerGroups)
+            {
+                var validatedContent = ClientEmitter.EmitControllerClient(
+                    controllerName, controllerEndpoints, typeFileMap, ValidateMode.Zod);
+                var clientPath = Path.Combine(clientDir, $"{controllerName}.ts");
+                await File.WriteAllTextAsync(clientPath, validatedContent);
+                Console.WriteLine($"  client/{controllerName}.ts → {clientPath} (validated)");
+            }
+
+            Console.WriteLine($"Compile complete in {FormatElapsed(sw.Elapsed)}.");
+        }
+    }
+    else
+    {
+        // Preview to stdout
+        foreach (var group in typeGrouping.Groups)
+        {
+            Console.WriteLine($"=== types/{group.FileName}.ts ===");
+            Console.Write(TypeEmitter.EmitGroupFile(group));
+            Console.WriteLine();
+        }
+
+        Console.WriteLine("=== types/index.ts ===");
+        Console.Write(TypeEmitter.EmitNamespacedBarrel(typeGrouping.Groups.Select(g => g.FileName).ToList()));
+
+        if (endpoints.Count > 0)
+        {
+            var controllerGroups = ClientEmitter.GroupByController(endpoints);
+            foreach (var (controllerName, controllerEndpoints) in controllerGroups)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"=== client/{controllerName}.ts ===");
+                Console.Write(ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints, typeFileMap));
+            }
+        }
+
+        if (options.OpenApiPath is not null)
+        {
+            var defs = types.ToDictionary(t => t.Name);
+            var brands = new Dictionary<string, TsType.Brand>();
+            var securityConfig = SecurityParser.Parse(options.DefaultSecurity);
+            var openApiJson = OpenApiEmitter.Emit(endpoints, defs, brands, enums, securityConfig);
+            Console.WriteLine();
+            Console.WriteLine($"=== {options.OpenApiPath} ===");
+            Console.Write(openApiJson);
+        }
     }
 
     return 0;
