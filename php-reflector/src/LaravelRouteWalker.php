@@ -45,8 +45,8 @@ class LaravelRouteWalker
     /**
      * @param array<array{httpMethod: string, uri: string, controller: string, action: string}> $routes
      */
-    public static function walk(array $routes): array
+    public static function walk(array $routes, array $extraFqcns = []): array
     {
-        return EndpointBuilder::walkRoutes($routes);
+        return EndpointBuilder::walkRoutes($routes, $extraFqcns);
     }
 }
