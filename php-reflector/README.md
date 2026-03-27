@@ -252,6 +252,17 @@ php bin/console rivet:reflect --out rivet-contract.json
 
 Requires `symfony/routing` (`^6.0|^7.0`) and `symfony/console` (`^6.0|^7.0`).
 
+## Limitations
+
+The PHP reflector covers the most common contract patterns but has known fidelity gaps compared to the C#/Roslyn pipeline. Key differences:
+
+- **Untyped arrays** without `@var` docblocks emit `unknown[]` with a warning
+- **Generic DTOs** (e.g. `Page<T>`) require `@template` docblocks — deferred to v2
+- **Validation constraints** are not extracted — deferred to v2
+- **Branded types / value objects** have no PHP equivalent
+
+See [full comparison](../docs/php-limitations.md) for details.
+
 ## License
 
 [MIT](LICENSE)
