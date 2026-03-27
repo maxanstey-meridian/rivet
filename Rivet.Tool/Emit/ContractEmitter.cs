@@ -14,12 +14,12 @@ public static class ContractEmitter
         Converters = { new TsTypeJsonConverter(), new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    private sealed record RivetContract(
+    internal sealed record RivetContract(
         IReadOnlyList<TsTypeDefinition> Types,
         IReadOnlyList<ContractEnum> Enums,
-        IReadOnlyList<TsEndpointDefinition> Endpoints);
+        IReadOnlyList<TsEndpointDefinition>? Endpoints = null);
 
-    private sealed record ContractEnum(string Name, IReadOnlyList<string> Values);
+    internal sealed record ContractEnum(string Name, IReadOnlyList<string> Values);
 
     public static string Emit(
         Dictionary<string, TsTypeDefinition> definitions,

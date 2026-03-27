@@ -212,7 +212,7 @@ class TypeParserTest extends TestCase
     public function testParseGenericClassRef(): void
     {
         $this->assertSame(
-            ['kind' => 'ref', 'name' => 'Collection'],
+            ['kind' => 'generic', 'name' => 'Collection', 'typeArgs' => [['kind' => 'ref', 'name' => 'UserDto']]],
             TypeParser::parse('Collection<UserDto>')
         );
     }
@@ -227,5 +227,26 @@ class TypeParserTest extends TestCase
     {
         $this->expectException(\RuntimeException::class);
         TypeParser::parse('@#$');
+    }
+
+    public function testParseIdentifierWithDigits(): void
+    {
+        $this->assertSame(
+            ['kind' => 'ref', 'name' => 'UserV2Dto'],
+            TypeParser::parse('UserV2Dto')
+        );
+    }
+
+    public function testParseTrailingGarbageThrows(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        TypeParser::parse('string GARBAGE');
+    }
+
+    public function testParseUnsupportedUnionThrows(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Unsupported union type');
+        TypeParser::parse('int|string|bool');
     }
 }

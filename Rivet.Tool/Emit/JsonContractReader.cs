@@ -16,15 +16,9 @@ public static class JsonContractReader
         Converters = { new TsTypeJsonConverter(), new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    internal sealed record RivetContract(
-        IReadOnlyList<TsTypeDefinition> Types,
-        IReadOnlyList<ContractEnum> Enums);
-
-    internal sealed record ContractEnum(string Name, IReadOnlyList<string> Values);
-
     public static (IReadOnlyList<TsTypeDefinition> Types, Dictionary<string, TsType.StringUnion> Enums) Read(string json)
     {
-        var contract = JsonSerializer.Deserialize<RivetContract>(json, Options)
+        var contract = JsonSerializer.Deserialize<ContractEmitter.RivetContract>(json, Options)
             ?? throw new JsonException("Failed to deserialize contract JSON.");
 
         var enums = new Dictionary<string, TsType.StringUnion>();

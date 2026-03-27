@@ -12,10 +12,10 @@ public sealed class PhpRoundTripTests
                         "name": "ScalarDto",
                         "typeParameters": [],
                         "properties": [
-                            { "name": "name", "type": { "kind": "primitive", "type": "string" }, "isOptional": false },
-                            { "name": "count", "type": { "kind": "primitive", "type": "number", "format": "int32" }, "isOptional": false },
-                            { "name": "rate", "type": { "kind": "primitive", "type": "number", "format": "double" }, "isOptional": false },
-                            { "name": "isActive", "type": { "kind": "primitive", "type": "boolean" }, "isOptional": false }
+                            { "name": "name", "type": { "kind": "primitive", "type": "string" }, "optional": false },
+                            { "name": "count", "type": { "kind": "primitive", "type": "number", "format": "int32" }, "optional": false },
+                            { "name": "rate", "type": { "kind": "primitive", "type": "number", "format": "double" }, "optional": false },
+                            { "name": "isActive", "type": { "kind": "primitive", "type": "boolean" }, "optional": false }
                         ]
                     }
                 ],
@@ -43,8 +43,8 @@ public sealed class PhpRoundTripTests
                         "name": "NullableDto",
                         "typeParameters": [],
                         "properties": [
-                            { "name": "maybeName", "type": { "kind": "nullable", "inner": { "kind": "primitive", "type": "string" } }, "isOptional": false },
-                            { "name": "maybeCount", "type": { "kind": "nullable", "inner": { "kind": "primitive", "type": "number", "format": "int32" } }, "isOptional": false }
+                            { "name": "maybeName", "type": { "kind": "nullable", "inner": { "kind": "primitive", "type": "string" } }, "optional": false },
+                            { "name": "maybeCount", "type": { "kind": "nullable", "inner": { "kind": "primitive", "type": "number", "format": "int32" } }, "optional": false }
                         ]
                     }
                 ],
@@ -69,8 +69,8 @@ public sealed class PhpRoundTripTests
                         "name": "ListDto",
                         "typeParameters": [],
                         "properties": [
-                            { "name": "tags", "type": { "kind": "array", "element": { "kind": "primitive", "type": "string" } }, "isOptional": false },
-                            { "name": "scores", "type": { "kind": "array", "element": { "kind": "primitive", "type": "number", "format": "int32" } }, "isOptional": false }
+                            { "name": "tags", "type": { "kind": "array", "element": { "kind": "primitive", "type": "string" } }, "optional": false },
+                            { "name": "scores", "type": { "kind": "array", "element": { "kind": "primitive", "type": "number", "format": "int32" } }, "optional": false }
                         ]
                     }
                 ],
@@ -95,7 +95,7 @@ public sealed class PhpRoundTripTests
                         "name": "DictDto",
                         "typeParameters": [],
                         "properties": [
-                            { "name": "scores", "type": { "kind": "dictionary", "value": { "kind": "primitive", "type": "number", "format": "int32" } }, "isOptional": false }
+                            { "name": "scores", "type": { "kind": "dictionary", "value": { "kind": "primitive", "type": "number", "format": "int32" } }, "optional": false }
                         ]
                     }
                 ],
@@ -128,7 +128,7 @@ public sealed class PhpRoundTripTests
                                         { "name": "height", "type": { "kind": "primitive", "type": "number", "format": "double" } }
                                     ]
                                 },
-                                "isOptional": false
+                                "optional": false
                             }
                         ]
                     }
@@ -153,7 +153,7 @@ public sealed class PhpRoundTripTests
                         "name": "WithEnumDto",
                         "typeParameters": [],
                         "properties": [
-                            { "name": "status", "type": { "kind": "ref", "name": "Status" }, "isOptional": false }
+                            { "name": "status", "type": { "kind": "ref", "name": "Status" }, "optional": false }
                         ]
                     }
                 ],
@@ -168,5 +168,31 @@ public sealed class PhpRoundTripTests
 
         Assert.Contains("export type Status = \"active\" | \"inactive\" | \"pending\";", ts);
         Assert.Contains("  status: Status;", ts);
+    }
+
+    [Fact]
+    public void Optional_Property_Emits_QuestionMark()
+    {
+        var json = """
+            {
+                "types": [
+                    {
+                        "name": "OptionalDto",
+                        "typeParameters": [],
+                        "properties": [
+                            { "name": "required", "type": { "kind": "primitive", "type": "string" }, "optional": false },
+                            { "name": "nickname", "type": { "kind": "primitive", "type": "string" }, "optional": true }
+                        ]
+                    }
+                ],
+                "enums": [],
+                "endpoints": []
+            }
+            """;
+
+        var ts = CompilationHelper.EmitTypesFromJson(json);
+
+        Assert.Contains("  required: string;", ts);
+        Assert.Contains("  nickname?: string;", ts);
     }
 }

@@ -30,7 +30,13 @@ class TypeParser
             throw new \InvalidArgumentException('Type expression cannot be empty');
         }
         $parser = new self($expr);
-        return $parser->parseType();
+        $result = $parser->parseType();
+        $parser->skipWhitespace();
+        if ($parser->pos < strlen($parser->input)) {
+            $remaining = substr($parser->input, $parser->pos);
+            throw new \RuntimeException("Unexpected trailing input: '$remaining'");
+        }
+        return $result;
     }
 
     private function parseType(): array
@@ -83,7 +89,7 @@ class TypeParser
             return ['kind' => 'stringUnion', 'values' => $values];
         }
 
-        return $first;
+        throw new \RuntimeException('Unsupported union type: only T|null and string literal unions are supported');
     }
 
     private function parseAtom(): array
@@ -111,6 +117,8 @@ class TypeParser
                 if (count($args) === 2 && $id === 'array') {
                     return ['kind' => 'dictionary', 'value' => $args[1]];
                 }
+            } else {
+                return ['kind' => 'generic', 'name' => $id, 'typeArgs' => $args];
             }
         }
 
@@ -144,7 +152,7 @@ class TypeParser
     private function consumeIdentifier(): string
     {
         $start = $this->pos;
-        while ($this->pos < strlen($this->input) && (ctype_alpha($this->input[$this->pos]) || $this->input[$this->pos] === '_' || $this->input[$this->pos] === '\\')) {
+        while ($this->pos < strlen($this->input) && (ctype_alnum($this->input[$this->pos]) || $this->input[$this->pos] === '_' || $this->input[$this->pos] === '\\')) {
             $this->pos++;
         }
 
