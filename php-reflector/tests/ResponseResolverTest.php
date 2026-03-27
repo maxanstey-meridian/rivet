@@ -68,4 +68,14 @@ class ResponseResolverTest extends TestCase
 
         $this->assertSame(['kind' => 'primitive', 'type' => 'string'], $result);
     }
+
+    public function testUnderscoredClassNameThrows(): void
+    {
+        $method = new \ReflectionMethod(OrderResponseController::class, 'underscored');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('class not found');
+
+        ResponseResolver::resolve($method);
+    }
 }

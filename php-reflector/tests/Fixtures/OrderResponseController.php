@@ -19,4 +19,7 @@ class OrderResponseController
 
     #[RivetResponse('string')]
     public function raw(): void {}
+
+    #[RivetResponse('Non_Existent_Class')]
+    public function underscored(): void {}
 }

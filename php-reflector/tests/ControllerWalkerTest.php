@@ -6,6 +6,8 @@ namespace Rivet\PhpReflector\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Rivet\PhpReflector\ControllerWalker;
+use Rivet\PhpReflector\Tests\Fixtures\AnotherController;
+use Rivet\PhpReflector\Tests\Fixtures\InlineResponseController;
 use Rivet\PhpReflector\Tests\Fixtures\NoResponseController;
 use Rivet\PhpReflector\Tests\Fixtures\SampleController;
 
@@ -124,6 +126,34 @@ class ControllerWalkerTest extends TestCase
         $this->assertSame('id', $show['params'][0]['name']);
         $this->assertSame('route', $show['params'][0]['source']);
         $this->assertSame(['kind' => 'primitive', 'type' => 'number', 'format' => 'int32'], $show['params'][0]['type']);
+    }
+
+    public function testMultipleControllersWalked(): void
+    {
+        $result = ControllerWalker::walk(SampleController::class, AnotherController::class);
+
+        // Endpoints from both controllers
+        $endpointNames = array_column($result['endpoints'], 'name');
+        $this->assertContains('show', $endpointNames);  // from SampleController
+        $this->assertContains('store', $endpointNames); // from SampleController
+        $this->assertCount(6, $result['endpoints']);     // 5 from Sample + 1 from Another
+
+        // Shared DTOs deduplicated (PersonDto referenced by both)
+        $typeNames = array_column($result['types'], 'name');
+        $personCount = count(array_filter($typeNames, fn($n) => $n === 'PersonDto'));
+        $this->assertSame(1, $personCount);
+
+        // Transitive types from both controllers present
+        $this->assertContains('AddressDto', $typeNames);  // transitive from PersonDto
+        $this->assertContains('OrderDto', $typeNames);     // from SampleController response
+    }
+
+    public function testInlineResponseShapeRefsWalked(): void
+    {
+        $result = ControllerWalker::walk(InlineResponseController::class);
+
+        $typeNames = array_column($result['types'], 'name');
+        $this->assertContains('OrderItemDto', $typeNames);
     }
 
     private function findEndpoint(string $name): array

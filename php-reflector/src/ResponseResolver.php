@@ -22,7 +22,7 @@ class ResponseResolver
             return ['kind' => 'ref', 'name' => (new \ReflectionClass($type))->getShortName()];
         }
 
-        if (preg_match('/^[A-Z][A-Za-z0-9\\\\]*$/', $type)) {
+        if (preg_match('/^[A-Z][A-Za-z0-9_\\\\]*$/', $type)) {
             throw new \InvalidArgumentException("RivetResponse class not found: $type");
         }
 

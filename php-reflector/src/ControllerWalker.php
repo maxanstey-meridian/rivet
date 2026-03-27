@@ -9,6 +9,38 @@ use Rivet\PhpReflector\Attribute\RivetRoute;
 
 class ControllerWalker
 {
+    private static function collectRefsFromType(array $typeNode, string $namespace, array &$fqcns): void
+    {
+        if ($typeNode['kind'] === 'ref') {
+            $name = $typeNode['name'];
+            $fqcn = $namespace !== '' ? $namespace . '\\' . $name : $name;
+            if (class_exists($fqcn)) {
+                $fqcns[$fqcn] = true;
+            }
+            return;
+        }
+
+        foreach (['inner', 'element', 'value'] as $key) {
+            if (isset($typeNode[$key]) && is_array($typeNode[$key])) {
+                self::collectRefsFromType($typeNode[$key], $namespace, $fqcns);
+            }
+        }
+
+        if (isset($typeNode['properties']) && is_array($typeNode['properties'])) {
+            foreach ($typeNode['properties'] as $prop) {
+                if (isset($prop['type'])) {
+                    self::collectRefsFromType($prop['type'], $namespace, $fqcns);
+                }
+            }
+        }
+
+        if (isset($typeNode['typeArgs']) && is_array($typeNode['typeArgs'])) {
+            foreach ($typeNode['typeArgs'] as $arg) {
+                self::collectRefsFromType($arg, $namespace, $fqcns);
+            }
+        }
+    }
+
     public static function walk(string ...$classNames): array
     {
         $endpoints = [];
@@ -65,6 +97,12 @@ class ControllerWalker
                 }
 
                 $returnType = ResponseResolver::resolve($method);
+
+                // Recurse into inline response type nodes to find class refs
+                if ($returnType !== null) {
+                    $namespace = $ref->getNamespaceName();
+                    self::collectRefsFromType($returnType, $namespace, $referencedFqcns);
+                }
                 $responses = $returnType !== null
                     ? [['statusCode' => 200, 'dataType' => $returnType]]
                     : [];
