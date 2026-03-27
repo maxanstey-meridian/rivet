@@ -118,4 +118,26 @@ class ContractEmitterTest extends TestCase
         $this->assertStringNotContainsString('"null"', $json);
         $this->assertStringNotContainsString(': null', $json);
     }
+
+    public function testStripNullsPreservesIndexedArrays(): void
+    {
+        $contract = [
+            'types' => [
+                [
+                    'name' => 'Test',
+                    'typeParameters' => [null, 'U'],
+                    'properties' => [],
+                ],
+            ],
+            'enums' => [],
+            'endpoints' => [],
+        ];
+
+        $json = ContractEmitter::emit($contract);
+        $decoded = json_decode($json, true);
+
+        $this->assertSame(['U'], $decoded['types'][0]['typeParameters']);
+        // Verify it's a JSON array, not an object — no "0": or "1": keys
+        $this->assertStringNotContainsString('"1":', $json);
+    }
 }

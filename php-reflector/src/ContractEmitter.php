@@ -14,6 +14,7 @@ class ContractEmitter
 
     private static function stripNulls(array $data): array
     {
+        $isList = array_is_list($data);
         $result = [];
         foreach ($data as $key => $value) {
             if ($value === null) {
@@ -21,6 +22,6 @@ class ContractEmitter
             }
             $result[$key] = is_array($value) ? self::stripNulls($value) : $value;
         }
-        return $result;
+        return $isList ? array_values($result) : $result;
     }
 }
