@@ -24,7 +24,7 @@ class ClassFinderTest extends TestCase
     public function testFindsEnumsAndClasses(): void
     {
         $fqcns = ClassFinder::find(__DIR__ . '/Fixtures');
-        $this->assertCount(23, $fqcns);
+        $this->assertCount(26, $fqcns);
     }
 
     public function testThrowsForMissingDirectory(): void
