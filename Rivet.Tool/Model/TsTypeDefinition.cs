@@ -40,6 +40,7 @@ public sealed record TsPropertyConstraints(
     int? MaxItems = null,
     bool? UniqueItems = null)
 {
+    [JsonIgnore]
     public bool HasAny => MinLength.HasValue || MaxLength.HasValue || Pattern is not null
         || Minimum.HasValue || Maximum.HasValue || ExclusiveMinimum.HasValue || ExclusiveMaximum.HasValue
         || MultipleOf.HasValue || MinItems.HasValue || MaxItems.HasValue || UniqueItems == true;
