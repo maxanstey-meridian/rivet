@@ -18,7 +18,7 @@ public static class OpenApiEmitter
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
-        IReadOnlyDictionary<string, TsType.StringUnion> enums,
+        IReadOnlyDictionary<string, TsType> enums,
         SecurityConfig? security)
     {
         var paths = BuildPaths(endpoints, security);
@@ -329,6 +329,12 @@ public static class OpenApiEmitter
                 ["enum"] = su.Members.ToList(),
             },
 
+            TsType.IntUnion iu => new Dictionary<string, object>
+            {
+                ["type"] = "integer",
+                ["enum"] = iu.Members.ToList(),
+            },
+
             TsType.TypeRef r => new Dictionary<string, object>
             {
                 ["$ref"] = $"#/components/schemas/{r.Name}",
@@ -493,7 +499,7 @@ public static class OpenApiEmitter
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
-        IReadOnlyDictionary<string, TsType.StringUnion> enums)
+        IReadOnlyDictionary<string, TsType> enums)
     {
         var schemas = new Dictionary<string, object>();
 
@@ -546,14 +552,10 @@ public static class OpenApiEmitter
             schemas[name] = brandSchema;
         }
 
-        // Enums as string schemas
-        foreach (var (name, su) in enums)
+        // Enums as schemas
+        foreach (var (name, enumType) in enums)
         {
-            schemas[name] = new Dictionary<string, object>
-            {
-                ["type"] = "string",
-                ["enum"] = su.Members.ToList(),
-            };
+            schemas[name] = MapTsTypeToJsonSchema(enumType);
         }
 
         return schemas;

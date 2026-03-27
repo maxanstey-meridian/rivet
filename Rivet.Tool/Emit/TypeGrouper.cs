@@ -12,7 +12,7 @@ public static class TypeGrouper
         string FileName,
         IReadOnlyList<TsTypeDefinition> Definitions,
         IReadOnlyList<TsType.Brand> Brands,
-        IReadOnlyDictionary<string, TsType.StringUnion> Enums,
+        IReadOnlyDictionary<string, TsType> Enums,
         IReadOnlyDictionary<string, IReadOnlyList<string>> Imports);
 
     public sealed record TypeGroupingResult(
@@ -49,7 +49,7 @@ public static class TypeGrouper
     public static TypeGroupingResult Group(
         IReadOnlyList<TsTypeDefinition> definitions,
         IReadOnlyList<TsType.Brand> brands,
-        IReadOnlyDictionary<string, TsType.StringUnion> enums,
+        IReadOnlyDictionary<string, TsType> enums,
         IReadOnlyDictionary<string, string?> typeNamespaces)
     {
         // All type names to their namespace group (null → "common")
@@ -137,7 +137,7 @@ public static class TypeGrouper
         // Partition types into groups
         var groupDefs = new Dictionary<string, List<TsTypeDefinition>>();
         var groupBrands = new Dictionary<string, List<TsType.Brand>>();
-        var groupEnums = new Dictionary<string, List<KeyValuePair<string, TsType.StringUnion>>>();
+        var groupEnums = new Dictionary<string, List<KeyValuePair<string, TsType>>>();
 
         foreach (var group in groupToFileName.Keys)
         {

@@ -11,7 +11,7 @@ public sealed class ContractEmitterTests
     {
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
-            new Dictionary<string, TsType.StringUnion>(),
+            new Dictionary<string, TsType>(),
             []);
 
         using var doc = JsonDocument.Parse(json);
@@ -36,7 +36,7 @@ public sealed class ContractEmitterTests
             ]),
         };
 
-        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         using var doc = JsonDocument.Parse(json);
         var types = doc.RootElement.GetProperty("types");
 
@@ -52,9 +52,9 @@ public sealed class ContractEmitterTests
     [Fact]
     public void Enums_Projected_With_Name_And_Values()
     {
-        var enums = new Dictionary<string, TsType.StringUnion>
+        var enums = new Dictionary<string, TsType>
         {
-            ["Status"] = new(["Active", "Inactive", "Pending"]),
+            ["Status"] = new TsType.StringUnion(["Active", "Inactive", "Pending"]),
         };
 
         var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), enums, []);
@@ -82,7 +82,7 @@ public sealed class ContractEmitterTests
             "UsersController",
             [new TsResponseType(200, new TsType.TypeRef("UserDto"))]);
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType.StringUnion>(), [endpoint]);
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -109,7 +109,7 @@ public sealed class ContractEmitterTests
             "UploadController",
             [new TsResponseType(204, null)]);
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType.StringUnion>(), [endpoint]);
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
         using var doc = JsonDocument.Parse(json);
         var pars = doc.RootElement.GetProperty("endpoints")[0].GetProperty("params");
 
@@ -130,7 +130,7 @@ public sealed class ContractEmitterTests
             "ItemsController",
             [new TsResponseType(200, null)]);
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType.StringUnion>(), [endpoint]);
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -158,7 +158,7 @@ public sealed class ContractEmitterTests
                 new TsResponseType(404, null, "Not found"),
             ]);
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType.StringUnion>(), [endpoint]);
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
         using var doc = JsonDocument.Parse(json);
         var responses = doc.RootElement.GetProperty("endpoints")[0].GetProperty("responses");
 
@@ -186,7 +186,7 @@ public sealed class ContractEmitterTests
             [],
             Security: new EndpointSecurity(false, "Bearer"));
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType.StringUnion>(), [endpoint]);
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
         using var doc = JsonDocument.Parse(json);
         var sec = doc.RootElement.GetProperty("endpoints")[0].GetProperty("security");
 
@@ -205,7 +205,7 @@ public sealed class ContractEmitterTests
             ]),
         };
 
-        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         using var doc = JsonDocument.Parse(json);
         var props = doc.RootElement.GetProperty("types")[0].GetProperty("properties");
 
@@ -226,7 +226,7 @@ public sealed class ContractEmitterTests
             ]),
         };
 
-        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         using var doc = JsonDocument.Parse(json);
         var props = doc.RootElement.GetProperty("types")[0].GetProperty("properties");
 
@@ -271,7 +271,7 @@ public sealed class ContractEmitterTests
             ]),
         };
 
-        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         using var doc = JsonDocument.Parse(json);
         var types = doc.RootElement.GetProperty("types");
 
@@ -298,7 +298,7 @@ public sealed class ContractEmitterTests
             ],
             Summary: "Create an order");
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType.StringUnion>(), [endpoint]);
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -335,7 +335,7 @@ public sealed class ContractEmitterTests
             ]),
         };
 
-        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         using var doc = JsonDocument.Parse(json);
         var props = doc.RootElement.GetProperty("types")[0].GetProperty("properties");
 
@@ -372,7 +372,7 @@ public sealed class ContractEmitterTests
             ]),
         };
 
-        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         using var doc = JsonDocument.Parse(json);
         var props = doc.RootElement.GetProperty("types")[0].GetProperty("properties");
 
@@ -411,7 +411,7 @@ public sealed class ContractEmitterTests
             Summary: "Get a user by ID",
             Description: "Returns the full user profile including nested address data.");
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType.StringUnion>(), [endpoint]);
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -430,7 +430,7 @@ public sealed class ContractEmitterTests
             ]),
         };
 
-        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         using var doc = JsonDocument.Parse(json);
         var typeParams = doc.RootElement.GetProperty("types")[0].GetProperty("typeParameters");
 
@@ -457,7 +457,7 @@ public sealed class ContractEmitterTests
             ]),
         };
 
-        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         using var doc = JsonDocument.Parse(json);
         var props = doc.RootElement.GetProperty("types")[0].GetProperty("properties");
 
@@ -497,9 +497,9 @@ public sealed class ContractEmitterTests
             ], Description: "Request to create an order"),
         };
 
-        var enums = new Dictionary<string, TsType.StringUnion>
+        var enums = new Dictionary<string, TsType>
         {
-            ["OrderStatus"] = new(["Pending", "Confirmed", "Shipped", "Cancelled"]),
+            ["OrderStatus"] = new TsType.StringUnion(["Pending", "Confirmed", "Shipped", "Cancelled"]),
         };
 
         var endpoints = new List<TsEndpointDefinition>
@@ -581,9 +581,9 @@ public sealed class ContractEmitterTests
             ]),
         };
 
-        var enums = new Dictionary<string, TsType.StringUnion>
+        var enums = new Dictionary<string, TsType>
         {
-            ["Status"] = new(["Active", "Inactive"]),
+            ["Status"] = new TsType.StringUnion(["Active", "Inactive"]),
         };
 
         var endpoints = new List<TsEndpointDefinition>

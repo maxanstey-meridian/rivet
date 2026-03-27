@@ -338,7 +338,7 @@ public sealed class MetadataAttributeTests
         var (walker, _) = WalkSource(source);
 
         Assert.True(walker.Enums.ContainsKey("Priority"));
-        var members = walker.Enums["Priority"].Members;
+        var members = ((TsType.StringUnion)walker.Enums["Priority"]).Members;
         Assert.Contains("low", members);
         Assert.Contains("medium", members);
         Assert.Contains("high", members);

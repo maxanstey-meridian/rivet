@@ -39,6 +39,10 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 root.GetProperty("values").EnumerateArray()
                     .Select(e => e.GetString()!).ToArray()),
 
+            "intUnion" => new TsType.IntUnion(
+                root.GetProperty("values").EnumerateArray()
+                    .Select(e => e.GetInt32()).ToArray()),
+
             "ref" => new TsType.TypeRef(
                 root.GetProperty("name").GetString()!),
 
@@ -103,6 +107,14 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 writer.WriteStartArray("values");
                 foreach (var member in su.Members)
                     writer.WriteStringValue(member);
+                writer.WriteEndArray();
+                break;
+
+            case TsType.IntUnion iu:
+                writer.WriteString("kind", "intUnion");
+                writer.WriteStartArray("values");
+                foreach (var member in iu.Members)
+                    writer.WriteNumberValue(member);
                 writer.WriteEndArray();
                 break;
 

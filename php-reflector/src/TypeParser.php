@@ -89,7 +89,22 @@ class TypeParser
             return ['kind' => 'stringUnion', 'values' => $values];
         }
 
-        throw new \RuntimeException('Unsupported union type: only T|null and string literal unions are supported');
+        $allIntUnions = true;
+        foreach ($members as $m) {
+            if ($m['kind'] !== 'intUnion') {
+                $allIntUnions = false;
+                break;
+            }
+        }
+        if ($allIntUnions) {
+            $values = [];
+            foreach ($members as $m) {
+                array_push($values, ...$m['values']);
+            }
+            return ['kind' => 'intUnion', 'values' => $values];
+        }
+
+        throw new \RuntimeException('Unsupported union type: only T|null, string literal, and int literal unions are supported');
     }
 
     private function parseAtom(): array
@@ -97,6 +112,12 @@ class TypeParser
         if ($this->peek() === "'") {
             $value = $this->consumeQuotedString();
             return ['kind' => 'stringUnion', 'values' => [$value]];
+        }
+
+        $ch = $this->peek();
+        if ($ch !== null && (ctype_digit($ch) || ($ch === '-' && $this->pos + 1 < strlen($this->input) && ctype_digit($this->input[$this->pos + 1])))) {
+            $value = $this->consumeInteger();
+            return ['kind' => 'intUnion', 'values' => [$value]];
         }
 
         $id = $this->consumeIdentifier();
@@ -195,6 +216,18 @@ class TypeParser
         }
         $this->expect('}');
         return ['kind' => 'inlineObject', 'properties' => $properties];
+    }
+
+    private function consumeInteger(): int
+    {
+        $start = $this->pos;
+        if ($this->peek() === '-') {
+            $this->pos++;
+        }
+        while ($this->pos < strlen($this->input) && ctype_digit($this->input[$this->pos])) {
+            $this->pos++;
+        }
+        return (int) substr($this->input, $start, $this->pos - $start);
     }
 
     private function consumeQuotedString(): string

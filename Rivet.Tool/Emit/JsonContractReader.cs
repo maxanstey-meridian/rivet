@@ -16,15 +16,18 @@ public static class JsonContractReader
         Converters = { new TsTypeJsonConverter(), new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    public static (IReadOnlyList<TsTypeDefinition> Types, Dictionary<string, TsType.StringUnion> Enums) Read(string json)
+    public static (IReadOnlyList<TsTypeDefinition> Types, Dictionary<string, TsType> Enums) Read(string json)
     {
         var contract = JsonSerializer.Deserialize<ContractEmitter.RivetContract>(json, Options)
             ?? throw new JsonException("Failed to deserialize contract JSON.");
 
-        var enums = new Dictionary<string, TsType.StringUnion>();
+        var enums = new Dictionary<string, TsType>();
         foreach (var e in contract.Enums)
         {
-            enums[e.Name] = new TsType.StringUnion(e.Values);
+            if (e.IntValues is not null)
+                enums[e.Name] = new TsType.IntUnion(e.IntValues);
+            else
+                enums[e.Name] = new TsType.StringUnion(e.Values!);
         }
 
         return (contract.Types, enums);

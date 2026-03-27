@@ -249,4 +249,28 @@ class TypeParserTest extends TestCase
         $this->expectExceptionMessage('Unsupported union type');
         TypeParser::parse('int|string|bool');
     }
+
+    public function testParseSingleIntLiteral(): void
+    {
+        $this->assertSame(
+            ['kind' => 'intUnion', 'values' => [42]],
+            TypeParser::parse('42')
+        );
+    }
+
+    public function testParseIntLiteralUnion(): void
+    {
+        $this->assertSame(
+            ['kind' => 'intUnion', 'values' => [1, 2, 3]],
+            TypeParser::parse('1|2|3')
+        );
+    }
+
+    public function testParseNegativeIntLiteral(): void
+    {
+        $this->assertSame(
+            ['kind' => 'intUnion', 'values' => [-1]],
+            TypeParser::parse('-1')
+        );
+    }
 }

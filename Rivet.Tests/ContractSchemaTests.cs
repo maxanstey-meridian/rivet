@@ -27,7 +27,7 @@ public sealed class ContractSchemaTests
     {
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
-            new Dictionary<string, TsType.StringUnion>(),
+            new Dictionary<string, TsType>(),
             []);
 
         var result = Validate(json);
@@ -37,9 +37,9 @@ public sealed class ContractSchemaTests
     [Fact]
     public void Contract_With_Enum_Validates()
     {
-        var enums = new Dictionary<string, TsType.StringUnion>
+        var enums = new Dictionary<string, TsType>
         {
-            ["Status"] = new(["Active", "Inactive"]),
+            ["Status"] = new TsType.StringUnion(["Active", "Inactive"]),
         };
 
         var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), enums, []);
@@ -67,7 +67,7 @@ public sealed class ContractSchemaTests
             ]),
         };
 
-        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
     }
@@ -91,7 +91,7 @@ public sealed class ContractSchemaTests
             ],
             Summary: "Create an order");
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType.StringUnion>(), [endpoint]);
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
     }
@@ -109,9 +109,9 @@ public sealed class ContractSchemaTests
             ], Description: "Request to create an order"),
         };
 
-        var enums = new Dictionary<string, TsType.StringUnion>
+        var enums = new Dictionary<string, TsType>
         {
-            ["OrderStatus"] = new(["Pending", "Confirmed", "Shipped", "Cancelled"]),
+            ["OrderStatus"] = new TsType.StringUnion(["Pending", "Confirmed", "Shipped", "Cancelled"]),
         };
 
         var endpoints = new List<TsEndpointDefinition>
@@ -147,7 +147,7 @@ public sealed class ContractSchemaTests
             ]),
         };
 
-        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
     }
@@ -195,7 +195,7 @@ public sealed class ContractSchemaTests
             ]),
         };
 
-        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType.StringUnion>(), []);
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
     }

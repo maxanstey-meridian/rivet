@@ -1386,7 +1386,7 @@ public sealed class ContractEndpointTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
-        var statusEnum = walker.Enums["Status"];
+        var statusEnum = (TsType.StringUnion)walker.Enums["Status"];
         Assert.Contains("in-progress", statusEnum.Members);
         Assert.Contains("on_hold", statusEnum.Members);
         Assert.Contains("Done", statusEnum.Members);

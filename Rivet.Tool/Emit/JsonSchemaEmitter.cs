@@ -18,7 +18,7 @@ public static class JsonSchemaEmitter
     public static string Emit(
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
-        IReadOnlyDictionary<string, TsType.StringUnion> enums,
+        IReadOnlyDictionary<string, TsType> enums,
         IReadOnlyList<TsEndpointDefinition>? endpoints = null)
     {
         var defs = new Dictionary<string, object>();
@@ -65,13 +65,9 @@ public static class JsonSchemaEmitter
         }
 
         // Enums
-        foreach (var (name, su) in enums)
+        foreach (var (name, enumType) in enums)
         {
-            defs[name] = new Dictionary<string, object>
-            {
-                ["type"] = "string",
-                ["enum"] = su.Members.ToList(),
-            };
+            defs[name] = MapTsTypeToSchema(enumType);
         }
 
         // Build the output
@@ -126,6 +122,12 @@ public static class JsonSchemaEmitter
             {
                 ["type"] = "string",
                 ["enum"] = su.Members.ToList(),
+            },
+
+            TsType.IntUnion iu => new Dictionary<string, object>
+            {
+                ["type"] = "integer",
+                ["enum"] = iu.Members.ToList(),
             },
 
             TsType.TypeRef r => new Dictionary<string, object>

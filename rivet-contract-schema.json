@@ -101,6 +101,15 @@
         {
           "type": "object",
           "properties": {
+            "kind": { "const": "intUnion" },
+            "values": { "type": "array", "items": { "type": "integer" }, "minItems": 1 }
+          },
+          "required": ["kind", "values"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
             "kind": { "const": "inlineObject" },
             "properties": {
               "type": "array",
@@ -167,13 +176,26 @@
       "additionalProperties": false
     },
     "contractEnum": {
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "values": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
-      },
-      "required": ["name", "values"],
-      "additionalProperties": false
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "values": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          },
+          "required": ["name", "values"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "intValues": { "type": "array", "items": { "type": "integer" }, "minItems": 1 }
+          },
+          "required": ["name", "intValues"],
+          "additionalProperties": false
+        }
+      ]
     },
     "endpointParam": {
       "type": "object",

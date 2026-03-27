@@ -19,16 +19,26 @@ public static class ContractEmitter
         IReadOnlyList<ContractEnum> Enums,
         IReadOnlyList<TsEndpointDefinition>? Endpoints = null);
 
-    internal sealed record ContractEnum(string Name, IReadOnlyList<string> Values);
+    internal sealed record ContractEnum(
+        string Name,
+        IReadOnlyList<string>? Values = null,
+        IReadOnlyList<int>? IntValues = null);
 
     public static string Emit(
         Dictionary<string, TsTypeDefinition> definitions,
-        Dictionary<string, TsType.StringUnion> enums,
+        Dictionary<string, TsType> enums,
         IReadOnlyList<TsEndpointDefinition> endpoints)
     {
+        var contractEnums = enums.Select(kv => kv.Value switch
+        {
+            TsType.StringUnion su => new ContractEnum(kv.Key, Values: su.Members),
+            TsType.IntUnion iu => new ContractEnum(kv.Key, IntValues: iu.Members),
+            _ => throw new InvalidOperationException($"Unsupported enum type: {kv.Value.GetType().Name}"),
+        }).ToList();
+
         var contract = new RivetContract(
             definitions.Values.ToList(),
-            enums.Select(kv => new ContractEnum(kv.Key, kv.Value.Members)).ToList(),
+            contractEnums,
             endpoints);
 
         return JsonSerializer.Serialize(contract, Options);

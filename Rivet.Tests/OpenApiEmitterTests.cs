@@ -24,7 +24,7 @@ public sealed class OpenApiEmitterTests
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
-        IReadOnlyDictionary<string, TsType.StringUnion> enums,
+        IReadOnlyDictionary<string, TsType> enums,
         SecurityConfig? security = null)
     {
         var json = OpenApiEmitter.Emit(endpoints, definitions, brands, enums, security);
@@ -221,7 +221,7 @@ public sealed class OpenApiEmitterTests
         };
 
         using var doc = EmitOpenApiFromModel(endpoints, definitions,
-            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType.StringUnion>());
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>());
 
         var post = doc.RootElement.GetProperty("paths")
             .GetProperty("/api/files")
@@ -782,7 +782,7 @@ public sealed class OpenApiEmitterTests
         };
 
         using var doc = EmitOpenApiFromModel(endpoints, definitions,
-            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType.StringUnion>());
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>());
 
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
@@ -1015,7 +1015,7 @@ public sealed class OpenApiEmitterTests
         using var doc = EmitOpenApiFromModel(endpoints,
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType.Brand>(),
-            new Dictionary<string, TsType.StringUnion>());
+            new Dictionary<string, TsType>());
 
         var responses = doc.RootElement.GetProperty("paths")
             .GetProperty("/api/do")
@@ -1068,7 +1068,7 @@ public sealed class OpenApiEmitterTests
         };
 
         using var doc = EmitOpenApiFromModel(endpoints, definitions,
-            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType.StringUnion>());
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>());
 
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
@@ -1126,7 +1126,7 @@ public sealed class OpenApiEmitterTests
         };
 
         using var doc = EmitOpenApiFromModel(endpoints, definitions,
-            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType.StringUnion>());
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>());
 
         var schema = doc.RootElement.GetProperty("paths")
             .GetProperty("/api/files")
@@ -1224,7 +1224,7 @@ public sealed class OpenApiEmitterTests
         };
 
         using var doc = EmitOpenApiFromModel(endpoints, definitions,
-            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType.StringUnion>());
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>());
 
         var multipartSchema = doc.RootElement.GetProperty("paths")
             .GetProperty("/api/files")
@@ -1282,7 +1282,7 @@ public sealed class OpenApiEmitterTests
         };
 
         using var doc = EmitOpenApiFromModel(endpoints, definitions,
-            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType.StringUnion>());
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>());
 
         var monoSchema = doc.RootElement.GetProperty("components")
             .GetProperty("schemas")

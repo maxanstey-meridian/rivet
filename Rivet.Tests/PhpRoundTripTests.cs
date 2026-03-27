@@ -195,4 +195,32 @@ public sealed class PhpRoundTripTests
         Assert.Contains("  required: string;", ts);
         Assert.Contains("  nickname?: string;", ts);
     }
+
+    [Fact]
+    public void IntBackedEnum_Produces_IntUnion_And_Ref()
+    {
+        var json = """
+            {
+                "types": [
+                    {
+                        "name": "TaskDto",
+                        "typeParameters": [],
+                        "properties": [
+                            { "name": "title", "type": { "kind": "primitive", "type": "string" }, "optional": false },
+                            { "name": "priority", "type": { "kind": "ref", "name": "Priority" }, "optional": false }
+                        ]
+                    }
+                ],
+                "enums": [
+                    { "name": "Priority", "intValues": [1, 2, 3] }
+                ],
+                "endpoints": []
+            }
+            """;
+
+        var ts = CompilationHelper.EmitTypesFromJson(json);
+
+        Assert.Contains("export type Priority = 1 | 2 | 3;", ts);
+        Assert.Contains("  priority: Priority;", ts);
+    }
 }

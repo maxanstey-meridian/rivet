@@ -358,8 +358,8 @@ public sealed class RealWorldImportTests
                 continue;
             }
 
-            var enum2 = r.Walker2.Enums[name];
-            Assert.Equal(enum1.Members.Count, enum2.Members.Count);
+            var enum2 = (TsType.StringUnion)r.Walker2.Enums[name];
+            Assert.Equal(((TsType.StringUnion)enum1).Members.Count, enum2.Members.Count);
         }
     }
 
