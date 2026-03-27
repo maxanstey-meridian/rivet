@@ -93,6 +93,51 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
         Assert.NotEqual(0, exitCode);
         Assert.DoesNotContain("Unhandled exception", output);
     }
+
+    [Fact]
+    public async Task DotnetPack_StillSucceeds_WithSingleFileConditional()
+    {
+        var repoRoot = PublishFixture.FindRepoRoot();
+        var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
+
+        var (exitCode, output) = await PublishFixture.RunProcessAsync(
+            "dotnet",
+            $"pack \"{csproj}\" -c Release --no-restore",
+            repoRoot);
+
+        Assert.True(exitCode == 0, $"dotnet pack failed (exit {exitCode}):\n{output}");
+    }
+
+    [Fact]
+    public async Task CrossCompile_ForRid_ProducesSingleFile()
+    {
+        var repoRoot = PublishFixture.FindRepoRoot();
+        var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
+        var outDir = Path.Combine(Path.GetTempPath(), $"rivet-cross-test-{Guid.NewGuid():N}");
+
+        try
+        {
+            var (exitCode, output) = await PublishFixture.RunProcessAsync(
+                "dotnet",
+                $"publish \"{csproj}\" -c Release -r linux-x64 --self-contained -o \"{outDir}\"",
+                repoRoot);
+
+            Assert.True(exitCode == 0, $"Cross-compile failed (exit {exitCode}):\n{output}");
+
+            var files = Directory.GetFiles(outDir)
+                .Where(f => !f.EndsWith(".pdb") && !f.EndsWith(".json"))
+                .ToArray();
+
+            Assert.True(files.Length <= 3,
+                $"Expected single-file output (≤3 non-pdb/json files) but found {files.Length}:\n"
+                + string.Join("\n", files.Select(Path.GetFileName)));
+        }
+        finally
+        {
+            if (Directory.Exists(outDir))
+                Directory.Delete(outDir, recursive: true);
+        }
+    }
 }
 
 public sealed class PublishFixture : IAsyncLifetime

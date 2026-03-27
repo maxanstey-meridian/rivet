@@ -25,6 +25,10 @@
     <PackageReference Include="System.Text.Json" Version="9.*" />
   </ItemGroup>
 
+  <PropertyGroup Condition="'$(SelfContained)' == 'true'">
+    <PublishSingleFile>true</PublishSingleFile>
+  </PropertyGroup>
+
   <PropertyGroup>
     <NoWarn>$(NoWarn);NU1701</NoWarn>
     <OutputType>Exe</OutputType>
