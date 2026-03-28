@@ -21,8 +21,13 @@ class RivetReflectCommand extends Command
     {
         $routes = LaravelRouteWalker::fromRouteCollection(Route::getRoutes());
 
-        $dir = $this->option('dir') ?? app_path();
+        $explicitDir = $this->option('dir');
+        $dir = $explicitDir ?? app_path();
         $extraFqcns = [];
+        if ($explicitDir !== null && !is_dir($dir)) {
+            $this->error("Error: directory does not exist: $dir");
+            return self::FAILURE;
+        }
         if (is_dir($dir)) {
             $allFqcns = ClassFinder::find($dir);
 

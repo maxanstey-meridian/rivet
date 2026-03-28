@@ -34,4 +34,11 @@ class EndpointBuilderTest extends TestCase
         $this->assertCount(1, $result['types']);
         $this->assertSame('SharedConfigDto', $result['types'][0]['name']);
     }
+
+    public function testBuildContractWithNonexistentExtraFqcnThrowsReflectionException(): void
+    {
+        $this->expectException(\ReflectionException::class);
+
+        EndpointBuilder::buildContract([], [], null, ['NonExistent\\FakeClass']);
+    }
 }

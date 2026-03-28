@@ -36,6 +36,16 @@ class TypeCollectorTest extends TestCase
         $this->assertSame([SharedConfigDto::class], $result);
     }
 
+    public function testSkipsAnnotatedEnumExplicitly(): void
+    {
+        // AnnotatedEnum has #[RivetType] but TypeCollector excludes enums —
+        // enums are discovered via PropertyWalker when referenced by a DTO,
+        // not through the standalone type discovery pipeline.
+        $result = TypeCollector::collect(AnnotatedEnum::class);
+
+        $this->assertSame([], $result);
+    }
+
     public function testSkipsInterfaces(): void
     {
         $result = TypeCollector::collect(AnnotatedInterface::class, SharedConfigDto::class);

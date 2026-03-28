@@ -36,6 +36,10 @@ class RivetReflectCommand extends Command
 
         $extraFqcns = [];
         $dir = $input->getOption('dir');
+        if ($dir !== null && !is_dir($dir)) {
+            $output->writeln("<error>Error: directory does not exist: $dir</error>");
+            return Command::FAILURE;
+        }
         if ($dir !== null && is_dir($dir)) {
             $allFqcns = ClassFinder::find($dir);
 

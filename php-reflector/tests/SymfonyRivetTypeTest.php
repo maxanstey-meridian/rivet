@@ -141,4 +141,17 @@ class SymfonyRivetTypeTest extends TestCase
         $this->assertStringContainsString('OrderDto', $output);
         $this->assertStringContainsString('SharedConfigDto', $output);
     }
+
+    public function testCommandWithInvalidDirReturnsFailure(): void
+    {
+        $router = $this->createMock(RouterInterface::class);
+        $router->method('getRouteCollection')->willReturn(new RouteCollection());
+
+        $command = new RivetReflectCommand($router);
+        $tester = new CommandTester($command);
+        $tester->execute(['--dir' => '/nonexistent/path']);
+
+        $this->assertSame(1, $tester->getStatusCode());
+        $this->assertStringContainsString('/nonexistent/path', $tester->getDisplay());
+    }
 }
