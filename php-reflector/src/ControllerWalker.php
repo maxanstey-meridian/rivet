@@ -8,7 +8,7 @@ use Rivet\PhpReflector\Attribute\RivetRoute;
 
 class ControllerWalker
 {
-    public static function walk(string ...$classNames): array
+    public static function walk(array $classNames, array $extraFqcns = []): array
     {
         $diagnostics = new Diagnostics();
         $endpoints = [];
@@ -36,6 +36,6 @@ class ControllerWalker
             }
         }
 
-        return EndpointBuilder::buildContract($endpoints, $referencedFqcns, $diagnostics);
+        return EndpointBuilder::buildContract($endpoints, $referencedFqcns, $diagnostics, $extraFqcns);
     }
 }

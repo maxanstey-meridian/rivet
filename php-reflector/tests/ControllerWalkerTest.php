@@ -9,6 +9,8 @@ use Rivet\PhpReflector\ControllerWalker;
 use Rivet\PhpReflector\Tests\Fixtures\AnotherController;
 use Rivet\PhpReflector\Tests\Fixtures\InlineResponseController;
 use Rivet\PhpReflector\Tests\Fixtures\NoRouteController;
+use Rivet\PhpReflector\Tests\Fixtures\OrderDto;
+use Rivet\PhpReflector\Tests\Fixtures\PersonDto;
 use Rivet\PhpReflector\Tests\Fixtures\SampleController;
 
 class ControllerWalkerTest extends TestCase
@@ -18,13 +20,13 @@ class ControllerWalkerTest extends TestCase
 
     public static function setUpBeforeClass(): void
     {
-        self::$result = ControllerWalker::walk(SampleController::class);
+        self::$result = ControllerWalker::walk([SampleController::class]);
         self::$endpoints = self::$result['endpoints'];
     }
 
     public function testEmptyControllerReturnsNoEndpoints(): void
     {
-        $result = ControllerWalker::walk(NoRouteController::class);
+        $result = ControllerWalker::walk([NoRouteController::class]);
 
         $this->assertSame([], $result['endpoints']);
         $this->assertSame([], $result['types']);
@@ -130,7 +132,7 @@ class ControllerWalkerTest extends TestCase
 
     public function testMultipleControllersWalked(): void
     {
-        $result = ControllerWalker::walk(SampleController::class, AnotherController::class);
+        $result = ControllerWalker::walk([SampleController::class, AnotherController::class]);
 
         // Endpoints from both controllers
         $endpointNames = array_column($result['endpoints'], 'name');
@@ -150,10 +152,41 @@ class ControllerWalkerTest extends TestCase
 
     public function testInlineResponseShapeRefsWalked(): void
     {
-        $result = ControllerWalker::walk(InlineResponseController::class);
+        $result = ControllerWalker::walk([InlineResponseController::class]);
 
         $typeNames = array_column($result['types'], 'name');
         $this->assertContains('OrderItemDto', $typeNames);
+    }
+
+    public function testExtraFqcnOnlyTypeAppearsInOutput(): void
+    {
+        // No endpoints exist on NoRouteController, but OrderDto should appear via extraFqcns
+        $result = ControllerWalker::walk([NoRouteController::class], [OrderDto::class]);
+
+        $this->assertSame([], $result['endpoints']);
+
+        $typeNames = array_column($result['types'], 'name');
+        $this->assertContains('OrderDto', $typeNames);
+
+        $enumNames = array_column($result['enums'], 'name');
+        $this->assertContains('Status', $enumNames);
+    }
+
+    public function testExtraFqcnDeduplicatedWithEndpointRef(): void
+    {
+        // PersonDto is already referenced by SampleController's store and update endpoints
+        $result = ControllerWalker::walk([SampleController::class], [PersonDto::class]);
+
+        // PersonDto appears exactly once (deduplication works)
+        $typeNames = array_column($result['types'], 'name');
+        $personCount = count(array_filter($typeNames, fn($n) => $n === 'PersonDto'));
+        $this->assertSame(1, $personCount);
+
+        // Transitive walking still works
+        $this->assertContains('AddressDto', $typeNames);
+
+        // Endpoint count unchanged
+        $this->assertCount(5, $result['endpoints']);
     }
 
     private function findEndpoint(string $name): array

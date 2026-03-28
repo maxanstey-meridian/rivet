@@ -137,7 +137,7 @@ class DiagnosticsTest extends TestCase
 
     public function testMissingResponseDiagnostic(): void
     {
-        $result = ControllerWalker::walk(SampleController::class);
+        $result = ControllerWalker::walk([SampleController::class]);
 
         $this->assertArrayHasKey('diagnostics', $result);
         $diag = $result['diagnostics'];
