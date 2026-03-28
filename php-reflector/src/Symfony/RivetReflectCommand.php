@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Rivet\PhpReflector\Symfony;
 
+use Rivet\PhpReflector\ClassFinder;
 use Rivet\PhpReflector\ContractEmitter;
 use Rivet\PhpReflector\Diagnostics;
 use Rivet\PhpReflector\SymfonyRouteWalker;
+use Rivet\PhpReflector\TypeCollector;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -25,12 +27,31 @@ class RivetReflectCommand extends Command
     protected function configure(): void
     {
         $this->addOption('out', null, InputOption::VALUE_REQUIRED, 'Output file path');
+        $this->addOption('dir', null, InputOption::VALUE_REQUIRED, 'Directory to scan for #[RivetType] classes');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $routes = SymfonyRouteWalker::fromRouteCollection($this->router->getRouteCollection());
-        $contract = SymfonyRouteWalker::walk($routes);
+
+        $extraFqcns = [];
+        $dir = $input->getOption('dir');
+        if ($dir !== null && is_dir($dir)) {
+            $allFqcns = ClassFinder::find($dir);
+
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+            );
+            foreach ($iterator as $file) {
+                if ($file->getExtension() === 'php') {
+                    require_once $file->getPathname();
+                }
+            }
+
+            $extraFqcns = TypeCollector::collect(...$allFqcns);
+        }
+
+        $contract = SymfonyRouteWalker::walk($routes, $extraFqcns);
 
         /** @var Diagnostics $diagnostics */
         $diagnostics = $contract['diagnostics'];
