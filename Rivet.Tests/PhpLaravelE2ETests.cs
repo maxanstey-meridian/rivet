@@ -5,7 +5,7 @@ namespace Rivet.Tests;
 public sealed class PhpLaravelE2ETests
 {
     private static readonly string GoldenJson = File.ReadAllText(
-        Path.Combine("..", "..", "..", "..", "php-reflector", "tests", "Integration", "SampleApp", "golden-contract.json"));
+        Path.Combine("..", "..", "..", "Fixtures", "php-golden-contract.json"));
 
     private static readonly string Ts = CompilationHelper.EmitTypesFromJson(GoldenJson);
 
