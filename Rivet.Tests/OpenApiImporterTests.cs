@@ -2939,6 +2939,90 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void IntEnum_Untyped_With_XEnumVarnames_Uses_Custom_Names()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Severity": {
+                "enum": [10, 20, 30],
+                "x-enum-varnames": ["Info", "Warning", "Error"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Severity.cs");
+
+        Assert.Contains("Info = 10,", content);
+        Assert.Contains("Warning = 20,", content);
+        Assert.Contains("Error = 30", content);
+        Assert.DoesNotContain("Value10", content);
+        Assert.DoesNotContain("Value20", content);
+        Assert.DoesNotContain("Value30", content);
+    }
+
+    [Fact]
+    public void IntEnum_XEnumVarnames_Duplicate_After_Sanitisation_Are_Deduplicated()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1],
+                "x-enum-varnames": ["low_val", "lowVal"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("LowVal = 0,", content);
+        Assert.Contains("LowVal_2 = 1", content);
+
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void IntEnum_Serialisation_RoundTrip_Produces_Number()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var compilation = CompilationHelper.CompileImportResult(result);
+
+        using var ms = new MemoryStream();
+        var emitResult = ((Microsoft.CodeAnalysis.CSharp.CSharpCompilation)compilation).Emit(ms);
+        Assert.True(emitResult.Success);
+        ms.Seek(0, SeekOrigin.Begin);
+
+        var asm = System.Reflection.Assembly.Load(ms.ToArray());
+        var enumType = asm.GetType("Test.Priority")!;
+        Assert.NotNull(enumType);
+
+        // Value1 = 1
+        var enumValue = Enum.ToObject(enumType, 1);
+
+        // The [JsonConverter(typeof(JsonNumberEnumConverter<Priority>))] attribute
+        // ensures the enum serialises as a number (the type-level default).
+        // Note: options.Converters takes precedence over type-level [JsonConverter]
+        // per .NET converter precedence rules — property-level attributes are needed
+        // to override options converters.
+        var json = System.Text.Json.JsonSerializer.Serialize(enumValue, enumType);
+
+        Assert.Equal("1", json);
+
+        // Round-trip: deserialise back
+        var deserialized = System.Text.Json.JsonSerializer.Deserialize(json, enumType);
+        Assert.Equal(enumValue, deserialized);
+    }
+
+    [Fact]
     public void WriteEnum_StringBacked_Preserves_JsonStringEnumMemberName()
     {
         var enumDef = new GeneratedEnum("Status", [
