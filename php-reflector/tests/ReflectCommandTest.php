@@ -48,9 +48,7 @@ class ReflectCommandTest extends TestCase
             $typeNames = array_column($decoded['types'], 'name');
             $this->assertContains('SharedConfigDto', $typeNames);
 
-            // SharedConfigDto passes both the main filter AND TypeCollector,
-            // so it appears in both lists before array_unique merges them.
-            // Assert it appears exactly once — proving deduplication works.
+            // TypeCollector returns each FQCN at most once, so no duplicates are possible.
             $this->assertSame(
                 1,
                 count(array_keys($typeNames, 'SharedConfigDto')),
