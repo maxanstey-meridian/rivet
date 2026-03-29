@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Rivet\PhpReflector;
 
+use Rivet\PhpReflector\Attribute\RivetRoute;
+
 class ReflectCommand
 {
     /** @var resource */
@@ -38,7 +40,24 @@ class ReflectCommand
 
         $classes = TypeCollector::collect(...$fqcns);
 
-        $contract = PropertyWalker::walk(...array_values($classes));
+        $controllers = array_filter($fqcns, function (string $fqcn) {
+            if (!class_exists($fqcn)) {
+                return false;
+            }
+            $ref = new \ReflectionClass($fqcn);
+            foreach ($ref->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
+                if ($method->getAttributes(RivetRoute::class) !== []) {
+                    return true;
+                }
+            }
+            return false;
+        });
+
+        if ($controllers !== []) {
+            $contract = ControllerWalker::walk(array_values($controllers), array_values($classes));
+        } else {
+            $contract = PropertyWalker::walk(...array_values($classes));
+        }
 
         /** @var Diagnostics $diagnostics */
         $diagnostics = $contract['diagnostics'];

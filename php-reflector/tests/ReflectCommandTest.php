@@ -120,21 +120,21 @@ class ReflectCommandTest extends TestCase
         }
     }
 
-    public function testRunProducesEmptyEndpoints(): void
+    public function testTypesOnlyProjectProducesEmptyEndpoints(): void
     {
-        // ReflectCommand uses PropertyWalker::walk() which only reflects DTOs,
-        // not ControllerWalker — so endpoints are always empty.
-        // Endpoint discovery requires the framework-specific walkers (Laravel/Symfony).
         $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
 
         try {
             $command = new ReflectCommand();
-            $exitCode = $command->run(__DIR__ . '/Fixtures', $tmpFile);
+            $exitCode = $command->run(__DIR__ . '/ReflectCommandFixtures/TaggedOnly', $tmpFile);
 
             $this->assertSame(0, $exitCode);
 
             $decoded = json_decode(file_get_contents($tmpFile), true);
             $this->assertSame([], $decoded['endpoints']);
+
+            $typeNames = array_column($decoded['types'], 'name');
+            $this->assertContains('TaggedDto', $typeNames);
         } finally {
             if (file_exists($tmpFile)) {
                 unlink($tmpFile);
@@ -198,6 +198,104 @@ class ReflectCommandTest extends TestCase
             $typeNames = array_column($decoded['types'], 'name');
             $this->assertCount(1, $typeNames, 'Only TaggedDto should appear');
             $this->assertNotContains('UntaggedDto', $typeNames);
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+        }
+    }
+
+    public function testTypesOnlyFallbackWhenNoControllers(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+
+        try {
+            $command = new ReflectCommand();
+            $exitCode = $command->run(__DIR__ . '/ReflectCommandFixtures/TaggedOnly', $tmpFile);
+
+            $this->assertSame(0, $exitCode);
+
+            $decoded = json_decode(file_get_contents($tmpFile), true);
+            $this->assertSame([], $decoded['endpoints']);
+
+            $typeNames = array_column($decoded['types'], 'name');
+            $this->assertContains('TaggedDto', $typeNames);
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+        }
+    }
+
+    public function testControllersProduceEndpoints(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+
+        try {
+            $command = new ReflectCommand();
+            $exitCode = $command->run(__DIR__ . '/ReflectCommandFixtures/WithControllers', $tmpFile);
+
+            $this->assertSame(0, $exitCode);
+
+            $decoded = json_decode(file_get_contents($tmpFile), true);
+            $this->assertNotEmpty($decoded['endpoints']);
+
+            $endpoint = $decoded['endpoints'][0];
+            $this->assertSame('GET', $endpoint['httpMethod']);
+            $this->assertSame('/items/{id}', $endpoint['routeTemplate']);
+
+            $typeNames = array_column($decoded['types'], 'name');
+            $this->assertContains('ResponseDto', $typeNames);
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+        }
+    }
+
+    public function testControllerAndRivetTypeDeduplication(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+
+        try {
+            $command = new ReflectCommand();
+            $exitCode = $command->run(__DIR__ . '/ReflectCommandFixtures/WithControllers', $tmpFile);
+
+            $this->assertSame(0, $exitCode);
+
+            $decoded = json_decode(file_get_contents($tmpFile), true);
+            $typeNames = array_column($decoded['types'], 'name');
+
+            // ResponseDto is both #[RivetType]-tagged and endpoint-referenced — must appear exactly once
+            $this->assertSame(
+                1,
+                count(array_keys($typeNames, 'ResponseDto')),
+                'ResponseDto must appear exactly once despite being both tagged and referenced'
+            );
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+        }
+    }
+
+    public function testRivetTypeClassesIncludedAlongsideEndpointTypes(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+
+        try {
+            $command = new ReflectCommand();
+            $exitCode = $command->run(__DIR__ . '/ReflectCommandFixtures/WithControllers', $tmpFile);
+
+            $this->assertSame(0, $exitCode);
+
+            $decoded = json_decode(file_get_contents($tmpFile), true);
+            $typeNames = array_column($decoded['types'], 'name');
+
+            // RequestDto is tagged #[RivetType] but NOT referenced by any endpoint
+            $this->assertContains('RequestDto', $typeNames);
+            // ResponseDto is tagged #[RivetType] AND referenced by the endpoint
+            $this->assertContains('ResponseDto', $typeNames);
         } finally {
             if (file_exists($tmpFile)) {
                 unlink($tmpFile);
