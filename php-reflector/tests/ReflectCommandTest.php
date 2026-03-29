@@ -27,6 +27,9 @@ class ReflectCommandTest extends TestCase
 
             $typeNames = array_column($decoded['types'], 'name');
             $this->assertContains('SharedConfigDto', $typeNames);
+
+            // Fixtures/ has controllers with #[RivetRoute] — verify controller path is taken
+            $this->assertNotEmpty($decoded['endpoints']);
         } finally {
             if (file_exists($tmpFile)) {
                 unlink($tmpFile);
@@ -299,6 +302,32 @@ class ReflectCommandTest extends TestCase
         } finally {
             if (file_exists($tmpFile)) {
                 unlink($tmpFile);
+            }
+        }
+    }
+
+    public function testControllerPathErrorReturnsExitCode1(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+        $stderrFile = sys_get_temp_dir() . '/rivet-stderr-' . uniqid() . '.txt';
+        $stderr = fopen($stderrFile, 'w');
+
+        try {
+            $command = new ReflectCommand($stderr);
+            $exitCode = $command->run(__DIR__ . '/ReflectCommandFixtures/BrokenController', $tmpFile);
+
+            fclose($stderr);
+            $stderrOutput = file_get_contents($stderrFile);
+
+            $this->assertSame(1, $exitCode);
+            $this->assertStringContainsString('NonExistentClass', $stderrOutput);
+            $this->assertFileDoesNotExist($tmpFile);
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+            if (file_exists($stderrFile)) {
+                unlink($stderrFile);
             }
         }
     }

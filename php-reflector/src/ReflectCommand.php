@@ -54,7 +54,12 @@ class ReflectCommand
         });
 
         if ($controllers !== []) {
-            $contract = ControllerWalker::walk(array_values($controllers), array_values($classes));
+            try {
+                $contract = ControllerWalker::walk(array_values($controllers), array_values($classes));
+            } catch (\RuntimeException $e) {
+                fwrite($this->stderr, $e->getMessage() . "\n");
+                return 1;
+            }
         } else {
             $contract = PropertyWalker::walk(...array_values($classes));
         }
