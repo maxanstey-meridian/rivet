@@ -2499,4 +2499,82 @@ public sealed class OpenApiImporterTests
 
         Assert.Empty(errors);
     }
+
+    [Fact]
+    public void IntEnum_Negative_Values_Produce_Valid_Identifiers()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Offset": {
+                "type": "integer",
+                "enum": [-1, 0, 1]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Offset.cs");
+
+        Assert.Contains("ValueNeg1 = -1,", content);
+        Assert.Contains("Value0 = 0,", content);
+        Assert.Contains("Value1 = 1", content);
+
+        // Must compile — invalid identifiers would cause CS errors
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void IntEnum_Duplicate_Values_Are_Deduplicated()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Status": {
+                "type": "integer",
+                "enum": [1, 1, 2]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Status.cs");
+
+        Assert.Contains("Value1 = 1,", content);
+        Assert.Contains("Value1_2 = 1,", content);
+        Assert.Contains("Value2 = 2", content);
+
+        // Must compile — duplicate member names would cause CS errors
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void Inline_Integer_Enum_On_Property_Synthesizes_Enum()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "TaskDto": {
+                "type": "object",
+                "properties": {
+                    "status": { "type": "integer", "enum": [0, 1, 2] }
+                },
+                "required": ["status"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var dtoContent = CompilationHelper.FindFile(result, "TaskDto.cs");
+
+        // Property type should be the synthesized enum, not long
+        Assert.DoesNotContain("long Status", dtoContent);
+
+        // The synthesized enum file should exist with explicit values
+        var enumFile = result.Files.FirstOrDefault(f =>
+            f.Content.Contains("public enum") && f.Content.Contains("= 0,"));
+        Assert.NotNull(enumFile);
+        Assert.Contains("Value0 = 0,", enumFile.Content);
+        Assert.Contains("Value1 = 1,", enumFile.Content);
+        Assert.Contains("Value2 = 2", enumFile.Content);
+    }
 }

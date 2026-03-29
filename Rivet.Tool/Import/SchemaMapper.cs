@@ -424,6 +424,8 @@ internal sealed class SchemaMapper
         // enum without explicit type (common in some generators)
         if (schema.Enum is { Count: > 1 })
         {
+            if (SchemaClassifier.IsIntEnum(schema))
+                return SynthesizeInlineIntEnum(schema, context);
             return SynthesizeInlineEnum(schema, context);
         }
 
@@ -503,6 +505,11 @@ internal sealed class SchemaMapper
 
         if (type.HasFlag(JsonSchemaType.Integer))
         {
+            if (schema.Enum is { Count: > 1 })
+            {
+                return SynthesizeInlineIntEnum(schema, context);
+            }
+
             return SchemaClassifier.ResolveIntegerType(schema);
         }
 
@@ -566,6 +573,21 @@ internal sealed class SchemaMapper
 
         var name = context ?? _ctx.NextSyntheticName("Enum");
         var enumDef = SchemaClassifier.MapEnum(name, schema);
+        _ctx.ExtraEnums.Add(enumDef);
+        _ctx.SchemaFingerprints[fingerprint] = name;
+        return name;
+    }
+
+    private string SynthesizeInlineIntEnum(IOpenApiSchema schema, string? context)
+    {
+        var fingerprint = SchemaClassifier.ComputeSchemaFingerprint(schema);
+        if (_ctx.SchemaFingerprints.TryGetValue(fingerprint, out var existingName))
+        {
+            return existingName;
+        }
+
+        var name = context ?? _ctx.NextSyntheticName("Enum");
+        var enumDef = SchemaClassifier.MapIntEnum(name, schema);
         _ctx.ExtraEnums.Add(enumDef);
         _ctx.SchemaFingerprints[fingerprint] = name;
         return name;

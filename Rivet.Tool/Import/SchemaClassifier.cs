@@ -381,6 +381,7 @@ internal static class SchemaClassifier
 
     internal static GeneratedEnum MapIntEnum(string name, IOpenApiSchema schema)
     {
+        var seen = new Dictionary<string, int>();
         var members = new List<GeneratedEnumMember>();
         foreach (var member in schema.Enum!)
         {
@@ -388,7 +389,19 @@ internal static class SchemaClassifier
                 continue;
 
             var intVal = member.GetValue<int>();
-            var csharpName = $"Value{intVal}";
+            var csharpName = intVal < 0 ? $"ValueNeg{Math.Abs(intVal)}" : $"Value{intVal}";
+
+            if (seen.TryGetValue(csharpName, out var count))
+            {
+                count++;
+                seen[csharpName] = count;
+                csharpName = $"{csharpName}_{count}";
+            }
+            else
+            {
+                seen[csharpName] = 1;
+            }
+
             members.Add(new GeneratedEnumMember(csharpName, null, intVal));
         }
 
