@@ -3038,4 +3038,59 @@ public sealed class OpenApiImporterTests
         Assert.DoesNotContain("[JsonStringEnumMemberName(\"Archived\")]", output);
         Assert.DoesNotContain("= ", output);
     }
+
+    [Fact]
+    public void IntEnum_Dedup_Suffixed_Name_Does_Not_Collide_With_Natural_Name()
+    {
+        // varnames: Foo, Foo, Foo_2
+        // Old logic: Foo (ok), Foo_2 (deduped from Foo), Foo_2 (natural) → collision!
+        // New logic: Foo, Foo_2, Foo_2_2 — all unique
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2],
+                "x-enum-varnames": ["Foo", "Foo", "Foo_2"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        // All three members must have distinct names
+        Assert.Contains("Foo = 0,", content);
+        Assert.Contains("Foo_2 = 1,", content);
+        Assert.Contains("Foo_2_2 = 2", content);
+
+        // Must compile — CS0102 would indicate collision
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void IntEnum_Triple_Duplicate_Values_Produce_Unique_Names()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Status": {
+                "type": "integer",
+                "enum": [1, 1, 1]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Status.cs");
+
+        Assert.Contains("Value1 = 1,", content);
+        Assert.Contains("Value1_2 = 1,", content);
+        Assert.Contains("Value1_3 = 1", content);
+
+        // Must compile — duplicate member names would cause CS0102
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        Assert.Empty(errors);
+    }
 }

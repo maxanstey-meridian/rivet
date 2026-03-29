@@ -412,7 +412,7 @@ internal static class SchemaClassifier
         var varnames = GetExtensionStringArray(schema, "x-enum-varnames");
         var useVarnames = varnames is not null && varnames.Count == schema.Enum!.Count;
 
-        var seen = new Dictionary<string, int>();
+        var emitted = new HashSet<string>();
         var members = new List<GeneratedEnumMember>();
         var index = 0;
         foreach (var member in schema.Enum!)
@@ -428,15 +428,16 @@ internal static class SchemaClassifier
                 ? Naming.ToPascalCaseFromSegments(varnames![index])
                 : intVal < 0 ? $"ValueNeg{Math.Abs(intVal)}" : $"Value{intVal}";
 
-            if (seen.TryGetValue(csharpName, out var count))
+            if (!emitted.Add(csharpName))
             {
-                count++;
-                seen[csharpName] = count;
-                csharpName = $"{csharpName}_{count}";
-            }
-            else
-            {
-                seen[csharpName] = 1;
+                var suffix = 2;
+                var deduped = $"{csharpName}_{suffix}";
+                while (!emitted.Add(deduped))
+                {
+                    suffix++;
+                    deduped = $"{csharpName}_{suffix}";
+                }
+                csharpName = deduped;
             }
 
             members.Add(new GeneratedEnumMember(csharpName, null, intVal));
