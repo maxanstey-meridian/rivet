@@ -2843,6 +2843,68 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void StringEnum_Does_Not_Have_JsonNumberEnumConverter()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Color": {
+                "type": "string",
+                "enum": ["red", "green", "blue"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Color.cs");
+
+        Assert.DoesNotContain("JsonNumberEnumConverter", content);
+    }
+
+    [Fact]
+    public void IntEnum_With_JsonConverter_Compiles()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "StatusCode": {
+                "type": "integer",
+                "enum": [1, 2, 3]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "status": { "$ref": "#/components/schemas/StatusCode" }
+                },
+                "required": ["status"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var enumContent = CompilationHelper.FindFile(result, "StatusCode.cs");
+        Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<StatusCode>))]", enumContent);
+
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void IntEnum_Has_JsonNumberEnumConverter_Attribute()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<Priority>))]", content);
+        Assert.Contains("using System.Text.Json.Serialization;", content);
+    }
+
+    [Fact]
     public void WriteEnum_StringBacked_Preserves_JsonStringEnumMemberName()
     {
         var enumDef = new GeneratedEnum("Status", [

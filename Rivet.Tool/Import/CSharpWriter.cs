@@ -101,7 +101,7 @@ internal static class CSharpWriter
     public static string WriteEnum(GeneratedEnum enumDef, string ns)
     {
         var isIntBacked = enumDef.Members.Any(m => m.IntValue.HasValue);
-        var needsJsonImport = !isIntBacked && enumDef.Members.Any(m => m.OriginalName is not null);
+        var needsJsonImport = isIntBacked || enumDef.Members.Any(m => m.OriginalName is not null);
 
         var sb = new StringBuilder();
         if (needsJsonImport)
@@ -111,6 +111,8 @@ internal static class CSharpWriter
         }
         sb.AppendLine($"namespace {ns};");
         sb.AppendLine();
+        if (isIntBacked)
+            sb.AppendLine($"[JsonConverter(typeof(JsonNumberEnumConverter<{enumDef.Name}>))]");
         sb.AppendLine($"public enum {enumDef.Name}");
         sb.AppendLine("{");
 
