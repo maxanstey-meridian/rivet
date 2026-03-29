@@ -32,6 +32,21 @@ internal static class SchemaClassifier
         return false;
     }
 
+    internal static bool IsIntEnum(IOpenApiSchema schema)
+    {
+        if (schema.Enum is not { Count: > 0 })
+            return false;
+
+        if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Integer))
+            return true;
+
+        // No explicit type — infer from values
+        if (!schema.Type.HasValue)
+            return schema.Enum.All(v => v is JsonNode node && node.GetValueKind() == JsonValueKind.Number);
+
+        return false;
+    }
+
     internal static bool IsBrand(IOpenApiSchema schema)
     {
         // x-rivet-brand extension is authoritative — works for any underlying type
@@ -83,6 +98,11 @@ internal static class SchemaClassifier
     internal static bool WouldGenerateType(IOpenApiSchema schema)
     {
         if (IsStringEnum(schema))
+        {
+            return true;
+        }
+
+        if (IsIntEnum(schema))
         {
             return true;
         }
@@ -354,6 +374,22 @@ internal static class SchemaClassifier
                 var originalName = string.Equals(sanitized, original, StringComparison.Ordinal) ? null : original;
                 members.Add(new GeneratedEnumMember(sanitized, originalName));
             }
+        }
+
+        return new GeneratedEnum(name, members);
+    }
+
+    internal static GeneratedEnum MapIntEnum(string name, IOpenApiSchema schema)
+    {
+        var members = new List<GeneratedEnumMember>();
+        foreach (var member in schema.Enum!)
+        {
+            if (member is null)
+                continue;
+
+            var intVal = member.GetValue<int>();
+            var csharpName = $"Value{intVal}";
+            members.Add(new GeneratedEnumMember(csharpName, null, intVal));
         }
 
         return new GeneratedEnum(name, members);

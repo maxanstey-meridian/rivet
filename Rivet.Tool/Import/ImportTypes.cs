@@ -33,7 +33,8 @@ internal sealed record RecordProperty(
 
 internal sealed record GeneratedEnumMember(
     string CSharpName,
-    string? OriginalName);
+    string? OriginalName,
+    int? IntValue = null);
 
 internal sealed record GeneratedEnum(
     string Name,

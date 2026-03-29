@@ -100,7 +100,8 @@ internal static class CSharpWriter
 
     public static string WriteEnum(GeneratedEnum enumDef, string ns)
     {
-        var needsJsonImport = enumDef.Members.Any(m => m.OriginalName is not null);
+        var isIntBacked = enumDef.Members.Any(m => m.IntValue.HasValue);
+        var needsJsonImport = !isIntBacked && enumDef.Members.Any(m => m.OriginalName is not null);
 
         var sb = new StringBuilder();
         if (needsJsonImport)
@@ -117,11 +118,12 @@ internal static class CSharpWriter
         {
             var member = enumDef.Members[i];
             var separator = i < enumDef.Members.Count - 1 ? "," : "";
-            if (member.OriginalName is not null)
+            if (!isIntBacked && member.OriginalName is not null)
             {
                 sb.AppendLine($"    [JsonStringEnumMemberName(\"{member.OriginalName}\")]");
             }
-            sb.AppendLine($"    {member.CSharpName}{separator}");
+            var valueAssignment = member.IntValue.HasValue ? $" = {member.IntValue.Value}" : "";
+            sb.AppendLine($"    {member.CSharpName}{valueAssignment}{separator}");
         }
 
         sb.AppendLine("}");

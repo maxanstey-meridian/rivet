@@ -112,6 +112,12 @@ internal sealed class SchemaMapper
                 continue;
             }
 
+            if (SchemaClassifier.IsIntEnum(schema))
+            {
+                enums.Add(SchemaClassifier.MapIntEnum(name, schema));
+                continue;
+            }
+
             if (SchemaClassifier.IsBrand(schema))
             {
                 brands.Add(SchemaClassifier.MapBrand(name, schema));

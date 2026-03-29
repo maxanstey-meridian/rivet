@@ -2391,4 +2391,112 @@ public sealed class OpenApiImporterTests
         Assert.DoesNotContain(".Summary(", content);
         Assert.Contains(".Description(\"Returns all items with pagination support\")", content);
     }
+
+    // ========== Integer Enum Tests ==========
+
+    [Fact]
+    public void IsIntEnum_Recognises_Integer_Type_With_Enum_Values()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "UserRole": {
+                "type": "integer",
+                "enum": [1, 2, 3]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "UserRole.cs");
+
+        Assert.Contains("public enum UserRole", content);
+    }
+
+    [Fact]
+    public void IsIntEnum_Recognises_Untyped_Numeric_Enum()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Severity": {
+                "enum": [10, 20, 30]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Severity.cs");
+
+        Assert.Contains("public enum Severity", content);
+        Assert.Contains("Value10", content);
+        Assert.Contains("Value20", content);
+        Assert.Contains("Value30", content);
+    }
+
+    [Fact]
+    public void IntEnum_WouldGenerateType_Enables_Ref_Resolution()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "StatusCode": {
+                "type": "integer",
+                "enum": [1, 2, 3]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "status": { "$ref": "#/components/schemas/StatusCode" }
+                },
+                "required": ["status"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        var enumContent = CompilationHelper.FindFile(result, "StatusCode.cs");
+        Assert.Contains("public enum StatusCode", enumContent);
+
+        var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
+        Assert.Contains("StatusCode Status", dtoContent);
+        Assert.DoesNotContain("long Status", dtoContent);
+    }
+
+    [Fact]
+    public void IntEnum_Members_Have_Explicit_Values()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("Value0 = 0,", content);
+        Assert.Contains("Value1 = 1,", content);
+        Assert.Contains("Value2 = 2", content);
+        Assert.DoesNotContain("JsonStringEnumMemberName", content);
+    }
+
+    [Fact]
+    public void IntEnum_Output_Compiles()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "StatusCode": {
+                "type": "integer",
+                "enum": [1, 2, 3]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "status": { "$ref": "#/components/schemas/StatusCode" }
+                },
+                "required": ["status"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        Assert.Empty(errors);
+    }
 }
