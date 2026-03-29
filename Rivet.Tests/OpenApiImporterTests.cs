@@ -2677,13 +2677,14 @@ public sealed class OpenApiImporterTests
 
         var result = CompilationHelper.Import(spec);
 
-        // Should not be treated as an int enum — no file with int-backed members
+        // Should not be treated as an int enum — no file with int-backed enum members
         Assert.DoesNotContain(result.Files, f =>
-            f.FileName.EndsWith("FloatVals.cs") && f.Content.Contains("= 1") || f.Content.Contains("= 2"));
+            f.FileName.EndsWith("FloatVals.cs") && (f.Content.Contains("= 1") || f.Content.Contains("= 2")));
 
-        // Falls through to string enum in ResolveFallbackType
+        // Falls through to string-backed enum via ResolveFallbackType
         var dtoContent = CompilationHelper.FindFile(result, "ItemDto.cs");
         Assert.DoesNotContain("long Val", dtoContent);
+        Assert.Contains("ItemDtoVal Val", dtoContent);
     }
 
     [Fact]
