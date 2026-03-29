@@ -7,6 +7,7 @@ namespace Rivet\PhpReflector\Tests;
 use PHPUnit\Framework\TestCase;
 use Rivet\PhpReflector\ControllerWalker;
 use Rivet\PhpReflector\Tests\Fixtures\AnotherController;
+use Rivet\PhpReflector\Tests\Fixtures\EnumParamController;
 use Rivet\PhpReflector\Tests\Fixtures\InlineResponseController;
 use Rivet\PhpReflector\Tests\Fixtures\NoRouteController;
 use Rivet\PhpReflector\Tests\Fixtures\OrderDto;
@@ -187,6 +188,52 @@ class ControllerWalkerTest extends TestCase
 
         // Endpoint count unchanged
         $this->assertCount(5, $result['endpoints']);
+    }
+
+    public function testStringEnumParamClassifiedAsQuery(): void
+    {
+        $result = ControllerWalker::walk([EnumParamController::class]);
+        $ep = $this->findEndpointIn($result['endpoints'], 'listByStatus');
+
+        $this->assertCount(1, $ep['params']);
+        $this->assertSame('status', $ep['params'][0]['name']);
+        $this->assertSame('query', $ep['params'][0]['source']);
+        $this->assertSame(['kind' => 'primitive', 'type' => 'string'], $ep['params'][0]['type']);
+    }
+
+    public function testIntEnumParamClassifiedAsRoute(): void
+    {
+        $result = ControllerWalker::walk([EnumParamController::class]);
+        $ep = $this->findEndpointIn($result['endpoints'], 'listByPriority');
+
+        $this->assertCount(1, $ep['params']);
+        $this->assertSame('priority', $ep['params'][0]['name']);
+        $this->assertSame('route', $ep['params'][0]['source']);
+        $this->assertSame(['kind' => 'primitive', 'type' => 'number', 'format' => 'int32'], $ep['params'][0]['type']);
+    }
+
+    public function testNullableEnumParamWrapped(): void
+    {
+        $result = ControllerWalker::walk([EnumParamController::class]);
+        $ep = $this->findEndpointIn($result['endpoints'], 'filtered');
+
+        $this->assertCount(1, $ep['params']);
+        $this->assertSame('status', $ep['params'][0]['name']);
+        $this->assertSame('query', $ep['params'][0]['source']);
+        $this->assertSame([
+            'kind' => 'nullable',
+            'inner' => ['kind' => 'primitive', 'type' => 'string'],
+        ], $ep['params'][0]['type']);
+    }
+
+    private function findEndpointIn(array $endpoints, string $name): array
+    {
+        foreach ($endpoints as $ep) {
+            if ($ep['name'] === $name) {
+                return $ep;
+            }
+        }
+        $this->fail("Endpoint '$name' not found");
     }
 
     private function findEndpoint(string $name): array

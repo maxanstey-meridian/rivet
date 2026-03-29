@@ -60,13 +60,26 @@ class EndpointBuilder
 
             $typeName = $paramType->getName();
 
-            if (class_exists($typeName)) {
+            if (class_exists($typeName) && !is_subclass_of($typeName, \BackedEnum::class)) {
                 $params[] = [
                     'name' => $param->getName(),
                     'type' => ['kind' => 'ref', 'name' => (new \ReflectionClass($typeName))->getShortName()],
                     'source' => 'body',
                 ];
                 $referencedFqcns[$typeName] = true;
+            } elseif (is_subclass_of($typeName, \BackedEnum::class)) {
+                $ref = new \ReflectionEnum($typeName);
+                $backingType = $ref->getBackingType();
+                $scalarType = $backingType !== null ? TypeParser::parse($backingType->getName()) : ['kind' => 'primitive', 'type' => 'string'];
+                $source = isset($routeParamNames[$param->getName()]) ? 'route' : 'query';
+                if ($paramType->allowsNull()) {
+                    $scalarType = ['kind' => 'nullable', 'inner' => $scalarType];
+                }
+                $params[] = [
+                    'name' => $param->getName(),
+                    'type' => $scalarType,
+                    'source' => $source,
+                ];
             } else {
                 $source = isset($routeParamNames[$param->getName()]) ? 'route' : 'query';
                 $parsedType = TypeParser::parse($typeName);
