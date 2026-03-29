@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Rivet.Tool.Import;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -2576,5 +2577,22 @@ public sealed class OpenApiImporterTests
         Assert.Contains("Value0 = 0,", enumFile.Content);
         Assert.Contains("Value1 = 1,", enumFile.Content);
         Assert.Contains("Value2 = 2", enumFile.Content);
+    }
+
+    [Fact]
+    public void WriteEnum_StringBacked_Preserves_JsonStringEnumMemberName()
+    {
+        var enumDef = new GeneratedEnum("Status", [
+            new GeneratedEnumMember("Active", "active"),
+            new GeneratedEnumMember("Inactive", "inactive"),
+            new GeneratedEnumMember("Archived", null),
+        ]);
+
+        var output = CSharpWriter.WriteEnum(enumDef, "Test");
+
+        Assert.Contains("[JsonStringEnumMemberName(\"active\")]", output);
+        Assert.Contains("[JsonStringEnumMemberName(\"inactive\")]", output);
+        Assert.DoesNotContain("[JsonStringEnumMemberName(\"Archived\")]", output);
+        Assert.DoesNotContain("= ", output);
     }
 }
