@@ -3070,6 +3070,35 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void IntEnum_Dedup_Skips_Past_Previously_Emitted_Natural_Name()
+    {
+        // varnames: A, A_2, A — natural A_2 is emitted second,
+        // so when the third "A" dedupes, suffix _2 is already taken → must skip to _3
+        // Old dict logic: A, A_2, A_2 — collision (dict doesn't know A_2 was emitted naturally)
+        // New HashSet logic: A, A_2, A_3 — correct (while loop skips taken _2)
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Level": {
+                "type": "integer",
+                "enum": [0, 1, 2],
+                "x-enum-varnames": ["A", "A_2", "A"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Level.cs");
+
+        Assert.Contains("A = 0,", content);
+        Assert.Contains("A_2 = 1,", content);
+        Assert.Contains("A_3 = 2", content);
+
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        Assert.Empty(errors);
+    }
+
+    [Fact]
     public void IntEnum_Triple_Duplicate_Values_Produce_Unique_Names()
     {
         var spec = CompilationHelper.BuildSpec(schemas: """
