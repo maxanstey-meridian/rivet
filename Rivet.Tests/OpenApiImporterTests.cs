@@ -2744,6 +2744,105 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void IntEnum_With_XEnumVarnames_Uses_Custom_Names()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2],
+                "x-enum-varnames": ["Low", "Medium", "High"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("Low = 0,", content);
+        Assert.Contains("Medium = 1,", content);
+        Assert.Contains("High = 2", content);
+        Assert.DoesNotContain("Value0", content);
+        Assert.DoesNotContain("Value1", content);
+        Assert.DoesNotContain("Value2", content);
+    }
+
+    [Fact]
+    public void IntEnum_With_XEnumVarnames_Compiles()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2],
+                "x-enum-varnames": ["Low", "Medium", "High"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void IntEnum_XEnumVarnames_Are_Sanitised()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1],
+                "x-enum-varnames": ["low_priority", "high-priority"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("LowPriority = 0,", content);
+        Assert.Contains("HighPriority = 1", content);
+    }
+
+    [Fact]
+    public void IntEnum_XEnumVarnames_Count_Mismatch_Falls_Back()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2],
+                "x-enum-varnames": ["Low", "High"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("Value0 = 0,", content);
+        Assert.Contains("Value1 = 1,", content);
+        Assert.Contains("Value2 = 2", content);
+        Assert.DoesNotContain("Low", content);
+        Assert.DoesNotContain("High", content);
+    }
+
+    [Fact]
+    public void IntEnum_Without_XEnumVarnames_Uses_ValueN_Fallback()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("Value0 = 0,", content);
+        Assert.Contains("Value1 = 1,", content);
+        Assert.Contains("Value2 = 2", content);
+    }
+
+    [Fact]
     public void WriteEnum_StringBacked_Preserves_JsonStringEnumMemberName()
     {
         var enumDef = new GeneratedEnum("Status", [

@@ -279,6 +279,25 @@ internal static class SchemaClassifier
         return null;
     }
 
+    internal static List<string>? GetExtensionStringArray(IOpenApiSchema schema, string key)
+    {
+        if (schema.Extensions is null || !schema.Extensions.TryGetValue(key, out var ext))
+            return null;
+
+        if (ext is not JsonNodeExtension jsonExt || jsonExt.Node is not JsonArray arr)
+            return null;
+
+        var result = new List<string>(arr.Count);
+        foreach (var item in arr)
+        {
+            var val = item?.GetValue<string>();
+            if (val is null) return null; // any non-string element → bail
+            result.Add(val);
+        }
+
+        return result;
+    }
+
     internal static bool TryGetGenericExtension(IOpenApiSchema schema, out GenericTemplateInfo? info)
     {
         info = null;
@@ -390,15 +409,24 @@ internal static class SchemaClassifier
 
     internal static GeneratedEnum MapIntEnum(string name, IOpenApiSchema schema)
     {
+        var varnames = GetExtensionStringArray(schema, "x-enum-varnames");
+        var useVarnames = varnames is not null && varnames.Count == schema.Enum!.Count;
+
         var seen = new Dictionary<string, int>();
         var members = new List<GeneratedEnumMember>();
+        var index = 0;
         foreach (var member in schema.Enum!)
         {
             if (member is not JsonNode memberNode || !IsWholeInt32(memberNode))
+            {
+                index++;
                 continue;
+            }
 
             var intVal = memberNode.GetValue<int>();
-            var csharpName = intVal < 0 ? $"ValueNeg{Math.Abs(intVal)}" : $"Value{intVal}";
+            var csharpName = useVarnames
+                ? Naming.ToPascalCaseFromSegments(varnames![index])
+                : intVal < 0 ? $"ValueNeg{Math.Abs(intVal)}" : $"Value{intVal}";
 
             if (seen.TryGetValue(csharpName, out var count))
             {
@@ -412,6 +440,7 @@ internal static class SchemaClassifier
             }
 
             members.Add(new GeneratedEnumMember(csharpName, null, intVal));
+            index++;
         }
 
         return new GeneratedEnum(name, members);
