@@ -2580,6 +2580,59 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Single_Value_IntEnum_Falls_Through_To_Long()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Constant": {
+                "type": "integer",
+                "enum": [42]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "code": { "$ref": "#/components/schemas/Constant" }
+                },
+                "required": ["code"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // No enum file should be generated for a single-value enum
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("Constant.cs"));
+
+        // The DTO property should fall through to long
+        var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
+        Assert.Contains("long Code", dtoContent);
+    }
+
+    [Fact]
+    public void Single_Value_Untyped_IntEnum_Falls_Through()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "SingleVal": {
+                "enum": [42]
+            },
+            "ItemDto": {
+                "type": "object",
+                "properties": {
+                    "val": { "$ref": "#/components/schemas/SingleVal" }
+                },
+                "required": ["val"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // No enum file should be generated
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("SingleVal.cs"));
+
+        // Untyped single-value falls through to string in ResolveFallbackType
+        var dtoContent = CompilationHelper.FindFile(result, "ItemDto.cs");
+        Assert.Contains("string Val", dtoContent);
+    }
+
+    [Fact]
     public void WriteEnum_StringBacked_Preserves_JsonStringEnumMemberName()
     {
         var enumDef = new GeneratedEnum("Status", [

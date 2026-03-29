@@ -34,7 +34,7 @@ internal static class SchemaClassifier
 
     internal static bool IsIntEnum(IOpenApiSchema schema)
     {
-        if (schema.Enum is not { Count: > 0 })
+        if (schema.Enum is not { Count: > 1 })
             return false;
 
         if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Integer))
