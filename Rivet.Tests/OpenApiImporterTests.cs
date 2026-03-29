@@ -2633,6 +2633,60 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Float_Enum_Values_Not_Classified_As_IntEnum()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "MixedVals": {
+                "type": "integer",
+                "enum": [1, 2, 3.5]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "code": { "$ref": "#/components/schemas/MixedVals" }
+                },
+                "required": ["code"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // No enum file — float value disqualifies it as an int enum
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("MixedVals.cs"));
+
+        // The DTO property should fall through to long
+        var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
+        Assert.Contains("long Code", dtoContent);
+    }
+
+    [Fact]
+    public void Untyped_Float_Enum_Values_Not_Classified_As_IntEnum()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "FloatVals": {
+                "enum": [1.5, 2.5]
+            },
+            "ItemDto": {
+                "type": "object",
+                "properties": {
+                    "val": { "$ref": "#/components/schemas/FloatVals" }
+                },
+                "required": ["val"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // Should not be treated as an int enum — no file with int-backed members
+        Assert.DoesNotContain(result.Files, f =>
+            f.FileName.EndsWith("FloatVals.cs") && f.Content.Contains("= 1") || f.Content.Contains("= 2"));
+
+        // Falls through to string enum in ResolveFallbackType
+        var dtoContent = CompilationHelper.FindFile(result, "ItemDto.cs");
+        Assert.DoesNotContain("long Val", dtoContent);
+    }
+
+    [Fact]
     public void WriteEnum_StringBacked_Preserves_JsonStringEnumMemberName()
     {
         var enumDef = new GeneratedEnum("Status", [

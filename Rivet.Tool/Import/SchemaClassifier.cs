@@ -38,13 +38,22 @@ internal static class SchemaClassifier
             return false;
 
         if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Integer))
-            return true;
+            return schema.Enum.All(v => v is JsonNode node && IsWholeInt32(node));
 
         // No explicit type — infer from values
         if (!schema.Type.HasValue)
-            return schema.Enum.All(v => v is JsonNode node && node.GetValueKind() == JsonValueKind.Number);
+            return schema.Enum.All(v => v is JsonNode node && IsWholeInt32(node));
 
         return false;
+    }
+
+    private static bool IsWholeInt32(JsonNode node)
+    {
+        if (node.GetValueKind() != JsonValueKind.Number)
+            return false;
+
+        var value = node.GetValue<double>();
+        return value == Math.Floor(value) && value >= int.MinValue && value <= int.MaxValue;
     }
 
     internal static bool IsBrand(IOpenApiSchema schema)
@@ -385,10 +394,10 @@ internal static class SchemaClassifier
         var members = new List<GeneratedEnumMember>();
         foreach (var member in schema.Enum!)
         {
-            if (member is null)
+            if (member is not JsonNode memberNode || !IsWholeInt32(memberNode))
                 continue;
 
-            var intVal = member.GetValue<int>();
+            var intVal = memberNode.GetValue<int>();
             var csharpName = intVal < 0 ? $"ValueNeg{Math.Abs(intVal)}" : $"Value{intVal}";
 
             if (seen.TryGetValue(csharpName, out var count))

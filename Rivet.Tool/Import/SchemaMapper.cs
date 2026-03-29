@@ -505,7 +505,7 @@ internal sealed class SchemaMapper
 
         if (type.HasFlag(JsonSchemaType.Integer))
         {
-            if (schema.Enum is { Count: > 1 })
+            if (schema.Enum is { Count: > 1 } && SchemaClassifier.IsIntEnum(schema))
             {
                 return SynthesizeInlineIntEnum(schema, context);
             }
