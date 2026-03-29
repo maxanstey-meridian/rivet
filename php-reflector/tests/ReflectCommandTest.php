@@ -26,7 +26,7 @@ class ReflectCommandTest extends TestCase
             $this->assertArrayHasKey('endpoints', $decoded);
 
             $typeNames = array_column($decoded['types'], 'name');
-            $this->assertContains('ScalarDto', $typeNames);
+            $this->assertContains('SharedConfigDto', $typeNames);
         } finally {
             if (file_exists($tmpFile)) {
                 unlink($tmpFile);
@@ -137,6 +137,69 @@ class ReflectCommandTest extends TestCase
 
             $decoded = json_decode(file_get_contents($tmpFile), true);
             $this->assertSame([], $decoded['endpoints']);
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+        }
+    }
+
+    public function testEmptyDirectoryProducesEmptyOutput(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+
+        try {
+            $command = new ReflectCommand();
+            $exitCode = $command->run(__DIR__ . '/ReflectCommandFixtures/Empty', $tmpFile);
+
+            $this->assertSame(0, $exitCode);
+
+            $decoded = json_decode(file_get_contents($tmpFile), true);
+            $this->assertSame([], $decoded['types']);
+            $this->assertSame([], $decoded['enums']);
+            $this->assertSame([], $decoded['endpoints']);
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+        }
+    }
+
+    public function testOnlyRivetTypeClassesAppearInOutput(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+
+        try {
+            $command = new ReflectCommand();
+            $exitCode = $command->run(__DIR__ . '/ReflectCommandFixtures/TaggedOnly', $tmpFile);
+
+            $this->assertSame(0, $exitCode);
+
+            $decoded = json_decode(file_get_contents($tmpFile), true);
+            $typeNames = array_column($decoded['types'], 'name');
+            $this->assertContains('TaggedDto', $typeNames);
+            $this->assertNotContains('UntaggedDto', $typeNames);
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+        }
+    }
+
+    public function testUntaggedClassesExcludedRegression(): void
+    {
+        $tmpFile = sys_get_temp_dir() . '/rivet-test-' . uniqid() . '.json';
+
+        try {
+            $command = new ReflectCommand();
+            $exitCode = $command->run(__DIR__ . '/ReflectCommandFixtures/TaggedOnly', $tmpFile);
+
+            $this->assertSame(0, $exitCode);
+
+            $decoded = json_decode(file_get_contents($tmpFile), true);
+            $typeNames = array_column($decoded['types'], 'name');
+            $this->assertCount(1, $typeNames, 'Only TaggedDto should appear');
+            $this->assertNotContains('UntaggedDto', $typeNames);
         } finally {
             if (file_exists($tmpFile)) {
                 unlink($tmpFile);

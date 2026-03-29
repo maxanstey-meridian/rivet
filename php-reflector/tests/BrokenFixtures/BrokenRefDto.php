@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Rivet\PhpReflector\Tests\BrokenFixtures;
 
+use Rivet\PhpReflector\Attribute\RivetType;
+
+#[RivetType]
 class BrokenRefDto
 {
     /** @var list<NonExistentClass> */

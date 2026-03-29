@@ -36,14 +36,7 @@ class ReflectCommand
             }
         }
 
-        // Filter to walkable classes (not enums, not interfaces)
-        $classes = array_filter($fqcns, fn(string $fqcn) =>
-            class_exists($fqcn) && !enum_exists($fqcn) && !interface_exists($fqcn)
-        );
-
-        // Ensure #[RivetType]-annotated classes are always included
-        $rivetTypes = TypeCollector::collect(...$fqcns);
-        $classes = array_unique(array_merge($classes, $rivetTypes));
+        $classes = TypeCollector::collect(...$fqcns);
 
         $contract = PropertyWalker::walk(...array_values($classes));
 
