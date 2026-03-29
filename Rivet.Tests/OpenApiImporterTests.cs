@@ -2888,7 +2888,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void IntEnum_Has_JsonNumberEnumConverter_Attribute()
+    public void IntEnum_Serialises_As_Number()
     {
         var spec = CompilationHelper.BuildSpec(schemas: """
             "Priority": {
@@ -2902,6 +2902,40 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<Priority>))]", content);
         Assert.Contains("using System.Text.Json.Serialization;", content);
+    }
+
+    [Fact]
+    public void IntEnum_With_Global_StringConverter_Still_Serialises_As_Number()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "StatusCode": {
+                "type": "integer",
+                "enum": [1, 2, 3]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "StatusCode.cs");
+
+        // JsonNumberEnumConverter attribute overrides any global JsonStringEnumConverter
+        Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<StatusCode>))]", content);
+    }
+
+    [Fact]
+    public void IntEnum_Deserialises_From_Number()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        // JsonNumberEnumConverter handles both serialisation and deserialisation
+        Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<Priority>))]", content);
     }
 
     [Fact]
