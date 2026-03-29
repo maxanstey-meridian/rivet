@@ -281,6 +281,41 @@ public static class CompilationHelper
             """;
     }
 
+    // --- JSON contract helpers ---
+
+    public static string EmitTypesFromJson(string json)
+    {
+        var (types, enums, _) = JsonContractReader.Read(json);
+        var grouping = TypeGrouper.Group(types, [], enums, new Dictionary<string, string?>());
+        return string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
+    }
+
+    public static string EmitClientFromJson(string json)
+    {
+        var (types, enums, endpoints) = JsonContractReader.Read(json);
+        var grouping = TypeGrouper.Group(types, [], enums, new Dictionary<string, string?>());
+        var typeFileMap = grouping.BuildTypeFileMap();
+        var controllerGroups = ClientEmitter.GroupByController(endpoints);
+        return string.Concat(
+            controllerGroups.Select(g => ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
+    }
+
+    public static string EmitOpenApiFromJson(string json)
+    {
+        var (types, enums, endpoints) = JsonContractReader.Read(json);
+        var definitions = types.ToDictionary(t => t.Name);
+        var brands = new Dictionary<string, TsType.Brand>();
+        return OpenApiEmitter.Emit(endpoints, definitions, brands, enums, security: null);
+    }
+
+    public static string EmitZodFromJson(string json)
+    {
+        var (types, enums, endpoints) = JsonContractReader.Read(json);
+        var grouping = TypeGrouper.Group(types, [], enums, new Dictionary<string, string?>());
+        var typeFileMap = grouping.BuildTypeFileMap();
+        return ZodValidatorEmitter.Emit(endpoints, typeFileMap);
+    }
+
     // --- Emission helpers ---
 
     public static string EmitTypes(string source)

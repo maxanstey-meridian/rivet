@@ -135,9 +135,10 @@ public sealed class OpenApiRoundTripTests
 
         Assert.True(walker.Definitions.ContainsKey("TaskDto"));
         Assert.True(walker.Enums.ContainsKey("Priority"));
-        Assert.Contains("Low", walker.Enums["Priority"].Members);
-        Assert.Contains("Medium", walker.Enums["Priority"].Members);
-        Assert.Contains("High", walker.Enums["Priority"].Members);
+        var priorityEnum = (TsType.StringUnion)walker.Enums["Priority"];
+        Assert.Contains("Low", priorityEnum.Members);
+        Assert.Contains("Medium", priorityEnum.Members);
+        Assert.Contains("High", priorityEnum.Members);
 
         // Property types on TaskDto survive
         var taskDef = walker.Definitions["TaskDto"];
@@ -1376,9 +1377,10 @@ public sealed class OpenApiRoundTripTests
 
         // --- Enum survived ---
         Assert.True(walker.Enums.ContainsKey("Status"));
-        Assert.Contains("Active", walker.Enums["Status"].Members);
-        Assert.Contains("Inactive", walker.Enums["Status"].Members);
-        Assert.Contains("Archived", walker.Enums["Status"].Members);
+        var statusEnum = (TsType.StringUnion)walker.Enums["Status"];
+        Assert.Contains("Active", statusEnum.Members);
+        Assert.Contains("Inactive", statusEnum.Members);
+        Assert.Contains("Archived", statusEnum.Members);
 
         // --- Brand survived ---
         Assert.True(walker.Brands.ContainsKey("Email"),
@@ -1851,7 +1853,7 @@ public sealed class OpenApiRoundTripTests
         // ───── Assertion group 5: Enum survived with all members ─────
 
         Assert.True(wlk2.Enums.ContainsKey("Priority"));
-        var prioEnum = wlk2.Enums["Priority"];
+        var prioEnum = (TsType.StringUnion)wlk2.Enums["Priority"];
         Assert.Contains("Low", prioEnum.Members);
         Assert.Contains("Medium", prioEnum.Members);
         Assert.Contains("High", prioEnum.Members);
@@ -2140,7 +2142,7 @@ public sealed class OpenApiRoundTripTests
             endpoints,
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType.Brand>(),
-            new Dictionary<string, TsType.StringUnion>(),
+            new Dictionary<string, TsType>(),
             null);
 
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
@@ -2196,7 +2198,7 @@ public sealed class OpenApiRoundTripTests
         // Emit OpenAPI
         var json = OpenApiEmitter.Emit(endpoints, definitions,
             new Dictionary<string, TsType.Brand>(),
-            new Dictionary<string, TsType.StringUnion>(), null);
+            new Dictionary<string, TsType>(), null);
 
         // Verify OpenAPI JSON has x-rivet-csharp-type on the right schemas
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
@@ -2647,7 +2649,7 @@ public sealed class OpenApiRoundTripTests
         // ===== Enum survived =====
 
         Assert.True(walker.Enums.ContainsKey("Priority"), "Priority enum should survive");
-        var priorityMembers = walker.Enums["Priority"].Members;
+        var priorityMembers = ((TsType.StringUnion)walker.Enums["Priority"]).Members;
         Assert.Equal(4, priorityMembers.Count);
         Assert.Contains("Low", priorityMembers);
         Assert.Contains("Critical", priorityMembers);

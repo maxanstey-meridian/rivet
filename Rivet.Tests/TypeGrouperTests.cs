@@ -24,9 +24,9 @@ public sealed class TypeGrouperTests
         {
             new("Email", new TsType.Primitive("string")),
         };
-        var enums = new Dictionary<string, TsType.StringUnion>
+        var enums = new Dictionary<string, TsType>
         {
-            ["TaskStatus"] = new(["Open", "Closed"]),
+            ["TaskStatus"] = new TsType.StringUnion(["Open", "Closed"]),
         };
         var namespaces = new Dictionary<string, string?>
         {
@@ -71,7 +71,7 @@ public sealed class TypeGrouperTests
             ["BarDto"] = "Api",
         };
 
-        var result = TypeGrouper.Group(definitions, [], new Dictionary<string, TsType.StringUnion>(), namespaces);
+        var result = TypeGrouper.Group(definitions, [], new Dictionary<string, TsType>(), namespaces);
 
         // All in one group, no common needed
         Assert.Single(result.Groups);
@@ -100,7 +100,7 @@ public sealed class TypeGrouperTests
             ["BarDto"] = "Api",
         };
 
-        var result = TypeGrouper.Group(definitions, [], new Dictionary<string, TsType.StringUnion>(), namespaces);
+        var result = TypeGrouper.Group(definitions, [], new Dictionary<string, TsType>(), namespaces);
 
         Assert.Single(result.Groups);
         Assert.Equal("api", result.Groups[0].FileName);
@@ -118,7 +118,7 @@ public sealed class TypeGrouperTests
             ["GlobalDto"] = null,
         };
 
-        var result = TypeGrouper.Group(definitions, [], new Dictionary<string, TsType.StringUnion>(), namespaces);
+        var result = TypeGrouper.Group(definitions, [], new Dictionary<string, TsType>(), namespaces);
 
         var common = result.Groups.Single(g => g.FileName == "common");
         Assert.Single(common.Definitions);
@@ -153,7 +153,7 @@ public sealed class TypeGrouperTests
             ["ConsumerB"] = "ModuleB",
         };
 
-        var result = TypeGrouper.Group(definitions, [], new Dictionary<string, TsType.StringUnion>(), namespaces);
+        var result = TypeGrouper.Group(definitions, [], new Dictionary<string, TsType>(), namespaces);
 
         // OuterDto cross-referenced by A and B → common
         // InnerDto referenced by OuterDto (now common) from Shared → also common

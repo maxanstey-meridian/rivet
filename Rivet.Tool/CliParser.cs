@@ -15,6 +15,7 @@ internal static class CliParser
         string? openApiPath = null;
         string? defaultSecurity = null;
         string? fromOpenApiPath = null;
+        string? fromContractPath = null;
         string? importNamespace = null;
         var check = false;
         var quiet = false;
@@ -51,6 +52,9 @@ internal static class CliParser
                 case "--from-openapi" when i + 1 < args.Length:
                     fromOpenApiPath = args[++i];
                     break;
+                case "--from" when i + 1 < args.Length:
+                    fromContractPath = args[++i];
+                    break;
                 case "--namespace" when i + 1 < args.Length:
                     importNamespace = args[++i];
                     break;
@@ -72,12 +76,21 @@ internal static class CliParser
             }
         }
 
+        // Contract JSON mode doesn't need a project path
+        if (fromContractPath is not null)
+        {
+            return new RivetOptions(
+                fromContractPath, outputDir, mode, files.ToArray(),
+                OpenApiPath: openApiPath, DefaultSecurity: defaultSecurity,
+                Quiet: quiet, JsonSchema: jsonSchema, FromContractPath: fromContractPath);
+        }
+
         // Import mode doesn't need a project path
         if (fromOpenApiPath is not null)
         {
             return new RivetOptions(
                 fromOpenApiPath, outputDir, mode, files.ToArray(),
-                openApiPath, defaultSecurity, fromOpenApiPath, importNamespace, check, quiet, routes, jsonSchema);
+                openApiPath, defaultSecurity, FromOpenApiPath: fromOpenApiPath, ImportNamespace: importNamespace, Check: check, Quiet: quiet, Routes: routes, JsonSchema: jsonSchema);
         }
 
         projectPath ??= files.FirstOrDefault();
@@ -98,6 +111,7 @@ internal static class CliParser
         Console.Error.WriteLine("  dotnet rivet --project <path.csproj> --output <dir>");
         Console.Error.WriteLine("  dotnet rivet <file.cs> [file2.cs ...] [--output <dir>]");
         Console.Error.WriteLine("  dotnet rivet --from-openapi <spec.json> --namespace <ns> [--output <dir>]");
+        Console.Error.WriteLine("  dotnet rivet --from <contract.json> [--output <dir>]");
         Console.Error.WriteLine();
         Console.Error.WriteLine("Options:");
         Console.Error.WriteLine("  -p, --project <path>       Path to .csproj file");
@@ -105,6 +119,7 @@ internal static class CliParser
         Console.Error.WriteLine("  --compile                  Emit Zod validators (fromJSONSchema, requires zod in consumer project)");
         Console.Error.WriteLine("  --openapi [file]           Emit OpenAPI 3.0 JSON spec (default: openapi.json)");
         Console.Error.WriteLine("  --security <spec>          Default security scheme (bearer, bearer:jwt, cookie:name, apikey:in:name)");
+        Console.Error.WriteLine("  --from <contract.json>     Emit TypeScript from a Rivet contract JSON file");
         Console.Error.WriteLine("  --from-openapi <spec.json> Import OpenAPI spec → C# contracts + DTOs");
         Console.Error.WriteLine("  --namespace <ns>           Namespace for generated C# files (default: Generated)");
         Console.Error.WriteLine("  --jsonschema               Emit standalone JSON Schema definitions (schemas.ts)");
@@ -121,4 +136,5 @@ sealed record RivetOptions(
     bool Check = false,
     bool Quiet = false,
     bool Routes = false,
-    bool JsonSchema = false);
+    bool JsonSchema = false,
+    string? FromContractPath = null);

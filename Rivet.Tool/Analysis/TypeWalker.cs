@@ -13,7 +13,7 @@ public sealed class TypeWalker
     private readonly HashSet<IAssemblySymbol> _walkableAssemblies;
     private readonly Dictionary<string, TsTypeDefinition> _definitions = new();
     private readonly Dictionary<string, TsType.Brand> _brands = new();
-    private readonly Dictionary<string, TsType.StringUnion> _enums = new();
+    private readonly Dictionary<string, TsType> _enums = new();
     private readonly Dictionary<string, string?> _typeNamespaces = new();
     private readonly HashSet<string> _visiting = new();
 
@@ -107,7 +107,7 @@ public sealed class TypeWalker
 
     public IReadOnlyDictionary<string, TsTypeDefinition> Definitions => _definitions;
     public IReadOnlyDictionary<string, TsType.Brand> Brands => _brands;
-    public IReadOnlyDictionary<string, TsType.StringUnion> Enums => _enums;
+    public IReadOnlyDictionary<string, TsType> Enums => _enums;
     public IReadOnlyDictionary<string, string?> TypeNamespaces => _typeNamespaces;
     public bool HasErrors { get; private set; }
 

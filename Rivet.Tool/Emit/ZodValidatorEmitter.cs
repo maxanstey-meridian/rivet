@@ -115,6 +115,7 @@ public static class ZodValidatorEmitter
             TsType.Primitive p => BuildPrimitiveSchema(p),
             TsType.Dictionary d => $"z.record(z.string(), {BuildZodExpression(d.Value)})",
             TsType.StringUnion su => $"z.enum([{string.Join(", ", su.Members.Select(m => $"\"{m}\""))}])",
+            TsType.IntUnion iu => $"z.union([{string.Join(", ", iu.Members.Select(m => $"z.literal({m})"))}])",
             TsType.InlineObject obj => $"z.object({{ {string.Join(", ", obj.Fields.Select(f => $"{TypeEmitter.QuoteIfNeeded(f.Name)}: {BuildZodExpression(f.Type)}"))} }})",
             TsType.TypeParam => "z.unknown()",
             _ => "z.unknown()",
@@ -165,6 +166,7 @@ public static class ZodValidatorEmitter
                 }
                 break;
             case TsType.StringUnion:
+            case TsType.IntUnion:
             case TsType.Primitive:
             case TsType.TypeParam:
                 break;

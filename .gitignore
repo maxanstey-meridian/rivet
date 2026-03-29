@@ -21,3 +21,6 @@ Rivet.Tests/js/node_modules/
 docs/node_modules/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+
+.orch/
+.plans/

@@ -542,8 +542,9 @@ public sealed class OpenApiImporterTests
         Assert.True(walker.Definitions.ContainsKey("HealthDto"));
 
         Assert.True(walker.Enums.ContainsKey("Priority"));
-        Assert.Contains("low", walker.Enums["Priority"].Members);
-        Assert.Contains("critical", walker.Enums["Priority"].Members);
+        var priorityEnum = (TsType.StringUnion)walker.Enums["Priority"];
+        Assert.Contains("low", priorityEnum.Members);
+        Assert.Contains("critical", priorityEnum.Members);
 
         Assert.True(walker.Brands.ContainsKey("Email"));
         Assert.True(walker.Brands.ContainsKey("Website"));

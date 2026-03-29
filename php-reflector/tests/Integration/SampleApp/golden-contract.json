@@ -1,0 +1,464 @@
+{
+    "types": [
+        {
+            "name": "ProductDto",
+            "typeParameters": [],
+            "properties": [
+                {
+                    "name": "title",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "string"
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "id",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "number",
+                        "format": "int32"
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "price",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "active",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "boolean"
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "description",
+                    "type": {
+                        "kind": "nullable",
+                        "inner": {
+                            "kind": "primitive",
+                            "type": "string"
+                        }
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "status",
+                    "type": {
+                        "kind": "ref",
+                        "name": "ProductStatus"
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "priority",
+                    "type": {
+                        "kind": "ref",
+                        "name": "Priority"
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "author",
+                    "type": {
+                        "kind": "ref",
+                        "name": "UserDto"
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "tags",
+                    "type": {
+                        "kind": "array",
+                        "element": {
+                            "kind": "primitive",
+                            "type": "string"
+                        }
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "metadata",
+                    "type": {
+                        "kind": "dictionary",
+                        "value": {
+                            "kind": "primitive",
+                            "type": "number",
+                            "format": "int32"
+                        }
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "dimensions",
+                    "type": {
+                        "kind": "inlineObject",
+                        "properties": [
+                            {
+                                "name": "width",
+                                "type": {
+                                    "kind": "primitive",
+                                    "type": "number",
+                                    "format": "int32"
+                                }
+                            },
+                            {
+                                "name": "height",
+                                "type": {
+                                    "kind": "primitive",
+                                    "type": "number",
+                                    "format": "int32"
+                                }
+                            }
+                        ]
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "size",
+                    "type": {
+                        "kind": "stringUnion",
+                        "values": [
+                            "small",
+                            "medium",
+                            "large"
+                        ]
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "rating",
+                    "type": {
+                        "kind": "intUnion",
+                        "values": [
+                            1,
+                            2,
+                            3
+                        ]
+                    },
+                    "optional": false
+                }
+            ]
+        },
+        {
+            "name": "ProductFilterDto",
+            "typeParameters": [],
+            "properties": [
+                {
+                    "name": "query",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "string"
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "page",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "number",
+                        "format": "int32"
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "priorities",
+                    "type": {
+                        "kind": "array",
+                        "element": {
+                            "kind": "ref",
+                            "name": "Priority"
+                        }
+                    },
+                    "optional": false
+                }
+            ]
+        },
+        {
+            "name": "UserDto",
+            "typeParameters": [],
+            "properties": [
+                {
+                    "name": "name",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "string"
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "email",
+                    "type": {
+                        "kind": "nullable",
+                        "inner": {
+                            "kind": "primitive",
+                            "type": "string"
+                        }
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "address",
+                    "type": {
+                        "kind": "ref",
+                        "name": "AddressDto"
+                    },
+                    "optional": false
+                }
+            ]
+        },
+        {
+            "name": "AddressDto",
+            "typeParameters": [],
+            "properties": [
+                {
+                    "name": "street",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "string"
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "city",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "string"
+                    },
+                    "optional": false
+                }
+            ]
+        }
+    ],
+    "enums": [
+        {
+            "name": "ProductStatus",
+            "values": [
+                "active",
+                "draft",
+                "archived"
+            ]
+        },
+        {
+            "name": "Priority",
+            "intValues": [
+                1,
+                2,
+                3
+            ]
+        }
+    ],
+    "endpoints": [
+        {
+            "name": "show",
+            "httpMethod": "GET",
+            "routeTemplate": "/products/{id}",
+            "controllerName": "product",
+            "params": [
+                {
+                    "name": "id",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "number",
+                        "format": "int32"
+                    },
+                    "source": "route"
+                }
+            ],
+            "returnType": {
+                "kind": "ref",
+                "name": "ProductDto"
+            },
+            "responses": [
+                {
+                    "statusCode": 200,
+                    "dataType": {
+                        "kind": "ref",
+                        "name": "ProductDto"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "store",
+            "httpMethod": "POST",
+            "routeTemplate": "/products",
+            "controllerName": "product",
+            "params": [
+                {
+                    "name": "payload",
+                    "type": {
+                        "kind": "ref",
+                        "name": "ProductFilterDto"
+                    },
+                    "source": "body"
+                }
+            ],
+            "returnType": {
+                "kind": "ref",
+                "name": "ProductDto"
+            },
+            "responses": [
+                {
+                    "statusCode": 200,
+                    "dataType": {
+                        "kind": "ref",
+                        "name": "ProductDto"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "index",
+            "httpMethod": "GET",
+            "routeTemplate": "/products",
+            "controllerName": "product",
+            "params": [
+                {
+                    "name": "status",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "string"
+                    },
+                    "source": "query"
+                },
+                {
+                    "name": "page",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "number",
+                        "format": "int32"
+                    },
+                    "source": "query"
+                },
+                {
+                    "name": "search",
+                    "type": {
+                        "kind": "nullable",
+                        "inner": {
+                            "kind": "primitive",
+                            "type": "string"
+                        }
+                    },
+                    "source": "query"
+                }
+            ],
+            "returnType": {
+                "kind": "array",
+                "element": {
+                    "kind": "ref",
+                    "name": "ProductDto"
+                }
+            },
+            "responses": [
+                {
+                    "statusCode": 200,
+                    "dataType": {
+                        "kind": "array",
+                        "element": {
+                            "kind": "ref",
+                            "name": "ProductDto"
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "destroy",
+            "httpMethod": "DELETE",
+            "routeTemplate": "/products/{id}",
+            "controllerName": "product",
+            "params": [
+                {
+                    "name": "id",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "number",
+                        "format": "int32"
+                    },
+                    "source": "route"
+                }
+            ],
+            "responses": []
+        },
+        {
+            "name": "paginated",
+            "httpMethod": "GET",
+            "routeTemplate": "/products/paginated",
+            "controllerName": "product",
+            "params": [
+                {
+                    "name": "page",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "number",
+                        "format": "int32"
+                    },
+                    "source": "query"
+                }
+            ],
+            "returnType": {
+                "kind": "generic",
+                "name": "Collection",
+                "typeArgs": [
+                    {
+                        "kind": "ref",
+                        "name": "ProductDto"
+                    }
+                ]
+            },
+            "responses": [
+                {
+                    "statusCode": 200,
+                    "dataType": {
+                        "kind": "generic",
+                        "name": "Collection",
+                        "typeArgs": [
+                            {
+                                "kind": "ref",
+                                "name": "ProductDto"
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "show",
+            "httpMethod": "GET",
+            "routeTemplate": "/users/{id}",
+            "controllerName": "user",
+            "params": [
+                {
+                    "name": "id",
+                    "type": {
+                        "kind": "primitive",
+                        "type": "number",
+                        "format": "int32"
+                    },
+                    "source": "route"
+                }
+            ],
+            "returnType": {
+                "kind": "ref",
+                "name": "UserDto"
+            },
+            "responses": [
+                {
+                    "statusCode": 200,
+                    "dataType": {
+                        "kind": "ref",
+                        "name": "UserDto"
+                    }
+                }
+            ]
+        }
+    ]
+}

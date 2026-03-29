@@ -1,9 +1,12 @@
+using System.Text.Json.Serialization;
+
 namespace Rivet.Tool.Model;
 
 /// <summary>
 /// Intermediate representation of a TypeScript type expression.
 /// Produced by the type walker, consumed by the emitter.
 /// </summary>
+[JsonConverter(typeof(TsTypeJsonConverter))]
 public abstract record TsType
 {
     private TsType() { }
@@ -23,6 +26,9 @@ public abstract record TsType
 
     /// <summary>"A" | "B" | "C" — string enum rendered as union.</summary>
     public sealed record StringUnion(IReadOnlyList<string> Members) : TsType;
+
+    /// <summary>1 | 2 | 3 — int enum rendered as numeric literal union.</summary>
+    public sealed record IntUnion(IReadOnlyList<int> Members) : TsType;
 
     /// <summary>Reference to another emitted type by name.</summary>
     public sealed record TypeRef(string Name) : TsType;
@@ -58,6 +64,7 @@ public abstract record TsType
             StringUnion su => su.Members.Count <= 3
                 ? string.Concat(su.Members.Select(s => char.ToUpperInvariant(s[0]) + s[1..]))
                 : "Enum",
+            IntUnion => "Enum",
             InlineObject obj => obj.Fields.Count <= 3
                 ? string.Concat(obj.Fields.Select(f => char.ToUpperInvariant(f.Name[0]) + f.Name[1..]))
                 : "Object",
@@ -121,6 +128,7 @@ public abstract record TsType
                 CollectTypeRefs(b.Inner, names);
                 break;
             case StringUnion:
+            case IntUnion:
             case Primitive:
             case TypeParam:
                 // No type refs to collect

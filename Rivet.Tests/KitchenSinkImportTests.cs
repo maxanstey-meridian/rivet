@@ -155,18 +155,18 @@ public sealed class KitchenSinkImportTests
         var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
         // Original values preserved via [JsonStringEnumMemberName] round-trip
-        var priority = walker.Enums["Priority"];
+        var priority = (TsType.StringUnion)walker.Enums["Priority"];
         Assert.Contains("low", priority.Members);
         Assert.Contains("medium", priority.Members);
         Assert.Contains("high", priority.Members);
         Assert.Contains("critical", priority.Members);
 
-        var taskStatus = walker.Enums["TaskStatus"];
+        var taskStatus = (TsType.StringUnion)walker.Enums["TaskStatus"];
         Assert.Contains("my_status", taskStatus.Members);
         Assert.Contains("ACTIVE", taskStatus.Members);
         Assert.Contains("in-progress", taskStatus.Members);
 
-        var singleRole = walker.Enums["SingleRole"];
+        var singleRole = (TsType.StringUnion)walker.Enums["SingleRole"];
         Assert.Single(singleRole.Members);
         Assert.Contains("admin", singleRole.Members);
     }

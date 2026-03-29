@@ -25,13 +25,17 @@
     <PackageReference Include="System.Text.Json" Version="9.*" />
   </ItemGroup>
 
+  <PropertyGroup Condition="'$(SelfContained)' == 'true'">
+    <PublishSingleFile>true</PublishSingleFile>
+  </PropertyGroup>
+
   <PropertyGroup>
     <NoWarn>$(NoWarn);NU1701</NoWarn>
     <OutputType>Exe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <UseAppHost>false</UseAppHost>
+    <UseAppHost Condition="'$(SelfContained)' != 'true'">false</UseAppHost>
     <PackAsTool>true</PackAsTool>
     <PackRelease>true</PackRelease>
     <PackageId>dotnet-rivet</PackageId>

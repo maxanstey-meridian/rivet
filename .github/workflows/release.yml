@@ -1,0 +1,68 @@
+name: Release platform binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rid: [osx-arm64, osx-x64, linux-x64, win-x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish self-contained binary
+        run: dotnet publish Rivet.Tool -c Release -r ${{ matrix.rid }} --self-contained -o ./publish
+
+      - name: Rename binary
+        run: |
+          cd publish
+          if [[ "${{ matrix.rid }}" == win-* ]]; then
+            mv Rivet.Tool.exe rivet-${{ matrix.rid }}.exe
+          else
+            mv Rivet.Tool rivet-${{ matrix.rid }}
+          fi
+
+      # Only linux-x64 can be smoke-tested on ubuntu-latest. macOS/Windows
+      # coverage comes from existing [Category=Local] tests run by devs natively.
+      - name: Smoke test — OpenAPI import (linux-x64 only)
+        if: matrix.rid == 'linux-x64'
+        run: |
+          chmod +x ./publish/rivet-linux-x64
+          ./publish/rivet-linux-x64 --from-openapi Rivet.Tests/Fixtures/openapi-petstore-v3.json --namespace PetStore
+
+      - name: Smoke test — contract JSON (linux-x64 only)
+        if: matrix.rid == 'linux-x64'
+        run: |
+          ./publish/rivet-linux-x64 --from Rivet.Tests/Fixtures/contract-sample.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rivet-${{ matrix.rid }}
+          path: ./publish/rivet-${{ matrix.rid }}*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ./artifacts/*
+          generate_release_notes: true

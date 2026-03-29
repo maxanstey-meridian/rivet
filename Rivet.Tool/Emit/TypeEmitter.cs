@@ -41,6 +41,7 @@ public static class TypeEmitter
             TsType.Array a => WrapIfCompound(a.Element) + "[]",
             TsType.Dictionary d => $"Record<string, {EmitType(d.Value)}>",
             TsType.StringUnion u => string.Join(" | ", u.Members.Select(m => $"\"{m}\"")),
+            TsType.IntUnion iu => string.Join(" | ", iu.Members),
             TsType.TypeRef r => r.Name,
             TsType.Generic g => $"{g.Name}<{string.Join(", ", g.TypeArguments.Select(EmitType))}>",
             TsType.Brand b => b.Name,
@@ -83,10 +84,9 @@ public static class TypeEmitter
         // Enums
         if (group.Enums.Count > 0)
         {
-            foreach (var (name, union) in group.Enums.OrderBy(e => e.Key))
+            foreach (var (name, enumType) in group.Enums.OrderBy(e => e.Key))
             {
-                var members = string.Join(" | ", union.Members.Select(m => $"\"{m}\""));
-                sb.AppendLine($"export type {name} = {members};");
+                sb.AppendLine($"export type {name} = {EmitType(enumType)};");
             }
 
             sb.AppendLine();
@@ -137,7 +137,7 @@ public static class TypeEmitter
     private static string WrapIfCompound(TsType element)
     {
         var str = EmitType(element);
-        return element is TsType.Nullable or TsType.StringUnion
+        return element is TsType.Nullable or TsType.StringUnion or TsType.IntUnion
             ? $"({str})"
             : str;
     }
