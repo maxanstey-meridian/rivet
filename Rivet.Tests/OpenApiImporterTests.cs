@@ -2677,14 +2677,70 @@ public sealed class OpenApiImporterTests
 
         var result = CompilationHelper.Import(spec);
 
-        // Should not be treated as an int enum — no file with int-backed enum members
-        Assert.DoesNotContain(result.Files, f =>
-            f.FileName.EndsWith("FloatVals.cs") && (f.Content.Contains("= 1") || f.Content.Contains("= 2")));
+        // No named enum file for FloatVals — WouldGenerateType returns false
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("FloatVals.cs"));
 
-        // Falls through to string-backed enum via ResolveFallbackType
+        // Falls through to string-backed inline enum via ResolveFallbackType
         var dtoContent = CompilationHelper.FindFile(result, "ItemDto.cs");
-        Assert.DoesNotContain("long Val", dtoContent);
         Assert.Contains("ItemDtoVal Val", dtoContent);
+        Assert.DoesNotContain("long Val", dtoContent);
+    }
+
+    [Fact]
+    public void IntEnum_Value_Exceeding_Int32_Range_Falls_Through_To_Long()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "BigVals": {
+                "type": "integer",
+                "enum": [1, 2147483648]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "code": { "$ref": "#/components/schemas/BigVals" }
+                },
+                "required": ["code"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // Value exceeds int.MaxValue — should not generate an int enum
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("BigVals.cs"));
+
+        var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
+        Assert.Contains("long Code", dtoContent);
+    }
+
+    [Fact]
+    public void Two_Value_IntEnum_Is_Classified_As_Enum()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Toggle": {
+                "type": "integer",
+                "enum": [0, 1]
+            },
+            "FlagDto": {
+                "type": "object",
+                "properties": {
+                    "enabled": { "$ref": "#/components/schemas/Toggle" }
+                },
+                "required": ["enabled"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // Two values is the minimum for Count: > 1 — enum SHOULD be generated
+        var enumContent = CompilationHelper.FindFile(result, "Toggle.cs");
+        Assert.Contains("public enum Toggle", enumContent);
+        Assert.Contains("Value0 = 0,", enumContent);
+        Assert.Contains("Value1 = 1", enumContent);
+
+        // DTO should reference the enum type, not long
+        var dtoContent = CompilationHelper.FindFile(result, "FlagDto.cs");
+        Assert.Contains("Toggle Enabled", dtoContent);
+        Assert.DoesNotContain("long Enabled", dtoContent);
     }
 
     [Fact]
