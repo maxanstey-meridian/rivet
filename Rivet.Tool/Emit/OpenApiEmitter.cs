@@ -249,12 +249,15 @@ public static class OpenApiEmitter
         }
         else if (ep.RequestType is not null)
         {
+            var requestTypeContentType = ep.IsFormEncoded
+                ? "application/x-www-form-urlencoded"
+                : "application/json";
             operation["requestBody"] = new Dictionary<string, object>
             {
                 ["required"] = true,
                 ["content"] = new Dictionary<string, object>
                 {
-                    ["application/json"] = new Dictionary<string, object>
+                    [requestTypeContentType] = new Dictionary<string, object>
                     {
                         ["schema"] = MapTsTypeToJsonSchema(ep.RequestType),
                     },
@@ -706,6 +709,11 @@ public static class OpenApiEmitter
                 {
                     CollectGenericsFromType(resp.DataType, genericInstances);
                 }
+            }
+
+            if (ep.RequestType is not null)
+            {
+                CollectGenericsFromType(ep.RequestType, genericInstances);
             }
         }
 

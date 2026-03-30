@@ -1325,6 +1325,86 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void RequestType_FormEncoded_UsesFormContentType()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "create", "POST", "/api/buyers",
+                [],
+                null, "buyers",
+                [new TsResponseType(200, null)],
+                IsFormEncoded: true,
+                RequestType: new TsType.TypeRef("CreateBuyerRequest")),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var requestBody = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/buyers")
+            .GetProperty("post")
+            .GetProperty("requestBody");
+
+        Assert.True(requestBody.GetProperty("required").GetBoolean());
+        var content = requestBody.GetProperty("content");
+        Assert.True(content.TryGetProperty("application/x-www-form-urlencoded", out var formContent));
+        Assert.Equal("#/components/schemas/CreateBuyerRequest",
+            formContent.GetProperty("schema").GetProperty("$ref").GetString());
+        Assert.False(content.TryGetProperty("application/json", out _));
+    }
+
+    [Fact]
+    public void RequestType_Generic_ProducesMonomorphisedSchema()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "create", "POST", "/api/buyers",
+                [],
+                null, "buyers",
+                [new TsResponseType(200, null)],
+                RequestType: new TsType.Generic("Envelope", [new TsType.TypeRef("BuyerDto")])),
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["BuyerDto"] = new("BuyerDto", [],
+            [
+                new TsPropertyDefinition("id", new TsType.Primitive("string"), false),
+            ]),
+            ["Envelope"] = new("Envelope", ["T"],
+            [
+                new TsPropertyDefinition("data", new TsType.TypeParam("T"), false),
+            ]),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints, definitions,
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>());
+
+        // The monomorphised schema must exist
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.TryGetProperty("Envelope_BuyerDto", out var envSchema),
+            "Missing monomorphised schema Envelope_BuyerDto");
+
+        // data property should resolve T → BuyerDto
+        var dataProp = envSchema.GetProperty("properties").GetProperty("data");
+        Assert.Equal("#/components/schemas/BuyerDto", dataProp.GetProperty("$ref").GetString());
+
+        // requestBody should $ref the monomorphised name
+        var reqBodySchema = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/buyers")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema");
+        Assert.Equal("#/components/schemas/Envelope_BuyerDto", reqBodySchema.GetProperty("$ref").GetString());
+    }
+
+    [Fact]
     public void RequestType_Absent_NoRequestBody()
     {
         var endpoints = new List<TsEndpointDefinition>
