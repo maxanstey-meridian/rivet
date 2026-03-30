@@ -445,7 +445,9 @@ public sealed class InlineTypeExtractorTests
         // Both outer and inner should be collected
         Assert.Equal(2, result.Count);
         Assert.Same(outer, result[0].Type);
+        Assert.Equal("Buyers.find.return", result[0].Context);
         Assert.Same(inner, result[1].Type);
+        Assert.Equal("Buyers.find.return.field.address", result[1].Context);
     }
 
     [Fact]
@@ -475,5 +477,88 @@ public sealed class InlineTypeExtractorTests
         var result = InlineTypeExtractor.CollectInlineObjects([]);
 
         Assert.Empty(result);
+    }
+
+    // --- Singularize tests ---
+
+    [Theory]
+    [InlineData("Buyers", "Buyer")]
+    [InlineData("Categories", "Category")]
+    [InlineData("Orders", "Order")]
+    public void Singularize_Basic(string input, string expected)
+    {
+        Assert.Equal(expected, InlineTypeExtractor.Singularize(input));
+    }
+
+    [Theory]
+    [InlineData("As", "As")]
+    [InlineData("Is", "Is")]
+    [InlineData("Go", "Go")]
+    public void Singularize_ShortWord(string input, string expected)
+    {
+        Assert.Equal(expected, InlineTypeExtractor.Singularize(input));
+    }
+
+    // --- GenerateName tests ---
+
+    [Fact]
+    public void GenerateName_FromControllerName()
+    {
+        var inline = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Buyers.find.return"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+
+        Assert.Equal("BuyerDto", result);
+    }
+
+    [Fact]
+    public void GenerateName_AlreadySingular()
+    {
+        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Order.list.return"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Order", occurrences, new HashSet<string>());
+
+        Assert.Equal("OrderDto", result);
+    }
+
+    [Fact]
+    public void GenerateName_NestedField()
+    {
+        var inner = new TsType.InlineObject([("street", new TsType.Primitive("string"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inner, "Buyers.find.return.field.lines"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+
+        Assert.Equal("LineDto", result);
+    }
+
+    [Fact]
+    public void GenerateName_Collision_AppendsSuffix()
+    {
+        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Buyers.find.return"),
+        };
+        var usedNames = new HashSet<string> { "BuyerDto" };
+
+        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, usedNames);
+
+        Assert.Equal("BuyerDto2", result);
+        Assert.Contains("BuyerDto2", usedNames);
     }
 }

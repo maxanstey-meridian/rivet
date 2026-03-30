@@ -43,6 +43,52 @@ public static class InlineTypeExtractor
         return results;
     }
 
+    public static string GenerateName(
+        string controllerName,
+        IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences,
+        HashSet<string> usedNames)
+    {
+        var name = DeriveBaseName(controllerName, occurrences) + "Dto";
+        name = ResolveCollision(name, usedNames);
+        usedNames.Add(name);
+        return name;
+    }
+
+    private static string DeriveBaseName(
+        string controllerName,
+        IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences)
+    {
+        var nestedOccurrence = occurrences.FirstOrDefault(o => o.Context.Contains(".field."));
+        if (nestedOccurrence != default)
+        {
+            var fieldName = nestedOccurrence.Context.Split(".field.").Last().Split('.').First();
+            return ToPascalCase(Singularize(fieldName));
+        }
+
+        return Singularize(controllerName);
+    }
+
+    private static string ResolveCollision(string name, HashSet<string> usedNames)
+    {
+        if (!usedNames.Contains(name)) return name;
+        var i = 2;
+        while (usedNames.Contains(name + i)) i++;
+        return name + i;
+    }
+
+    private static string ToPascalCase(string s) =>
+        s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
+    public static string Singularize(string name)
+    {
+        if (name.Length <= 3) return name;
+        if (name.EndsWith("ies"))
+            return name[..^3] + "y";
+        if (name.EndsWith("s"))
+            return name[..^1];
+        return name;
+    }
+
     private static void CollectFromType(TsType? type, string context,
         List<(TsType.InlineObject, string)> results)
     {
@@ -50,8 +96,8 @@ public static class InlineTypeExtractor
         {
             case TsType.InlineObject io:
                 results.Add((io, context));
-                foreach (var (_, fieldType) in io.Fields)
-                    CollectFromType(fieldType, context, results);
+                foreach (var (fieldName, fieldType) in io.Fields)
+                    CollectFromType(fieldType, $"{context}.field.{fieldName}", results);
                 break;
             case TsType.Array a:
                 CollectFromType(a.Element, context, results);
