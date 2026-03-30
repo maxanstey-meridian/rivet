@@ -9,6 +9,8 @@ public sealed record ExtractionResult(
 
 public static class InlineTypeExtractor
 {
+    private const int CrossControllerThreshold = 3;
+
     public static string CanonicalHash(TsType type)
     {
         return type switch
@@ -56,7 +58,13 @@ public static class InlineTypeExtractor
         IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences,
         HashSet<string> usedNames)
     {
-        var name = DeriveBaseName(controllerName, occurrences) + "Dto";
+        var baseName = DeriveBaseName(controllerName, occurrences);
+        return GenerateName(baseName, usedNames);
+    }
+
+    public static string GenerateName(string baseName, HashSet<string> usedNames)
+    {
+        var name = baseName + "Dto";
         name = ResolveCollision(name, usedNames);
         usedNames.Add(name);
         return name;
@@ -86,6 +94,14 @@ public static class InlineTypeExtractor
         var i = 2;
         while (usedNames.Contains(name + i)) i++;
         return name + i;
+    }
+
+    internal static string DeriveStructuralName(TsType.InlineObject type)
+    {
+        var fields = type.Fields;
+        if (fields.Count <= 2)
+            return string.Concat(fields.Select(f => ToPascalCase(f.Name)));
+        return string.Concat(fields.Take(2).Select(f => ToPascalCase(f.Name))) + $"Plus{fields.Count - 2}";
     }
 
     internal static string ToPascalCase(string s) =>
@@ -127,9 +143,18 @@ public static class InlineTypeExtractor
             if (items.Count < 2 && representative.Fields.Count < fieldThreshold)
                 continue;
 
-            // Derive controller name from first occurrence context
-            var controllerName = items[0].Context.Split('.')[0];
-            var name = GenerateName(controllerName, items, usedNames);
+            var distinctControllers = items.Select(i => i.Context.Split('.')[0]).Distinct().Count();
+            string name;
+            if (distinctControllers >= CrossControllerThreshold)
+            {
+                var structuralBase = DeriveStructuralName(representative);
+                name = GenerateName(structuralBase, usedNames);
+            }
+            else
+            {
+                var controllerName = items[0].Context.Split('.')[0];
+                name = GenerateName(controllerName, items, usedNames);
+            }
 
             replacements[group.Key] = new TsType.TypeRef(name);
             typeNamespaces[name] = null;

@@ -1284,4 +1284,137 @@ public sealed class InlineTypeExtractorTests
         Assert.NotNull(innerType);
         Assert.StartsWith("BuyerFind", innerType!.Name);
     }
+
+    [Fact]
+    public void DeriveStructuralName_SingleField()
+    {
+        var inline = new TsType.InlineObject([("message", new TsType.Primitive("string"))]);
+
+        var result = InlineTypeExtractor.DeriveStructuralName(inline);
+
+        Assert.Equal("Message", result);
+    }
+
+    [Fact]
+    public void DeriveStructuralName_TwoFields()
+    {
+        var inline = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+
+        var result = InlineTypeExtractor.DeriveStructuralName(inline);
+
+        Assert.Equal("IdName", result);
+    }
+
+    [Fact]
+    public void DeriveStructuralName_ThreeOrMoreFields()
+    {
+        var inline = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+            ("phone", new TsType.Primitive("string")),
+            ("location", new TsType.Primitive("string")),
+        ]);
+
+        var result = InlineTypeExtractor.DeriveStructuralName(inline);
+
+        Assert.Equal("IdNamePlus3", result);
+    }
+
+    [Fact]
+    public void GenerateName_WithExplicitBaseName()
+    {
+        var usedNames = new HashSet<string>();
+
+        var result = InlineTypeExtractor.GenerateName("Message", usedNames);
+
+        Assert.Equal("MessageDto", result);
+        Assert.Contains("MessageDto", usedNames);
+    }
+
+    [Fact]
+    public void Extract_ShapeAcross3Controllers_UsesStructuralName()
+    {
+        var endpoints = new[]
+        {
+            MakeEndpoint("Auth", "login", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("string"))])),
+            MakeEndpoint("Orders", "list", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("string"))])),
+            MakeEndpoint("Products", "create", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("string"))])),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        Assert.Single(result.ExtractedTypes);
+        Assert.Equal("MessageDto", result.ExtractedTypes[0].Name);
+    }
+
+    [Fact]
+    public void Extract_ShapeAcross2Controllers_UsesControllerName()
+    {
+        var endpoints = new[]
+        {
+            MakeEndpoint("Auth", "login", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("string"))])),
+            MakeEndpoint("Orders", "list", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("string"))])),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        Assert.Single(result.ExtractedTypes);
+        Assert.Equal("AuthLoginDto", result.ExtractedTypes[0].Name);
+    }
+
+    [Fact]
+    public void Extract_MultiFieldSharedShape_StructuralName()
+    {
+        var shape = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[]
+        {
+            MakeEndpoint("Auth", "login", returnType:
+                new TsType.InlineObject([("id", new TsType.Primitive("number")), ("name", new TsType.Primitive("string"))])),
+            MakeEndpoint("Orders", "list", returnType:
+                new TsType.InlineObject([("id", new TsType.Primitive("number")), ("name", new TsType.Primitive("string"))])),
+            MakeEndpoint("Products", "get", returnType:
+                new TsType.InlineObject([("id", new TsType.Primitive("number")), ("name", new TsType.Primitive("string"))])),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        Assert.Single(result.ExtractedTypes);
+        Assert.Equal("IdNameDto", result.ExtractedTypes[0].Name);
+    }
+
+    [Fact]
+    public void Extract_LargeSharedShape_TruncatesName()
+    {
+        var fields = new (string, TsType)[]
+        {
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+            ("phone", new TsType.Primitive("string")),
+            ("location", new TsType.Primitive("string")),
+        };
+        var endpoints = new[]
+        {
+            MakeEndpoint("Auth", "login", returnType: new TsType.InlineObject(fields)),
+            MakeEndpoint("Orders", "list", returnType: new TsType.InlineObject(fields)),
+            MakeEndpoint("Products", "get", returnType: new TsType.InlineObject(fields)),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        Assert.Single(result.ExtractedTypes);
+        Assert.Equal("IdNamePlus3Dto", result.ExtractedTypes[0].Name);
+    }
 }
