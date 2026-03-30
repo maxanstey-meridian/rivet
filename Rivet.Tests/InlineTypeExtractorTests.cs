@@ -1927,4 +1927,211 @@ public sealed class InlineTypeExtractorTests
             t.Properties.Any(p => p.Name == "id") && !t.Properties.Any(p => p.Name == "message"));
         Assert.EndsWith("Dto", innerType.Name);
     }
+
+    // --- Gap coverage tests ---
+
+    // Gap 1: Disambiguation strategies preserve Response suffix (Detail, DistinguishingField, Ref)
+
+    [Fact]
+    public void DisambiguateCollision_MoreFields_ResponseSuffix_AppendsDetailResponse()
+    {
+        var largeType = new TsType.InlineObject([
+            ("data", new TsType.Primitive("string")),
+            ("message", new TsType.Primitive("string")),
+            ("error", new TsType.Primitive("string")),
+            ("status", new TsType.Primitive("number")),
+            ("timestamp", new TsType.Primitive("string")),
+            ("trace", new TsType.Primitive("string")),
+        ]);
+        var smallType = new TsType.InlineObject([
+            ("data", new TsType.Primitive("string")),
+            ("message", new TsType.Primitive("string")),
+            ("error", new TsType.Primitive("string")),
+        ]);
+        var usedNames = new HashSet<string> { "BuyerFindResponse" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindResponse"] = smallType };
+
+        var result = InlineTypeExtractor.DisambiguateCollision(
+            "BuyerFindResponse", usedNames, nameTypes, largeType);
+
+        Assert.Equal("BuyerFindDetailResponse", result);
+    }
+
+    [Fact]
+    public void DisambiguateCollision_DistinguishingField_ResponseSuffix()
+    {
+        var typeA = new TsType.InlineObject([
+            ("data", new TsType.Primitive("string")),
+            ("message", new TsType.Primitive("string")),
+            ("customer_name", new TsType.Primitive("string")),
+        ]);
+        var typeB = new TsType.InlineObject([
+            ("data", new TsType.Primitive("string")),
+            ("message", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+        ]);
+        var usedNames = new HashSet<string> { "BuyerFindResponse" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindResponse"] = typeB };
+
+        var result = InlineTypeExtractor.DisambiguateCollision(
+            "BuyerFindResponse", usedNames, nameTypes, typeA);
+
+        Assert.Equal("BuyerFindCustomerNameResponse", result);
+    }
+
+    [Fact]
+    public void DisambiguateCollision_ArrayElement_ResponseSuffix_AppendsRefResponse()
+    {
+        var type = new TsType.InlineObject([
+            ("data", new TsType.Primitive("string")),
+            ("message", new TsType.Primitive("string")),
+        ]);
+        var existingType = new TsType.InlineObject([
+            ("data", new TsType.Primitive("string")),
+            ("message", new TsType.Primitive("string")),
+            ("error", new TsType.Primitive("string")),
+        ]);
+        var usedNames = new HashSet<string> { "BuyerFindResponse" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindResponse"] = existingType };
+        var arrayElementHashes = new HashSet<string> { InlineTypeExtractor.CanonicalHash(type) };
+
+        var result = InlineTypeExtractor.DisambiguateCollision(
+            "BuyerFindResponse", usedNames, nameTypes, type, arrayElementHashes);
+
+        Assert.Equal("BuyerFindRefResponse", result);
+    }
+
+    // Gap 2: IsResponseWrapper with .response.* context
+
+    [Fact]
+    public void IsResponseWrapper_ResponseStatusContext_WithDataField_True()
+    {
+        var type = new TsType.InlineObject([
+            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
+            ("message", new TsType.Primitive("string")),
+        ]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (type, "Orders.list.response.200"),
+        };
+
+        Assert.True(InlineTypeExtractor.IsResponseWrapper(occurrences, type));
+    }
+
+    // Gap 3: Mixed top-level + nested occurrences → false
+
+    [Fact]
+    public void IsResponseWrapper_MixedContexts_ReturnsFalse()
+    {
+        var type = new TsType.InlineObject([
+            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
+            ("message", new TsType.Primitive("string")),
+        ]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (type, "Auth.login.return"),
+            (type, "Auth.session.return.field.data"),
+        };
+
+        Assert.False(InlineTypeExtractor.IsResponseWrapper(occurrences, type));
+    }
+
+    // Gap 4: Ref candidate taken → cascades to next strategy
+
+    [Fact]
+    public void DisambiguateCollision_RefCandidateTaken_CascadesToSummary()
+    {
+        var type = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var existingType = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+            ("phone", new TsType.Primitive("string")),
+            ("address", new TsType.Primitive("string")),
+        ]);
+        var usedNames = new HashSet<string> { "BuyerFindDto", "BuyerFindRefDto" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindDto"] = existingType };
+        var arrayElementHashes = new HashSet<string> { InlineTypeExtractor.CanonicalHash(type) };
+
+        var result = InlineTypeExtractor.DisambiguateCollision(
+            "BuyerFindDto", usedNames, nameTypes, type, arrayElementHashes);
+
+        // Ref is taken → falls through to Summary (fewer fields)
+        Assert.Equal("BuyerFindSummaryDto", result);
+    }
+
+    // Gap 5: DeriveStructuralName with only a data field
+
+    [Fact]
+    public void DeriveStructuralName_OnlyDataField_ReturnsObject()
+    {
+        var inline = new TsType.InlineObject([
+            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
+        ]);
+
+        var result = InlineTypeExtractor.DeriveStructuralName(inline);
+
+        Assert.Equal("Object", result);
+    }
+
+    // Gap 6: Extract-level collision between two different Response wrappers
+
+    [Fact]
+    public void Extract_CollidingResponseWrappers_SemanticDisambiguation()
+    {
+        // Two different response wrapper shapes, both top-level returns with data+message
+        // Both derive base name "OrderList" → both get Response suffix → collision on "OrderListResponse"
+        var smallWrapper = new TsType.InlineObject([
+            ("data", new TsType.Primitive("string")),
+            ("message", new TsType.Primitive("string")),
+        ]);
+        var largeWrapper = new TsType.InlineObject([
+            ("data", new TsType.Primitive("string")),
+            ("message", new TsType.Primitive("string")),
+            ("error", new TsType.Primitive("string")),
+            ("status", new TsType.Primitive("number")),
+            ("trace", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[]
+        {
+            // smallWrapper: duplicated as top-level return
+            MakeEndpoint("Orders", "list", returnType: smallWrapper),
+            MakeEndpoint("Orders", "list",
+                responses: [new TsResponseType(200,
+                    new TsType.InlineObject([
+                        ("data", new TsType.Primitive("string")),
+                        ("message", new TsType.Primitive("string")),
+                    ]))]),
+            // largeWrapper: duplicated as top-level return, same controller+method
+            MakeEndpoint("Orders", "list",
+                responses: [new TsResponseType(201, largeWrapper)]),
+            MakeEndpoint("Orders", "list",
+                responses: [new TsResponseType(202,
+                    new TsType.InlineObject([
+                        ("data", new TsType.Primitive("string")),
+                        ("message", new TsType.Primitive("string")),
+                        ("error", new TsType.Primitive("string")),
+                        ("status", new TsType.Primitive("number")),
+                        ("trace", new TsType.Primitive("string")),
+                    ]))]),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        // Both are top-level with wrapper fields → Response suffix
+        // Both derive "OrderList" base → collision on "OrderListResponse"
+        var names = result.ExtractedTypes
+            .Where(t => t.Name.StartsWith("OrderList"))
+            .Select(t => t.Name).OrderBy(n => n).ToList();
+        Assert.Equal(2, names.Count);
+        Assert.Contains("OrderListResponse", names);
+        // Second should be semantically disambiguated with Response suffix, not numeric
+        Assert.DoesNotContain("OrderListResponse2", names);
+        Assert.True(
+            names.Contains("OrderListSummaryResponse") || names.Contains("OrderListDetailResponse"),
+            $"Expected semantic disambiguation with Response suffix, got: {string.Join(", ", names)}");
+    }
 }
