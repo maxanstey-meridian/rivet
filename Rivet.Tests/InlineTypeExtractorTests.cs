@@ -1417,4 +1417,110 @@ public sealed class InlineTypeExtractorTests
         Assert.Single(result.ExtractedTypes);
         Assert.Equal("IdNamePlus3Dto", result.ExtractedTypes[0].Name);
     }
+
+    [Fact]
+    public void Extract_DataWrapperAcross3Controllers_DoesNotProduceDataDto()
+    {
+        var endpoints = new[]
+        {
+            MakeEndpoint("Auth", "login", returnType:
+                new TsType.InlineObject([("data", new TsType.InlineObject([
+                    ("id", new TsType.Primitive("number")),
+                    ("name", new TsType.Primitive("string")),
+                ]))])),
+            MakeEndpoint("Orders", "list", returnType:
+                new TsType.InlineObject([("data", new TsType.InlineObject([
+                    ("id", new TsType.Primitive("number")),
+                    ("name", new TsType.Primitive("string")),
+                ]))])),
+            MakeEndpoint("Products", "create", returnType:
+                new TsType.InlineObject([("data", new TsType.InlineObject([
+                    ("id", new TsType.Primitive("number")),
+                    ("name", new TsType.Primitive("string")),
+                ]))])),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        // The outer { data: ... } wrapper appears across 3 controllers → structural path
+        // DeriveStructuralName must NOT return "Data" — it should skip the data field
+        Assert.DoesNotContain(result.ExtractedTypes, t => t.Name.StartsWith("Data"));
+    }
+
+    [Fact]
+    public void DeriveStructuralName_EmptyObject_ReturnsFallbackName()
+    {
+        var inline = new TsType.InlineObject([]);
+
+        var result = InlineTypeExtractor.DeriveStructuralName(inline);
+
+        Assert.Equal("Object", result);
+    }
+
+    [Fact]
+    public void Extract_TwoDifferentShapesSameStructuralName_BothAcross3Controllers_ResolvesCollision()
+    {
+        var endpoints = new[]
+        {
+            // { message: string } across 3 controllers
+            MakeEndpoint("Auth", "login", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("string"))])),
+            MakeEndpoint("Orders", "list", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("string"))])),
+            MakeEndpoint("Products", "create", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("string"))])),
+            // { message: number } across 3 different controllers
+            MakeEndpoint("Users", "get", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("number"))])),
+            MakeEndpoint("Teams", "find", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("number"))])),
+            MakeEndpoint("Roles", "list", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("number"))])),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        var names = result.ExtractedTypes.Select(t => t.Name).OrderBy(n => n).ToList();
+        Assert.Equal(2, names.Count);
+        Assert.Contains("MessageDto", names);
+        Assert.Contains("MessageDto2", names);
+    }
+
+    [Fact]
+    public void DeriveStructuralName_SnakeCaseFields_ProducesPascalCase()
+    {
+        var inline = new TsType.InlineObject([
+            ("user_id", new TsType.Primitive("number")),
+            ("first_name", new TsType.Primitive("string")),
+        ]);
+
+        var result = InlineTypeExtractor.DeriveStructuralName(inline);
+
+        Assert.Equal("UserIdFirstName", result);
+    }
+
+    [Fact]
+    public void Extract_ShapeAcross3Controllers_SameMethod_UsesStructuralNotController()
+    {
+        // All 3 controllers use method "list" — if structural naming weren't active,
+        // the controller-based path would produce a plausible name too
+        var endpoints = new[]
+        {
+            MakeEndpoint("Auth", "list", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("string"))])),
+            MakeEndpoint("Orders", "list", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("string"))])),
+            MakeEndpoint("Products", "list", returnType:
+                new TsType.InlineObject([("message", new TsType.Primitive("string"))])),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        Assert.Single(result.ExtractedTypes);
+        Assert.Equal("MessageDto", result.ExtractedTypes[0].Name);
+        // Negative: controller name must NOT appear in the structural name
+        Assert.DoesNotContain("Auth", result.ExtractedTypes[0].Name);
+        Assert.DoesNotContain("Order", result.ExtractedTypes[0].Name);
+        Assert.DoesNotContain("Product", result.ExtractedTypes[0].Name);
+    }
 }

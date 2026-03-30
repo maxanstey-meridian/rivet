@@ -98,7 +98,9 @@ public static class InlineTypeExtractor
 
     internal static string DeriveStructuralName(TsType.InlineObject type)
     {
-        var fields = type.Fields;
+        var fields = type.Fields.Where(f => f.Name != "data").ToList();
+        if (fields.Count == 0)
+            return "Object";
         if (fields.Count <= 2)
             return string.Concat(fields.Select(f => ToPascalCase(f.Name)));
         return string.Concat(fields.Take(2).Select(f => ToPascalCase(f.Name))) + $"Plus{fields.Count - 2}";
