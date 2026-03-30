@@ -11,11 +11,19 @@ public sealed class ValidatorEmitterTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
-        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+
+        // Extraction pass — matches EmitPipeline.RunAsync wiring
+        var extraction = InlineTypeExtractor.Extract(endpoints, definitions);
+        var allDefinitions = definitions.Concat(extraction.ExtractedTypes).ToList();
+        var allNamespaces = new Dictionary<string, string?>(walker.TypeNamespaces);
+        foreach (var (name, ns) in extraction.TypeNamespaces)
+            allNamespaces[name] = ns;
+
+        var typeGrouping = TypeGrouper.Group(allDefinitions, walker.Brands.Values.ToList(), walker.Enums, allNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
-        var validators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
-        var client = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap);
-        var validatedClient = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap, ValidateMode.Zod);
+        var validators = ZodValidatorEmitter.Emit(extraction.Endpoints, typeFileMap);
+        var client = ClientEmitter.EmitControllerClient("endpoints", extraction.Endpoints, typeFileMap);
+        var validatedClient = ClientEmitter.EmitControllerClient("endpoints", extraction.Endpoints, typeFileMap, ValidateMode.Zod);
         return (validators, client, validatedClient);
     }
 
@@ -25,10 +33,18 @@ public sealed class ValidatorEmitterTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
-        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
+
+        // Extraction pass — matches EmitPipeline.RunAsync wiring
+        var extraction = InlineTypeExtractor.Extract(endpoints, definitions);
+        var allDefinitions = definitions.Concat(extraction.ExtractedTypes).ToList();
+        var allNamespaces = new Dictionary<string, string?>(walker.TypeNamespaces);
+        foreach (var (name, ns) in extraction.TypeNamespaces)
+            allNamespaces[name] = ns;
+
+        var typeGrouping = TypeGrouper.Group(allDefinitions, walker.Brands.Values.ToList(), walker.Enums, allNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
-        var zodValidators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
-        var zodClient = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap, ValidateMode.Zod);
+        var zodValidators = ZodValidatorEmitter.Emit(extraction.Endpoints, typeFileMap);
+        var zodClient = ClientEmitter.EmitControllerClient("endpoints", extraction.Endpoints, typeFileMap, ValidateMode.Zod);
         return (zodValidators, zodClient);
     }
 
@@ -514,5 +530,39 @@ public sealed class ValidatorEmitterTests
 
         // Should emit without error — Dictionary gets z.record()
         Assert.Contains("fromJSONSchema(MetadataDtoSchema)", zodValidators);
+    }
+
+    [Fact]
+    public void ExtractedInlineType_ZodValidator_ReferencesSchema()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/orders/{id}")]
+                public static Task<(Guid Id, string Name, decimal Price)> GetOrder(
+                    [FromRoute] Guid id)
+                    => throw new NotImplementedException();
+
+                [RivetEndpoint]
+                [HttpGet("/api/orders")]
+                public static Task<(Guid Id, string Name, decimal Price)[]> ListOrders()
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (zodValidators, _) = GenerateZod(source);
+
+        // The extracted type's schema should be imported and used
+        Assert.Contains("endpointDtoSchema", zodValidators);
+        Assert.Contains("assertendpointDto", zodValidators);
+        Assert.Contains("endpointDto", zodValidators);
     }
 }

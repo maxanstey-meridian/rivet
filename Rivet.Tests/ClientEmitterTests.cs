@@ -12,10 +12,18 @@ public sealed class ClientEmitterTests
         var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var definitions = walker.Definitions.Values.ToList();
         var brands = walker.Brands.Values.ToList();
-        var typeGrouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
+
+        // Extraction pass — matches EmitPipeline.RunAsync wiring
+        var extraction = InlineTypeExtractor.Extract(endpoints, definitions);
+        var allDefinitions = definitions.Concat(extraction.ExtractedTypes).ToList();
+        var allNamespaces = new Dictionary<string, string?>(walker.TypeNamespaces);
+        foreach (var (name, ns) in extraction.TypeNamespaces)
+            allNamespaces[name] = ns;
+
+        var typeGrouping = TypeGrouper.Group(allDefinitions, brands, walker.Enums, allNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
         var types = string.Concat(typeGrouping.Groups.Select(TypeEmitter.EmitGroupFile));
-        var client = ClientEmitter.EmitControllerClient("endpoints", endpoints, typeFileMap);
+        var client = ClientEmitter.EmitControllerClient("endpoints", extraction.Endpoints, typeFileMap);
         return (types, client);
     }
 
@@ -388,5 +396,83 @@ public sealed class ClientEmitterTests
         Assert.Equal("_return", safeParam.Invoke(null, ["return"]) as string);
         Assert.Equal("_delete", safeParam.Invoke(null, ["delete"]) as string);
         Assert.Equal("normalName", safeParam.Invoke(null, ["normalName"]) as string);
+    }
+
+    [Fact]
+    public void InlineTypeExtracted_ImportedInClient()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/buyers/{id}")]
+                public static Task<(Guid Id, string Name)> FindBuyer(
+                    [FromRoute] Guid id)
+                    => throw new NotImplementedException();
+
+                [RivetEndpoint]
+                [HttpGet("/api/buyers")]
+                public static Task<(Guid Id, string Name)[]> ListBuyers()
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (types, client) = Generate(source);
+
+        // Extracted type should exist in types output
+        Assert.Contains("export type endpointDto", types);
+
+        // Client should import the extracted type
+        Assert.Contains("import type { endpointDto }", client);
+
+        // Client should use the extracted name, not an inline literal
+        Assert.Contains("Promise<endpointDto>", client);
+        Assert.DoesNotContain("{ id: string; name: string }", client);
+    }
+
+    [Fact]
+    public void InlineTypeExtracted_ResultType_UsesName()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/items/{id}")]
+                [ProducesResponseType(typeof((Guid Id, string Title)), 200)]
+                [ProducesResponseType(404)]
+                public static Task<IActionResult> GetItem(
+                    [FromRoute] Guid id)
+                    => throw new NotImplementedException();
+
+                [RivetEndpoint]
+                [HttpGet("/api/items")]
+                [ProducesResponseType(typeof((Guid Id, string Title)[]), 200)]
+                public static Task<IActionResult> ListItems()
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (types, client) = Generate(source);
+
+        // Extracted type should appear in types
+        Assert.Contains("export type endpointDto", types);
+
+        // Discriminated union result type should use the extracted name
+        Assert.Contains("data: endpointDto", client);
+        Assert.DoesNotContain("{ id: string; title: string }", client);
     }
 }
