@@ -62,11 +62,36 @@ public static class InlineTypeExtractor
         return GenerateName(baseName, usedNames);
     }
 
+    public static string GenerateName(
+        string controllerName,
+        IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences,
+        HashSet<string> usedNames,
+        Dictionary<string, TsType.InlineObject> nameTypes,
+        TsType.InlineObject type)
+    {
+        var baseName = DeriveBaseName(controllerName, occurrences);
+        return GenerateName(baseName, usedNames, nameTypes, type);
+    }
+
     public static string GenerateName(string baseName, HashSet<string> usedNames)
     {
         var name = baseName + "Dto";
         name = ResolveCollision(name, usedNames);
         usedNames.Add(name);
+        return name;
+    }
+
+    public static string GenerateName(
+        string baseName,
+        HashSet<string> usedNames,
+        Dictionary<string, TsType.InlineObject> nameTypes,
+        TsType.InlineObject type)
+    {
+        var name = baseName + "Dto";
+        if (usedNames.Contains(name))
+            name = DisambiguateCollision(name, usedNames, nameTypes, type);
+        usedNames.Add(name);
+        nameTypes[name] = type;
         return name;
     }
 
@@ -86,6 +111,45 @@ public static class InlineTypeExtractor
         var segments = occurrences[0].Context.Split('.');
         var methodName = segments.Length > 1 ? segments[1] : "";
         return ToPascalCase(Singularize(controllerName)) + ToPascalCase(methodName);
+    }
+
+    internal static string DisambiguateCollision(
+        string name,
+        HashSet<string> usedNames,
+        Dictionary<string, TsType.InlineObject> nameTypes,
+        TsType.InlineObject type)
+    {
+        if (nameTypes.TryGetValue(name, out var existing))
+        {
+            // Strip "Dto" suffix to insert qualifier before it
+            var baseName = name.EndsWith("Dto") ? name[..^3] : name;
+
+            if (type.Fields.Count < existing.Fields.Count)
+            {
+                var candidate = baseName + "SummaryDto";
+                if (!usedNames.Contains(candidate))
+                    return candidate;
+            }
+
+            if (type.Fields.Count > existing.Fields.Count)
+            {
+                var candidate = baseName + "DetailDto";
+                if (!usedNames.Contains(candidate))
+                    return candidate;
+            }
+
+            // Find a distinguishing field name
+            var existingFieldNames = existing.Fields.Select(f => f.Name).ToHashSet();
+            var distinguishing = type.Fields.FirstOrDefault(f => !existingFieldNames.Contains(f.Name));
+            if (distinguishing != default)
+            {
+                var candidate = baseName + ToPascalCase(distinguishing.Name) + "Dto";
+                if (!usedNames.Contains(candidate))
+                    return candidate;
+            }
+        }
+
+        return ResolveCollision(name, usedNames);
     }
 
     private static string ResolveCollision(string name, HashSet<string> usedNames)
@@ -133,6 +197,7 @@ public static class InlineTypeExtractor
             .ToList();
 
         var usedNames = new HashSet<string>(existingDefinitions.Select(d => d.Name));
+        var nameTypes = new Dictionary<string, TsType.InlineObject>();
         var replacements = new Dictionary<string, TsType.TypeRef>();
         var extractedTypes = new List<TsTypeDefinition>();
         var typeNamespaces = new Dictionary<string, string?>();
@@ -150,12 +215,12 @@ public static class InlineTypeExtractor
             if (distinctControllers >= CrossControllerThreshold)
             {
                 var structuralBase = DeriveStructuralName(representative);
-                name = GenerateName(structuralBase, usedNames);
+                name = GenerateName(structuralBase, usedNames, nameTypes, representative);
             }
             else
             {
                 var controllerName = items[0].Context.Split('.')[0];
-                name = GenerateName(controllerName, items, usedNames);
+                name = GenerateName(controllerName, items, usedNames, nameTypes, representative);
             }
 
             replacements[group.Key] = new TsType.TypeRef(name);

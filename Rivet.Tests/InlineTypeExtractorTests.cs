@@ -547,19 +547,27 @@ public sealed class InlineTypeExtractorTests
     }
 
     [Fact]
-    public void GenerateName_Collision_AppendsSuffix()
+    public void GenerateName_Collision_UsesSummaryDisambiguation()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var smallType = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var largeType = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+        ]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
-            (inline, "Buyers.find.return"),
+            (smallType, "Buyers.find.return"),
         };
         var usedNames = new HashSet<string> { "BuyerFindDto" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindDto"] = largeType };
 
-        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, usedNames);
+        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, usedNames, nameTypes, smallType);
 
-        Assert.Equal("BuyerFindDto2", result);
-        Assert.Contains("BuyerFindDto2", usedNames);
+        Assert.Equal("BuyerFindSummaryDto", result);
+        Assert.Contains("BuyerFindSummaryDto", usedNames);
+        // nameTypes should track the new assignment
+        Assert.True(nameTypes.ContainsKey("BuyerFindSummaryDto"));
     }
 
     // --- Extract tests ---
@@ -1484,6 +1492,161 @@ public sealed class InlineTypeExtractorTests
         Assert.Equal(2, names.Count);
         Assert.Contains("MessageDto", names);
         Assert.Contains("MessageDto2", names);
+    }
+
+    [Fact]
+    public void DisambiguateCollision_FewerFields_AppendsSummary()
+    {
+        var smallType = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var largeType = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+            ("phone", new TsType.Primitive("string")),
+            ("address", new TsType.Primitive("string")),
+        ]);
+        var usedNames = new HashSet<string> { "BuyerFindDto" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindDto"] = largeType };
+
+        var result = InlineTypeExtractor.DisambiguateCollision("BuyerFindDto", usedNames, nameTypes, smallType);
+
+        Assert.Equal("BuyerFindSummaryDto", result);
+    }
+
+    [Fact]
+    public void Extract_TwoDifferentShapesSameFieldName_SemanticDisambiguation()
+    {
+        // Two shapes both from field context "items" — collision on "ItemDto"
+        var smallItems = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var largeItems = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+            ("phone", new TsType.Primitive("string")),
+            ("address", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[]
+        {
+            // small items shape duplicated across two endpoints
+            MakeEndpoint("Buyers", "find", returnType: new TsType.InlineObject([
+                ("items", smallItems),
+            ])),
+            MakeEndpoint("Buyers", "list", returnType: new TsType.InlineObject([
+                ("items", new TsType.InlineObject([
+                    ("id", new TsType.Primitive("number")),
+                    ("name", new TsType.Primitive("string")),
+                ])),
+            ])),
+            // large items shape duplicated across two endpoints
+            MakeEndpoint("Buyers", "search", returnType: new TsType.InlineObject([
+                ("items", largeItems),
+            ])),
+            MakeEndpoint("Buyers", "export", returnType: new TsType.InlineObject([
+                ("items", new TsType.InlineObject([
+                    ("id", new TsType.Primitive("number")),
+                    ("name", new TsType.Primitive("string")),
+                    ("email", new TsType.Primitive("string")),
+                    ("phone", new TsType.Primitive("string")),
+                    ("address", new TsType.Primitive("string")),
+                ])),
+            ])),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        var names = result.ExtractedTypes.Select(t => t.Name).OrderBy(n => n).ToList();
+        // One gets "ItemDto", the other gets semantic disambiguation
+        Assert.Contains("ItemDto", names);
+        // The second should NOT be "ItemDto2" — should be Summary or Detail
+        Assert.DoesNotContain("ItemDto2", names);
+        // Should contain either ItemSummaryDto or ItemDetailDto
+        Assert.True(
+            names.Contains("ItemSummaryDto") || names.Contains("ItemDetailDto"),
+            $"Expected semantic disambiguation, got: {string.Join(", ", names)}");
+    }
+
+    [Fact]
+    public void DisambiguateCollision_NameNotInNameTypes_FallsBackToNumeric()
+    {
+        // Simulates collision with existingDefinitions (no type info tracked)
+        var type = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var usedNames = new HashSet<string> { "BuyerFindDto" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject>(); // empty — name came from existingDefs
+
+        var result = InlineTypeExtractor.DisambiguateCollision("BuyerFindDto", usedNames, nameTypes, type);
+
+        Assert.Equal("BuyerFindDto2", result);
+    }
+
+    [Fact]
+    public void DisambiguateCollision_AllStrategiesFail_FallsBackToNumeric()
+    {
+        // Same count, same field names, different types — no semantic strategy applies
+        var typeA = new TsType.InlineObject([
+            ("id", new TsType.Primitive("string")),
+            ("name", new TsType.Primitive("number")),
+        ]);
+        var typeB = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var usedNames = new HashSet<string> { "BuyerFindDto" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindDto"] = typeB };
+
+        var result = InlineTypeExtractor.DisambiguateCollision("BuyerFindDto", usedNames, nameTypes, typeA);
+
+        Assert.Equal("BuyerFindDto2", result);
+    }
+
+    [Fact]
+    public void DisambiguateCollision_DistinguishingField()
+    {
+        var typeA = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("customer_name", new TsType.Primitive("string")),
+        ]);
+        var typeB = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+        ]);
+        var usedNames = new HashSet<string> { "BuyerFindDto" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindDto"] = typeB };
+
+        var result = InlineTypeExtractor.DisambiguateCollision("BuyerFindDto", usedNames, nameTypes, typeA);
+
+        Assert.Equal("BuyerFindCustomerNameDto", result);
+    }
+
+    [Fact]
+    public void DisambiguateCollision_MoreFields_AppendsDetail()
+    {
+        var largeType = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+            ("phone", new TsType.Primitive("string")),
+            ("address", new TsType.Primitive("string")),
+            ("notes", new TsType.Primitive("string")),
+        ]);
+        var smallType = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+        ]);
+        var usedNames = new HashSet<string> { "BuyerFindDto" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindDto"] = smallType };
+
+        var result = InlineTypeExtractor.DisambiguateCollision("BuyerFindDto", usedNames, nameTypes, largeType);
+
+        Assert.Equal("BuyerFindDetailDto", result);
     }
 
     [Fact]
