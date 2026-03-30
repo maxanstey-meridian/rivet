@@ -126,14 +126,20 @@ public static partial class ClientEmitter
             paramParts.Add($"{SafeParameterName(p.Name)}: {TypeEmitter.EmitTypeString(p.Type)}");
         }
 
-        var paramsStr = string.Join(", ", paramParts);
-
         var route = InterpolateRoute(endpoint.RouteTemplate, endpoint.Params);
 
         var fileParams = endpoint.Params.Where(p => p.Source == ParamSource.File).ToList();
         var formFieldParams = endpoint.Params.Where(p => p.Source == ParamSource.FormField).ToList();
         var bodyParam = endpoint.Params.FirstOrDefault(p => p.Source == ParamSource.Body);
         var queryParams = endpoint.Params.Where(p => p.Source == ParamSource.Query).ToList();
+
+        // Fallback: PHP contracts carry body type in RequestType instead of Params
+        if (bodyParam is null && endpoint.RequestType is not null)
+        {
+            paramParts.Add($"body: {TypeEmitter.EmitTypeString(endpoint.RequestType)}");
+        }
+
+        var paramsStr = string.Join(", ", paramParts);
 
         // Determine result type for unwrap: false
         var hasResultDU = endpoint.Responses.Count >= 2;
@@ -170,6 +176,10 @@ public static partial class ClientEmitter
             {
                 fetchOptionParts.Add($"body: {SafeParameterName(bodyParam.Name)}");
             }
+        }
+        else if (endpoint.RequestType is not null)
+        {
+            fetchOptionParts.Add("body: body");
         }
         if (queryParams.Count > 0)
         {
@@ -365,6 +375,11 @@ public static partial class ClientEmitter
             if (endpoint.ReturnType is not null)
             {
                 TsType.CollectTypeRefs(endpoint.ReturnType, names);
+            }
+
+            if (endpoint.RequestType is not null)
+            {
+                TsType.CollectTypeRefs(endpoint.RequestType, names);
             }
 
             foreach (var response in endpoint.Responses)

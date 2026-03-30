@@ -1,5 +1,6 @@
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -435,6 +436,105 @@ public sealed class ClientEmitterTests
         // Client should use the extracted name, not an inline literal
         Assert.Contains("Promise<endpointDto>", client);
         Assert.DoesNotContain("{ id: string; name: string }", client);
+    }
+
+    // --- RequestType tests (hand-built endpoints for PHP contract support) ---
+
+    private static TsEndpointDefinition MakeEndpoint(
+        string name = "createBuyer",
+        string method = "POST",
+        string route = "/api/buyers",
+        IReadOnlyList<TsEndpointParam>? @params = null,
+        TsType? returnType = null,
+        string controller = "buyer",
+        TsType? requestType = null) =>
+        new(
+            Name: name,
+            HttpMethod: method,
+            RouteTemplate: route,
+            Params: @params ?? [],
+            ReturnType: returnType,
+            ControllerName: controller,
+            Responses: [],
+            RequestType: requestType);
+
+    [Fact]
+    public void RequestType_TypeRef_EmitsBodyParam()
+    {
+        var endpoint = MakeEndpoint(
+            requestType: new TsType.TypeRef("CreateBuyerRequest"),
+            returnType: new TsType.TypeRef("BuyerDto"));
+
+        var typeFileMap = new Dictionary<string, string>
+        {
+            ["CreateBuyerRequest"] = "buyer",
+            ["BuyerDto"] = "buyer",
+        };
+
+        var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], typeFileMap);
+
+        // All three overloads should include body param
+        Assert.Contains("export function createBuyer(body: CreateBuyerRequest): Promise<BuyerDto>;", output);
+        Assert.Contains("export function createBuyer(body: CreateBuyerRequest, opts: { unwrap: true }): Promise<BuyerDto>;", output);
+        Assert.Contains("export function createBuyer(body: CreateBuyerRequest, opts: { unwrap: false }): Promise<RivetResult<BuyerDto>>;", output);
+        // Fetch options should include body
+        Assert.Contains("body: body", output);
+        // Import should include the request type
+        Assert.Contains("CreateBuyerRequest", output.Split('\n').First(l => l.StartsWith("import type")));
+    }
+
+    [Fact]
+    public void RequestType_InlineObject_EmitsBodyParam()
+    {
+        var endpoint = MakeEndpoint(
+            requestType: new TsType.InlineObject([
+                ("id", new TsType.Primitive("number", "int32")),
+                ("name", new TsType.Primitive("string")),
+            ]),
+            returnType: new TsType.Primitive("void"));
+
+        var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], new Dictionary<string, string>());
+
+        Assert.Contains("body: { id: number; name: string; }", output);
+        Assert.Contains("body: body", output);
+    }
+
+    [Fact]
+    public void RequestType_Null_NoBodyParam()
+    {
+        var endpoint = MakeEndpoint(
+            name: "listBuyers",
+            method: "GET",
+            route: "/api/buyers",
+            returnType: new TsType.Primitive("void"),
+            requestType: null);
+
+        var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], new Dictionary<string, string>());
+
+        Assert.DoesNotContain("body:", output);
+    }
+
+    [Fact]
+    public void RequestType_IgnoredWhenBodyParamExists()
+    {
+        var endpoint = MakeEndpoint(
+            method: "POST",
+            @params: [new TsEndpointParam("body", new TsType.TypeRef("LegacyRequest"), ParamSource.Body)],
+            requestType: new TsType.TypeRef("CreateBuyerRequest"),
+            returnType: new TsType.Primitive("void"));
+
+        var typeFileMap = new Dictionary<string, string>
+        {
+            ["LegacyRequest"] = "buyer",
+            ["CreateBuyerRequest"] = "buyer",
+        };
+
+        var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], typeFileMap);
+
+        Assert.Contains("body: LegacyRequest", output);
+        // Signature should NOT contain the RequestType name
+        var signatures = output.Split('\n').Where(l => l.StartsWith("export function")).ToList();
+        Assert.All(signatures, s => Assert.DoesNotContain("CreateBuyerRequest", s));
     }
 
     [Fact]
