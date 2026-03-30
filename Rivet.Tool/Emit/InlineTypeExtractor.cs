@@ -59,7 +59,8 @@ public static class InlineTypeExtractor
         HashSet<string> usedNames)
     {
         var baseName = DeriveBaseName(controllerName, occurrences);
-        return GenerateName(baseName, usedNames);
+        var suffix = IsResponseWrapper(occurrences, occurrences[0].Type) ? "Response" : "Dto";
+        return GenerateName(baseName, suffix, usedNames);
     }
 
     public static string GenerateName(
@@ -71,12 +72,18 @@ public static class InlineTypeExtractor
         HashSet<string>? arrayElementHashes = null)
     {
         var baseName = DeriveBaseName(controllerName, occurrences);
-        return GenerateName(baseName, usedNames, nameTypes, type, arrayElementHashes);
+        var suffix = IsResponseWrapper(occurrences, type) ? "Response" : "Dto";
+        return GenerateName(baseName, suffix, usedNames, nameTypes, type, arrayElementHashes);
     }
 
     public static string GenerateName(string baseName, HashSet<string> usedNames)
     {
-        var name = baseName + "Dto";
+        return GenerateName(baseName, "Dto", usedNames);
+    }
+
+    public static string GenerateName(string baseName, string suffix, HashSet<string> usedNames)
+    {
+        var name = baseName + suffix;
         name = ResolveCollision(name, usedNames);
         usedNames.Add(name);
         return name;
@@ -84,12 +91,13 @@ public static class InlineTypeExtractor
 
     public static string GenerateName(
         string baseName,
+        string suffix,
         HashSet<string> usedNames,
         Dictionary<string, TsType.InlineObject> nameTypes,
         TsType.InlineObject type,
         HashSet<string>? arrayElementHashes)
     {
-        var name = baseName + "Dto";
+        var name = baseName + suffix;
         if (usedNames.Contains(name))
             name = DisambiguateCollision(name, usedNames, nameTypes, type, arrayElementHashes);
         usedNames.Add(name);
@@ -115,6 +123,26 @@ public static class InlineTypeExtractor
         return ToPascalCase(Singularize(controllerName)) + ToPascalCase(methodName);
     }
 
+    private static readonly HashSet<string> ResponseWrapperFields = ["data", "message", "error", "status"];
+
+    internal static bool IsResponseWrapper(
+        IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences,
+        TsType.InlineObject type)
+    {
+        // Condition 1: all occurrences are top-level (no .field. in context)
+        // and context matches *.return or *.response.*
+        var allTopLevel = occurrences.All(o =>
+        {
+            var ctx = o.Context;
+            if (ctx.Contains(".field.")) return false;
+            return ctx.EndsWith(".return") || ctx.Contains(".response.");
+        });
+        if (!allTopLevel) return false;
+
+        // Condition 2: type has at least one wrapper field
+        return type.Fields.Any(f => ResponseWrapperFields.Contains(f.Name));
+    }
+
     internal static string DisambiguateCollision(
         string name,
         HashSet<string> usedNames,
@@ -122,29 +150,44 @@ public static class InlineTypeExtractor
         TsType.InlineObject type,
         HashSet<string>? arrayElementHashes = null)
     {
-        var baseName = name.EndsWith("Dto") ? name[..^3] : name;
+        // Strip known suffix to get baseName and suffix
+        string baseName, suffix;
+        if (name.EndsWith("Response"))
+        {
+            baseName = name[..^8];
+            suffix = "Response";
+        }
+        else if (name.EndsWith("Dto"))
+        {
+            baseName = name[..^3];
+            suffix = "Dto";
+        }
+        else
+        {
+            baseName = name;
+            suffix = "";
+        }
 
         // Strategy 1: Array element → Ref
         if (arrayElementHashes is not null && arrayElementHashes.Contains(CanonicalHash(type)))
         {
-            var candidate = baseName + "RefDto";
+            var candidate = baseName + "Ref" + suffix;
             if (!usedNames.Contains(candidate))
                 return candidate;
         }
 
         if (nameTypes.TryGetValue(name, out var existing))
         {
-
             if (type.Fields.Count < existing.Fields.Count)
             {
-                var candidate = baseName + "SummaryDto";
+                var candidate = baseName + "Summary" + suffix;
                 if (!usedNames.Contains(candidate))
                     return candidate;
             }
 
             if (type.Fields.Count > existing.Fields.Count)
             {
-                var candidate = baseName + "DetailDto";
+                var candidate = baseName + "Detail" + suffix;
                 if (!usedNames.Contains(candidate))
                     return candidate;
             }
@@ -154,7 +197,7 @@ public static class InlineTypeExtractor
             var distinguishing = type.Fields.FirstOrDefault(f => !existingFieldNames.Contains(f.Name));
             if (distinguishing != default)
             {
-                var candidate = baseName + ToPascalCase(distinguishing.Name) + "Dto";
+                var candidate = baseName + ToPascalCase(distinguishing.Name) + suffix;
                 if (!usedNames.Contains(candidate))
                     return candidate;
             }
@@ -223,11 +266,12 @@ public static class InlineTypeExtractor
                 continue;
 
             var distinctControllers = items.Select(i => i.Context.Split('.')[0]).Distinct().Count();
+            var suffix = IsResponseWrapper(items, representative) ? "Response" : "Dto";
             string name;
             if (distinctControllers >= CrossControllerThreshold)
             {
                 var structuralBase = DeriveStructuralName(representative);
-                name = GenerateName(structuralBase, usedNames, nameTypes, representative, arrayElementHashes);
+                name = GenerateName(structuralBase, suffix, usedNames, nameTypes, representative, arrayElementHashes);
             }
             else
             {

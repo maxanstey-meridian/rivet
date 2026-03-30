@@ -1359,7 +1359,7 @@ public sealed class InlineTypeExtractorTests
         var result = InlineTypeExtractor.Extract(endpoints, []);
 
         Assert.Single(result.ExtractedTypes);
-        Assert.Equal("MessageDto", result.ExtractedTypes[0].Name);
+        Assert.Equal("MessageResponse", result.ExtractedTypes[0].Name);
     }
 
     [Fact]
@@ -1376,7 +1376,7 @@ public sealed class InlineTypeExtractorTests
         var result = InlineTypeExtractor.Extract(endpoints, []);
 
         Assert.Single(result.ExtractedTypes);
-        Assert.Equal("AuthLoginDto", result.ExtractedTypes[0].Name);
+        Assert.Equal("AuthLoginResponse", result.ExtractedTypes[0].Name);
     }
 
     [Fact]
@@ -1490,8 +1490,8 @@ public sealed class InlineTypeExtractorTests
 
         var names = result.ExtractedTypes.Select(t => t.Name).OrderBy(n => n).ToList();
         Assert.Equal(2, names.Count);
-        Assert.Contains("MessageDto", names);
-        Assert.Contains("MessageDto2", names);
+        Assert.Contains("MessageResponse", names);
+        Assert.Contains("MessageResponse2", names);
     }
 
     [Fact]
@@ -1776,10 +1776,155 @@ public sealed class InlineTypeExtractorTests
         var result = InlineTypeExtractor.Extract(endpoints, []);
 
         Assert.Single(result.ExtractedTypes);
-        Assert.Equal("MessageDto", result.ExtractedTypes[0].Name);
+        Assert.Equal("MessageResponse", result.ExtractedTypes[0].Name);
         // Negative: controller name must NOT appear in the structural name
         Assert.DoesNotContain("Auth", result.ExtractedTypes[0].Name);
         Assert.DoesNotContain("Order", result.ExtractedTypes[0].Name);
         Assert.DoesNotContain("Product", result.ExtractedTypes[0].Name);
+    }
+
+    // --- IsResponseWrapper tests ---
+
+    [Fact]
+    public void IsResponseWrapper_TopLevelReturn_WithDataField_True()
+    {
+        var type = new TsType.InlineObject([
+            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
+            ("message", new TsType.Primitive("string")),
+        ]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (type, "Auth.login.return"),
+        };
+
+        Assert.True(InlineTypeExtractor.IsResponseWrapper(occurrences, type));
+    }
+
+    [Fact]
+    public void IsResponseWrapper_FieldContext_False()
+    {
+        var type = new TsType.InlineObject([
+            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
+        ]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (type, "Auth.login.return.field.data"),
+        };
+
+        Assert.False(InlineTypeExtractor.IsResponseWrapper(occurrences, type));
+    }
+
+    [Fact]
+    public void GenerateName_ResponseWrapper_GetsResponseSuffix()
+    {
+        var type = new TsType.InlineObject([
+            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
+            ("message", new TsType.Primitive("string")),
+        ]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (type, "Auth.login.return"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Auth", occurrences, new HashSet<string>());
+
+        Assert.Equal("AuthLoginResponse", result);
+    }
+
+    [Fact]
+    public void GenerateName_TopLevelWithoutWrapperFields_GetsDtoSuffix()
+    {
+        var type = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (type, "Buyers.find.return"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+
+        Assert.Equal("BuyerFindDto", result);
+    }
+
+    [Fact]
+    public void GenerateName_NestedType_GetsDtoSuffix()
+    {
+        var type = new TsType.InlineObject([
+            ("street", new TsType.Primitive("string")),
+            ("city", new TsType.Primitive("string")),
+        ]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (type, "Buyers.find.return.field.location"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+
+        Assert.Equal("LocationDto", result);
+    }
+
+    [Fact]
+    public void GenerateName_ResponseWrapperCollision_UsesSummaryResponse()
+    {
+        var smallType = new TsType.InlineObject([
+            ("data", new TsType.Primitive("string")),
+            ("message", new TsType.Primitive("string")),
+        ]);
+        var largeType = new TsType.InlineObject([
+            ("data", new TsType.Primitive("string")),
+            ("message", new TsType.Primitive("string")),
+            ("error", new TsType.Primitive("string")),
+            ("status", new TsType.Primitive("number")),
+            ("timestamp", new TsType.Primitive("string")),
+        ]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (smallType, "Auth.login.return"),
+        };
+        var usedNames = new HashSet<string> { "AuthLoginResponse" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["AuthLoginResponse"] = largeType };
+
+        var result = InlineTypeExtractor.GenerateName(
+            "Auth", occurrences, usedNames, nameTypes, smallType);
+
+        Assert.Equal("AuthLoginSummaryResponse", result);
+    }
+
+    [Fact]
+    public void Extract_ResponseWrapperAndInnerDto()
+    {
+        var inner = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var outer = new TsType.InlineObject([
+            ("data", inner),
+            ("message", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[]
+        {
+            MakeEndpoint("Orders", "list", returnType: outer),
+            MakeEndpoint("Orders", "search", returnType: new TsType.InlineObject([
+                ("data", new TsType.InlineObject([
+                    ("id", new TsType.Primitive("number")),
+                    ("name", new TsType.Primitive("string")),
+                ])),
+                ("message", new TsType.Primitive("string")),
+            ])),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        Assert.Equal(2, result.ExtractedTypes.Count);
+
+        var outerType = result.ExtractedTypes.First(t =>
+            t.Properties.Any(p => p.Name == "message"));
+        Assert.EndsWith("Response", outerType.Name);
+
+        var innerType = result.ExtractedTypes.First(t =>
+            t.Properties.Any(p => p.Name == "id") && !t.Properties.Any(p => p.Name == "message"));
+        Assert.EndsWith("Dto", innerType.Name);
     }
 }
