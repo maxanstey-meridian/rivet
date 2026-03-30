@@ -273,4 +273,207 @@ public sealed class InlineTypeExtractorTests
             InlineTypeExtractor.CanonicalHash(dateTime),
             InlineTypeExtractor.CanonicalHash(dateTime2));
     }
+
+    // --- Hash coverage for remaining TsType variants ---
+
+    [Fact]
+    public void Dictionary_HashesCorrectly()
+    {
+        var dict = new TsType.Dictionary(new TsType.Primitive("string"));
+        var dict2 = new TsType.Dictionary(new TsType.Primitive("string"));
+        var dictNum = new TsType.Dictionary(new TsType.Primitive("number"));
+
+        Assert.Equal(
+            InlineTypeExtractor.CanonicalHash(dict),
+            InlineTypeExtractor.CanonicalHash(dict2));
+        Assert.NotEqual(
+            InlineTypeExtractor.CanonicalHash(dict),
+            InlineTypeExtractor.CanonicalHash(dictNum));
+    }
+
+    [Fact]
+    public void StringUnion_OrderIndependent()
+    {
+        var a = new TsType.StringUnion(["beta", "alpha", "gamma"]);
+        var b = new TsType.StringUnion(["gamma", "alpha", "beta"]);
+        var c = new TsType.StringUnion(["alpha", "delta"]);
+
+        Assert.Equal(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(b));
+        Assert.NotEqual(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(c));
+    }
+
+    [Fact]
+    public void IntUnion_OrderIndependent()
+    {
+        var a = new TsType.IntUnion([3, 1, 2]);
+        var b = new TsType.IntUnion([1, 2, 3]);
+        var c = new TsType.IntUnion([1, 2, 4]);
+
+        Assert.Equal(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(b));
+        Assert.NotEqual(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(c));
+    }
+
+    [Fact]
+    public void Generic_HashesWithTypeArguments()
+    {
+        var a = new TsType.Generic("PagedResult", [new TsType.TypeRef("Foo")]);
+        var b = new TsType.Generic("PagedResult", [new TsType.TypeRef("Foo")]);
+        var c = new TsType.Generic("PagedResult", [new TsType.TypeRef("Bar")]);
+        var d = new TsType.Generic("OtherGeneric", [new TsType.TypeRef("Foo")]);
+
+        Assert.Equal(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(b));
+        Assert.NotEqual(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(c));
+        Assert.NotEqual(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(d));
+    }
+
+    [Fact]
+    public void TypeParam_HashesByName()
+    {
+        var a = new TsType.TypeParam("T");
+        var b = new TsType.TypeParam("T");
+        var c = new TsType.TypeParam("U");
+
+        Assert.Equal(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(b));
+        Assert.NotEqual(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(c));
+    }
+
+    [Fact]
+    public void Brand_HashesNameAndInner()
+    {
+        var a = new TsType.Brand("Email", new TsType.Primitive("string"));
+        var b = new TsType.Brand("Email", new TsType.Primitive("string"));
+        var c = new TsType.Brand("UserId", new TsType.Primitive("string"));
+        var d = new TsType.Brand("Email", new TsType.Primitive("number"));
+
+        Assert.Equal(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(b));
+        Assert.NotEqual(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(c));
+        Assert.NotEqual(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(d));
+    }
+
+    [Fact]
+    public void EmptyInlineObject_HashesConsistently()
+    {
+        var a = new TsType.InlineObject([]);
+        var b = new TsType.InlineObject([]);
+        var c = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+
+        Assert.Equal(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(b));
+        Assert.NotEqual(
+            InlineTypeExtractor.CanonicalHash(a),
+            InlineTypeExtractor.CanonicalHash(c));
+    }
+
+    // --- Collection coverage for remaining wrapper types ---
+
+    [Fact]
+    public void CollectsFromDictionary()
+    {
+        var inline = new TsType.InlineObject([("key", new TsType.Primitive("string"))]);
+        var endpoint = MakeEndpoint("Items", "map",
+            returnType: new TsType.Dictionary(inline));
+
+        var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
+
+        Assert.Single(result);
+        Assert.Same(inline, result[0].Type);
+    }
+
+    [Fact]
+    public void CollectsFromGenericTypeArguments()
+    {
+        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var endpoint = MakeEndpoint("Items", "paged",
+            returnType: new TsType.Generic("PagedResult", [inline]));
+
+        var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
+
+        Assert.Single(result);
+        Assert.Same(inline, result[0].Type);
+    }
+
+    [Fact]
+    public void CollectsFromBrandInner()
+    {
+        var inline = new TsType.InlineObject([("value", new TsType.Primitive("string"))]);
+        var endpoint = MakeEndpoint("Items", "get",
+            returnType: new TsType.Brand("Tagged", inline));
+
+        var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
+
+        Assert.Single(result);
+        Assert.Same(inline, result[0].Type);
+    }
+
+    [Fact]
+    public void CollectsNestedInlineObjectsFromFields()
+    {
+        var inner = new TsType.InlineObject([("street", new TsType.Primitive("string"))]);
+        var outer = new TsType.InlineObject([
+            ("name", new TsType.Primitive("string")),
+            ("address", inner),
+        ]);
+        var endpoint = MakeEndpoint("Buyers", "find", returnType: outer);
+
+        var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
+
+        // Both outer and inner should be collected
+        Assert.Equal(2, result.Count);
+        Assert.Same(outer, result[0].Type);
+        Assert.Same(inner, result[1].Type);
+    }
+
+    [Fact]
+    public void NullReturnType_DoesNotCrash()
+    {
+        var endpoint = MakeEndpoint("Buyers", "delete");
+
+        var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void NullResponseDataType_DoesNotCrash()
+    {
+        var endpoint = MakeEndpoint("Buyers", "delete",
+            responses: [new TsResponseType(204, null)]);
+
+        var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void EmptyEndpointsList_ReturnsEmpty()
+    {
+        var result = InlineTypeExtractor.CollectInlineObjects([]);
+
+        Assert.Empty(result);
+    }
 }
