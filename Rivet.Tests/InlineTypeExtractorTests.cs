@@ -561,4 +561,226 @@ public sealed class InlineTypeExtractorTests
         Assert.Equal("BuyerDto2", result);
         Assert.Contains("BuyerDto2", usedNames);
     }
+
+    // --- Extract tests ---
+
+    [Fact]
+    public void DuplicateInlineObjects_ExtractedToNamedType()
+    {
+        var inline1 = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var inline2 = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[]
+        {
+            MakeEndpoint("Buyers", "find", returnType: inline1),
+            MakeEndpoint("Buyers", "list", returnType: inline2),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        // One extracted type
+        Assert.Single(result.ExtractedTypes);
+        var extracted = result.ExtractedTypes[0];
+        Assert.Equal("BuyerDto", extracted.Name);
+        Assert.Equal(2, extracted.Properties.Count);
+
+        // Both endpoints replaced with TypeRef
+        Assert.IsType<TsType.TypeRef>(result.Endpoints[0].ReturnType);
+        Assert.Equal("BuyerDto", ((TsType.TypeRef)result.Endpoints[0].ReturnType!).Name);
+        Assert.IsType<TsType.TypeRef>(result.Endpoints[1].ReturnType);
+        Assert.Equal("BuyerDto", ((TsType.TypeRef)result.Endpoints[1].ReturnType!).Name);
+
+        // Namespace is null (common group)
+        Assert.Null(result.TypeNamespaces["BuyerDto"]);
+    }
+
+    [Fact]
+    public void LargeInlineObject_ExtractedEvenIfSingle()
+    {
+        var inline = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+            ("phone", new TsType.Primitive("string")),
+            ("address", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[] { MakeEndpoint("Buyers", "find", returnType: inline) };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        Assert.Single(result.ExtractedTypes);
+        Assert.IsType<TsType.TypeRef>(result.Endpoints[0].ReturnType);
+    }
+
+    [Fact]
+    public void SmallSingleOccurrence_NotExtracted()
+    {
+        var inline = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[] { MakeEndpoint("Buyers", "find", returnType: inline) };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        Assert.Empty(result.ExtractedTypes);
+        Assert.IsType<TsType.InlineObject>(result.Endpoints[0].ReturnType);
+    }
+
+    [Fact]
+    public void ReplacementIsRecursive()
+    {
+        var inner = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[]
+        {
+            MakeEndpoint("Buyers", "find", returnType: new TsType.Array(inner)),
+            MakeEndpoint("Buyers", "list", returnType: new TsType.Array(
+                new TsType.InlineObject([
+                    ("id", new TsType.Primitive("number")),
+                    ("name", new TsType.Primitive("string")),
+                ]))),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        Assert.Single(result.ExtractedTypes);
+
+        // Both endpoints should have Array(TypeRef(...))
+        var ret0 = Assert.IsType<TsType.Array>(result.Endpoints[0].ReturnType);
+        Assert.IsType<TsType.TypeRef>(ret0.Element);
+
+        var ret1 = Assert.IsType<TsType.Array>(result.Endpoints[1].ReturnType);
+        Assert.IsType<TsType.TypeRef>(ret1.Element);
+    }
+
+    [Fact]
+    public void ResponseDataTypes_AlsoReplaced()
+    {
+        var inline = new TsType.InlineObject([
+            ("total", new TsType.Primitive("number")),
+            ("items", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[]
+        {
+            MakeEndpoint("Orders", "list",
+                responses: [new TsResponseType(200, inline)]),
+            MakeEndpoint("Orders", "search",
+                responses: [new TsResponseType(200,
+                    new TsType.InlineObject([
+                        ("total", new TsType.Primitive("number")),
+                        ("items", new TsType.Primitive("string")),
+                    ]))]),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        Assert.Single(result.ExtractedTypes);
+        Assert.IsType<TsType.TypeRef>(result.Endpoints[0].Responses[0].DataType);
+        Assert.IsType<TsType.TypeRef>(result.Endpoints[1].Responses[0].DataType);
+    }
+
+    [Fact]
+    public void ExistingDefinitions_NoNameCollision()
+    {
+        var inline = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[]
+        {
+            MakeEndpoint("Buyers", "find", returnType: inline),
+            MakeEndpoint("Buyers", "list", returnType: new TsType.InlineObject([
+                ("id", new TsType.Primitive("number")),
+                ("name", new TsType.Primitive("string")),
+            ])),
+        };
+        var existingDefs = new[] { new TsTypeDefinition("BuyerDto", [], []) };
+
+        var result = InlineTypeExtractor.Extract(endpoints, existingDefs);
+
+        Assert.Single(result.ExtractedTypes);
+        Assert.Equal("BuyerDto2", result.ExtractedTypes[0].Name);
+    }
+
+    [Fact]
+    public void ExtractedTypeProperties_CorrectOptional()
+    {
+        var inline = new TsType.InlineObject([
+            ("name", new TsType.Primitive("string")),
+            ("nickname", new TsType.Nullable(new TsType.Primitive("string"))),
+        ]);
+        var endpoints = new[]
+        {
+            MakeEndpoint("Buyers", "find", returnType: inline),
+            MakeEndpoint("Buyers", "list", returnType: new TsType.InlineObject([
+                ("name", new TsType.Primitive("string")),
+                ("nickname", new TsType.Nullable(new TsType.Primitive("string"))),
+            ])),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        var extracted = result.ExtractedTypes[0];
+        Assert.Equal(2, extracted.Properties.Count);
+
+        var nameProp = extracted.Properties.First(p => p.Name == "name");
+        Assert.False(nameProp.IsOptional);
+        Assert.IsType<TsType.Primitive>(nameProp.Type);
+
+        var nicknameProp = extracted.Properties.First(p => p.Name == "nickname");
+        Assert.True(nicknameProp.IsOptional);
+        Assert.IsType<TsType.Primitive>(nicknameProp.Type);
+        Assert.Equal("string", ((TsType.Primitive)nicknameProp.Type).Name);
+    }
+
+    [Fact]
+    public void NestedInlineObjects_BothExtracted()
+    {
+        var inner = new TsType.InlineObject([
+            ("street", new TsType.Primitive("string")),
+            ("city", new TsType.Primitive("string")),
+        ]);
+        var outer = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("address", inner),
+        ]);
+        // Duplicate both outer and inner across two endpoints
+        var endpoints = new[]
+        {
+            MakeEndpoint("Buyers", "find", returnType: outer),
+            MakeEndpoint("Buyers", "list", returnType: new TsType.InlineObject([
+                ("id", new TsType.Primitive("number")),
+                ("name", new TsType.Primitive("string")),
+                ("address", new TsType.InlineObject([
+                    ("street", new TsType.Primitive("string")),
+                    ("city", new TsType.Primitive("string")),
+                ])),
+            ])),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        // Both inner and outer extracted
+        Assert.Equal(2, result.ExtractedTypes.Count);
+
+        // Both endpoints replaced with TypeRef at top level
+        Assert.IsType<TsType.TypeRef>(result.Endpoints[0].ReturnType);
+        Assert.IsType<TsType.TypeRef>(result.Endpoints[1].ReturnType);
+
+        // The outer type's 'address' property should reference the inner type via TypeRef
+        var outerType = result.ExtractedTypes.First(t =>
+            t.Properties.Any(p => p.Name == "address"));
+        var addressProp = outerType.Properties.First(p => p.Name == "address");
+        Assert.IsType<TsType.TypeRef>(addressProp.Type);
+    }
 }

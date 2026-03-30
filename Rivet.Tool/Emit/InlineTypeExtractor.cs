@@ -2,6 +2,11 @@ namespace Rivet.Tool.Emit;
 
 using Rivet.Tool.Model;
 
+public sealed record ExtractionResult(
+    IReadOnlyList<TsEndpointDefinition> Endpoints,
+    IReadOnlyList<TsTypeDefinition> ExtractedTypes,
+    IReadOnlyDictionary<string, string?> TypeNamespaces);
+
 public static class InlineTypeExtractor
 {
     public static string CanonicalHash(TsType type)
@@ -87,6 +92,124 @@ public static class InlineTypeExtractor
         if (name.EndsWith("s"))
             return name[..^1];
         return name;
+    }
+
+    public static ExtractionResult Extract(
+        IReadOnlyList<TsEndpointDefinition> endpoints,
+        IReadOnlyList<TsTypeDefinition> existingDefinitions,
+        int fieldThreshold = 5)
+    {
+        var collected = CollectInlineObjects(endpoints);
+
+        // Group by canonical hash
+        var groups = collected
+            .GroupBy(c => CanonicalHash(c.Type))
+            .ToList();
+
+        var usedNames = new HashSet<string>(existingDefinitions.Select(d => d.Name));
+        var replacements = new Dictionary<string, TsType.TypeRef>();
+        var extractedTypes = new List<TsTypeDefinition>();
+        var typeNamespaces = new Dictionary<string, string?>();
+
+        foreach (var group in groups)
+        {
+            var items = group.ToList();
+            var representative = items[0].Type;
+
+            if (items.Count < 2 && representative.Fields.Count < fieldThreshold)
+                continue;
+
+            // Derive controller name from first occurrence context
+            var controllerName = items[0].Context.Split('.')[0];
+            var name = GenerateName(controllerName, items, usedNames);
+
+            replacements[group.Key] = new TsType.TypeRef(name);
+            typeNamespaces[name] = null;
+        }
+
+        // Build type definitions with replaced field types
+        foreach (var (hash, typeRef) in replacements)
+        {
+            var representative = collected.First(c => CanonicalHash(c.Type) == hash).Type;
+            var properties = representative.Fields
+                .Select(f => BuildPropertyDefinition(f.Name, ReplaceInType(f.Type, replacements)))
+                .ToList();
+
+            extractedTypes.Add(new TsTypeDefinition(typeRef.Name, [], properties));
+        }
+
+        // Replace InlineObjects in all endpoints
+        var updatedEndpoints = endpoints.Select(e => ReplaceInEndpoint(e, replacements)).ToList();
+
+        return new ExtractionResult(updatedEndpoints, extractedTypes, typeNamespaces);
+    }
+
+    private static TsPropertyDefinition BuildPropertyDefinition(string name, TsType type)
+    {
+        if (type is TsType.Nullable nullable)
+            return new TsPropertyDefinition(name, nullable.Inner, IsOptional: true);
+
+        return new TsPropertyDefinition(name, type, IsOptional: false);
+    }
+
+    private static TsEndpointDefinition ReplaceInEndpoint(
+        TsEndpointDefinition endpoint,
+        Dictionary<string, TsType.TypeRef> replacements)
+    {
+        var returnType = endpoint.ReturnType is not null
+            ? ReplaceInType(endpoint.ReturnType, replacements)
+            : null;
+
+        var responses = endpoint.Responses
+            .Select(r => r.DataType is not null
+                ? r with { DataType = ReplaceInType(r.DataType, replacements) }
+                : r)
+            .ToList();
+
+        var parameters = endpoint.Params
+            .Select(p => p with { Type = ReplaceInType(p.Type, replacements) })
+            .ToList();
+
+        return endpoint with
+        {
+            ReturnType = returnType,
+            Responses = responses,
+            Params = parameters,
+        };
+    }
+
+    private static TsType ReplaceInType(TsType type, Dictionary<string, TsType.TypeRef> replacements)
+    {
+        switch (type)
+        {
+            case TsType.InlineObject io:
+                var hash = CanonicalHash(io);
+                if (replacements.TryGetValue(hash, out var typeRef))
+                    return typeRef;
+                var replacedFields = io.Fields
+                    .Select(f => (f.Name, Type: ReplaceInType(f.Type, replacements)))
+                    .ToList();
+                return new TsType.InlineObject(replacedFields);
+
+            case TsType.Array a:
+                return new TsType.Array(ReplaceInType(a.Element, replacements));
+
+            case TsType.Nullable n:
+                return new TsType.Nullable(ReplaceInType(n.Inner, replacements));
+
+            case TsType.Dictionary d:
+                return new TsType.Dictionary(ReplaceInType(d.Value, replacements));
+
+            case TsType.Generic g:
+                var replacedArgs = g.TypeArguments.Select(a => ReplaceInType(a, replacements)).ToList();
+                return new TsType.Generic(g.Name, replacedArgs);
+
+            case TsType.Brand b:
+                return new TsType.Brand(b.Name, ReplaceInType(b.Inner, replacements));
+
+            default:
+                return type;
+        }
     }
 
     private static void CollectFromType(TsType? type, string context,
