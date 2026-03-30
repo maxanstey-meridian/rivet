@@ -137,4 +137,21 @@ public sealed class InlineTypeExtractorTests
             InlineTypeExtractor.CanonicalHash(nullable),
             InlineTypeExtractor.CanonicalHash(inner));
     }
+
+    [Fact]
+    public void PrimitiveWithFormat_DiffersFromWithout()
+    {
+        var dateTime = new TsType.Primitive("string", "date-time");
+        var plainString = new TsType.Primitive("string");
+
+        Assert.NotEqual(
+            InlineTypeExtractor.CanonicalHash(dateTime),
+            InlineTypeExtractor.CanonicalHash(plainString));
+
+        // Same format should match
+        var dateTime2 = new TsType.Primitive("string", "date-time");
+        Assert.Equal(
+            InlineTypeExtractor.CanonicalHash(dateTime),
+            InlineTypeExtractor.CanonicalHash(dateTime2));
+    }
 }

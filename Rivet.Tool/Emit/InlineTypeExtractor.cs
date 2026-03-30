@@ -8,7 +8,7 @@ public static class InlineTypeExtractor
     {
         return type switch
         {
-            TsType.Primitive p => $"P:{p.Name}",
+            TsType.Primitive p => p.Format is not null ? $"P:{p.Name}:{p.Format}" : $"P:{p.Name}",
             TsType.Nullable n => $"N:{CanonicalHash(n.Inner)}",
             TsType.Array a => $"A:{CanonicalHash(a.Element)}",
             TsType.Dictionary d => $"D:{CanonicalHash(d.Value)}",
