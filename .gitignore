@@ -7,6 +7,7 @@ nupkg/
 *.suo
 .idea/
 Solution1/
+.phpunit*
 
 # Test results
 TestResults/
@@ -24,3 +25,4 @@ docs/.vitepress/cache/
 
 .orch/
 .plans/
+vendor/
