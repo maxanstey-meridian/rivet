@@ -210,6 +210,200 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
         Assert.Contains("active: boolean", allTypeContent);
     }
 
+    /// <summary>
+    /// Gap 1: JSON contract path — verify client file also uses extracted type, not just type file.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_JsonContract_ClientFile_ImportsExtractedType()
+    {
+        var inlineType = new TsType.InlineObject([
+            ("email", new TsType.Primitive("string")),
+            ("active", new TsType.Primitive("boolean")),
+        ]);
+
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("getUser", "GET", "/api/users/{id}",
+                [new TsEndpointParam("id", new TsType.Primitive("number"), ParamSource.Route)],
+                inlineType, "Users", []),
+            new("findUser", "GET", "/api/users/search",
+                [new TsEndpointParam("q", new TsType.Primitive("string"), ParamSource.Query)],
+                inlineType, "Users", []),
+        };
+
+        var input = BuildEmitInput(endpoints);
+        var options = new RivetOptions(".", _outputDir, "emit", []);
+
+        await EmitPipeline.RunAsync(input, options);
+
+        var clientFile = Path.Combine(_outputDir, "client", "Users.ts");
+        Assert.True(File.Exists(clientFile), "client/Users.ts should exist");
+
+        var clientContent = await File.ReadAllTextAsync(clientFile);
+        Assert.Contains("import type { UserDto }", clientContent);
+        Assert.Contains("UserDto", clientContent);
+        Assert.DoesNotContain("{ email: string; active: boolean }", clientContent);
+    }
+
+    /// <summary>
+    /// Gap 2: Compile mode — extracted types flow through Zod validators and validated client re-emit.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_CompileMode_ExtractedType_InValidatorsAndClient()
+    {
+        var inlineType = new TsType.InlineObject([
+            ("name", new TsType.Primitive("string")),
+            ("score", new TsType.Primitive("number")),
+        ]);
+
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("getPlayer", "GET", "/api/players/{id}",
+                [new TsEndpointParam("id", new TsType.Primitive("number"), ParamSource.Route)],
+                inlineType, "Players", []),
+            new("listPlayers", "GET", "/api/players", [], new TsType.Array(inlineType), "Players", []),
+        };
+
+        var input = BuildEmitInput(endpoints);
+        var options = new RivetOptions(".", _outputDir, "compile", []);
+
+        await EmitPipeline.RunAsync(input, options);
+
+        // Validators file should reference the extracted type's schema
+        var validatorsPath = Path.Combine(_outputDir, "validators.ts");
+        Assert.True(File.Exists(validatorsPath), "validators.ts should exist in compile mode");
+        var validatorsContent = await File.ReadAllTextAsync(validatorsPath);
+        Assert.Contains("PlayerDtoSchema", validatorsContent);
+        Assert.Contains("assertPlayerDto", validatorsContent);
+
+        // Client file should be the validated version (re-emitted in compile mode)
+        var clientFile = Path.Combine(_outputDir, "client", "Players.ts");
+        var clientContent = await File.ReadAllTextAsync(clientFile);
+        Assert.Contains("PlayerDto", clientContent);
+        Assert.Contains("assertPlayerDto", clientContent);
+    }
+
+    /// <summary>
+    /// Gap 3: Negative test — a single-use small InlineObject should NOT be extracted.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_SmallSingleUseInlineObject_NotExtracted()
+    {
+        var smallInline = new TsType.InlineObject([
+            ("ok", new TsType.Primitive("boolean")),
+            ("msg", new TsType.Primitive("string")),
+        ]);
+
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("ping", "GET", "/api/ping", [], smallInline, "Health", []),
+        };
+
+        var input = BuildEmitInput(endpoints);
+        var options = new RivetOptions(".", _outputDir, "emit", []);
+
+        await EmitPipeline.RunAsync(input, options);
+
+        // No extracted type should appear in type files (only used once, < 5 fields)
+        var typesDir = Path.Combine(_outputDir, "types");
+        var typeFiles = Directory.GetFiles(typesDir, "*.ts")
+            .Where(f => !f.EndsWith("index.ts"))
+            .ToList();
+        var allTypeContent = string.Concat(typeFiles.Select(File.ReadAllText));
+        Assert.DoesNotContain("export type", allTypeContent);
+
+        // Client should emit the inline literal directly
+        var clientFile = Path.Combine(_outputDir, "client", "Health.ts");
+        var clientContent = await File.ReadAllTextAsync(clientFile);
+        Assert.Contains("ok: boolean", clientContent);
+    }
+
+    /// <summary>
+    /// Gap 4: InlineObject in param position gets extracted when duplicated across endpoints.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_ParamPositionInlineType_Extracted()
+    {
+        var paramInline = new TsType.InlineObject([
+            ("page", new TsType.Primitive("number")),
+            ("size", new TsType.Primitive("number")),
+        ]);
+
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("listOrders", "GET", "/api/orders",
+                [new TsEndpointParam("filter", paramInline, ParamSource.Query)],
+                new TsType.Primitive("string"), "Orders", []),
+            new("listItems", "GET", "/api/items",
+                [new TsEndpointParam("filter", paramInline, ParamSource.Query)],
+                new TsType.Primitive("string"), "Items", []),
+        };
+
+        var input = BuildEmitInput(endpoints);
+        var options = new RivetOptions(".", _outputDir, "emit", []);
+
+        await EmitPipeline.RunAsync(input, options);
+
+        // Extracted type should appear in types
+        var typesDir = Path.Combine(_outputDir, "types");
+        var typeFiles = Directory.GetFiles(typesDir, "*.ts")
+            .Where(f => !f.EndsWith("index.ts"))
+            .ToList();
+        var allTypeContent = string.Concat(typeFiles.Select(File.ReadAllText));
+        Assert.Contains("export type", allTypeContent);
+        Assert.Contains("page: number", allTypeContent);
+        Assert.Contains("size: number", allTypeContent);
+    }
+
+    /// <summary>
+    /// Gap 5: Pre-existing definition with same name doesn't get clobbered by extraction.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_PreExistingDefinition_NotClobbered()
+    {
+        var inlineType = new TsType.InlineObject([
+            ("x", new TsType.Primitive("number")),
+            ("y", new TsType.Primitive("number")),
+        ]);
+
+        // Pre-existing definition named "WidgetDto" with different fields
+        var existingDef = new TsTypeDefinition("WidgetDto", [], [
+            new("id", new TsType.Primitive("string"), false),
+            new("label", new TsType.Primitive("string"), false),
+        ]);
+
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("getWidget", "GET", "/api/widgets/{id}",
+                [new TsEndpointParam("id", new TsType.Primitive("number"), ParamSource.Route)],
+                inlineType, "Widgets", []),
+            new("listWidgets", "GET", "/api/widgets", [], new TsType.Array(inlineType), "Widgets", []),
+        };
+
+        var input = BuildEmitInput(endpoints, definitions: [existingDef]);
+        var options = new RivetOptions(".", _outputDir, "emit", []);
+
+        await EmitPipeline.RunAsync(input, options);
+
+        var typesDir = Path.Combine(_outputDir, "types");
+        var typeFiles = Directory.GetFiles(typesDir, "*.ts")
+            .Where(f => !f.EndsWith("index.ts"))
+            .ToList();
+        var allTypeContent = string.Concat(typeFiles.Select(File.ReadAllText));
+
+        // Original WidgetDto must still have its original fields
+        Assert.Contains("id: string", allTypeContent);
+        Assert.Contains("label: string", allTypeContent);
+
+        // Extracted type gets a collision-avoidance name (WidgetDto2 or similar)
+        Assert.Contains("x: number", allTypeContent);
+        Assert.Contains("y: number", allTypeContent);
+
+        // Both definitions should be present — the extracted one didn't overwrite the original
+        var widgetDtoCount = allTypeContent.Split("export type WidgetDto").Length - 1;
+        Assert.True(widgetDtoCount >= 1, "Original WidgetDto must still exist");
+    }
+
     private static EmitPipeline.EmitInput BuildEmitInput(
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyList<TsTypeDefinition>? definitions = null,
