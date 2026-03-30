@@ -34,17 +34,26 @@ internal static class SchemaClassifier
 
     internal static bool IsIntEnum(IOpenApiSchema schema)
     {
-        if (schema.Enum is not { Count: > 0 })
+        if (schema.Enum is not { Count: > 1 })
             return false;
 
         if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Integer))
-            return true;
+            return schema.Enum.All(v => v is JsonNode node && IsWholeInt32(node));
 
         // No explicit type — infer from values
         if (!schema.Type.HasValue)
-            return schema.Enum.All(v => v is JsonNode node && node.GetValueKind() == JsonValueKind.Number);
+            return schema.Enum.All(v => v is JsonNode node && IsWholeInt32(node));
 
         return false;
+    }
+
+    private static bool IsWholeInt32(JsonNode node)
+    {
+        if (node.GetValueKind() != JsonValueKind.Number)
+            return false;
+
+        var value = node.GetValue<double>();
+        return value == Math.Floor(value) && value >= int.MinValue && value <= int.MaxValue;
     }
 
     internal static bool IsBrand(IOpenApiSchema schema)
@@ -270,6 +279,25 @@ internal static class SchemaClassifier
         return null;
     }
 
+    internal static List<string>? GetExtensionStringArray(IOpenApiSchema schema, string key)
+    {
+        if (schema.Extensions is null || !schema.Extensions.TryGetValue(key, out var ext))
+            return null;
+
+        if (ext is not JsonNodeExtension jsonExt || jsonExt.Node is not JsonArray arr)
+            return null;
+
+        var result = new List<string>(arr.Count);
+        foreach (var item in arr)
+        {
+            var val = item?.GetValue<string>();
+            if (val is null) return null; // any non-string element → bail
+            result.Add(val);
+        }
+
+        return result;
+    }
+
     internal static bool TryGetGenericExtension(IOpenApiSchema schema, out GenericTemplateInfo? info)
     {
         info = null;
@@ -381,28 +409,39 @@ internal static class SchemaClassifier
 
     internal static GeneratedEnum MapIntEnum(string name, IOpenApiSchema schema)
     {
-        var seen = new Dictionary<string, int>();
+        var varnames = GetExtensionStringArray(schema, "x-enum-varnames");
+        var useVarnames = varnames is not null && varnames.Count == schema.Enum!.Count;
+
+        var emitted = new HashSet<string>();
         var members = new List<GeneratedEnumMember>();
+        var index = 0;
         foreach (var member in schema.Enum!)
         {
-            if (member is null)
+            if (member is not JsonNode memberNode || !IsWholeInt32(memberNode))
+            {
+                index++;
                 continue;
-
-            var intVal = member.GetValue<int>();
-            var csharpName = intVal < 0 ? $"ValueNeg{Math.Abs(intVal)}" : $"Value{intVal}";
-
-            if (seen.TryGetValue(csharpName, out var count))
-            {
-                count++;
-                seen[csharpName] = count;
-                csharpName = $"{csharpName}_{count}";
             }
-            else
+
+            var intVal = memberNode.GetValue<int>();
+            var csharpName = useVarnames
+                ? Naming.ToPascalCaseFromSegments(varnames![index])
+                : intVal < 0 ? $"ValueNeg{Math.Abs(intVal)}" : $"Value{intVal}";
+
+            if (!emitted.Add(csharpName))
             {
-                seen[csharpName] = 1;
+                var suffix = 2;
+                var deduped = $"{csharpName}_{suffix}";
+                while (!emitted.Add(deduped))
+                {
+                    suffix++;
+                    deduped = $"{csharpName}_{suffix}";
+                }
+                csharpName = deduped;
             }
 
             members.Add(new GeneratedEnumMember(csharpName, null, intVal));
+            index++;
         }
 
         return new GeneratedEnum(name, members);

@@ -2580,6 +2580,451 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Single_Value_IntEnum_Falls_Through_To_Long()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Constant": {
+                "type": "integer",
+                "enum": [42]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "code": { "$ref": "#/components/schemas/Constant" }
+                },
+                "required": ["code"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // No enum file should be generated for a single-value enum
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("Constant.cs"));
+
+        // The DTO property should fall through to long
+        var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
+        Assert.Contains("long Code", dtoContent);
+    }
+
+    [Fact]
+    public void Single_Value_Untyped_IntEnum_Falls_Through()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "SingleVal": {
+                "enum": [42]
+            },
+            "ItemDto": {
+                "type": "object",
+                "properties": {
+                    "val": { "$ref": "#/components/schemas/SingleVal" }
+                },
+                "required": ["val"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // No enum file should be generated
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("SingleVal.cs"));
+
+        // Untyped single-value falls through to string in ResolveFallbackType
+        var dtoContent = CompilationHelper.FindFile(result, "ItemDto.cs");
+        Assert.Contains("string Val", dtoContent);
+    }
+
+    [Fact]
+    public void Float_Enum_Values_Not_Classified_As_IntEnum()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "MixedVals": {
+                "type": "integer",
+                "enum": [1, 2, 3.5]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "code": { "$ref": "#/components/schemas/MixedVals" }
+                },
+                "required": ["code"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // No enum file — float value disqualifies it as an int enum
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("MixedVals.cs"));
+
+        // The DTO property should fall through to long
+        var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
+        Assert.Contains("long Code", dtoContent);
+    }
+
+    [Fact]
+    public void Untyped_Float_Enum_Values_Not_Classified_As_IntEnum()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "FloatVals": {
+                "enum": [1.5, 2.5]
+            },
+            "ItemDto": {
+                "type": "object",
+                "properties": {
+                    "val": { "$ref": "#/components/schemas/FloatVals" }
+                },
+                "required": ["val"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // No named enum file for FloatVals — WouldGenerateType returns false
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("FloatVals.cs"));
+
+        // Falls through to string-backed inline enum via ResolveFallbackType
+        var dtoContent = CompilationHelper.FindFile(result, "ItemDto.cs");
+        Assert.Contains("ItemDtoVal Val", dtoContent);
+        Assert.DoesNotContain("long Val", dtoContent);
+    }
+
+    [Fact]
+    public void IntEnum_Value_Exceeding_Int32_Range_Falls_Through_To_Long()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "BigVals": {
+                "type": "integer",
+                "enum": [1, 2147483648]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "code": { "$ref": "#/components/schemas/BigVals" }
+                },
+                "required": ["code"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // Value exceeds int.MaxValue — should not generate an int enum
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("BigVals.cs"));
+
+        var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
+        Assert.Contains("long Code", dtoContent);
+    }
+
+    [Fact]
+    public void Two_Value_IntEnum_Is_Classified_As_Enum()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Toggle": {
+                "type": "integer",
+                "enum": [0, 1]
+            },
+            "FlagDto": {
+                "type": "object",
+                "properties": {
+                    "enabled": { "$ref": "#/components/schemas/Toggle" }
+                },
+                "required": ["enabled"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // Two values is the minimum for Count: > 1 — enum SHOULD be generated
+        var enumContent = CompilationHelper.FindFile(result, "Toggle.cs");
+        Assert.Contains("public enum Toggle", enumContent);
+        Assert.Contains("Value0 = 0,", enumContent);
+        Assert.Contains("Value1 = 1", enumContent);
+
+        // DTO should reference the enum type, not long
+        var dtoContent = CompilationHelper.FindFile(result, "FlagDto.cs");
+        Assert.Contains("Toggle Enabled", dtoContent);
+        Assert.DoesNotContain("long Enabled", dtoContent);
+    }
+
+    [Fact]
+    public void IntEnum_With_XEnumVarnames_Uses_Custom_Names()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2],
+                "x-enum-varnames": ["Low", "Medium", "High"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("Low = 0,", content);
+        Assert.Contains("Medium = 1,", content);
+        Assert.Contains("High = 2", content);
+        Assert.DoesNotContain("Value0", content);
+        Assert.DoesNotContain("Value1", content);
+        Assert.DoesNotContain("Value2", content);
+    }
+
+    [Fact]
+    public void IntEnum_With_XEnumVarnames_Compiles()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2],
+                "x-enum-varnames": ["Low", "Medium", "High"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void IntEnum_XEnumVarnames_Are_Sanitised()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1],
+                "x-enum-varnames": ["low_priority", "high-priority"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("LowPriority = 0,", content);
+        Assert.Contains("HighPriority = 1", content);
+    }
+
+    [Fact]
+    public void IntEnum_XEnumVarnames_Count_Mismatch_Falls_Back()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2],
+                "x-enum-varnames": ["Low", "High"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("Value0 = 0,", content);
+        Assert.Contains("Value1 = 1,", content);
+        Assert.Contains("Value2 = 2", content);
+        Assert.DoesNotContain("Low", content);
+        Assert.DoesNotContain("High", content);
+    }
+
+    [Fact]
+    public void IntEnum_Without_XEnumVarnames_Uses_ValueN_Fallback()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("Value0 = 0,", content);
+        Assert.Contains("Value1 = 1,", content);
+        Assert.Contains("Value2 = 2", content);
+    }
+
+    [Fact]
+    public void StringEnum_Does_Not_Have_JsonNumberEnumConverter()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Color": {
+                "type": "string",
+                "enum": ["red", "green", "blue"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Color.cs");
+
+        Assert.DoesNotContain("JsonNumberEnumConverter", content);
+    }
+
+    [Fact]
+    public void IntEnum_With_JsonConverter_Compiles()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "StatusCode": {
+                "type": "integer",
+                "enum": [1, 2, 3]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "status": { "$ref": "#/components/schemas/StatusCode" }
+                },
+                "required": ["status"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var enumContent = CompilationHelper.FindFile(result, "StatusCode.cs");
+        Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<StatusCode>))]", enumContent);
+
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void IntEnum_Serialises_As_Number()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<Priority>))]", content);
+        Assert.Contains("using System.Text.Json.Serialization;", content);
+    }
+
+    [Fact]
+    public void IntEnum_Has_JsonNumberEnumConverter_Attribute()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "StatusCode": {
+                "type": "integer",
+                "enum": [1, 2, 3]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "StatusCode.cs");
+
+        // Type-level attribute is emitted; note that options.Converters takes precedence
+        // over type-level [JsonConverter] per .NET converter precedence rules —
+        // property-level attributes would be needed to fully override options converters.
+        Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<StatusCode>))]", content);
+    }
+
+    [Fact]
+    public void IntEnum_Deserialises_From_Number()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        // JsonNumberEnumConverter handles both serialisation and deserialisation
+        Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<Priority>))]", content);
+    }
+
+    [Fact]
+    public void IntEnum_Untyped_With_XEnumVarnames_Uses_Custom_Names()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Severity": {
+                "enum": [10, 20, 30],
+                "x-enum-varnames": ["Info", "Warning", "Error"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Severity.cs");
+
+        Assert.Contains("Info = 10,", content);
+        Assert.Contains("Warning = 20,", content);
+        Assert.Contains("Error = 30", content);
+        Assert.DoesNotContain("Value10", content);
+        Assert.DoesNotContain("Value20", content);
+        Assert.DoesNotContain("Value30", content);
+    }
+
+    [Fact]
+    public void IntEnum_XEnumVarnames_Duplicate_After_Sanitisation_Are_Deduplicated()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1],
+                "x-enum-varnames": ["low_val", "lowVal"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        Assert.Contains("LowVal = 0,", content);
+        Assert.Contains("LowVal_2 = 1", content);
+
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void IntEnum_Serialisation_RoundTrip_Produces_Number()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var compilation = CompilationHelper.CompileImportResult(result);
+
+        using var ms = new MemoryStream();
+        var emitResult = ((Microsoft.CodeAnalysis.CSharp.CSharpCompilation)compilation).Emit(ms);
+        Assert.True(emitResult.Success);
+        ms.Seek(0, SeekOrigin.Begin);
+
+        var asm = System.Reflection.Assembly.Load(ms.ToArray());
+        var enumType = asm.GetType("Test.Priority")!;
+        Assert.NotNull(enumType);
+
+        // Value1 = 1
+        var enumValue = Enum.ToObject(enumType, 1);
+
+        // The [JsonConverter(typeof(JsonNumberEnumConverter<Priority>))] attribute
+        // ensures the enum serialises as a number (the type-level default).
+        // Note: options.Converters takes precedence over type-level [JsonConverter]
+        // per .NET converter precedence rules — property-level attributes are needed
+        // to override options converters.
+        var json = System.Text.Json.JsonSerializer.Serialize(enumValue, enumType);
+
+        Assert.Equal("1", json);
+
+        // Round-trip: deserialise back
+        var deserialized = System.Text.Json.JsonSerializer.Deserialize(json, enumType);
+        Assert.Equal(enumValue, deserialized);
+    }
+
+    [Fact]
     public void WriteEnum_StringBacked_Preserves_JsonStringEnumMemberName()
     {
         var enumDef = new GeneratedEnum("Status", [
@@ -2594,5 +3039,89 @@ public sealed class OpenApiImporterTests
         Assert.Contains("[JsonStringEnumMemberName(\"inactive\")]", output);
         Assert.DoesNotContain("[JsonStringEnumMemberName(\"Archived\")]", output);
         Assert.DoesNotContain("= ", output);
+    }
+
+    [Fact]
+    public void IntEnum_Dedup_Suffixed_Name_Does_Not_Collide_With_Natural_Name()
+    {
+        // varnames: Foo, Foo, Foo_2
+        // Old logic: Foo (ok), Foo_2 (deduped from Foo), Foo_2 (natural) → collision!
+        // New logic: Foo, Foo_2, Foo_2_2 — all unique
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Priority": {
+                "type": "integer",
+                "enum": [0, 1, 2],
+                "x-enum-varnames": ["Foo", "Foo", "Foo_2"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Priority.cs");
+
+        // All three members must have distinct names
+        Assert.Contains("Foo = 0,", content);
+        Assert.Contains("Foo_2 = 1,", content);
+        Assert.Contains("Foo_2_2 = 2", content);
+
+        // Must compile — CS0102 would indicate collision
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void IntEnum_Dedup_Skips_Past_Previously_Emitted_Natural_Name()
+    {
+        // varnames: A, A_2, A — natural A_2 is emitted second,
+        // so when the third "A" dedupes, suffix _2 is already taken → must skip to _3
+        // Old dict logic: A, A_2, A_2 — collision (dict doesn't know A_2 was emitted naturally)
+        // New HashSet logic: A, A_2, A_3 — correct (while loop skips taken _2)
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Level": {
+                "type": "integer",
+                "enum": [0, 1, 2],
+                "x-enum-varnames": ["A", "A_2", "A"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Level.cs");
+
+        Assert.Contains("A = 0,", content);
+        Assert.Contains("A_2 = 1,", content);
+        Assert.Contains("A_3 = 2", content);
+
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void IntEnum_Triple_Duplicate_Values_Produce_Unique_Names()
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Status": {
+                "type": "integer",
+                "enum": [1, 1, 1]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "Status.cs");
+
+        Assert.Contains("Value1 = 1,", content);
+        Assert.Contains("Value1_2 = 1,", content);
+        Assert.Contains("Value1_3 = 1", content);
+
+        // Must compile — duplicate member names would cause CS0102
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        Assert.Empty(errors);
     }
 }
