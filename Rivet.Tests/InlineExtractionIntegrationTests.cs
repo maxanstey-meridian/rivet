@@ -56,7 +56,7 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
 
         var allTypeContent = string.Concat(typeFiles.Select(File.ReadAllText));
 
-        Assert.Contains("export type BuyerDto", allTypeContent);
+        Assert.Contains("export type BuyerFindDto", allTypeContent);
         Assert.Contains("name: string", allTypeContent);
         Assert.Contains("age: number", allTypeContent);
     }
@@ -89,7 +89,7 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
         Assert.True(File.Exists(schemasPath), "schemas.ts should exist");
 
         var schemasContent = await File.ReadAllTextAsync(schemasPath);
-        Assert.Contains("BuyerDto", schemasContent);
+        Assert.Contains("BuyerFindDto", schemasContent);
     }
 
     /// <summary>
@@ -125,7 +125,7 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
 
         // Should import the extracted type
         Assert.Contains("import type {", clientContent);
-        Assert.Contains("BuyerDto", clientContent);
+        Assert.Contains("BuyerFindDto", clientContent);
 
         // Should NOT contain inline object literal in function signatures
         Assert.DoesNotContain("{ name: string; age: number }", clientContent);
@@ -162,12 +162,12 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
             .Where(f => !f.EndsWith("index.ts"))
             .ToList();
         var allTypeContent = string.Concat(typeFiles.Select(File.ReadAllText));
-        Assert.Contains("export type OrderDto", allTypeContent);
+        Assert.Contains("export type OrderGetDto", allTypeContent);
 
         // The client file must reference the extracted type, not inline it
         var clientFile = Path.Combine(_outputDir, "client", "Orders.ts");
         var clientContent = await File.ReadAllTextAsync(clientFile);
-        Assert.Contains("OrderDto", clientContent);
+        Assert.Contains("OrderGetDto", clientContent);
         Assert.DoesNotContain("firstName: string; lastName: string", clientContent);
     }
 
@@ -205,7 +205,7 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
 
         var allTypeContent = string.Concat(typeFiles.Select(File.ReadAllText));
 
-        Assert.Contains("export type UserDto", allTypeContent);
+        Assert.Contains("export type UserGetUserDto", allTypeContent);
         Assert.Contains("email: string", allTypeContent);
         Assert.Contains("active: boolean", allTypeContent);
     }
@@ -240,8 +240,8 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
         Assert.True(File.Exists(clientFile), "client/Users.ts should exist");
 
         var clientContent = await File.ReadAllTextAsync(clientFile);
-        Assert.Contains("import type { UserDto }", clientContent);
-        Assert.Contains("UserDto", clientContent);
+        Assert.Contains("import type { UserGetUserDto }", clientContent);
+        Assert.Contains("UserGetUserDto", clientContent);
         Assert.DoesNotContain("{ email: string; active: boolean }", clientContent);
     }
 
@@ -273,14 +273,14 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
         var validatorsPath = Path.Combine(_outputDir, "validators.ts");
         Assert.True(File.Exists(validatorsPath), "validators.ts should exist in compile mode");
         var validatorsContent = await File.ReadAllTextAsync(validatorsPath);
-        Assert.Contains("PlayerDtoSchema", validatorsContent);
-        Assert.Contains("assertPlayerDto", validatorsContent);
+        Assert.Contains("PlayerGetPlayerDtoSchema", validatorsContent);
+        Assert.Contains("assertPlayerGetPlayerDto", validatorsContent);
 
         // Client file should be the validated version (re-emitted in compile mode)
         var clientFile = Path.Combine(_outputDir, "client", "Players.ts");
         var clientContent = await File.ReadAllTextAsync(clientFile);
-        Assert.Contains("PlayerDto", clientContent);
-        Assert.Contains("assertPlayerDto", clientContent);
+        Assert.Contains("PlayerGetPlayerDto", clientContent);
+        Assert.Contains("assertPlayerGetPlayerDto", clientContent);
     }
 
     /// <summary>
@@ -366,8 +366,8 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
             ("y", new TsType.Primitive("number")),
         ]);
 
-        // Pre-existing definition named "WidgetDto" with different fields
-        var existingDef = new TsTypeDefinition("WidgetDto", [], [
+        // Pre-existing definition named "WidgetGetWidgetDto" with different fields
+        var existingDef = new TsTypeDefinition("WidgetGetWidgetDto", [], [
             new("id", new TsType.Primitive("string"), false),
             new("label", new TsType.Primitive("string"), false),
         ]);
@@ -400,8 +400,8 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
         Assert.Contains("y: number", allTypeContent);
 
         // Both definitions should be present — the extracted one didn't overwrite the original
-        Assert.Contains("export type WidgetDto ", allTypeContent);   // original (note trailing space before '=')
-        Assert.Contains("export type WidgetDto2", allTypeContent);   // collision-avoidance name
+        Assert.Contains("export type WidgetGetWidgetDto ", allTypeContent);   // original (note trailing space before '=')
+        Assert.Contains("export type WidgetGetWidgetDto2", allTypeContent);   // collision-avoidance name
     }
 
     private static EmitPipeline.EmitInput BuildEmitInput(

@@ -561,8 +561,8 @@ public sealed class ValidatorEmitterTests
         var (zodValidators, _) = GenerateZod(source);
 
         // The extracted type's schema should be imported and used
-        Assert.Contains("endpointDtoSchema", zodValidators);
-        Assert.Contains("assertendpointDto", zodValidators);
-        Assert.Contains("endpointDto", zodValidators);
+        Assert.Contains("EndpointGetOrderDtoSchema", zodValidators);
+        Assert.Contains("assertEndpointGetOrderDto", zodValidators);
+        Assert.Contains("EndpointGetOrderDto", zodValidators);
     }
 }

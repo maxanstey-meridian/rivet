@@ -515,7 +515,7 @@ public sealed class InlineTypeExtractorTests
 
         var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
 
-        Assert.Equal("BuyerDto", result);
+        Assert.Equal("BuyerFindDto", result);
     }
 
     [Fact]
@@ -529,7 +529,7 @@ public sealed class InlineTypeExtractorTests
 
         var result = InlineTypeExtractor.GenerateName("Order", occurrences, new HashSet<string>());
 
-        Assert.Equal("OrderDto", result);
+        Assert.Equal("OrderListDto", result);
     }
 
     [Fact]
@@ -554,12 +554,12 @@ public sealed class InlineTypeExtractorTests
         {
             (inline, "Buyers.find.return"),
         };
-        var usedNames = new HashSet<string> { "BuyerDto" };
+        var usedNames = new HashSet<string> { "BuyerFindDto" };
 
         var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, usedNames);
 
-        Assert.Equal("BuyerDto2", result);
-        Assert.Contains("BuyerDto2", usedNames);
+        Assert.Equal("BuyerFindDto2", result);
+        Assert.Contains("BuyerFindDto2", usedNames);
     }
 
     // --- Extract tests ---
@@ -586,17 +586,17 @@ public sealed class InlineTypeExtractorTests
         // One extracted type
         Assert.Single(result.ExtractedTypes);
         var extracted = result.ExtractedTypes[0];
-        Assert.Equal("BuyerDto", extracted.Name);
+        Assert.Equal("BuyerFindDto", extracted.Name);
         Assert.Equal(2, extracted.Properties.Count);
 
         // Both endpoints replaced with TypeRef
         Assert.IsType<TsType.TypeRef>(result.Endpoints[0].ReturnType);
-        Assert.Equal("BuyerDto", ((TsType.TypeRef)result.Endpoints[0].ReturnType!).Name);
+        Assert.Equal("BuyerFindDto", ((TsType.TypeRef)result.Endpoints[0].ReturnType!).Name);
         Assert.IsType<TsType.TypeRef>(result.Endpoints[1].ReturnType);
-        Assert.Equal("BuyerDto", ((TsType.TypeRef)result.Endpoints[1].ReturnType!).Name);
+        Assert.Equal("BuyerFindDto", ((TsType.TypeRef)result.Endpoints[1].ReturnType!).Name);
 
         // Namespace is null (common group)
-        Assert.Null(result.TypeNamespaces["BuyerDto"]);
+        Assert.Null(result.TypeNamespaces["BuyerFindDto"]);
     }
 
     [Fact]
@@ -703,12 +703,12 @@ public sealed class InlineTypeExtractorTests
                 ("name", new TsType.Primitive("string")),
             ])),
         };
-        var existingDefs = new[] { new TsTypeDefinition("BuyerDto", [], []) };
+        var existingDefs = new[] { new TsTypeDefinition("BuyerFindDto", [], []) };
 
         var result = InlineTypeExtractor.Extract(endpoints, existingDefs);
 
         Assert.Single(result.ExtractedTypes);
-        Assert.Equal("BuyerDto2", result.ExtractedTypes[0].Name);
+        Assert.Equal("BuyerFindDto2", result.ExtractedTypes[0].Name);
     }
 
     [Fact]
@@ -810,7 +810,7 @@ public sealed class InlineTypeExtractorTests
         Assert.Single(result.ExtractedTypes);
         Assert.IsType<TsType.TypeRef>(result.Endpoints[0].Params[0].Type);
         Assert.IsType<TsType.TypeRef>(result.Endpoints[1].Params[0].Type);
-        Assert.Equal("PostDto", result.ExtractedTypes[0].Name);
+        Assert.Equal("PostCreateDto", result.ExtractedTypes[0].Name);
     }
 
     [Fact]
@@ -966,8 +966,8 @@ public sealed class InlineTypeExtractorTests
 
         Assert.Equal(2, result.ExtractedTypes.Count);
         var names = result.ExtractedTypes.Select(t => t.Name).OrderBy(n => n).ToList();
-        Assert.Contains("BuyerDto", names);
-        Assert.Contains("OrderDto", names);
+        Assert.Contains("BuyerFindDto", names);
+        Assert.Contains("OrderGetDto", names);
     }
 
     [Fact]
@@ -1069,13 +1069,13 @@ public sealed class InlineTypeExtractorTests
 
         // One extracted type (deduplicated)
         Assert.Single(result.ExtractedTypes);
-        Assert.Equal("BuyerDto", result.ExtractedTypes[0].Name);
+        Assert.Equal("BuyerCreateDto", result.ExtractedTypes[0].Name);
 
         // Both endpoints' RequestType replaced with TypeRef
         Assert.IsType<TsType.TypeRef>(result.Endpoints[0].RequestType);
-        Assert.Equal("BuyerDto", ((TsType.TypeRef)result.Endpoints[0].RequestType!).Name);
+        Assert.Equal("BuyerCreateDto", ((TsType.TypeRef)result.Endpoints[0].RequestType!).Name);
         Assert.IsType<TsType.TypeRef>(result.Endpoints[1].RequestType);
-        Assert.Equal("BuyerDto", ((TsType.TypeRef)result.Endpoints[1].RequestType!).Name);
+        Assert.Equal("BuyerCreateDto", ((TsType.TypeRef)result.Endpoints[1].RequestType!).Name);
     }
 
     [Fact]
@@ -1120,5 +1120,62 @@ public sealed class InlineTypeExtractorTests
     public void ToPascalCase_HandlesSnakeCase(string input, string expected)
     {
         Assert.Equal(expected, InlineTypeExtractor.ToPascalCase(input));
+    }
+
+    [Fact]
+    public void GenerateName_ResponseContext_UsesMethodName()
+    {
+        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Orders.list.response.200"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Orders", occurrences, new HashSet<string>());
+
+        Assert.Equal("OrderListDto", result);
+    }
+
+    [Fact]
+    public void GenerateName_ParamContext_UsesMethodName()
+    {
+        var inline = new TsType.InlineObject([("name", new TsType.Primitive("string"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Products.create.param.data"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Products", occurrences, new HashSet<string>());
+
+        Assert.Equal("ProductCreateDto", result);
+    }
+
+    [Fact]
+    public void GenerateName_TopLevel_MultipleOccurrences()
+    {
+        var inline = new TsType.InlineObject([("token", new TsType.Primitive("string"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Auth.login.return"),
+            (inline, "Auth.session.return"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Auth", occurrences, new HashSet<string>());
+
+        Assert.Equal("AuthLoginDto", result);
+    }
+
+    [Fact]
+    public void GenerateName_TopLevel_UsesMethodName()
+    {
+        var inline = new TsType.InlineObject([("token", new TsType.Primitive("string"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Auth.login.return"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Auth", occurrences, new HashSet<string>());
+
+        Assert.Equal("AuthLoginDto", result);
     }
 }

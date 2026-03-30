@@ -73,7 +73,10 @@ public static class InlineTypeExtractor
             return ToPascalCase(Singularize(fieldName));
         }
 
-        return Singularize(controllerName);
+        // Extract method name from context path: "Controller.Method.return" → segments[1]
+        var segments = occurrences[0].Context.Split('.');
+        var methodName = segments.Length > 1 ? segments[1] : "";
+        return ToPascalCase(Singularize(controllerName)) + ToPascalCase(methodName);
     }
 
     private static string ResolveCollision(string name, HashSet<string> usedNames)

@@ -428,13 +428,13 @@ public sealed class ClientEmitterTests
         var (types, client) = Generate(source);
 
         // Extracted type should exist in types output
-        Assert.Contains("export type endpointDto", types);
+        Assert.Contains("export type EndpointFindBuyerDto", types);
 
         // Client should import the extracted type
-        Assert.Contains("import type { endpointDto }", client);
+        Assert.Contains("import type { EndpointFindBuyerDto }", client);
 
         // Client should use the extracted name, not an inline literal
-        Assert.Contains("Promise<endpointDto>", client);
+        Assert.Contains("Promise<EndpointFindBuyerDto>", client);
         Assert.DoesNotContain("{ id: string; name: string }", client);
     }
 
@@ -681,11 +681,11 @@ public sealed class ClientEmitterTests
 
         var (types, client) = Generate(source);
 
-        // Extracted type should appear in types
-        Assert.Contains("export type endpointDto", types);
+        // Extracted type should appear in types (method name now included)
+        Assert.Contains("export type EndpointGetItemDto", types);
 
         // Discriminated union result type should use the extracted name
-        Assert.Contains("data: endpointDto", client);
+        Assert.Contains("data: EndpointGetItemDto", client);
         Assert.DoesNotContain("{ id: string; title: string }", client);
     }
 }
