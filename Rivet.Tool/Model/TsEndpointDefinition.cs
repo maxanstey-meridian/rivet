@@ -18,7 +18,8 @@ public sealed record TsEndpointDefinition(
     EndpointSecurity? Security = null,
     string? FileContentType = null,
     string? InputTypeName = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFormEncoded = false);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFormEncoded = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? RequestType = null);
 
 /// <summary>
 /// Security metadata for an endpoint. null = inherit CLI default.
