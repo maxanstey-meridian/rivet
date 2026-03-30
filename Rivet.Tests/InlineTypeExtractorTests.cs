@@ -1093,4 +1093,32 @@ public sealed class InlineTypeExtractorTests
         Assert.Same(inline, result[0].Type);
         Assert.Equal("Buyers.create.requestType", result[0].Context);
     }
+
+    [Fact]
+    public void GenerateName_NestedSnakeCaseField_ProducesPascalCase()
+    {
+        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Buyers.find.return.field.mix_types"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+
+        Assert.Equal("MixTypeDto", result);
+    }
+
+    [Theory]
+    [InlineData("mix_type", "MixType")]
+    [InlineData("order_catalog", "OrderCatalog")]
+    [InlineData("created_at", "CreatedAt")]
+    [InlineData("already", "Already")]
+    [InlineData("", "")]
+    [InlineData("_leading", "Leading")]
+    [InlineData("trailing_", "Trailing")]
+    [InlineData("double__underscore", "DoubleUnderscore")]
+    public void ToPascalCase_HandlesSnakeCase(string input, string expected)
+    {
+        Assert.Equal(expected, InlineTypeExtractor.ToPascalCase(input));
+    }
 }

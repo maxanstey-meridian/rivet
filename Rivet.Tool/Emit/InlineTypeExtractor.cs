@@ -84,8 +84,9 @@ public static class InlineTypeExtractor
         return name + i;
     }
 
-    private static string ToPascalCase(string s) =>
-        s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
+    internal static string ToPascalCase(string s) =>
+        string.Concat(s.Split('_', StringSplitOptions.RemoveEmptyEntries)
+            .Select(seg => char.ToUpperInvariant(seg[0]) + seg[1..]));
 
     public static string Singularize(string name)
     {
