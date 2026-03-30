@@ -67,10 +67,11 @@ public static class InlineTypeExtractor
         IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences,
         HashSet<string> usedNames,
         Dictionary<string, TsType.InlineObject> nameTypes,
-        TsType.InlineObject type)
+        TsType.InlineObject type,
+        HashSet<string>? arrayElementHashes = null)
     {
         var baseName = DeriveBaseName(controllerName, occurrences);
-        return GenerateName(baseName, usedNames, nameTypes, type);
+        return GenerateName(baseName, usedNames, nameTypes, type, arrayElementHashes);
     }
 
     public static string GenerateName(string baseName, HashSet<string> usedNames)
@@ -85,11 +86,12 @@ public static class InlineTypeExtractor
         string baseName,
         HashSet<string> usedNames,
         Dictionary<string, TsType.InlineObject> nameTypes,
-        TsType.InlineObject type)
+        TsType.InlineObject type,
+        HashSet<string>? arrayElementHashes)
     {
         var name = baseName + "Dto";
         if (usedNames.Contains(name))
-            name = DisambiguateCollision(name, usedNames, nameTypes, type);
+            name = DisambiguateCollision(name, usedNames, nameTypes, type, arrayElementHashes);
         usedNames.Add(name);
         nameTypes[name] = type;
         return name;
@@ -117,12 +119,21 @@ public static class InlineTypeExtractor
         string name,
         HashSet<string> usedNames,
         Dictionary<string, TsType.InlineObject> nameTypes,
-        TsType.InlineObject type)
+        TsType.InlineObject type,
+        HashSet<string>? arrayElementHashes = null)
     {
+        var baseName = name.EndsWith("Dto") ? name[..^3] : name;
+
+        // Strategy 1: Array element → Ref
+        if (arrayElementHashes is not null && arrayElementHashes.Contains(CanonicalHash(type)))
+        {
+            var candidate = baseName + "RefDto";
+            if (!usedNames.Contains(candidate))
+                return candidate;
+        }
+
         if (nameTypes.TryGetValue(name, out var existing))
         {
-            // Strip "Dto" suffix to insert qualifier before it
-            var baseName = name.EndsWith("Dto") ? name[..^3] : name;
 
             if (type.Fields.Count < existing.Fields.Count)
             {
@@ -198,6 +209,7 @@ public static class InlineTypeExtractor
 
         var usedNames = new HashSet<string>(existingDefinitions.Select(d => d.Name));
         var nameTypes = new Dictionary<string, TsType.InlineObject>();
+        var arrayElementHashes = CollectArrayElementHashes(endpoints);
         var replacements = new Dictionary<string, TsType.TypeRef>();
         var extractedTypes = new List<TsTypeDefinition>();
         var typeNamespaces = new Dictionary<string, string?>();
@@ -215,12 +227,12 @@ public static class InlineTypeExtractor
             if (distinctControllers >= CrossControllerThreshold)
             {
                 var structuralBase = DeriveStructuralName(representative);
-                name = GenerateName(structuralBase, usedNames, nameTypes, representative);
+                name = GenerateName(structuralBase, usedNames, nameTypes, representative, arrayElementHashes);
             }
             else
             {
                 var controllerName = items[0].Context.Split('.')[0];
-                name = GenerateName(controllerName, items, usedNames, nameTypes, representative);
+                name = GenerateName(controllerName, items, usedNames, nameTypes, representative, arrayElementHashes);
             }
 
             replacements[group.Key] = new TsType.TypeRef(name);
@@ -314,6 +326,51 @@ public static class InlineTypeExtractor
 
             default:
                 return type;
+        }
+    }
+
+    private static HashSet<string> CollectArrayElementHashes(IReadOnlyList<TsEndpointDefinition> endpoints)
+    {
+        var hashes = new HashSet<string>();
+        foreach (var e in endpoints)
+        {
+            CollectArrayElements(e.ReturnType, hashes);
+            foreach (var r in e.Responses)
+                CollectArrayElements(r.DataType, hashes);
+            foreach (var p in e.Params)
+                CollectArrayElements(p.Type, hashes);
+            if (e.RequestType is not null)
+                CollectArrayElements(e.RequestType, hashes);
+        }
+        return hashes;
+    }
+
+    private static void CollectArrayElements(TsType? type, HashSet<string> hashes)
+    {
+        switch (type)
+        {
+            case TsType.Array a:
+                if (a.Element is TsType.InlineObject io)
+                    hashes.Add(CanonicalHash(io));
+                CollectArrayElements(a.Element, hashes);
+                break;
+            case TsType.InlineObject obj:
+                foreach (var (_, fieldType) in obj.Fields)
+                    CollectArrayElements(fieldType, hashes);
+                break;
+            case TsType.Nullable n:
+                CollectArrayElements(n.Inner, hashes);
+                break;
+            case TsType.Dictionary d:
+                CollectArrayElements(d.Value, hashes);
+                break;
+            case TsType.Generic g:
+                foreach (var arg in g.TypeArguments)
+                    CollectArrayElements(arg, hashes);
+                break;
+            case TsType.Brand b:
+                CollectArrayElements(b.Inner, hashes);
+                break;
         }
     }
 

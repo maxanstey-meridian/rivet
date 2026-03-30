@@ -1495,6 +1495,102 @@ public sealed class InlineTypeExtractorTests
     }
 
     [Fact]
+    public void DisambiguateCollision_ArrayElement_AppendsRef()
+    {
+        var type = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var existingType = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+        ]);
+        var usedNames = new HashSet<string> { "BuyerFindDto" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindDto"] = existingType };
+        var arrayElementHashes = new HashSet<string> { InlineTypeExtractor.CanonicalHash(type) };
+
+        var result = InlineTypeExtractor.DisambiguateCollision(
+            "BuyerFindDto", usedNames, nameTypes, type, arrayElementHashes);
+
+        Assert.Equal("BuyerFindRefDto", result);
+    }
+
+    [Fact]
+    public void Extract_ArrayElementCollision_AppendsRef()
+    {
+        // Two shapes sharing the same field name context "items":
+        // - one appears directly as a field (not array-wrapped)
+        // - one appears inside Array(InlineObject)
+        // Both get context "*.field.items" → base name "Item" → collision on "ItemDto"
+        // The array-wrapped one should get "ItemRefDto"
+        var directShape = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+        ]);
+        var arrayShape = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("label", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[]
+        {
+            // directShape in field "items" — NOT array-wrapped, duplicated
+            MakeEndpoint("Buyers", "find", returnType: new TsType.InlineObject([
+                ("items", directShape),
+            ])),
+            MakeEndpoint("Buyers", "list", returnType: new TsType.InlineObject([
+                ("items", new TsType.InlineObject([
+                    ("id", new TsType.Primitive("number")),
+                    ("name", new TsType.Primitive("string")),
+                    ("email", new TsType.Primitive("string")),
+                ])),
+            ])),
+            // arrayShape in field "items" — Array-wrapped, duplicated
+            MakeEndpoint("Orders", "find", returnType: new TsType.InlineObject([
+                ("items", new TsType.Array(arrayShape)),
+            ])),
+            MakeEndpoint("Orders", "list", returnType: new TsType.InlineObject([
+                ("items", new TsType.Array(new TsType.InlineObject([
+                    ("id", new TsType.Primitive("number")),
+                    ("label", new TsType.Primitive("string")),
+                ]))),
+            ])),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        var names = result.ExtractedTypes.Select(t => t.Name).OrderBy(n => n).ToList();
+        // One should be "ItemDto", the array one should be "ItemRefDto" (not "ItemDto2")
+        Assert.Contains("ItemDto", names);
+        Assert.Contains("ItemRefDto", names);
+        Assert.DoesNotContain("ItemDto2", names);
+    }
+
+    [Fact]
+    public void DisambiguateCollision_NotArrayElement_SkipsRef()
+    {
+        // Same scenario but type is NOT an array element — should fall through to Summary
+        var type = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var existingType = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+            ("email", new TsType.Primitive("string")),
+        ]);
+        var usedNames = new HashSet<string> { "BuyerFindDto" };
+        var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindDto"] = existingType };
+        var arrayElementHashes = new HashSet<string>(); // empty — not an array element
+
+        var result = InlineTypeExtractor.DisambiguateCollision(
+            "BuyerFindDto", usedNames, nameTypes, type, arrayElementHashes);
+
+        Assert.Equal("BuyerFindSummaryDto", result);
+    }
+
+    [Fact]
     public void DisambiguateCollision_FewerFields_AppendsSummary()
     {
         var smallType = new TsType.InlineObject([

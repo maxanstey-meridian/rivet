@@ -401,7 +401,7 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
 
         // Both definitions should be present — the extracted one didn't overwrite the original
         Assert.Contains("export type WidgetGetWidgetDto ", allTypeContent);   // original (note trailing space before '=')
-        Assert.Contains("export type WidgetGetWidgetDto2", allTypeContent);   // collision-avoidance name
+        Assert.Contains("export type WidgetGetWidgetRefDto", allTypeContent); // collision-avoidance: Ref because type appears as Array element
     }
 
     private static EmitPipeline.EmitInput BuildEmitInput(
