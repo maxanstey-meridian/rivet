@@ -1025,4 +1025,72 @@ public sealed class InlineTypeExtractorTests
         Assert.Empty(result.Endpoints);
         Assert.Empty(result.TypeNamespaces);
     }
+
+    [Fact]
+    public void Extract_RequestTypeNull_NoEffect()
+    {
+        var inline = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[]
+        {
+            MakeEndpoint("Buyers", "find", returnType: inline),
+            MakeEndpoint("Buyers", "list", returnType: inline),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        // Extraction works normally
+        Assert.Single(result.ExtractedTypes);
+        // RequestType stays null
+        Assert.Null(result.Endpoints[0].RequestType);
+        Assert.Null(result.Endpoints[1].RequestType);
+    }
+
+    [Fact]
+    public void Extract_DeduplicatesRequestTypeInlineObjects()
+    {
+        var inline1 = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var inline2 = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var endpoints = new[]
+        {
+            MakeEndpoint("Buyers", "create") with { RequestType = inline1 },
+            MakeEndpoint("Buyers", "update") with { RequestType = inline2 },
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        // One extracted type (deduplicated)
+        Assert.Single(result.ExtractedTypes);
+        Assert.Equal("BuyerDto", result.ExtractedTypes[0].Name);
+
+        // Both endpoints' RequestType replaced with TypeRef
+        Assert.IsType<TsType.TypeRef>(result.Endpoints[0].RequestType);
+        Assert.Equal("BuyerDto", ((TsType.TypeRef)result.Endpoints[0].RequestType!).Name);
+        Assert.IsType<TsType.TypeRef>(result.Endpoints[1].RequestType);
+        Assert.Equal("BuyerDto", ((TsType.TypeRef)result.Endpoints[1].RequestType!).Name);
+    }
+
+    [Fact]
+    public void CollectInlineObjects_WalksRequestType()
+    {
+        var inline = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var endpoint = MakeEndpoint("Buyers", "create") with { RequestType = inline };
+
+        var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
+
+        Assert.Single(result);
+        Assert.Same(inline, result[0].Type);
+        Assert.Equal("Buyers.create.requestType", result[0].Context);
+    }
 }

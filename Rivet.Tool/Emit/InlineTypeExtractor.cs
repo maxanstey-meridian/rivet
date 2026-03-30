@@ -43,6 +43,9 @@ public static class InlineTypeExtractor
 
             foreach (var p in e.Params)
                 CollectFromType(p.Type, $"{e.ControllerName}.{e.Name}.param.{p.Name}", results);
+
+            if (e.RequestType is not null)
+                CollectFromType(e.RequestType, $"{e.ControllerName}.{e.Name}.requestType", results);
         }
 
         return results;
@@ -170,11 +173,16 @@ public static class InlineTypeExtractor
             .Select(p => p with { Type = ReplaceInType(p.Type, replacements) })
             .ToList();
 
+        var requestType = endpoint.RequestType is not null
+            ? ReplaceInType(endpoint.RequestType, replacements)
+            : null;
+
         return endpoint with
         {
             ReturnType = returnType,
             Responses = responses,
             Params = parameters,
+            RequestType = requestType,
         };
     }
 
