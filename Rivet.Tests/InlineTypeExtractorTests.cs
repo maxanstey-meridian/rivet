@@ -1234,4 +1234,54 @@ public sealed class InlineTypeExtractorTests
 
         Assert.Equal("ItemDto", result);
     }
+
+    [Fact]
+    public void GenerateName_NonDataField_StillUsesFieldName()
+    {
+        var inline = new TsType.InlineObject([("street", new TsType.Primitive("string"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Buyers.find.return.field.location"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+
+        Assert.Equal("LocationDto", result);
+    }
+
+    [Fact]
+    public void Extract_DataWrapperFromDifferentMethods_DistinctNames()
+    {
+        var inner1 = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var outer1 = new TsType.InlineObject([
+            ("data", inner1),
+        ]);
+        var inner2 = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("name", new TsType.Primitive("string")),
+        ]);
+        var outer2 = new TsType.InlineObject([
+            ("data", inner2),
+        ]);
+        var endpoints = new[]
+        {
+            MakeEndpoint("Buyers", "find", returnType: outer1),
+            MakeEndpoint("Buyers", "list", returnType: outer2),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        // Both outer wrappers are identical → extracted as one type ("BuyerFindDto")
+        // Both inner { id, name } are identical → extracted as one type
+        // Inner context is "Buyers.find.return.field.data" → data-skip → "BuyerFind"
+        // Collides with outer → gets "BuyerFindDto2", but crucially NOT "DataDto"
+        Assert.DoesNotContain(result.ExtractedTypes, t => t.Name.StartsWith("Data"));
+        var innerType = result.ExtractedTypes.FirstOrDefault(t =>
+            t.Properties.Any(p => p.Name == "id") && t.Properties.Any(p => p.Name == "name"));
+        Assert.NotNull(innerType);
+        Assert.StartsWith("BuyerFind", innerType!.Name);
+    }
 }
