@@ -447,7 +447,8 @@ public sealed class ClientEmitterTests
         IReadOnlyList<TsEndpointParam>? @params = null,
         TsType? returnType = null,
         string controller = "buyer",
-        TsType? requestType = null) =>
+        TsType? requestType = null,
+        bool isFormEncoded = false) =>
         new(
             Name: name,
             HttpMethod: method,
@@ -456,6 +457,7 @@ public sealed class ClientEmitterTests
             ReturnType: returnType,
             ControllerName: controller,
             Responses: [],
+            IsFormEncoded: isFormEncoded,
             RequestType: requestType);
 
     [Fact]
@@ -500,6 +502,22 @@ public sealed class ClientEmitterTests
     }
 
     [Fact]
+    public void RequestType_FormEncoded_EmitsUrlSearchParams()
+    {
+        var endpoint = MakeEndpoint(
+            requestType: new TsType.TypeRef("LoginRequest"),
+            returnType: new TsType.Primitive("void"),
+            isFormEncoded: true);
+
+        var typeFileMap = new Dictionary<string, string> { ["LoginRequest"] = "auth" };
+        var output = ClientEmitter.EmitControllerClient("auth", [endpoint], typeFileMap);
+
+        Assert.Contains("body: new URLSearchParams(body as Record<string, string>)", output);
+        Assert.Contains("formEncoded: true", output);
+        Assert.DoesNotContain("body: body,", output);
+    }
+
+    [Fact]
     public void RequestType_Null_NoBodyParam()
     {
         var endpoint = MakeEndpoint(
@@ -535,6 +553,9 @@ public sealed class ClientEmitterTests
         // Signature should NOT contain the RequestType name
         var signatures = output.Split('\n').Where(l => l.StartsWith("export function")).ToList();
         Assert.All(signatures, s => Assert.DoesNotContain("CreateBuyerRequest", s));
+        // Import should NOT contain the unused RequestType
+        var importLines = output.Split('\n').Where(l => l.StartsWith("import type")).ToList();
+        Assert.All(importLines, l => Assert.DoesNotContain("CreateBuyerRequest", l));
     }
 
     [Fact]

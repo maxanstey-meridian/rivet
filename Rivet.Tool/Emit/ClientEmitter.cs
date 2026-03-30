@@ -179,7 +179,15 @@ public static partial class ClientEmitter
         }
         else if (endpoint.RequestType is not null)
         {
-            fetchOptionParts.Add("body: body");
+            if (endpoint.IsFormEncoded)
+            {
+                fetchOptionParts.Add("body: new URLSearchParams(body as Record<string, string>)");
+                fetchOptionParts.Add("formEncoded: true");
+            }
+            else
+            {
+                fetchOptionParts.Add("body: body");
+            }
         }
         if (queryParams.Count > 0)
         {
@@ -377,7 +385,8 @@ public static partial class ClientEmitter
                 TsType.CollectTypeRefs(endpoint.ReturnType, names);
             }
 
-            if (endpoint.RequestType is not null)
+            var bodyParam = endpoint.Params.FirstOrDefault(p => p.Source == ParamSource.Body);
+            if (bodyParam is null && endpoint.RequestType is not null)
             {
                 TsType.CollectTypeRefs(endpoint.RequestType, names);
             }
