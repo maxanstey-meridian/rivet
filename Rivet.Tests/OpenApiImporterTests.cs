@@ -2905,7 +2905,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void IntEnum_With_Global_StringConverter_Still_Serialises_As_Number()
+    public void IntEnum_Has_JsonNumberEnumConverter_Attribute()
     {
         var spec = CompilationHelper.BuildSpec(schemas: """
             "StatusCode": {
@@ -2917,7 +2917,9 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "StatusCode.cs");
 
-        // JsonNumberEnumConverter attribute overrides any global JsonStringEnumConverter
+        // Type-level attribute is emitted; note that options.Converters takes precedence
+        // over type-level [JsonConverter] per .NET converter precedence rules —
+        // property-level attributes would be needed to fully override options converters.
         Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<StatusCode>))]", content);
     }
 
