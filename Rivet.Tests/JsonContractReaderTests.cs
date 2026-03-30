@@ -204,6 +204,104 @@ public sealed class JsonContractReaderTests
     }
 
     [Fact]
+    public void RequestType_InlineObject_Survives_RoundTrip()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "createBuyer", "POST", "/buyers",
+            Params: [],
+            ReturnType: null,
+            ControllerName: "buyer",
+            Responses: [],
+            RequestType: new TsType.InlineObject([("id", new TsType.Primitive("number", "int32")), ("name", new TsType.Primitive("string"))]));
+
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]);
+
+        var result = JsonContractReader.Read(json);
+
+        var ep = Assert.Single(result.Endpoints);
+        var inlineObj = Assert.IsType<TsType.InlineObject>(ep.RequestType);
+        Assert.Equal(2, inlineObj.Fields.Count);
+        Assert.Equal("id", inlineObj.Fields[0].Name);
+        Assert.IsType<TsType.Primitive>(inlineObj.Fields[0].Type);
+        Assert.Equal("name", inlineObj.Fields[1].Name);
+        Assert.IsType<TsType.Primitive>(inlineObj.Fields[1].Type);
+    }
+
+    [Fact]
+    public void RequestType_ExplicitNull_IsNull()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "getProduct",
+                        "httpMethod": "GET",
+                        "routeTemplate": "/products/{id}",
+                        "controllerName": "product",
+                        "params": [],
+                        "returnType": null,
+                        "responses": [],
+                        "requestType": null
+                    }
+                ]
+            }
+            """;
+
+        var result = JsonContractReader.Read(json);
+
+        var ep = Assert.Single(result.Endpoints);
+        Assert.Null(ep.RequestType);
+    }
+
+    [Fact]
+    public void RequestType_Null_Omitted_From_Serialized_Json()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "getProduct", "GET", "/products/{id}",
+            Params: [],
+            ReturnType: null,
+            ControllerName: "product",
+            Responses: []);
+
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]);
+
+        Assert.DoesNotContain("requestType", json);
+    }
+
+    [Fact]
+    public void RequestType_With_IsFormEncoded_Survives_RoundTrip()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "submitForm", "POST", "/forms",
+            Params: [],
+            ReturnType: null,
+            ControllerName: "form",
+            Responses: [],
+            IsFormEncoded: true,
+            RequestType: new TsType.TypeRef("SubmitFormRequest"));
+
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]);
+
+        var result = JsonContractReader.Read(json);
+
+        var ep = Assert.Single(result.Endpoints);
+        Assert.True(ep.IsFormEncoded);
+        var typeRef = Assert.IsType<TsType.TypeRef>(ep.RequestType);
+        Assert.Equal("SubmitFormRequest", typeRef.Name);
+    }
+
+    [Fact]
     public void Read_Handles_Multiple_ParamSources()
     {
         var json = """
