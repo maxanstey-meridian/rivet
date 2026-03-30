@@ -1405,6 +1405,145 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void CollectGenericsFromType_WalksBrandInner()
+    {
+        // A Brand wrapping a Generic must produce the monomorphised schema
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "list", "GET", "/api/items",
+                [],
+                new TsType.Brand("Tagged", new TsType.Generic("Wrapper", [new TsType.TypeRef("ItemDto")])),
+                "items",
+                [new TsResponseType(200,
+                    new TsType.Brand("Tagged", new TsType.Generic("Wrapper", [new TsType.TypeRef("ItemDto")])))]),
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["ItemDto"] = new("ItemDto", [],
+            [
+                new TsPropertyDefinition("id", new TsType.Primitive("string"), false),
+            ]),
+            ["Wrapper"] = new("Wrapper", ["T"],
+            [
+                new TsPropertyDefinition("data", new TsType.TypeParam("T"), false),
+            ]),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints, definitions,
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>());
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.TryGetProperty("Wrapper_ItemDto", out _),
+            "Missing monomorphised schema Wrapper_ItemDto — CollectGenericsFromType must walk Brand inner");
+    }
+
+    [Fact]
+    public void RequestType_Nullable_EmitsNullableRequestBody()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "create", "POST", "/api/buyers",
+                [],
+                null, "buyers",
+                [new TsResponseType(200, null)],
+                RequestType: new TsType.Nullable(new TsType.TypeRef("CreateBuyerRequest"))),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var schema = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/buyers")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema");
+
+        // Nullable TypeRef wraps in allOf
+        var allOf = schema.GetProperty("allOf");
+        Assert.Equal(1, allOf.GetArrayLength());
+        Assert.Equal("#/components/schemas/CreateBuyerRequest",
+            allOf[0].GetProperty("$ref").GetString());
+        Assert.True(schema.GetProperty("nullable").GetBoolean());
+    }
+
+    [Fact]
+    public void RequestType_InlineObject_WithNestedGeneric_ProducesMonomorphisedSchema()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "create", "POST", "/api/buyers",
+                [],
+                null, "buyers",
+                [new TsResponseType(200, null)],
+                RequestType: new TsType.InlineObject([
+                    ("name", new TsType.Primitive("string")),
+                    ("tags", new TsType.Generic("TagList", [new TsType.TypeRef("TagDto")])),
+                ])),
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["TagDto"] = new("TagDto", [],
+            [
+                new TsPropertyDefinition("label", new TsType.Primitive("string"), false),
+            ]),
+            ["TagList"] = new("TagList", ["T"],
+            [
+                new TsPropertyDefinition("items", new TsType.Array(new TsType.TypeParam("T")), false),
+            ]),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints, definitions,
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>());
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.TryGetProperty("TagList_TagDto", out var tagListSchema),
+            "Missing monomorphised schema TagList_TagDto");
+
+        var itemsProp = tagListSchema.GetProperty("properties").GetProperty("items");
+        Assert.Equal("array", itemsProp.GetProperty("type").GetString());
+        Assert.Equal("#/components/schemas/TagDto",
+            itemsProp.GetProperty("items").GetProperty("$ref").GetString());
+    }
+
+    [Fact]
+    public void RequestType_IgnoredWhenFileParamsExist()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "upload", "POST", "/api/buyers",
+                [new TsEndpointParam("document", new TsType.Primitive("File"), ParamSource.File)],
+                null, "buyers",
+                [new TsResponseType(200, null)],
+                RequestType: new TsType.TypeRef("CreateBuyerRequest")),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var requestBody = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/buyers")
+            .GetProperty("post")
+            .GetProperty("requestBody");
+
+        // File upload takes priority — multipart, not application/json
+        var content = requestBody.GetProperty("content");
+        Assert.True(content.TryGetProperty("multipart/form-data", out _));
+        Assert.False(content.TryGetProperty("application/json", out _));
+    }
+
+    [Fact]
     public void RequestType_Absent_NoRequestBody()
     {
         var endpoints = new List<TsEndpointDefinition>

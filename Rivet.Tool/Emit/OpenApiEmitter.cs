@@ -747,6 +747,15 @@ public static class OpenApiEmitter
             case TsType.Dictionary d:
                 CollectGenericsFromType(d.Value, instances);
                 break;
+            case TsType.InlineObject obj:
+                foreach (var (_, fieldType) in obj.Fields)
+                {
+                    CollectGenericsFromType(fieldType, instances);
+                }
+                break;
+            case TsType.Brand b:
+                CollectGenericsFromType(b.Inner, instances);
+                break;
         }
     }
 
