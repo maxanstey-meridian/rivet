@@ -448,7 +448,8 @@ public sealed class ClientEmitterTests
         TsType? returnType = null,
         string controller = "buyer",
         TsType? requestType = null,
-        bool isFormEncoded = false) =>
+        bool isFormEncoded = false,
+        IReadOnlyList<TsResponseType>? responses = null) =>
         new(
             Name: name,
             HttpMethod: method,
@@ -456,7 +457,7 @@ public sealed class ClientEmitterTests
             Params: @params ?? [],
             ReturnType: returnType,
             ControllerName: controller,
-            Responses: [],
+            Responses: responses ?? [],
             IsFormEncoded: isFormEncoded,
             RequestType: requestType);
 
@@ -514,7 +515,9 @@ public sealed class ClientEmitterTests
 
         Assert.Contains("body: new URLSearchParams(body as Record<string, string>)", output);
         Assert.Contains("formEncoded: true", output);
-        Assert.DoesNotContain("body: body,", output);
+        // Ensure raw body: body is not emitted (URLSearchParams wrapping is used instead)
+        var fetchLines = output.Split('\n').Where(l => l.Contains("body:")).ToList();
+        Assert.All(fetchLines, l => Assert.DoesNotContain("body: body", l));
     }
 
     [Fact]
@@ -556,6 +559,95 @@ public sealed class ClientEmitterTests
         // Import should NOT contain the unused RequestType
         var importLines = output.Split('\n').Where(l => l.StartsWith("import type")).ToList();
         Assert.All(importLines, l => Assert.DoesNotContain("CreateBuyerRequest", l));
+    }
+
+    [Fact]
+    public void RequestType_IgnoredWhenFileParamsExist()
+    {
+        var endpoint = MakeEndpoint(
+            name: "uploadDocument",
+            route: "/api/documents",
+            @params: [new TsEndpointParam("file", new TsType.Primitive("File"), ParamSource.File)],
+            requestType: new TsType.TypeRef("UploadRequest"),
+            returnType: new TsType.Primitive("void"));
+
+        var output = ClientEmitter.EmitControllerClient("docs", [endpoint], new Dictionary<string, string>());
+
+        // File param should appear in signature, but NOT a body param from RequestType
+        Assert.Contains("file: File", output);
+        var signatures = output.Split('\n').Where(l => l.StartsWith("export function")).ToList();
+        Assert.All(signatures, s => Assert.DoesNotContain("body:", s));
+        // Fetch options should use fd (FormData), not body
+        Assert.Contains("body: fd", output);
+    }
+
+    [Fact]
+    public void RequestType_WithRouteParam_EmitsBothInSignature()
+    {
+        var endpoint = MakeEndpoint(
+            route: "/api/buyers/{id}",
+            @params: [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+            requestType: new TsType.TypeRef("CreateBuyerRequest"),
+            returnType: new TsType.TypeRef("BuyerDto"));
+
+        var typeFileMap = new Dictionary<string, string>
+        {
+            ["CreateBuyerRequest"] = "buyer",
+            ["BuyerDto"] = "buyer",
+        };
+
+        var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], typeFileMap);
+
+        Assert.Contains("export function createBuyer(id: string, body: CreateBuyerRequest): Promise<BuyerDto>;", output);
+        Assert.Contains("export function createBuyer(id: string, body: CreateBuyerRequest, opts: { unwrap: true }): Promise<BuyerDto>;", output);
+        Assert.Contains("export function createBuyer(id: string, body: CreateBuyerRequest, opts: { unwrap: false }): Promise<RivetResult<BuyerDto>>;", output);
+    }
+
+    [Fact]
+    public void RequestType_WithQueryParam_EmitsBothBodyAndQuery()
+    {
+        var endpoint = MakeEndpoint(
+            route: "/api/buyers",
+            @params: [new TsEndpointParam("status", new TsType.Primitive("string"), ParamSource.Query)],
+            requestType: new TsType.TypeRef("CreateBuyerRequest"),
+            returnType: new TsType.Primitive("void"));
+
+        var typeFileMap = new Dictionary<string, string> { ["CreateBuyerRequest"] = "buyer" };
+        var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], typeFileMap);
+
+        Assert.Contains("export function createBuyer(status: string, body: CreateBuyerRequest): Promise<void>;", output);
+        Assert.Contains("body: body", output);
+        Assert.Contains("query: { status }", output);
+    }
+
+    [Fact]
+    public void RequestType_WithMultiResponse_EmitsResultDUAndBodyParam()
+    {
+        var endpoint = MakeEndpoint(
+            requestType: new TsType.TypeRef("CreateBuyerRequest"),
+            returnType: new TsType.TypeRef("BuyerDto"),
+            responses:
+            [
+                new TsResponseType(200, new TsType.TypeRef("BuyerDto")),
+                new TsResponseType(422, new TsType.TypeRef("ValidationError")),
+            ]);
+
+        var typeFileMap = new Dictionary<string, string>
+        {
+            ["CreateBuyerRequest"] = "buyer",
+            ["BuyerDto"] = "buyer",
+            ["ValidationError"] = "buyer",
+        };
+
+        var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], typeFileMap);
+
+        // Result DU should be emitted
+        Assert.Contains("export type CreateBuyerResult =", output);
+        Assert.Contains("{ status: 200; data: BuyerDto; response: Response }", output);
+        Assert.Contains("{ status: 422; data: ValidationError; response: Response }", output);
+        // Body param in all overloads including the DU variant
+        Assert.Contains("export function createBuyer(body: CreateBuyerRequest): Promise<BuyerDto>;", output);
+        Assert.Contains("export function createBuyer(body: CreateBuyerRequest, opts: { unwrap: false }): Promise<CreateBuyerResult>;", output);
     }
 
     [Fact]

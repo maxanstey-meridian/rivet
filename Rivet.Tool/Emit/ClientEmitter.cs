@@ -134,7 +134,7 @@ public static partial class ClientEmitter
         var queryParams = endpoint.Params.Where(p => p.Source == ParamSource.Query).ToList();
 
         // Fallback: PHP contracts carry body type in RequestType instead of Params
-        if (bodyParam is null && endpoint.RequestType is not null)
+        if (bodyParam is null && fileParams.Count == 0 && endpoint.RequestType is not null)
         {
             paramParts.Add($"body: {TypeEmitter.EmitTypeString(endpoint.RequestType)}");
         }
