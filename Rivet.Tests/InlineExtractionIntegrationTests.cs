@@ -400,8 +400,8 @@ public sealed class InlineExtractionIntegrationTests : IDisposable
         Assert.Contains("y: number", allTypeContent);
 
         // Both definitions should be present — the extracted one didn't overwrite the original
-        var widgetDtoCount = allTypeContent.Split("export type WidgetDto").Length - 1;
-        Assert.True(widgetDtoCount >= 1, "Original WidgetDto must still exist");
+        Assert.Contains("export type WidgetDto ", allTypeContent);   // original (note trailing space before '=')
+        Assert.Contains("export type WidgetDto2", allTypeContent);   // collision-avoidance name
     }
 
     private static EmitPipeline.EmitInput BuildEmitInput(
