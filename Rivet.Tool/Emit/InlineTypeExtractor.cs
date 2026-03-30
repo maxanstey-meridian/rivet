@@ -23,4 +23,52 @@ public static class InlineTypeExtractor
             _ => throw new NotSupportedException($"Unknown TsType variant: {type.GetType().Name}"),
         };
     }
+
+    public static List<(TsType.InlineObject Type, string Context)> CollectInlineObjects(
+        IReadOnlyList<TsEndpointDefinition> endpoints)
+    {
+        var results = new List<(TsType.InlineObject, string)>();
+
+        foreach (var e in endpoints)
+        {
+            CollectFromType(e.ReturnType, $"{e.ControllerName}.{e.Name}.return", results);
+
+            foreach (var r in e.Responses)
+                CollectFromType(r.DataType, $"{e.ControllerName}.{e.Name}.response.{r.StatusCode}", results);
+
+            foreach (var p in e.Params)
+                CollectFromType(p.Type, $"{e.ControllerName}.{e.Name}.param.{p.Name}", results);
+        }
+
+        return results;
+    }
+
+    private static void CollectFromType(TsType? type, string context,
+        List<(TsType.InlineObject, string)> results)
+    {
+        switch (type)
+        {
+            case TsType.InlineObject io:
+                results.Add((io, context));
+                foreach (var (_, fieldType) in io.Fields)
+                    CollectFromType(fieldType, context, results);
+                break;
+            case TsType.Array a:
+                CollectFromType(a.Element, context, results);
+                break;
+            case TsType.Nullable n:
+                CollectFromType(n.Inner, context, results);
+                break;
+            case TsType.Dictionary d:
+                CollectFromType(d.Value, context, results);
+                break;
+            case TsType.Generic g:
+                foreach (var arg in g.TypeArguments)
+                    CollectFromType(arg, context, results);
+                break;
+            case TsType.Brand b:
+                CollectFromType(b.Inner, context, results);
+                break;
+        }
+    }
 }
