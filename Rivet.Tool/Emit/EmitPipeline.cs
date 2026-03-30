@@ -19,10 +19,31 @@ internal static class EmitPipeline
 
     internal static async Task<int> RunAsync(EmitInput input, RivetOptions options)
     {
-        var typeGrouping = TypeGrouper.Group(input.Definitions, input.Brands, input.Enums, input.TypeNamespaces);
+        // Extraction pass: find duplicate/large InlineObjects, replace with named TypeRefs
+        var extraction = InlineTypeExtractor.Extract(input.Endpoints, input.Definitions.ToList());
+
+        var allDefinitions = input.Definitions.Concat(extraction.ExtractedTypes).ToList();
+
+        var allNamespaces = new Dictionary<string, string?>(input.TypeNamespaces);
+        foreach (var (name, ns) in extraction.TypeNamespaces)
+            allNamespaces[name] = ns;
+
+        var definitionsByName = new Dictionary<string, TsTypeDefinition>(input.DefinitionsByName);
+        foreach (var def in extraction.ExtractedTypes)
+            definitionsByName[def.Name] = def;
+
+        var merged = input with
+        {
+            Definitions = allDefinitions,
+            Endpoints = extraction.Endpoints,
+            TypeNamespaces = allNamespaces,
+            DefinitionsByName = definitionsByName,
+        };
+
+        var typeGrouping = TypeGrouper.Group(merged.Definitions, merged.Brands, merged.Enums, allNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
         var mode = options.Mode;
-        var endpoints = input.Endpoints;
+        var endpoints = merged.Endpoints;
 
         if (mode == "compile" && options.OutputDir is null)
         {
@@ -32,11 +53,11 @@ internal static class EmitPipeline
 
         if (options.OutputDir is not null)
         {
-            await WriteOutput(input, options, typeGrouping, typeFileMap, mode, endpoints);
+            await WriteOutput(merged, options, typeGrouping, typeFileMap, mode, endpoints);
         }
         else if (!options.Quiet)
         {
-            PreviewToStdout(input, options, typeGrouping, typeFileMap, endpoints);
+            PreviewToStdout(merged, options, typeGrouping, typeFileMap, endpoints);
         }
 
         return 0;
