@@ -247,6 +247,20 @@ public static class OpenApiEmitter
                 },
             };
         }
+        else if (ep.RequestType is not null)
+        {
+            operation["requestBody"] = new Dictionary<string, object>
+            {
+                ["required"] = true,
+                ["content"] = new Dictionary<string, object>
+                {
+                    ["application/json"] = new Dictionary<string, object>
+                    {
+                        ["schema"] = MapTsTypeToJsonSchema(ep.RequestType),
+                    },
+                },
+            };
+        }
 
         // Responses
         var responses = new Dictionary<string, object>();

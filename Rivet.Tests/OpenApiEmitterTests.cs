@@ -1294,6 +1294,124 @@ public sealed class OpenApiEmitterTests
         Assert.Equal("TaskDto", ext.GetProperty("args").GetProperty("T").GetString());
     }
 
+    [Fact]
+    public void RequestType_IgnoredWhenBodyParamExists()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "create", "POST", "/api/buyers",
+                [new TsEndpointParam("body", new TsType.TypeRef("FromParams"), ParamSource.Body)],
+                null, "buyers",
+                [new TsResponseType(200, null)],
+                RequestType: new TsType.TypeRef("FromRequestType")),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var schema = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/buyers")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema");
+
+        // Should use Param (FromParams), not RequestType (FromRequestType)
+        Assert.Equal("#/components/schemas/FromParams", schema.GetProperty("$ref").GetString());
+    }
+
+    [Fact]
+    public void RequestType_Absent_NoRequestBody()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("list", "GET", "/api/buyers", [], null, "buyers",
+                [new TsResponseType(200, null)]),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var get = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/buyers")
+            .GetProperty("get");
+
+        Assert.False(get.TryGetProperty("requestBody", out _));
+    }
+
+    [Fact]
+    public void RequestType_InlineObject_EmitsRequestBody()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "create", "POST", "/api/buyers",
+                [],
+                null, "buyers",
+                [new TsResponseType(200, null)],
+                RequestType: new TsType.InlineObject([
+                    ("id", new TsType.Primitive("number")),
+                    ("name", new TsType.Primitive("string")),
+                ])),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var requestBody = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/buyers")
+            .GetProperty("post")
+            .GetProperty("requestBody");
+
+        Assert.True(requestBody.GetProperty("required").GetBoolean());
+
+        var schema = requestBody.GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema");
+        Assert.Equal("object", schema.GetProperty("type").GetString());
+        Assert.Equal("number", schema.GetProperty("properties").GetProperty("id").GetProperty("type").GetString());
+        Assert.Equal("string", schema.GetProperty("properties").GetProperty("name").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public void RequestType_TypeRef_EmitsRequestBody()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "create", "POST", "/api/buyers",
+                [],
+                null, "buyers",
+                [new TsResponseType(200, null)],
+                RequestType: new TsType.TypeRef("CreateBuyerRequest")),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var post = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/buyers")
+            .GetProperty("post");
+
+        var requestBody = post.GetProperty("requestBody");
+        Assert.True(requestBody.GetProperty("required").GetBoolean());
+        Assert.Equal("#/components/schemas/CreateBuyerRequest",
+            requestBody.GetProperty("content")
+                .GetProperty("application/json")
+                .GetProperty("schema")
+                .GetProperty("$ref").GetString());
+    }
+
     private static void CollectRefs(JsonElement element, List<string> refs)
     {
         switch (element.ValueKind)
