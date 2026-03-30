@@ -1178,4 +1178,60 @@ public sealed class InlineTypeExtractorTests
 
         Assert.Equal("AuthLoginDto", result);
     }
+
+    [Fact]
+    public void GenerateName_DataFieldSkipped_UsesMethodName()
+    {
+        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Buyers.find.return.field.data"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+
+        Assert.Equal("BuyerFindDto", result);
+    }
+
+    [Fact]
+    public void GenerateName_SnakeCaseController_UsesMethodName()
+    {
+        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "order_items.find.return"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("order_items", occurrences, new HashSet<string>());
+
+        Assert.Equal("OrderItemFindDto", result);
+    }
+
+    [Fact]
+    public void GenerateName_SnakeCaseMethod_UsesMethodName()
+    {
+        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Orders.find_all.return"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Orders", occurrences, new HashSet<string>());
+
+        Assert.Equal("OrderFindAllDto", result);
+    }
+
+    [Fact]
+    public void GenerateName_DataFieldWithDeeperNesting_UsesInnerField()
+    {
+        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var occurrences = new List<(TsType.InlineObject Type, string Context)>
+        {
+            (inline, "Buyers.find.return.field.data.field.items"),
+        };
+
+        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+
+        Assert.Equal("ItemDto", result);
+    }
 }

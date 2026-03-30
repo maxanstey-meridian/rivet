@@ -70,7 +70,8 @@ public static class InlineTypeExtractor
         if (nestedOccurrence != default)
         {
             var fieldName = nestedOccurrence.Context.Split(".field.").Last().Split('.').First();
-            return ToPascalCase(Singularize(fieldName));
+            if (fieldName != "data")
+                return ToPascalCase(Singularize(fieldName));
         }
 
         // Extract method name from context path: "Controller.Method.return" → segments[1]
