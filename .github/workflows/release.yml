@@ -34,6 +34,10 @@ jobs:
             mv Rivet.Tool rivet-${{ matrix.rid }}
           fi
 
+      - name: Package publish directory
+        run: |
+          tar -czf rivet-${{ matrix.rid }}.tar.gz -C ./publish .
+
       # Only linux-x64 can be smoke-tested on ubuntu-latest. macOS/Windows
       # coverage comes from existing [Category=Local] tests run by devs natively.
       - name: Smoke test — OpenAPI import (linux-x64 only)
@@ -50,7 +54,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: rivet-${{ matrix.rid }}
-          path: ./publish/rivet-${{ matrix.rid }}*
+          path: ./rivet-${{ matrix.rid }}.tar.gz
 
   release:
     needs: build
