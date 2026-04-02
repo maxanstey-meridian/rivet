@@ -318,6 +318,73 @@ public sealed class JsonContractReaderTests
     }
 
     [Fact]
+    public void Read_Throws_For_Request_Example_With_Both_Json_And_ComponentExampleId()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "responses": [],
+                        "requestExamples": [
+                            {
+                                "mediaType": "application/json",
+                                "json": "{\"customerId\":\"cus_123\"}",
+                                "componentExampleId": "create-order"
+                            }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        var error = Assert.Throws<ArgumentException>(() => JsonContractReader.Read(json));
+
+        Assert.Contains("Exactly one of json or componentExampleId", error.Message);
+    }
+
+    [Fact]
+    public void Read_Throws_For_Response_Example_Missing_Both_Json_And_ComponentExampleId()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "responses": [
+                            {
+                                "statusCode": 422,
+                                "examples": [
+                                    {
+                                        "mediaType": "application/json",
+                                        "name": "broken"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        var error = Assert.Throws<ArgumentException>(() => JsonContractReader.Read(json));
+
+        Assert.Contains("Exactly one of json or componentExampleId", error.Message);
+    }
+
+    [Fact]
     public void Request_Examples_Deserialize_With_Inline_And_RefBacked_Metadata_In_Order()
     {
         var json = """

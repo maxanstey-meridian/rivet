@@ -441,6 +441,67 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void EndpointExamples_Survive_Walk_Emit_Read_RoundTrip_From_ContractDsl()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginRequest(string Email, string Password);
+
+            [RivetType]
+            public sealed record TokenDto(string Token);
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly Define Login =
+                    Define.Post<LoginRequest, TokenDto>("/api/auth/login")
+                        .FormEncoded()
+                        .RequestExampleRef(
+                            "login-request",
+                            "{\"email\":\"ada@example.com\",\"password\":\"secret\"}",
+                            name: "loginRequest")
+                        .Returns<ProblemDto>(422)
+                        .ResponseExampleRef(
+                            422,
+                            "login-problem",
+                            "{\"title\":\"Bad credentials\"}",
+                            name: "badCredentials");
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var definitions = walker.Definitions.ToDictionary(kv => kv.Key, kv => kv.Value);
+        var enums = walker.Enums.ToDictionary(kv => kv.Key, kv => kv.Value);
+        var json = ContractEmitter.Emit(definitions, enums, endpoints);
+        var result = JsonContractReader.Read(json);
+
+        var endpoint = Assert.Single(result.Endpoints);
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("loginRequest", requestExample.Name);
+        Assert.Equal("application/x-www-form-urlencoded", requestExample.MediaType);
+        Assert.Null(requestExample.Json);
+        Assert.Equal("login-request", requestExample.ComponentExampleId);
+        Assert.Equal("""{"email":"ada@example.com","password":"secret"}""", requestExample.ResolvedJson);
+
+        var response = endpoint.Responses.First(r => r.StatusCode == 422);
+        var responseExample = Assert.Single(response.Examples!);
+        Assert.Equal("badCredentials", responseExample.Name);
+        Assert.Equal("application/json", responseExample.MediaType);
+        Assert.Null(responseExample.Json);
+        Assert.Equal("login-problem", responseExample.ComponentExampleId);
+        Assert.Equal("""{"title":"Bad credentials"}""", responseExample.ResolvedJson);
+    }
+
+    [Fact]
     public void RequestExamples_Multiple_Entries_Are_Preserved_In_Order()
     {
         var source = """
@@ -706,6 +767,45 @@ public sealed class ContractEndpointTests
         var example = Assert.Single(ep.RequestExamples!);
         Assert.Equal("multipart/form-data", example.MediaType);
         Assert.Equal("""{"file":"ignored"}""", example.Json);
+    }
+
+    [Fact]
+    public void InputOnly_RequestExamples_And_Untyped_ResponseExamples_Are_Preserved()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginRequest(string Email, string Password);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly InputRouteDefinition<LoginRequest> Login =
+                    Define.Delete("/api/auth/session")
+                        .Accepts<LoginRequest>()
+                        .RequestExampleJson("{\"email\":\"ada@example.com\",\"password\":\"secret\"}", name: "loginRequest")
+                        .Returns(422)
+                        .ResponseExampleJson(422, "{\"message\":\"Bad credentials\"}", name: "badCredentials");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("loginRequest", requestExample.Name);
+        Assert.Equal("application/json", requestExample.MediaType);
+        Assert.Equal("""{"email":"ada@example.com","password":"secret"}""", requestExample.Json);
+
+        var response = endpoint.Responses.First(r => r.StatusCode == 422);
+        Assert.Null(response.DataType);
+        var responseExample = Assert.Single(response.Examples!);
+        Assert.Equal("badCredentials", responseExample.Name);
+        Assert.Equal("application/json", responseExample.MediaType);
+        Assert.Equal("""{"message":"Bad credentials"}""", responseExample.Json);
     }
 
     [Fact]
