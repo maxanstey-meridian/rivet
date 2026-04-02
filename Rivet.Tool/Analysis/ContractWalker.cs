@@ -337,7 +337,7 @@ public static class ContractWalker
         var requestExamples = requestExampleCalls.Count == 0
             ? null
             : requestExampleCalls
-                .Select(call => ToEndpointExample(call, DefaultRequestExampleMediaType(isFormEncoded, acceptsFile)))
+                .Select(call => ToEndpointExample(call, DefaultRequestExampleMediaType(isFormEncoded, parameters)))
                 .ToList();
 
         return new TsEndpointDefinition(
@@ -360,9 +360,11 @@ public static class ContractWalker
     private static int DefaultSuccessCode(string httpMethod) =>
         httpMethod switch { "POST" => 201, "DELETE" => 204, _ => 200 };
 
-    private static string DefaultRequestExampleMediaType(bool isFormEncoded, bool acceptsFile)
+    private static string DefaultRequestExampleMediaType(
+        bool isFormEncoded,
+        IReadOnlyList<TsEndpointParam> parameters)
     {
-        if (acceptsFile)
+        if (parameters.Any(parameter => parameter.Source is ParamSource.File or ParamSource.FormField))
         {
             return "multipart/form-data";
         }

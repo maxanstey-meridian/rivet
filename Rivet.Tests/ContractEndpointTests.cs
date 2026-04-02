@@ -334,6 +334,38 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void RequestExampleJson_On_ImplicitMultipartInput_Defaults_To_MultipartFormData()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadInput(IFormFile Document, string Title);
+
+            [RivetType]
+            public sealed record UploadResultDto(string Id);
+
+            [RivetContract]
+            public static class UploadsContract
+            {
+                public static readonly Define Upload =
+                    Define.Post<UploadInput, UploadResultDto>("/api/uploads")
+                        .RequestExampleJson("{\"title\":\"Quarterly report\"}");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var example = Assert.Single(ep.RequestExamples!);
+        Assert.Equal("multipart/form-data", example.MediaType);
+        Assert.Equal("""{"title":"Quarterly report"}""", example.Json);
+    }
+
+    [Fact]
     public void Get_OutputOnly_NoInput()
     {
         var source = """
