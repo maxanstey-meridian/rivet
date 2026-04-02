@@ -219,6 +219,35 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void ResponseExampleJson_Without_Declared_Response_Is_Ignored()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        Assert.Single(ep.Responses);
+        Assert.Equal(200, ep.Responses[0].StatusCode);
+        Assert.Null(ep.Responses[0].Examples);
+        Assert.DoesNotContain(ep.Responses, response => response.StatusCode == 422);
+    }
+
+    [Fact]
     public void Example_MediaType_Override_Is_Preserved()
     {
         var source = """

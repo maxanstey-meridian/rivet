@@ -21,8 +21,6 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     private bool _acceptsFile;
     private bool _formEncoded;
     private List<RouteErrorResponse>? _errorResponses;
-    private List<EndpointExample>? _requestExamples;
-    private List<RouteResponseExample>? _responseExamples;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
@@ -38,8 +36,6 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public bool IsFileUpload => _acceptsFile;
     public bool IsFormEncoded => _formEncoded;
     public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses => _errorResponses;
-    public IReadOnlyList<EndpointExample>? RequestExamples => _requestExamples;
-    public IReadOnlyList<RouteResponseExample>? ResponseExamples => _responseExamples;
 
     /// <summary>The resolved success status code (for use in Invoke).</summary>
     protected int SuccessStatus => _successStatus;
@@ -65,8 +61,6 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         target._acceptsFile = _acceptsFile;
         target._formEncoded = _formEncoded;
         target._errorResponses = _errorResponses?.ToList();
-        target._requestExamples = _requestExamples?.ToList();
-        target._responseExamples = _responseExamples?.ToList();
     }
 
     public TSelf Summary(string summary)
@@ -121,22 +115,19 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
 
     public TSelf RequestExampleJson(string json, string? name = null, string? mediaType = null)
     {
-        _requestExamples ??= [];
-        _requestExamples.Add(EndpointExample.JsonExample(json, name, mediaType));
+        _ = EndpointExample.JsonExample(json, name, mediaType);
         return (TSelf)this;
     }
 
     public TSelf RequestExampleRef(string componentExampleId, string resolvedJson, string? name = null, string? mediaType = null)
     {
-        _requestExamples ??= [];
-        _requestExamples.Add(EndpointExample.RefExample(componentExampleId, resolvedJson, name, mediaType));
+        _ = EndpointExample.RefExample(componentExampleId, resolvedJson, name, mediaType);
         return (TSelf)this;
     }
 
     public TSelf ResponseExampleJson(int statusCode, string json, string? name = null, string? mediaType = null)
     {
-        _responseExamples ??= [];
-        _responseExamples.Add(new RouteResponseExample(statusCode, EndpointExample.JsonExample(json, name, mediaType)));
+        _ = EndpointExample.JsonExample(json, name, mediaType);
         return (TSelf)this;
     }
 
@@ -147,10 +138,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         string? name = null,
         string? mediaType = null)
     {
-        _responseExamples ??= [];
-        _responseExamples.Add(new RouteResponseExample(
-            statusCode,
-            EndpointExample.RefExample(componentExampleId, resolvedJson, name, mediaType)));
+        _ = EndpointExample.RefExample(componentExampleId, resolvedJson, name, mediaType);
         return (TSelf)this;
     }
 

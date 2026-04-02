@@ -17,5 +17,3 @@ public sealed record EndpointExample(
         string? mediaType = null) =>
         new(mediaType, name, ComponentExampleId: componentExampleId, ResolvedJson: resolvedJson);
 }
-
-public sealed record RouteResponseExample(int StatusCode, EndpointExample Example);

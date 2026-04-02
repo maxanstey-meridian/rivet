@@ -332,7 +332,7 @@ public static class ContractWalker
         }
 
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
-        ApplyResponseExamples(responses, responseExampleCalls, fileContentType);
+        ApplyResponseExamples(responses, responseExampleCalls, fileContentType, name);
 
         var requestExamples = requestExampleCalls.Count == 0
             ? null
@@ -397,7 +397,8 @@ public static class ContractWalker
     private static void ApplyResponseExamples(
         List<TsResponseType> responses,
         IReadOnlyList<PendingEndpointExampleCall> responseExampleCalls,
-        string? fileContentType)
+        string? fileContentType,
+        string endpointName)
     {
         if (responseExampleCalls.Count == 0)
         {
@@ -421,7 +422,8 @@ public static class ContractWalker
                 continue;
             }
 
-            responses.Add(new TsResponseType(group.Key, null, Examples: mappedExamples));
+            Console.Error.WriteLine(
+                $"warning: ignoring response example for undeclared status {group.Key} on contract endpoint '{endpointName}'");
         }
 
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
