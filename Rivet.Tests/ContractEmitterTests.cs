@@ -260,6 +260,15 @@ public sealed class ContractEmitterTests
     }
 
     [Fact]
+    public void Endpoint_Example_Properties_Are_Not_Publicly_Settable()
+    {
+        Assert.Null(typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.MediaType))!.SetMethod);
+        Assert.Null(typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.Json))!.SetMethod);
+        Assert.Null(typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.ComponentExampleId))!.SetMethod);
+        Assert.Null(typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.ResolvedJson))!.SetMethod);
+    }
+
+    [Fact]
     public void Security_Serializes_As_CamelCase()
     {
         var endpoint = new TsEndpointDefinition(

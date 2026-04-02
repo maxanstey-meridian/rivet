@@ -221,7 +221,12 @@
       "oneOf": [
         {
           "required": ["json"],
-          "not": { "required": ["componentExampleId"] }
+          "not": {
+            "anyOf": [
+              { "required": ["componentExampleId"] },
+              { "required": ["resolvedJson"] }
+            ]
+          }
         },
         {
           "required": ["componentExampleId"],

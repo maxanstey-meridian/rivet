@@ -326,6 +326,41 @@ public sealed class ContractSchemaTests
         Assert.False(result.IsValid);
     }
 
+    [Fact]
+    public void Endpoint_Example_With_Json_And_ResolvedJson_But_No_ComponentExampleId_Rejected()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "responses": [
+                            {
+                                "statusCode": 201,
+                                "examples": [
+                                    {
+                                        "mediaType": "application/json",
+                                        "json": "{\"id\":\"ord_123\"}",
+                                        "resolvedJson": "{\"id\":\"ord_123\"}"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        var result = Validate(json);
+        Assert.False(result.IsValid);
+    }
+
     private static string FormatErrors(EvaluationResults results) =>
         string.Join("\n", results.Details
             .Where(d => !d.IsValid && d.Errors is not null)

@@ -27,17 +27,17 @@ public sealed record TsEndpointExample
         this.ResolvedJson = ResolvedJson;
     }
 
-    public string MediaType { get; init; }
+    public string MediaType { get; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Name { get; init; }
+    public string? Name { get; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Json { get; init; }
+    public string? Json { get; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ComponentExampleId { get; init; }
+    public string? ComponentExampleId { get; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ResolvedJson { get; init; }
+    public string? ResolvedJson { get; }
 }
