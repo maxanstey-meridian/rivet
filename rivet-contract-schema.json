@@ -265,6 +265,7 @@
         "fileContentType": { "type": "string" },
         "inputTypeName": { "type": "string" },
         "isFormEncoded": { "type": "boolean" },
+        "requestType": { "$ref": "#/$defs/tsType" },
         "requestExamples": { "type": "array", "items": { "$ref": "#/$defs/endpointExample" } }
       },
       "required": ["name", "httpMethod", "routeTemplate", "params", "controllerName", "responses"],

@@ -240,6 +240,26 @@ public sealed class ContractEmitterTests
     }
 
     [Fact]
+    public void Endpoint_Example_Requires_Exactly_One_Of_Json_Or_ComponentExampleId()
+    {
+        var missingPayload = Assert.Throws<ArgumentException>(() => new TsEndpointExample("application/json"));
+        Assert.Contains("Exactly one of json or componentExampleId", missingPayload.Message);
+
+        var duplicatePayload = Assert.Throws<ArgumentException>(() =>
+            new TsEndpointExample("application/json", Json: """{"id":"ord_123"}""", ComponentExampleId: "order-created"));
+        Assert.Contains("Exactly one of json or componentExampleId", duplicatePayload.Message);
+    }
+
+    [Fact]
+    public void Endpoint_Example_ResolvedJson_Requires_ComponentExampleId()
+    {
+        var error = Assert.Throws<ArgumentException>(() =>
+            new TsEndpointExample("application/json", ResolvedJson: """{"id":"ord_123"}""", Json: """{"id":"ord_123"}"""));
+
+        Assert.Contains("resolvedJson is only valid for ref-backed examples", error.Message);
+    }
+
+    [Fact]
     public void Security_Serializes_As_CamelCase()
     {
         var endpoint = new TsEndpointDefinition(

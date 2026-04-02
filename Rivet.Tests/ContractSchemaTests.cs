@@ -137,6 +137,24 @@ public sealed class ContractSchemaTests
     }
 
     [Fact]
+    public void Endpoint_With_RequestType_Validates()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "createBuyer",
+            "POST",
+            "/buyers",
+            [],
+            null,
+            "BuyersController",
+            [new TsResponseType(202, null)],
+            RequestType: new TsType.TypeRef("CreateBuyerRequest"));
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var result = Validate(json);
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
     public void Full_Contract_Golden_Validates()
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
