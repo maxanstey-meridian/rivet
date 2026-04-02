@@ -97,6 +97,46 @@ public sealed class ContractSchemaTests
     }
 
     [Fact]
+    public void Endpoint_With_Request_And_Response_Examples_Validates()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "createOrder",
+            "POST",
+            "/api/orders",
+            [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            new TsType.TypeRef("CreateOrderResponse"),
+            "OrdersController",
+            [
+                new TsResponseType(
+                    201,
+                    new TsType.TypeRef("CreateOrderResponse"),
+                    Examples:
+                    [
+                        new TsEndpointExample("application/json", "created", """{"id":"ord_123"}"""),
+                    ]),
+                new TsResponseType(
+                    422,
+                    new TsType.TypeRef("ValidationProblem"),
+                    "Validation failed",
+                    [
+                        new TsEndpointExample(
+                            "application/json",
+                            "validationProblem",
+                            ComponentExampleId: "validation-problem",
+                            ResolvedJson: """{"message":"Validation failed"}"""),
+                    ]),
+            ],
+            RequestExamples:
+            [
+                new TsEndpointExample("application/json", Json: """{"customerId":"cus_123"}"""),
+            ]);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var result = Validate(json);
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
     public void Full_Contract_Golden_Validates()
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
@@ -230,6 +270,40 @@ public sealed class ContractSchemaTests
     public void Invalid_ParamSource_Rejected()
     {
         var json = """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"x","type":{"kind":"primitive","type":"string"},"source":"header"}],"controllerName":"C","responses":[]}]}""";
+        var result = Validate(json);
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Endpoint_Example_Missing_Json_And_ComponentExampleId_Rejected()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "responses": [
+                            {
+                                "statusCode": 201,
+                                "examples": [
+                                    {
+                                        "mediaType": "application/json",
+                                        "name": "broken"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+            """;
+
         var result = Validate(json);
         Assert.False(result.IsValid);
     }

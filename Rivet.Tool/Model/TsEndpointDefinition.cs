@@ -19,7 +19,8 @@ public sealed record TsEndpointDefinition(
     string? FileContentType = null,
     string? InputTypeName = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFormEncoded = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? RequestType = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? RequestType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsEndpointExample>? RequestExamples = null);
 
 /// <summary>
 /// Security metadata for an endpoint. null = inherit CLI default.
@@ -29,7 +30,11 @@ public sealed record EndpointSecurity(bool IsAnonymous, string? Scheme = null);
 /// <summary>
 /// A typed response for a given status code.
 /// </summary>
-public sealed record TsResponseType(int StatusCode, TsType? DataType, string? Description = null);
+public sealed record TsResponseType(
+    int StatusCode,
+    TsType? DataType,
+    string? Description = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsEndpointExample>? Examples = null);
 
 /// <summary>
 /// A parameter to a client function.

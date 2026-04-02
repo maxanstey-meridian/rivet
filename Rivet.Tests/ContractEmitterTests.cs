@@ -174,6 +174,72 @@ public sealed class ContractEmitterTests
     }
 
     [Fact]
+    public void Endpoint_Examples_Serialize_With_Request_And_Response_Metadata()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "createOrder",
+            "POST",
+            "/api/orders",
+            [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            new TsType.TypeRef("CreateOrderResponse"),
+            "OrdersController",
+            [
+                new TsResponseType(
+                    201,
+                    new TsType.TypeRef("CreateOrderResponse"),
+                    Examples:
+                    [
+                        new TsEndpointExample("application/json", "created", """{"id":"ord_123","status":"created"}"""),
+                        new TsEndpointExample("application/json", "queued", """{"id":"ord_124","status":"queued"}"""),
+                    ]),
+                new TsResponseType(
+                    422,
+                    new TsType.TypeRef("ValidationProblem"),
+                    "Validation failed",
+                    [
+                        new TsEndpointExample(
+                            "application/json",
+                            "validationProblem",
+                            ComponentExampleId: "validation-problem",
+                            ResolvedJson: """{"message":"Validation failed"}"""),
+                    ]),
+            ],
+            RequestExamples:
+            [
+                new TsEndpointExample("application/json", Json: """{"customerId":"cus_123"}"""),
+            ]);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var ep = doc.RootElement.GetProperty("endpoints")[0];
+
+        var requestExamples = ep.GetProperty("requestExamples");
+        Assert.Single(requestExamples.EnumerateArray());
+        var requestExample = requestExamples[0];
+        Assert.Equal("application/json", requestExample.GetProperty("mediaType").GetString());
+        Assert.Equal("""{"customerId":"cus_123"}""", requestExample.GetProperty("json").GetString());
+        Assert.False(requestExample.TryGetProperty("name", out _));
+        Assert.False(requestExample.TryGetProperty("componentExampleId", out _));
+        Assert.False(requestExample.TryGetProperty("resolvedJson", out _));
+
+        var responses = ep.GetProperty("responses");
+        var createdExamples = responses[0].GetProperty("examples");
+        Assert.Equal(2, createdExamples.GetArrayLength());
+        Assert.Equal("created", createdExamples[0].GetProperty("name").GetString());
+        Assert.Equal("""{"id":"ord_123","status":"created"}""", createdExamples[0].GetProperty("json").GetString());
+        Assert.Equal("queued", createdExamples[1].GetProperty("name").GetString());
+        Assert.Equal("""{"id":"ord_124","status":"queued"}""", createdExamples[1].GetProperty("json").GetString());
+
+        var validationExamples = responses[1].GetProperty("examples");
+        Assert.Single(validationExamples.EnumerateArray());
+        var refBackedExample = validationExamples[0];
+        Assert.Equal("validationProblem", refBackedExample.GetProperty("name").GetString());
+        Assert.Equal("validation-problem", refBackedExample.GetProperty("componentExampleId").GetString());
+        Assert.Equal("""{"message":"Validation failed"}""", refBackedExample.GetProperty("resolvedJson").GetString());
+        Assert.False(refBackedExample.TryGetProperty("json", out _));
+    }
+
+    [Fact]
     public void Security_Serializes_As_CamelCase()
     {
         var endpoint = new TsEndpointDefinition(

@@ -231,6 +231,93 @@ public sealed class JsonContractReaderTests
     }
 
     [Fact]
+    public void Endpoint_Examples_Deserialize_With_Request_And_Response_Metadata()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "returnType": null,
+                        "requestExamples": [
+                            {
+                                "mediaType": "application/json",
+                                "json": "{\"customerId\":\"cus_123\"}"
+                            }
+                        ],
+                        "responses": [
+                            {
+                                "statusCode": 201,
+                                "dataType": { "kind": "ref", "name": "CreateOrderResponse" },
+                                "examples": [
+                                    {
+                                        "mediaType": "application/json",
+                                        "name": "created",
+                                        "json": "{\"id\":\"ord_123\"}"
+                                    },
+                                    {
+                                        "mediaType": "application/json",
+                                        "name": "queued",
+                                        "json": "{\"id\":\"ord_124\"}"
+                                    }
+                                ]
+                            },
+                            {
+                                "statusCode": 422,
+                                "dataType": { "kind": "ref", "name": "ValidationProblem" },
+                                "description": "Validation failed",
+                                "examples": [
+                                    {
+                                        "mediaType": "application/json",
+                                        "name": "validationProblem",
+                                        "componentExampleId": "validation-problem",
+                                        "resolvedJson": "{\"message\":\"Validation failed\"}"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        var result = JsonContractReader.Read(json);
+
+        var endpoint = Assert.Single(result.Endpoints);
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("application/json", requestExample.MediaType);
+        Assert.Null(requestExample.Name);
+        Assert.Equal("""{"customerId":"cus_123"}""", requestExample.Json);
+        Assert.Null(requestExample.ComponentExampleId);
+        Assert.Null(requestExample.ResolvedJson);
+
+        Assert.Equal(2, endpoint.Responses.Count);
+
+        var createdResponse = endpoint.Responses[0];
+        Assert.Equal(201, createdResponse.StatusCode);
+        var createdExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(createdResponse.Examples);
+        Assert.Equal(2, createdExamples.Count);
+        Assert.Equal("created", createdExamples[0].Name);
+        Assert.Equal("""{"id":"ord_123"}""", createdExamples[0].Json);
+        Assert.Equal("queued", createdExamples[1].Name);
+        Assert.Equal("""{"id":"ord_124"}""", createdExamples[1].Json);
+
+        var validationResponse = endpoint.Responses[1];
+        Assert.Equal("Validation failed", validationResponse.Description);
+        var refBackedExample = Assert.Single(validationResponse.Examples!);
+        Assert.Equal("validationProblem", refBackedExample.Name);
+        Assert.Equal("validation-problem", refBackedExample.ComponentExampleId);
+        Assert.Null(refBackedExample.Json);
+        Assert.Equal("""{"message":"Validation failed"}""", refBackedExample.ResolvedJson);
+    }
+
+    [Fact]
     public void RequestType_ExplicitNull_IsNull()
     {
         var json = """

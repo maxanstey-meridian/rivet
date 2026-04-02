@@ -207,12 +207,35 @@
       "required": ["name", "type", "source"],
       "additionalProperties": false
     },
+    "endpointExample": {
+      "type": "object",
+      "properties": {
+        "mediaType": { "type": "string" },
+        "name": { "type": "string" },
+        "json": { "type": "string" },
+        "componentExampleId": { "type": "string" },
+        "resolvedJson": { "type": "string" }
+      },
+      "required": ["mediaType"],
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": ["json"],
+          "not": { "required": ["componentExampleId"] }
+        },
+        {
+          "required": ["componentExampleId"],
+          "not": { "required": ["json"] }
+        }
+      ]
+    },
     "responseType": {
       "type": "object",
       "properties": {
         "statusCode": { "type": "integer" },
         "dataType": { "$ref": "#/$defs/tsType" },
-        "description": { "type": "string" }
+        "description": { "type": "string" },
+        "examples": { "type": "array", "items": { "$ref": "#/$defs/endpointExample" } }
       },
       "required": ["statusCode"],
       "additionalProperties": false
@@ -241,7 +264,8 @@
         "security": { "$ref": "#/$defs/endpointSecurity" },
         "fileContentType": { "type": "string" },
         "inputTypeName": { "type": "string" },
-        "isFormEncoded": { "type": "boolean" }
+        "isFormEncoded": { "type": "boolean" },
+        "requestExamples": { "type": "array", "items": { "$ref": "#/$defs/endpointExample" } }
       },
       "required": ["name", "httpMethod", "routeTemplate", "params", "controllerName", "responses"],
       "additionalProperties": false
