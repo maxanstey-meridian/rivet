@@ -248,6 +248,43 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void ResponseExampleJson_Multiple_Examples_For_Same_Status_Are_Preserved_In_Order()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record ValidationProblemDto(string Message);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .Returns<ValidationProblemDto>(422)
+                        .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem")
+                        .ResponseExampleJson(422, "{\"message\":\"Already archived\"}", name: "archivedProblem");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 422);
+        var examples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(response.Examples);
+        Assert.Equal(2, examples.Count);
+        Assert.Equal("validationProblem", examples[0].Name);
+        Assert.Equal("""{"message":"Validation failed"}""", examples[0].Json);
+        Assert.Equal("archivedProblem", examples[1].Name);
+        Assert.Equal("""{"message":"Already archived"}""", examples[1].Json);
+    }
+
+    [Fact]
     public void Example_MediaType_Override_Is_Preserved()
     {
         var source = """
@@ -392,6 +429,38 @@ public sealed class ContractEndpointTests
         var example = Assert.Single(ep.RequestExamples!);
         Assert.Equal("multipart/form-data", example.MediaType);
         Assert.Equal("""{"title":"Quarterly report"}""", example.Json);
+    }
+
+    [Fact]
+    public void RequestExampleJson_On_FormEncoded_Input_Defaults_To_FormUrlEncoded()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginInput(string Email, string Password);
+
+            [RivetType]
+            public sealed record TokenDto(string Token);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly Define Login =
+                    Define.Post<LoginInput, TokenDto>("/api/login")
+                        .FormEncoded()
+                        .RequestExampleJson("{\"email\":\"ada@example.com\",\"password\":\"secret\"}");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var example = Assert.Single(ep.RequestExamples!);
+        Assert.Equal("application/x-www-form-urlencoded", example.MediaType);
+        Assert.Equal("""{"email":"ada@example.com","password":"secret"}""", example.Json);
     }
 
     [Fact]

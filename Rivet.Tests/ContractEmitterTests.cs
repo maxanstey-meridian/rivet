@@ -240,6 +240,43 @@ public sealed class ContractEmitterTests
     }
 
     [Fact]
+    public void Endpoint_Example_With_ComponentExampleId_Only_Serializes_Without_ResolvedJson()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "createOrder",
+            "POST",
+            "/api/orders",
+            [],
+            null,
+            "OrdersController",
+            [
+                new TsResponseType(
+                    202,
+                    null,
+                    Examples:
+                    [
+                        new TsEndpointExample(
+                            "application/json",
+                            "accepted",
+                            ComponentExampleId: "order-accepted"),
+                    ]),
+            ]);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var example = doc.RootElement
+            .GetProperty("endpoints")[0]
+            .GetProperty("responses")[0]
+            .GetProperty("examples")[0];
+
+        Assert.Equal("application/json", example.GetProperty("mediaType").GetString());
+        Assert.Equal("accepted", example.GetProperty("name").GetString());
+        Assert.Equal("order-accepted", example.GetProperty("componentExampleId").GetString());
+        Assert.False(example.TryGetProperty("json", out _));
+        Assert.False(example.TryGetProperty("resolvedJson", out _));
+    }
+
+    [Fact]
     public void Endpoint_Example_Requires_Exactly_One_Of_Json_Or_ComponentExampleId()
     {
         var missingPayload = Assert.Throws<ArgumentException>(() => new TsEndpointExample("application/json"));

@@ -137,6 +137,34 @@ public sealed class ContractSchemaTests
     }
 
     [Fact]
+    public void Endpoint_Example_With_ComponentExampleId_Only_Validates()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "createOrder",
+            "POST",
+            "/api/orders",
+            [],
+            null,
+            "OrdersController",
+            [
+                new TsResponseType(
+                    202,
+                    null,
+                    Examples:
+                    [
+                        new TsEndpointExample(
+                            "application/json",
+                            "accepted",
+                            ComponentExampleId: "order-accepted"),
+                    ]),
+            ]);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var result = Validate(json);
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
     public void Endpoint_With_RequestType_Validates()
     {
         var endpoint = new TsEndpointDefinition(
@@ -348,6 +376,41 @@ public sealed class ContractSchemaTests
                                         "mediaType": "application/json",
                                         "json": "{\"id\":\"ord_123\"}",
                                         "resolvedJson": "{\"id\":\"ord_123\"}"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        var result = Validate(json);
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Endpoint_Example_With_Json_And_ComponentExampleId_Rejected()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "responses": [
+                            {
+                                "statusCode": 201,
+                                "examples": [
+                                    {
+                                        "mediaType": "application/json",
+                                        "json": "{\"id\":\"ord_123\"}",
+                                        "componentExampleId": "order-created"
                                     }
                                 ]
                             }

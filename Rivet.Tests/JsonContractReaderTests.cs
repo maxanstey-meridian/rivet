@@ -381,6 +381,49 @@ public sealed class JsonContractReaderTests
     }
 
     [Fact]
+    public void Endpoint_Example_With_ComponentExampleId_Only_Deserializes_Without_ResolvedJson()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "responses": [
+                            {
+                                "statusCode": 202,
+                                "examples": [
+                                    {
+                                        "mediaType": "application/json",
+                                        "name": "accepted",
+                                        "componentExampleId": "order-accepted"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        var result = JsonContractReader.Read(json);
+
+        var endpoint = Assert.Single(result.Endpoints);
+        var response = Assert.Single(endpoint.Responses);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Equal("accepted", example.Name);
+        Assert.Null(example.Json);
+        Assert.Equal("order-accepted", example.ComponentExampleId);
+        Assert.Null(example.ResolvedJson);
+    }
+
+    [Fact]
     public void RequestType_ExplicitNull_IsNull()
     {
         var json = """
