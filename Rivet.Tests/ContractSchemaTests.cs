@@ -487,6 +487,36 @@ public sealed class ContractSchemaTests
     }
 
     [Fact]
+    public void Request_Example_With_ResolvedJson_But_No_ComponentExampleId_Rejected()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "requestExamples": [
+                            {
+                                "mediaType": "application/json",
+                                "resolvedJson": "{\"id\":\"ord_123\"}"
+                            }
+                        ],
+                        "responses": []
+                    }
+                ]
+            }
+            """;
+
+        var result = Validate(json);
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
     public void Request_Example_Missing_Json_And_ComponentExampleId_Rejected()
     {
         var json = """

@@ -318,6 +318,56 @@ public sealed class JsonContractReaderTests
     }
 
     [Fact]
+    public void Request_Examples_Deserialize_With_Inline_And_RefBacked_Metadata_In_Order()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "responses": [],
+                        "requestExamples": [
+                            {
+                                "mediaType": "application/json",
+                                "name": "inline",
+                                "json": "{\"customerId\":\"cus_123\"}"
+                            },
+                            {
+                                "mediaType": "application/json",
+                                "name": "refBacked",
+                                "componentExampleId": "create-order-example",
+                                "resolvedJson": "{\"customerId\":\"cus_456\"}"
+                            }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        var result = JsonContractReader.Read(json);
+
+        var endpoint = Assert.Single(result.Endpoints);
+        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(endpoint.RequestExamples);
+        Assert.Equal(2, requestExamples.Count);
+
+        Assert.Equal("inline", requestExamples[0].Name);
+        Assert.Equal("""{"customerId":"cus_123"}""", requestExamples[0].Json);
+        Assert.Null(requestExamples[0].ComponentExampleId);
+        Assert.Null(requestExamples[0].ResolvedJson);
+
+        Assert.Equal("refBacked", requestExamples[1].Name);
+        Assert.Null(requestExamples[1].Json);
+        Assert.Equal("create-order-example", requestExamples[1].ComponentExampleId);
+        Assert.Equal("""{"customerId":"cus_456"}""", requestExamples[1].ResolvedJson);
+    }
+
+    [Fact]
     public void Endpoint_Examples_Survive_Emit_And_Read_RoundTrip()
     {
         var endpoint = new TsEndpointDefinition(
@@ -378,6 +428,49 @@ public sealed class JsonContractReaderTests
         Assert.Equal("validation-problem", refBackedExample.ComponentExampleId);
         Assert.Null(refBackedExample.Json);
         Assert.Equal("""{"message":"Validation failed"}""", refBackedExample.ResolvedJson);
+    }
+
+    [Fact]
+    public void Request_Examples_Survive_Emit_And_Read_RoundTrip_With_RefBacked_Metadata_And_Order()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "createOrder",
+            "POST",
+            "/orders",
+            [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            new TsType.TypeRef("CreateOrderResponse"),
+            "orders",
+            [new TsResponseType(201, new TsType.TypeRef("CreateOrderResponse"))],
+            RequestExamples:
+            [
+                new TsEndpointExample("application/json", "inline", """{"customerId":"cus_123"}"""),
+                new TsEndpointExample(
+                    "application/json",
+                    "refBacked",
+                    ComponentExampleId: "create-order-example",
+                    ResolvedJson: """{"customerId":"cus_456"}"""),
+            ]);
+
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]);
+
+        var result = JsonContractReader.Read(json);
+
+        var roundTripped = Assert.Single(result.Endpoints);
+        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(roundTripped.RequestExamples);
+        Assert.Equal(2, requestExamples.Count);
+
+        Assert.Equal("inline", requestExamples[0].Name);
+        Assert.Equal("""{"customerId":"cus_123"}""", requestExamples[0].Json);
+        Assert.Null(requestExamples[0].ComponentExampleId);
+        Assert.Null(requestExamples[0].ResolvedJson);
+
+        Assert.Equal("refBacked", requestExamples[1].Name);
+        Assert.Null(requestExamples[1].Json);
+        Assert.Equal("create-order-example", requestExamples[1].ComponentExampleId);
+        Assert.Equal("""{"customerId":"cus_456"}""", requestExamples[1].ResolvedJson);
     }
 
     [Fact]

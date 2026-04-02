@@ -240,6 +240,50 @@ public sealed class ContractEmitterTests
     }
 
     [Fact]
+    public void Request_Examples_Serialize_With_Inline_And_RefBacked_Metadata_In_Order()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "createOrder",
+            "POST",
+            "/api/orders",
+            [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            new TsType.TypeRef("CreateOrderResponse"),
+            "OrdersController",
+            [new TsResponseType(201, new TsType.TypeRef("CreateOrderResponse"))],
+            RequestExamples:
+            [
+                new TsEndpointExample("application/json", "inline", """{"customerId":"cus_123"}"""),
+                new TsEndpointExample(
+                    "application/json",
+                    "refBacked",
+                    ComponentExampleId: "create-order-example",
+                    ResolvedJson: """{"customerId":"cus_456"}"""),
+            ]);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var requestExamples = doc.RootElement
+            .GetProperty("endpoints")[0]
+            .GetProperty("requestExamples");
+
+        Assert.Equal(2, requestExamples.GetArrayLength());
+
+        var inlineExample = requestExamples[0];
+        Assert.Equal("application/json", inlineExample.GetProperty("mediaType").GetString());
+        Assert.Equal("inline", inlineExample.GetProperty("name").GetString());
+        Assert.Equal("""{"customerId":"cus_123"}""", inlineExample.GetProperty("json").GetString());
+        Assert.False(inlineExample.TryGetProperty("componentExampleId", out _));
+        Assert.False(inlineExample.TryGetProperty("resolvedJson", out _));
+
+        var refBackedExample = requestExamples[1];
+        Assert.Equal("application/json", refBackedExample.GetProperty("mediaType").GetString());
+        Assert.Equal("refBacked", refBackedExample.GetProperty("name").GetString());
+        Assert.Equal("create-order-example", refBackedExample.GetProperty("componentExampleId").GetString());
+        Assert.Equal("""{"customerId":"cus_456"}""", refBackedExample.GetProperty("resolvedJson").GetString());
+        Assert.False(refBackedExample.TryGetProperty("json", out _));
+    }
+
+    [Fact]
     public void Endpoint_Example_With_ComponentExampleId_Only_Serializes_Without_ResolvedJson()
     {
         var endpoint = new TsEndpointDefinition(

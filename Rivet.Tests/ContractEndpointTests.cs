@@ -441,6 +441,47 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void RequestExamples_Multiple_Entries_Are_Preserved_In_Order()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateCommentInput(string Text);
+
+            [RivetType]
+            public sealed record CommentDto(string Id, string Text);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define CreateComment =
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                        .RequestExampleJson("{\"text\":\"hello\"}", name: "inline")
+                        .RequestExampleRef("create-comment", "{\"text\":\"bonjour\"}", name: "refBacked");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(ep.RequestExamples);
+        Assert.Equal(2, requestExamples.Count);
+
+        Assert.Equal("inline", requestExamples[0].Name);
+        Assert.Equal("""{"text":"hello"}""", requestExamples[0].Json);
+        Assert.Null(requestExamples[0].ComponentExampleId);
+        Assert.Null(requestExamples[0].ResolvedJson);
+
+        Assert.Equal("refBacked", requestExamples[1].Name);
+        Assert.Null(requestExamples[1].Json);
+        Assert.Equal("create-comment", requestExamples[1].ComponentExampleId);
+        Assert.Equal("""{"text":"bonjour"}""", requestExamples[1].ResolvedJson);
+    }
+
+    [Fact]
     public void RequestExampleJson_MediaType_Override_Is_Preserved()
     {
         var source = """
@@ -665,6 +706,73 @@ public sealed class ContractEndpointTests
         var example = Assert.Single(ep.RequestExamples!);
         Assert.Equal("multipart/form-data", example.MediaType);
         Assert.Equal("""{"file":"ignored"}""", example.Json);
+    }
+
+    [Fact]
+    public void ResponseExampleJson_Attaches_To_Synthesized_Post_Success_Response()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateOrderInput(string CustomerId);
+
+            [RivetType]
+            public sealed record OrderDto(string Id);
+
+            [RivetContract]
+            public static class OrdersContract
+            {
+                public static readonly Define CreateOrder =
+                    Define.Post<CreateOrderInput, OrderDto>("/api/orders")
+                        .ResponseExampleJson(201, "{\"id\":\"ord_123\"}", name: "created");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 201);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("created", example.Name);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Equal("""{"id":"ord_123"}""", example.Json);
+    }
+
+    [Fact]
+    public void ResponseExampleJson_Attaches_To_Status_Overridden_Synthesized_Success_Response()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateOrderInput(string CustomerId);
+
+            [RivetType]
+            public sealed record OrderDto(string Id);
+
+            [RivetContract]
+            public static class OrdersContract
+            {
+                public static readonly Define CreateOrder =
+                    Define.Post<CreateOrderInput, OrderDto>("/api/orders")
+                        .Status(202)
+                        .ResponseExampleJson(202, "{\"id\":\"ord_123\"}", name: "accepted");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 202);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("accepted", example.Name);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Equal("""{"id":"ord_123"}""", example.Json);
     }
 
     [Fact]
