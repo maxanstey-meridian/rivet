@@ -115,19 +115,16 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
 
     public TSelf RequestExampleJson(string json, string? name = null, string? mediaType = null)
     {
-        _ = EndpointExample.JsonExample(json, name, mediaType);
         return (TSelf)this;
     }
 
     public TSelf RequestExampleRef(string componentExampleId, string resolvedJson, string? name = null, string? mediaType = null)
     {
-        _ = EndpointExample.RefExample(componentExampleId, resolvedJson, name, mediaType);
         return (TSelf)this;
     }
 
     public TSelf ResponseExampleJson(int statusCode, string json, string? name = null, string? mediaType = null)
     {
-        _ = EndpointExample.JsonExample(json, name, mediaType);
         return (TSelf)this;
     }
 
@@ -138,7 +135,6 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         string? name = null,
         string? mediaType = null)
     {
-        _ = EndpointExample.RefExample(componentExampleId, resolvedJson, name, mediaType);
         return (TSelf)this;
     }
 
