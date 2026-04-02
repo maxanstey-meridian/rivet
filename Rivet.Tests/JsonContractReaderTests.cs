@@ -318,6 +318,69 @@ public sealed class JsonContractReaderTests
     }
 
     [Fact]
+    public void Endpoint_Examples_Survive_Emit_And_Read_RoundTrip()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "createOrder",
+            "POST",
+            "/orders",
+            [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            new TsType.TypeRef("CreateOrderResponse"),
+            "orders",
+            [
+                new TsResponseType(
+                    201,
+                    new TsType.TypeRef("CreateOrderResponse"),
+                    Examples:
+                    [
+                        new TsEndpointExample("application/json", "created", """{"id":"ord_123"}"""),
+                        new TsEndpointExample("application/json", "queued", """{"id":"ord_124"}"""),
+                    ]),
+                new TsResponseType(
+                    422,
+                    new TsType.TypeRef("ValidationProblem"),
+                    "Validation failed",
+                    [
+                        new TsEndpointExample(
+                            "application/json",
+                            "validationProblem",
+                            ComponentExampleId: "validation-problem",
+                            ResolvedJson: """{"message":"Validation failed"}"""),
+                    ]),
+            ],
+            RequestExamples:
+            [
+                new TsEndpointExample("application/json", Json: """{"customerId":"cus_123"}"""),
+            ]);
+
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]);
+
+        var result = JsonContractReader.Read(json);
+
+        var roundTripped = Assert.Single(result.Endpoints);
+        var requestExample = Assert.Single(roundTripped.RequestExamples!);
+        Assert.Equal("application/json", requestExample.MediaType);
+        Assert.Equal("""{"customerId":"cus_123"}""", requestExample.Json);
+
+        var createdResponse = roundTripped.Responses[0];
+        var createdExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(createdResponse.Examples);
+        Assert.Equal(2, createdExamples.Count);
+        Assert.Equal("created", createdExamples[0].Name);
+        Assert.Equal("""{"id":"ord_123"}""", createdExamples[0].Json);
+        Assert.Equal("queued", createdExamples[1].Name);
+        Assert.Equal("""{"id":"ord_124"}""", createdExamples[1].Json);
+
+        var refBackedExample = Assert.Single(roundTripped.Responses[1].Examples!);
+        Assert.Equal("validationProblem", refBackedExample.Name);
+        Assert.Equal("validation-problem", refBackedExample.ComponentExampleId);
+        Assert.Null(refBackedExample.Json);
+        Assert.Equal("""{"message":"Validation failed"}""", refBackedExample.ResolvedJson);
+    }
+
+    [Fact]
     public void RequestType_ExplicitNull_IsNull()
     {
         var json = """

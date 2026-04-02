@@ -30,8 +30,47 @@ public static class JsonContractReader
                 enums[e.Name] = new TsType.StringUnion(e.Values!);
         }
 
-        var endpoints = contract.Endpoints ?? [];
+        var endpoints = contract.Endpoints?.Select(ToEndpointDefinition).ToList() ?? [];
 
         return (contract.Types, enums, endpoints);
+    }
+
+    private static TsEndpointDefinition ToEndpointDefinition(ContractEmitter.ContractEndpoint endpoint)
+    {
+        return new TsEndpointDefinition(
+            endpoint.Name,
+            endpoint.HttpMethod,
+            endpoint.RouteTemplate,
+            endpoint.Params,
+            endpoint.ReturnType,
+            endpoint.ControllerName,
+            endpoint.Responses.Select(ToResponseType).ToList(),
+            endpoint.Summary,
+            endpoint.Description,
+            endpoint.Security,
+            endpoint.FileContentType,
+            endpoint.InputTypeName,
+            endpoint.IsFormEncoded,
+            endpoint.RequestType,
+            endpoint.RequestExamples?.Select(ToEndpointExample).ToList());
+    }
+
+    private static TsResponseType ToResponseType(ContractEmitter.ContractResponseType response)
+    {
+        return new TsResponseType(
+            response.StatusCode,
+            response.DataType,
+            response.Description,
+            response.Examples?.Select(ToEndpointExample).ToList());
+    }
+
+    private static TsEndpointExample ToEndpointExample(ContractEmitter.ContractEndpointExample example)
+    {
+        return new TsEndpointExample(
+            example.MediaType,
+            example.Name,
+            example.Json,
+            example.ComponentExampleId,
+            example.ResolvedJson);
     }
 }

@@ -17,12 +17,42 @@ public static class ContractEmitter
     internal sealed record RivetContract(
         IReadOnlyList<TsTypeDefinition> Types,
         IReadOnlyList<ContractEnum> Enums,
-        IReadOnlyList<TsEndpointDefinition>? Endpoints = null);
+        IReadOnlyList<ContractEndpoint>? Endpoints = null);
 
     internal sealed record ContractEnum(
         string Name,
         IReadOnlyList<string>? Values = null,
         IReadOnlyList<int>? IntValues = null);
+
+    internal sealed record ContractEndpoint(
+        string Name,
+        string HttpMethod,
+        string RouteTemplate,
+        IReadOnlyList<TsEndpointParam> Params,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? ReturnType,
+        string ControllerName,
+        IReadOnlyList<ContractResponseType> Responses,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Summary = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Description = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EndpointSecurity? Security = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FileContentType = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? InputTypeName = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFormEncoded = false,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? RequestType = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ContractEndpointExample>? RequestExamples = null);
+
+    internal sealed record ContractResponseType(
+        int StatusCode,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? DataType,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Description = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ContractEndpointExample>? Examples = null);
+
+    internal sealed record ContractEndpointExample(
+        string MediaType,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Name = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Json = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ComponentExampleId = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResolvedJson = null);
 
     public static string Emit(
         Dictionary<string, TsTypeDefinition> definitions,
@@ -39,8 +69,47 @@ public static class ContractEmitter
         var contract = new RivetContract(
             definitions.Values.ToList(),
             contractEnums,
-            endpoints);
+            endpoints.Select(ToContractEndpoint).ToList());
 
         return JsonSerializer.Serialize(contract, Options);
+    }
+
+    internal static ContractEndpoint ToContractEndpoint(TsEndpointDefinition endpoint)
+    {
+        return new ContractEndpoint(
+            endpoint.Name,
+            endpoint.HttpMethod,
+            endpoint.RouteTemplate,
+            endpoint.Params,
+            endpoint.ReturnType,
+            endpoint.ControllerName,
+            endpoint.Responses.Select(ToContractResponseType).ToList(),
+            endpoint.Summary,
+            endpoint.Description,
+            endpoint.Security,
+            endpoint.FileContentType,
+            endpoint.InputTypeName,
+            endpoint.IsFormEncoded,
+            endpoint.RequestType,
+            endpoint.RequestExamples?.Select(ToContractEndpointExample).ToList());
+    }
+
+    internal static ContractResponseType ToContractResponseType(TsResponseType response)
+    {
+        return new ContractResponseType(
+            response.StatusCode,
+            response.DataType,
+            response.Description,
+            response.Examples?.Select(ToContractEndpointExample).ToList());
+    }
+
+    internal static ContractEndpointExample ToContractEndpointExample(TsEndpointExample example)
+    {
+        return new ContractEndpointExample(
+            example.MediaType,
+            example.Name,
+            example.Json,
+            example.ComponentExampleId,
+            example.ResolvedJson);
     }
 }
