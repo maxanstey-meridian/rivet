@@ -277,6 +277,48 @@ public sealed class ContractEmitterTests
     }
 
     [Fact]
+    public void Endpoint_Examples_Serialize_With_NonDefault_MediaTypes()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "createOrder",
+            "POST",
+            "/api/orders",
+            [],
+            null,
+            "OrdersController",
+            [
+                new TsResponseType(
+                    422,
+                    new TsType.TypeRef("ProblemDetails"),
+                    Examples:
+                    [
+                        new TsEndpointExample(
+                            "application/problem+json",
+                            "problem",
+                            ComponentExampleId: "problem-example",
+                            ResolvedJson: """{"title":"Bad request"}"""),
+                    ]),
+            ],
+            RequestExamples:
+            [
+                new TsEndpointExample("application/problem+json", Json: """{"title":"Bad request"}"""),
+            ]);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var ep = doc.RootElement.GetProperty("endpoints")[0];
+
+        var requestExample = ep.GetProperty("requestExamples")[0];
+        Assert.Equal("application/problem+json", requestExample.GetProperty("mediaType").GetString());
+        Assert.Equal("""{"title":"Bad request"}""", requestExample.GetProperty("json").GetString());
+
+        var responseExample = ep.GetProperty("responses")[0].GetProperty("examples")[0];
+        Assert.Equal("application/problem+json", responseExample.GetProperty("mediaType").GetString());
+        Assert.Equal("problem-example", responseExample.GetProperty("componentExampleId").GetString());
+        Assert.Equal("""{"title":"Bad request"}""", responseExample.GetProperty("resolvedJson").GetString());
+    }
+
+    [Fact]
     public void Endpoint_Example_Requires_Exactly_One_Of_Json_Or_ComponentExampleId()
     {
         var missingPayload = Assert.Throws<ArgumentException>(() => new TsEndpointExample("application/json"));

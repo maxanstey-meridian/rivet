@@ -424,6 +424,52 @@ public sealed class JsonContractReaderTests
     }
 
     [Fact]
+    public void Endpoint_Examples_With_NonDefault_MediaTypes_Survive_Emit_And_Read_RoundTrip()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "createOrder",
+            "POST",
+            "/orders",
+            [],
+            null,
+            "orders",
+            [
+                new TsResponseType(
+                    422,
+                    new TsType.TypeRef("ProblemDetails"),
+                    "Bad request",
+                    [
+                        new TsEndpointExample(
+                            "application/problem+json",
+                            "problem",
+                            ComponentExampleId: "problem-example",
+                            ResolvedJson: """{"title":"Bad request"}"""),
+                    ]),
+            ],
+            RequestExamples:
+            [
+                new TsEndpointExample("application/problem+json", Json: """{"title":"Bad request"}"""),
+            ]);
+
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]);
+
+        var result = JsonContractReader.Read(json);
+
+        var roundTripped = Assert.Single(result.Endpoints);
+        var requestExample = Assert.Single(roundTripped.RequestExamples!);
+        Assert.Equal("application/problem+json", requestExample.MediaType);
+        Assert.Equal("""{"title":"Bad request"}""", requestExample.Json);
+
+        var responseExample = Assert.Single(roundTripped.Responses[0].Examples!);
+        Assert.Equal("application/problem+json", responseExample.MediaType);
+        Assert.Equal("problem-example", responseExample.ComponentExampleId);
+        Assert.Equal("""{"title":"Bad request"}""", responseExample.ResolvedJson);
+    }
+
+    [Fact]
     public void RequestType_ExplicitNull_IsNull()
     {
         var json = """

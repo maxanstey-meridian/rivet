@@ -363,6 +363,47 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void ResponseExampleRef_MediaType_Override_Is_Preserved()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .Returns<ProblemDto>(422)
+                        .ResponseExampleRef(
+                            422,
+                            "problem-example",
+                            "{\"title\":\"Bad request\"}",
+                            name: "problem",
+                            mediaType: "application/problem+json");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 422);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("problem", example.Name);
+        Assert.Equal("application/problem+json", example.MediaType);
+        Assert.Null(example.Json);
+        Assert.Equal("problem-example", example.ComponentExampleId);
+        Assert.Equal("""{"title":"Bad request"}""", example.ResolvedJson);
+    }
+
+    [Fact]
     public void RequestExampleRef_Preserves_ComponentRef_And_ResolvedJson()
     {
         var source = """
@@ -593,6 +634,38 @@ public sealed class ContractEndpointTests
         Assert.Null(example.Json);
         Assert.Equal("document-example", example.ComponentExampleId);
         Assert.Equal("""{"href":"/api/documents/123"}""", example.ResolvedJson);
+    }
+
+    [Fact]
+    public void ResponseExampleJson_On_File_Error_Response_Defaults_To_ApplicationJson()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [RivetContract]
+            public static class DocumentsContract
+            {
+                public static readonly RouteDefinition Download =
+                    Define.Get("/api/documents/{id}")
+                        .ProducesFile("application/pdf")
+                        .Returns<ProblemDto>(422)
+                        .ResponseExampleJson(422, "{\"title\":\"Bad request\"}", name: "problem");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 422);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("problem", example.Name);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Equal("""{"title":"Bad request"}""", example.Json);
     }
 
     [Fact]
