@@ -185,6 +185,8 @@ public static class ContractWalker
         // Process chained calls: .Accepts<T>(), .Returns<T>(statusCode[, description]),
         // .Status(statusCode), .Description(desc), .Anonymous(), .Secure(scheme), .ProducesFile(contentType)
         var responses = new List<TsResponseType>();
+        var requestExampleCalls = new List<PendingEndpointExampleCall>();
+        var responseExampleCalls = new List<PendingEndpointExampleCall>();
         int? successStatusOverride = null;
         string? endpointSummary = null;
         string? endpointDescription = null;
@@ -207,6 +209,28 @@ public static class ContractWalker
             else if (call.MethodName == "FormEncoded")
             {
                 isFormEncoded = true;
+            }
+            else if (call.MethodName == "RequestExampleJson" && call.GetStringArg("json") is not null)
+            {
+                requestExampleCalls.Add(new PendingEndpointExampleCall(
+                    StatusCode: null,
+                    Name: call.GetStringArg("name"),
+                    MediaType: call.GetStringArg("mediaType"),
+                    Json: call.GetStringArg("json"),
+                    ComponentExampleId: null,
+                    ResolvedJson: null));
+            }
+            else if (call.MethodName == "RequestExampleRef"
+                && call.GetStringArg("componentExampleId") is not null
+                && call.GetStringArg("resolvedJson") is not null)
+            {
+                requestExampleCalls.Add(new PendingEndpointExampleCall(
+                    StatusCode: null,
+                    Name: call.GetStringArg("name"),
+                    MediaType: call.GetStringArg("mediaType"),
+                    Json: null,
+                    ComponentExampleId: call.GetStringArg("componentExampleId"),
+                    ResolvedJson: call.GetStringArg("resolvedJson")));
             }
             else if (call.MethodName == "Returns" && call.TypeArgs.Count == 1 && call.StatusCodeArg is not null)
             {
@@ -240,6 +264,31 @@ public static class ContractWalker
             else if (call.MethodName == "ProducesFile")
             {
                 fileContentType = call.StringArg ?? "application/octet-stream";
+            }
+            else if (call.MethodName == "ResponseExampleJson"
+                && call.GetIntArg("statusCode") is int responseStatusCode
+                && call.GetStringArg("json") is not null)
+            {
+                responseExampleCalls.Add(new PendingEndpointExampleCall(
+                    responseStatusCode,
+                    call.GetStringArg("name"),
+                    call.GetStringArg("mediaType"),
+                    call.GetStringArg("json"),
+                    null,
+                    null));
+            }
+            else if (call.MethodName == "ResponseExampleRef"
+                && call.GetIntArg("statusCode") is int refStatusCode
+                && call.GetStringArg("componentExampleId") is not null
+                && call.GetStringArg("resolvedJson") is not null)
+            {
+                responseExampleCalls.Add(new PendingEndpointExampleCall(
+                    refStatusCode,
+                    call.GetStringArg("name"),
+                    call.GetStringArg("mediaType"),
+                    null,
+                    call.GetStringArg("componentExampleId"),
+                    call.GetStringArg("resolvedJson")));
             }
         }
 
@@ -283,12 +332,98 @@ public static class ContractWalker
         }
 
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
+        ApplyResponseExamples(responses, responseExampleCalls, fileContentType);
 
-        return new TsEndpointDefinition(name, httpMethod, route, parameters, returnType, controllerName, responses, endpointSummary, endpointDescription, security, fileContentType, inputTypeName, isFormEncoded);
+        var requestExamples = requestExampleCalls.Count == 0
+            ? null
+            : requestExampleCalls
+                .Select(call => ToEndpointExample(call, DefaultRequestExampleMediaType(isFormEncoded, acceptsFile)))
+                .ToList();
+
+        return new TsEndpointDefinition(
+            name,
+            httpMethod,
+            route,
+            parameters,
+            returnType,
+            controllerName,
+            responses,
+            endpointSummary,
+            endpointDescription,
+            security,
+            fileContentType,
+            inputTypeName,
+            isFormEncoded,
+            RequestExamples: requestExamples);
     }
 
     private static int DefaultSuccessCode(string httpMethod) =>
         httpMethod switch { "POST" => 201, "DELETE" => 204, _ => 200 };
+
+    private static string DefaultRequestExampleMediaType(bool isFormEncoded, bool acceptsFile)
+    {
+        if (acceptsFile)
+        {
+            return "multipart/form-data";
+        }
+
+        return isFormEncoded
+            ? "application/x-www-form-urlencoded"
+            : "application/json";
+    }
+
+    private static string DefaultResponseExampleMediaType(int statusCode, string? fileContentType)
+    {
+        if (fileContentType is not null && statusCode is >= 200 and < 300)
+        {
+            return fileContentType;
+        }
+
+        return "application/json";
+    }
+
+    private static TsEndpointExample ToEndpointExample(PendingEndpointExampleCall call, string defaultMediaType)
+    {
+        return new TsEndpointExample(
+            call.MediaType ?? defaultMediaType,
+            call.Name,
+            call.Json,
+            call.ComponentExampleId,
+            call.ResolvedJson);
+    }
+
+    private static void ApplyResponseExamples(
+        List<TsResponseType> responses,
+        IReadOnlyList<PendingEndpointExampleCall> responseExampleCalls,
+        string? fileContentType)
+    {
+        if (responseExampleCalls.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var group in responseExampleCalls.GroupBy(call => call.StatusCode!.Value))
+        {
+            var mappedExamples = group
+                .Select(call => ToEndpointExample(call, DefaultResponseExampleMediaType(group.Key, fileContentType)))
+                .ToList();
+
+            var responseIndex = responses.FindIndex(response => response.StatusCode == group.Key);
+            if (responseIndex >= 0)
+            {
+                var response = responses[responseIndex];
+                var mergedExamples = response.Examples is null
+                    ? mappedExamples
+                    : response.Examples.Concat(mappedExamples).ToList();
+                responses[responseIndex] = response with { Examples = mergedExamples };
+                continue;
+            }
+
+            responses.Add(new TsResponseType(group.Key, null, Examples: mappedExamples));
+        }
+
+        responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
+    }
 
     private static (IReadOnlyList<TsEndpointParam> Params, string? InputTypeName) BuildParams(
         WellKnownTypes wkt,
@@ -495,12 +630,47 @@ public static class ContractWalker
     /// <summary>
     /// Represents a single method call in the builder chain.
     /// </summary>
-    private sealed record ChainedCall(
-        string MethodName,
-        IReadOnlyList<ITypeSymbol> TypeArgs,
-        string? RouteArg,
-        int? StatusCodeArg,
-        string? StringArg);
+    private sealed class ChainedCall
+    {
+        public ChainedCall(
+            string methodName,
+            IReadOnlyList<ITypeSymbol> typeArgs,
+            IReadOnlyDictionary<string, object> constantArgs)
+        {
+            MethodName = methodName;
+            TypeArgs = typeArgs;
+            ConstantArgs = constantArgs;
+        }
+
+        public string MethodName { get; }
+        public IReadOnlyList<ITypeSymbol> TypeArgs { get; }
+        public IReadOnlyDictionary<string, object> ConstantArgs { get; }
+
+        public string? RouteArg => GetStringArg("route");
+        public int? StatusCodeArg => GetIntArg("statusCode");
+        public string? StringArg => GetFirstStringArg();
+
+        public string? GetStringArg(string parameterName) =>
+            ConstantArgs.TryGetValue(parameterName, out var value) && value is string text
+                ? text
+                : null;
+
+        public int? GetIntArg(string parameterName) =>
+            ConstantArgs.TryGetValue(parameterName, out var value) && value is int number
+                ? number
+                : null;
+
+        private string? GetFirstStringArg() =>
+            ConstantArgs.Values.OfType<string>().FirstOrDefault();
+    }
+
+    private sealed record PendingEndpointExampleCall(
+        int? StatusCode,
+        string? Name,
+        string? MediaType,
+        string? Json,
+        string? ComponentExampleId,
+        string? ResolvedJson);
 
     /// <summary>
     /// Walks the invocation chain from the initializer expression using syntax + GetSymbolInfo.
@@ -541,44 +711,48 @@ public static class ContractWalker
         // Extract type arguments
         var typeArgs = method.TypeArguments;
 
-        // Extract arguments — collect all string and int constants
-        var stringArgs = new List<string>();
-        int? statusCodeArg = null;
+        var constantArgs = new Dictionary<string, object>(StringComparer.Ordinal);
 
-        foreach (var arg in invocation.ArgumentList.Arguments)
+        for (var i = 0; i < invocation.ArgumentList.Arguments.Count; i++)
         {
-            var constValue = semanticModel.GetConstantValue(arg.Expression);
-            if (constValue.HasValue)
+            var arg = invocation.ArgumentList.Arguments[i];
+            var parameter = ResolveParameter(method, arg, i);
+            if (parameter is null)
             {
-                if (constValue.Value is string s)
-                {
-                    stringArgs.Add(s);
-                }
-                else if (constValue.Value is int i)
-                {
-                    statusCodeArg = i;
-                }
+                continue;
             }
-        }
 
-        // For factory calls (Get/Post/etc): first string = route, no description
-        // For .Returns(statusCode, description): first string = description
-        // For .Description(desc): first string = description
-        var isFactoryCall = method.ContainingType?.Name is "Define";
-        string? routeArg = isFactoryCall ? stringArgs.FirstOrDefault() : null;
-        string? descriptionArg = isFactoryCall ? null : stringArgs.FirstOrDefault();
+            var constValue = semanticModel.GetConstantValue(arg.Expression);
+            if (!constValue.HasValue || constValue.Value is null)
+            {
+                continue;
+            }
+
+            constantArgs[parameter.Name] = constValue.Value;
+        }
 
         calls.Add(new ChainedCall(
             method.Name,
             typeArgs,
-            routeArg,
-            statusCodeArg,
-            descriptionArg));
+            constantArgs));
 
         // Recurse into the receiver (the expression the method is called on)
         if (invocation.Expression is MemberAccessExpressionSyntax memberAccess)
         {
             CollectInvocationsRecursive(memberAccess.Expression, semanticModel, calls);
         }
+    }
+
+    private static IParameterSymbol? ResolveParameter(IMethodSymbol method, ArgumentSyntax argument, int ordinal)
+    {
+        if (argument.NameColon is not null)
+        {
+            var name = argument.NameColon.Name.Identifier.ValueText;
+            return method.Parameters.FirstOrDefault(parameter => parameter.Name == name);
+        }
+
+        return ordinal < method.Parameters.Length
+            ? method.Parameters[ordinal]
+            : null;
     }
 }

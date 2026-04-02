@@ -116,6 +116,224 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void Post_RequestExampleJson_Defaults_To_Json_MediaType()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateCommentInput(string Text);
+
+            [RivetType]
+            public sealed record CommentDto(string Id, string Text);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define CreateComment =
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                        .RequestExampleJson("{\"text\":\"hello\"}");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var requestExample = Assert.Single(ep.RequestExamples!);
+        Assert.Equal("application/json", requestExample.MediaType);
+        Assert.Equal("""{"text":"hello"}""", requestExample.Json);
+        Assert.Null(requestExample.Name);
+        Assert.Null(requestExample.ComponentExampleId);
+        Assert.Null(requestExample.ResolvedJson);
+    }
+
+    [Fact]
+    public void ResponseExampleJson_Attaches_To_NonSuccess_Response()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record ValidationProblemDto(string Message);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .Returns<ValidationProblemDto>(422)
+                        .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 422);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("validationProblem", example.Name);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Equal("""{"message":"Validation failed"}""", example.Json);
+        Assert.Null(example.ComponentExampleId);
+        Assert.Null(example.ResolvedJson);
+    }
+
+    [Fact]
+    public void ResponseExampleJson_Before_Returns_Still_Attaches_To_NonSuccess_Response()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record ValidationProblemDto(string Message);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem")
+                        .Returns<ValidationProblemDto>(422);
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 422);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("validationProblem", example.Name);
+        Assert.Equal("""{"message":"Validation failed"}""", example.Json);
+    }
+
+    [Fact]
+    public void Example_MediaType_Override_Is_Preserved()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record ValidationProblemDto(string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .Returns<ValidationProblemDto>(422)
+                        .ResponseExampleJson(
+                            422,
+                            "{\"title\":\"Bad request\"}",
+                            name: "problem",
+                            mediaType: "application/problem+json");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 422);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("problem", example.Name);
+        Assert.Equal("application/problem+json", example.MediaType);
+        Assert.Equal("""{"title":"Bad request"}""", example.Json);
+    }
+
+    [Fact]
+    public void ResponseExampleRef_Preserves_ComponentRef_And_ResolvedJson()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record ValidationProblemDto(string Message);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .Returns<ValidationProblemDto>(422)
+                        .ResponseExampleRef(
+                            422,
+                            "validation-problem",
+                            "{\"message\":\"Validation failed\"}",
+                            name: "validationProblem");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 422);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("validationProblem", example.Name);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Null(example.Json);
+        Assert.Equal("validation-problem", example.ComponentExampleId);
+        Assert.Equal("""{"message":"Validation failed"}""", example.ResolvedJson);
+    }
+
+    [Fact]
+    public void RequestExampleRef_Preserves_ComponentRef_And_ResolvedJson()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateCommentInput(string Text);
+
+            [RivetType]
+            public sealed record CommentDto(string Id, string Text);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define CreateComment =
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                        .RequestExampleRef(
+                            "create-comment",
+                            "{\"text\":\"hello\"}",
+                            name: "commentExample");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var example = Assert.Single(ep.RequestExamples!);
+        Assert.Equal("commentExample", example.Name);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Null(example.Json);
+        Assert.Equal("create-comment", example.ComponentExampleId);
+        Assert.Equal("""{"text":"hello"}""", example.ResolvedJson);
+    }
+
+    [Fact]
     public void Get_OutputOnly_NoInput()
     {
         var source = """
