@@ -400,6 +400,79 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void RequestExampleJson_MediaType_Override_Is_Preserved()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateCommentInput(string Text);
+
+            [RivetType]
+            public sealed record CommentDto(string Id, string Text);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define CreateComment =
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                        .RequestExampleJson(
+                            "{\"text\":\"hello\"}",
+                            name: "commentExample",
+                            mediaType: "application/problem+json");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var example = Assert.Single(ep.RequestExamples!);
+        Assert.Equal("commentExample", example.Name);
+        Assert.Equal("application/problem+json", example.MediaType);
+        Assert.Equal("""{"text":"hello"}""", example.Json);
+    }
+
+    [Fact]
+    public void RequestExampleRef_MediaType_Override_Is_Preserved()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateCommentInput(string Text);
+
+            [RivetType]
+            public sealed record CommentDto(string Id, string Text);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define CreateComment =
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                        .RequestExampleRef(
+                            "create-comment",
+                            "{\"text\":\"hello\"}",
+                            name: "commentExample",
+                            mediaType: "application/problem+json");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var example = Assert.Single(ep.RequestExamples!);
+        Assert.Equal("commentExample", example.Name);
+        Assert.Equal("application/problem+json", example.MediaType);
+        Assert.Null(example.Json);
+        Assert.Equal("create-comment", example.ComponentExampleId);
+        Assert.Equal("""{"text":"hello"}""", example.ResolvedJson);
+    }
+
+    [Fact]
     public void RequestExampleJson_On_ImplicitMultipartInput_Defaults_To_MultipartFormData()
     {
         var source = """
@@ -461,6 +534,65 @@ public sealed class ContractEndpointTests
         var example = Assert.Single(ep.RequestExamples!);
         Assert.Equal("application/x-www-form-urlencoded", example.MediaType);
         Assert.Equal("""{"email":"ada@example.com","password":"secret"}""", example.Json);
+    }
+
+    [Fact]
+    public void RequestExampleJson_On_AcceptsFile_Defaults_To_MultipartFormData()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadResultDto(string Id);
+
+            [RivetContract]
+            public static class UploadsContract
+            {
+                public static readonly RouteDefinition<UploadResultDto> Upload =
+                    Define.Post<UploadResultDto>("/api/files")
+                        .AcceptsFile()
+                        .RequestExampleJson("{\"file\":\"ignored\"}");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var example = Assert.Single(ep.RequestExamples!);
+        Assert.Equal("multipart/form-data", example.MediaType);
+        Assert.Equal("""{"file":"ignored"}""", example.Json);
+    }
+
+    [Fact]
+    public void ResponseExampleRef_On_File_Success_Response_Defaults_To_FileContentType()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class DocumentsContract
+            {
+                public static readonly RouteDefinition Download =
+                    Define.Get("/api/documents/{id}")
+                        .ProducesFile("application/pdf")
+                        .ResponseExampleRef(200, "document-example", "{\"href\":\"/api/documents/123\"}", name: "document");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 200);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("document", example.Name);
+        Assert.Equal("application/pdf", example.MediaType);
+        Assert.Null(example.Json);
+        Assert.Equal("document-example", example.ComponentExampleId);
+        Assert.Equal("""{"href":"/api/documents/123"}""", example.ResolvedJson);
     }
 
     [Fact]
