@@ -355,6 +355,39 @@ public sealed class ContractSchemaTests
     }
 
     [Fact]
+    public void Endpoint_Example_Missing_MediaType_Rejected()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "responses": [
+                            {
+                                "statusCode": 201,
+                                "examples": [
+                                    {
+                                        "json": "{\"id\":\"ord_123\"}"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        var result = Validate(json);
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
     public void Endpoint_Example_With_Json_And_ResolvedJson_But_No_ComponentExampleId_Rejected()
     {
         var json = """
@@ -415,6 +448,35 @@ public sealed class ContractSchemaTests
                                 ]
                             }
                         ]
+                    }
+                ]
+            }
+            """;
+
+        var result = Validate(json);
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Request_Example_Missing_MediaType_Rejected()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "requestExamples": [
+                            {
+                                "json": "{\"id\":\"ord_123\"}"
+                            }
+                        ],
+                        "responses": []
                     }
                 ]
             }

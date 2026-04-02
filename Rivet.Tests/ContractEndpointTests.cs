@@ -578,6 +578,38 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void RequestExampleJson_Before_FormEncoded_Defaults_To_FormUrlEncoded()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginInput(string Email, string Password);
+
+            [RivetType]
+            public sealed record TokenDto(string Token);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly Define Login =
+                    Define.Post<LoginInput, TokenDto>("/api/login")
+                        .RequestExampleJson("{\"email\":\"ada@example.com\",\"password\":\"secret\"}")
+                        .FormEncoded();
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var example = Assert.Single(ep.RequestExamples!);
+        Assert.Equal("application/x-www-form-urlencoded", example.MediaType);
+        Assert.Equal("""{"email":"ada@example.com","password":"secret"}""", example.Json);
+    }
+
+    [Fact]
     public void RequestExampleJson_On_AcceptsFile_Defaults_To_MultipartFormData()
     {
         var source = """
@@ -604,6 +636,69 @@ public sealed class ContractEndpointTests
         var example = Assert.Single(ep.RequestExamples!);
         Assert.Equal("multipart/form-data", example.MediaType);
         Assert.Equal("""{"file":"ignored"}""", example.Json);
+    }
+
+    [Fact]
+    public void RequestExampleJson_Before_AcceptsFile_Defaults_To_MultipartFormData()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadResultDto(string Id);
+
+            [RivetContract]
+            public static class UploadsContract
+            {
+                public static readonly RouteDefinition<UploadResultDto> Upload =
+                    Define.Post<UploadResultDto>("/api/files")
+                        .RequestExampleJson("{\"file\":\"ignored\"}")
+                        .AcceptsFile();
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var example = Assert.Single(ep.RequestExamples!);
+        Assert.Equal("multipart/form-data", example.MediaType);
+        Assert.Equal("""{"file":"ignored"}""", example.Json);
+    }
+
+    [Fact]
+    public void ComponentOnly_Ref_Examples_Are_Not_Available_In_Contract_Dsl()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateCommentInput(string Text);
+
+            [RivetType]
+            public sealed record CommentDto(string Id, string Text);
+
+            [RivetType]
+            public sealed record ValidationProblemDto(string Message);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define CreateComment =
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                        .RequestExampleRef("create-comment")
+                        .Returns<ValidationProblemDto>(422)
+                        .ResponseExampleRef(422, "validation-problem");
+            }
+            """;
+
+        var error = Assert.Throws<InvalidOperationException>(() => CompilationHelper.CreateCompilation(source));
+
+        Assert.Contains("RequestExampleRef", error.Message);
+        Assert.Contains("ResponseExampleRef", error.Message);
     }
 
     [Fact]
