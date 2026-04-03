@@ -320,6 +320,53 @@ public sealed class ControllerEndpointTests
     }
 
     [Fact]
+    public void Controller_RequestExampleAttribute_Preserves_Ref_Metadata_Name_And_MediaType_Override()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateItemRequest(string Name);
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [Route("api/items")]
+            public sealed class ItemsController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(typeof(ItemDto), 201)]
+                [RivetRequestExample(
+                    "{\"name\":\"Ada\"}",
+                    componentExampleId: "create-item",
+                    name: "starter",
+                    mediaType: "application/merge-patch+json")]
+                public Task<IActionResult> Create(
+                    [FromBody] CreateItemRequest request,
+                    CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("starter", requestExample.Name);
+        Assert.Equal("application/merge-patch+json", requestExample.MediaType);
+        Assert.Null(requestExample.Json);
+        Assert.Equal("create-item", requestExample.ComponentExampleId);
+        Assert.Equal("""{"name":"Ada"}""", requestExample.ResolvedJson);
+    }
+
+    [Fact]
     public void Controller_ResponseExampleAttribute_Preserves_Ref_Metadata_And_MediaType_Override()
     {
         var source = """
@@ -366,6 +413,47 @@ public sealed class ControllerEndpointTests
     }
 
     [Fact]
+    public void Controller_ResponseExampleAttribute_Attaches_To_Synthesized_ActionResult_Success_Response()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [RivetType]
+            public sealed record ErrorDto(string Message);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/items/{id}")]
+                [ProducesResponseType(typeof(ErrorDto), 404)]
+                [RivetResponseExample(200, "{\"id\":\"550e8400-e29b-41d4-a716-446655440000\",\"name\":\"Ada\"}", name: "ok")]
+                public static Task<ActionResult<ItemDto>> Get([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var response = endpoint.Responses.Single(r => r.StatusCode == 200);
+        Assert.True(response.DataType is TsType.TypeRef { Name: "ItemDto" });
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("ok", example.Name);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Equal("""{"id":"550e8400-e29b-41d4-a716-446655440000","name":"Ada"}""", example.Json);
+        Assert.Null(example.ComponentExampleId);
+        Assert.Null(example.ResolvedJson);
+    }
+
+    [Fact]
     public void Controller_ResponseExampleAttribute_Without_Declared_Response_Is_Ignored()
     {
         var source = """
@@ -397,6 +485,42 @@ public sealed class ControllerEndpointTests
         Assert.Equal(200, endpoint.Responses[0].StatusCode);
         Assert.Null(endpoint.Responses[0].Examples);
         Assert.DoesNotContain(endpoint.Responses, response => response.StatusCode == 422);
+    }
+
+    [Fact]
+    public void Controller_RequestExampleAttribute_Defaults_To_Multipart_For_File_Upload_Endpoints()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadResultDto(string Id);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpPost("/api/uploads")]
+                [ProducesResponseType(typeof(UploadResultDto), 201)]
+                [RivetRequestExample("{\"title\":\"Quarterly report\"}")]
+                public static Task<IActionResult> Upload(IFormFile file, [FromQuery] string title)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("multipart/form-data", requestExample.MediaType);
+        Assert.Equal("""{"title":"Quarterly report"}""", requestExample.Json);
+        Assert.Null(requestExample.ComponentExampleId);
+        Assert.Null(requestExample.ResolvedJson);
     }
 
     [Fact]

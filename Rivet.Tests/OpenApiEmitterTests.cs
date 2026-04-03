@@ -595,6 +595,141 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void Controller_RequestExampleAttribute_RefBacked_Request_Uses_Component_Example_Reference()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateItemRequest(string Name);
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [Route("api/items")]
+            public sealed class ItemsController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(typeof(ItemDto), 201)]
+                [RivetRequestExample(
+                    "{\"name\":\"Ada\"}",
+                    componentExampleId: "create-item",
+                    name: "starter",
+                    mediaType: "application/merge-patch+json")]
+                public Task<IActionResult> Create(
+                    [FromBody] CreateItemRequest request,
+                    CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        using var doc = EmitOpenApiFromController(source);
+        var requestContent = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/items")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/merge-patch+json");
+
+        var examples = requestContent.GetProperty("examples");
+        Assert.Equal(
+            "#/components/examples/create-item",
+            examples.GetProperty("starter").GetProperty("$ref").GetString());
+
+        var componentExample = doc.RootElement.GetProperty("components")
+            .GetProperty("examples")
+            .GetProperty("create-item");
+        Assert.Equal("Ada", componentExample.GetProperty("value").GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public void Controller_ResponseExampleAttribute_Attaches_To_Synthesized_ActionResult_Success_Response_In_OpenApi()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [RivetType]
+            public sealed record ErrorDto(string Message);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/items/{id}")]
+                [ProducesResponseType(typeof(ErrorDto), 404)]
+                [RivetResponseExample(200, "{\"id\":\"550e8400-e29b-41d4-a716-446655440000\",\"name\":\"Ada\"}", name: "ok")]
+                public static Task<ActionResult<ItemDto>> Get([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        using var doc = EmitOpenApiFromController(source);
+        var examples = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/items/{id}")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples");
+
+        Assert.Equal(
+            "Ada",
+            examples.GetProperty("ok").GetProperty("value").GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public void Controller_RequestExampleAttribute_Defaults_To_Multipart_For_File_Upload_Endpoints_In_OpenApi()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadResultDto(string Id);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpPost("/api/uploads")]
+                [ProducesResponseType(typeof(UploadResultDto), 201)]
+                [RivetRequestExample("{\"title\":\"Quarterly report\"}")]
+                public static Task<IActionResult> Upload(IFormFile file, [FromQuery] string title)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        using var doc = EmitOpenApiFromController(source);
+        var multipart = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/uploads")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("multipart/form-data");
+
+        Assert.Equal("Quarterly report", multipart.GetProperty("example").GetProperty("title").GetString());
+    }
+
+    [Fact]
     public void Multipart_RequestExampleRef_Emits_Component_Example_Reference()
     {
         var source = """
