@@ -57,6 +57,7 @@ The generated `openapi.json` includes:
 - **Summary / Description** — `.Summary()` emits to the operation `summary` field, `.Description()` to `description`
 - **Property metadata** — `[RivetDescription]`, `[RivetConstraints]`, `[RivetDefault]`, `[RivetExample]`, `[RivetReadOnly]`, `[RivetWriteOnly]` attributes are emitted on property schemas
 - **Type descriptions** — `[RivetDescription]` on records emits `description` on the schema object
+- **Endpoint/content examples** — request and response examples on the endpoint model emit to `requestBody.content[*]` and `responses[*].content[*]`
 
 ### Type representation
 
@@ -67,6 +68,31 @@ The generated `openapi.json` includes:
 - **Nullable types** use `nullable: true`
 
 The `x-rivet-*` extensions are ignored by non-Rivet consumers (valid OpenAPI 3.0). They enable [lossless round-trips](/guides/openapi-round-trips) when the spec is imported back into Rivet.
+
+## Endpoint/content example emission
+
+Rivet emits endpoint-level examples from either contract builder calls or controller example attributes.
+
+- One unnamed inline example on a media type emits as singular `example`.
+- Named examples, multiple examples, and ref-backed examples emit under `examples`.
+- Ref-backed examples emit `$ref` entries that point at `#/components/examples/{id}` when Rivet has both the component id and resolved JSON payload.
+- If Rivet cannot safely emit a valid ref, it inlines the example content instead of producing a broken `$ref`.
+
+Example:
+
+```csharp
+public static readonly RouteDefinition<CreateWidgetRequest, WidgetDto> Create =
+    Define.Post<CreateWidgetRequest, WidgetDto>("/api/widgets")
+        .RequestExampleJson("{\"name\":\"starter-widget\"}")
+        .Returns<ProblemDto>(422)
+        .ResponseExampleRef(
+            422,
+            "widget-validation-problem",
+            "{\"title\":\"Validation failed\"}",
+            name: "validationProblem");
+```
+
+This feature covers request-body and response-body examples. Property-level examples still come from `[RivetExample]` on DTO properties and emit on schemas, not on operation content.
 
 ## Viewing the spec
 

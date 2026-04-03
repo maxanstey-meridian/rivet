@@ -222,7 +222,35 @@ output/
 - **Enums** for string enums, with `[JsonStringEnumMemberName]` attributes to preserve original member names that differ from PascalCase
 - **Branded value objects** for string types with semantic formats (`email`, `uri`, etc.)
 - **Static contract classes** with `RouteDefinition<T>` builder chains — `.Summary()` for OpenAPI `summary`, `.Description()` for `description`, `.FormEncoded()` for `application/x-www-form-urlencoded` bodies
+- **Endpoint/content examples** mapped into builder calls — `.RequestExampleJson()`, `.RequestExampleRef()`, `.ResponseExampleJson()`, and `.ResponseExampleRef()`
 - Operations grouped by tag into separate contract classes
+
+## Endpoint/content examples
+
+Rivet imports endpoint-level media examples separately from property-level schema examples.
+
+- Property examples become `[RivetExample]` on generated DTO properties.
+- Request-body and response-body examples become endpoint builder calls on the generated contract field.
+- Named OpenAPI `examples` entries keep their example names.
+- Ref-backed `#/components/examples/...` entries keep both the component id and the resolved JSON payload, so the forward pipeline can re-emit valid refs later.
+
+Example generated contract:
+
+```csharp
+public static readonly RouteDefinition<CreateWidgetRequest, WidgetDto> Create =
+    Define.Post<CreateWidgetRequest, WidgetDto>("/api/widgets")
+        .RequestExampleRef(
+            "create-widget",
+            "{\"name\":\"starter-widget\"}",
+            name: "starter")
+        .Returns<ProblemDto>(422)
+        .ResponseExampleJson(
+            422,
+            "{\"title\":\"Validation failed\"}",
+            name: "validationProblem");
+```
+
+The contract DSL does not support a pure component ref without resolved JSON. If the source spec points at `#/components/examples/...` but Rivet cannot resolve the example payload, the importer emits an unsupported marker rather than silently pretending the example survived.
 
 ## Supported schema subset
 
@@ -265,6 +293,7 @@ A marker appears when:
 
 - The content type doesn't match any supported pattern (e.g. a vendor-specific XML type)
 - The content type is supported but the schema is missing (e.g. `application/json` with examples but no `schema` key — this is a spec authoring error)
+- An endpoint example entry exists but Rivet cannot resolve its value or referenced component example
 
 ### Working with markers
 

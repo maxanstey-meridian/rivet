@@ -30,11 +30,38 @@ All builder methods return the definition for chaining.
 | `.Summary(text)` | Short one-line summary, emitted to the OpenAPI `summary` field |
 | `.Description(desc)` | Detailed description, emitted to the OpenAPI `description` field |
 | `.FormEncoded()` | Mark the request body as `application/x-www-form-urlencoded` instead of JSON |
+| `.RequestExampleJson(json, name?, mediaType?)` | Attach a request-body example to the endpoint. Emits `example` when there is one unnamed inline entry, otherwise `examples`. |
+| `.RequestExampleRef(componentExampleId, resolvedJson, name?, mediaType?)` | Attach a ref-backed request example. `resolvedJson` is stored so Rivet can re-emit a valid `#/components/examples/...` entry on output. |
+| `.ResponseExampleJson(statusCode, json, name?, mediaType?)` | Attach a response-body example to a declared response status. |
+| `.ResponseExampleRef(statusCode, componentExampleId, resolvedJson, name?, mediaType?)` | Attach a ref-backed response example to a declared response status. |
 | `.Anonymous()` | Marks endpoint as not requiring authentication |
 | `.Secure(scheme)` | Sets a named security scheme for the endpoint |
 | `.Accepts<T>()` | Convert void definition to input-only (accepts body, returns void) |
 | `.AcceptsFile()` | Mark endpoint as accepting a file upload (generates `File` param with `FormData`) |
 | `.ProducesFile(contentType?)` | Mark endpoint as returning a file download. Default `application/octet-stream`. TS client returns `Blob`, OpenAPI emits `format: binary` |
+
+## Endpoint example authoring
+
+These methods describe endpoint-level content examples, not property-level schema examples.
+
+```csharp
+public static readonly RouteDefinition<CreateWidgetRequest, WidgetDto> Create =
+    Define.Post<CreateWidgetRequest, WidgetDto>("/api/widgets")
+        .RequestExampleJson("{\"name\":\"starter-widget\"}")
+        .Returns<ProblemDto>(422)
+        .ResponseExampleRef(
+            422,
+            "widget-validation-problem",
+            "{\"title\":\"Validation failed\"}",
+            name: "validationProblem");
+```
+
+- Use `RequestExampleJson` / `ResponseExampleJson` for inline media examples.
+- Use `RequestExampleRef` / `ResponseExampleRef` when you need `#/components/examples/...` preservation on emitted OpenAPI.
+- `mediaType` defaults to `application/json`, except form-encoded and multipart request bodies which keep their existing content type.
+- Response example methods only attach to statuses you already declared with `.Returns(...)` or the success status already implied by the endpoint.
+
+These builder methods are Roslyn-readable markers for code generation. They do not affect `.Invoke()` runtime behavior directly.
 
 ## Field attributes
 

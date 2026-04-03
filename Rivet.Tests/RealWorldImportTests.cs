@@ -637,6 +637,74 @@ public sealed class RealWorldImportTests
         AssertFullRoundTrip(r, "GitHub");
     }
 
+    [Fact]
+    [Trait("Category", "Slow")]
+    public void GitHub_Full_RoundTrip_Retains_Request_And_Response_RefExamples()
+    {
+        var r = FullRoundTripLenient("openapi-github.json", "GitHub");
+        var emitted = JsonSerializer.Deserialize<JsonElement>(r.EmittedJson);
+
+        var requestExamples = emitted.GetProperty("paths")
+            .GetProperty("/enterprises/{enterprise}/actions/cache/retention-limit")
+            .GetProperty("put")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples");
+        Assert.Equal(
+            "#/components/examples/actions-cache-retention-limit",
+            requestExamples.GetProperty("selected_actions").GetProperty("$ref").GetString());
+
+        var requestComponentExample = emitted.GetProperty("components")
+            .GetProperty("examples")
+            .GetProperty("actions-cache-retention-limit");
+        Assert.Equal(
+            80,
+            requestComponentExample.GetProperty("value").GetProperty("max_cache_retention_days").GetInt32());
+
+        var responseExamples = emitted.GetProperty("paths")
+            .GetProperty("/organizations/{org}/settings/billing/budgets/{budget_id}")
+            .GetProperty("delete")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples");
+        Assert.Equal(
+            "#/components/examples/delete-budget",
+            responseExamples.GetProperty("default").GetProperty("$ref").GetString());
+
+        var responseComponentExample = emitted.GetProperty("components")
+            .GetProperty("examples")
+            .GetProperty("delete-budget");
+        Assert.Equal(
+            "Budget successfully deleted.",
+            responseComponentExample.GetProperty("value").GetProperty("message").GetString());
+
+        var requestEndpoint = r.Endpoints2.Single(endpoint =>
+            endpoint.HttpMethod == "PUT" &&
+            endpoint.RouteTemplate == "/enterprises/{enterprise}/actions/cache/retention-limit");
+        var requestExample = Assert.Single(requestEndpoint.RequestExamples!);
+        Assert.Equal("selected_actions", requestExample.Name);
+        Assert.Equal("application/json", requestExample.MediaType);
+        Assert.Null(requestExample.Json);
+        Assert.Equal("actions-cache-retention-limit", requestExample.ComponentExampleId);
+        Assert.Equal("""{"max_cache_retention_days":80}""", requestExample.ResolvedJson);
+
+        var responseEndpoint = r.Endpoints2.Single(endpoint =>
+            endpoint.HttpMethod == "DELETE" &&
+            endpoint.RouteTemplate == "/organizations/{org}/settings/billing/budgets/{budget_id}");
+        var response = responseEndpoint.Responses.Single(rsp => rsp.StatusCode == 200);
+        var responseExample = Assert.Single(response.Examples!);
+        Assert.Equal("default", responseExample.Name);
+        Assert.Equal("application/json", responseExample.MediaType);
+        Assert.Null(responseExample.Json);
+        Assert.Equal("delete-budget", responseExample.ComponentExampleId);
+        Assert.Equal(
+            """{"message":"Budget successfully deleted.","budget_id":"2c1feb79-3947-4dc8-a16e-80cbd732cc0b"}""",
+            responseExample.ResolvedJson);
+    }
+
     // ========== Large real-world specs — full round-trip ==========
 
     [Fact]

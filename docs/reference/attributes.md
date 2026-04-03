@@ -1,6 +1,6 @@
 # Attributes
 
-Rivet provides marker attributes for discovery and metadata attributes for property-level annotations. All are in the `Rivet.Attributes` NuGet package.
+Rivet provides marker attributes for discovery, endpoint-level metadata attributes, and property-level schema metadata attributes. All are in the `Rivet.Attributes` NuGet package.
 
 ## `[RivetType]`
 
@@ -110,6 +110,48 @@ Controller `[Route]` prefixes are combined with method routes. Route constraints
 
 Endpoints are grouped by controller into separate client files: `TasksController` becomes `client/tasks.ts`.
 
+## Endpoint example attributes
+
+These attributes attach request/response media examples to controller or standalone `[RivetEndpoint]` methods. They map to the same endpoint example model used by the contract builder methods.
+
+### `[RivetRequestExample]`
+
+Method-level request example metadata.
+
+```csharp
+[RivetEndpoint]
+[HttpPost("/api/widgets")]
+[RivetRequestExample("{\"name\":\"starter-widget\"}")]
+public static Task<WidgetDto> Create([FromBody] CreateWidgetRequest request)
+    => throw new NotImplementedException();
+```
+
+Parameters:
+
+- `json` is required. For ref-backed examples it is the resolved JSON payload that Rivet keeps alongside the component id.
+- `componentExampleId` is optional and tells the emitter to target `#/components/examples/{id}` when it can re-emit a valid ref.
+- `name` is optional. Named examples emit under OpenAPI `examples`; one unnamed inline example emits as singular `example`.
+- `mediaType` is optional and defaults to `application/json`.
+
+### `[RivetResponseExample]`
+
+Method-level response example metadata for a specific status code.
+
+```csharp
+[RivetEndpoint]
+[HttpDelete("/api/widgets/{id}")]
+[ProducesResponseType(typeof(DeleteWidgetResponse), 200)]
+[RivetResponseExample(
+    200,
+    "{\"message\":\"Widget deleted\"}",
+    componentExampleId: "delete-widget",
+    name: "default")]
+public static Task<IActionResult> Delete([FromRoute] Guid id)
+    => throw new NotImplementedException();
+```
+
+`statusCode` must target a response status that Rivet already knows about from `[ProducesResponseType]`, typed results, or the inferred success response. If the status is undeclared, Rivet ignores the example instead of inventing a new response entry.
+
 ## Metadata attributes
 
 Property-level attributes that preserve OpenAPI/JSON Schema metadata through the C# round-trip. Apply with `[property: ...]` syntax on record constructor parameters.
@@ -218,3 +260,5 @@ public sealed record ProductDto(
 ```
 
 These attributes are emitted to both OpenAPI and JSON Schema output, and are preserved through OpenAPI import round-trips.
+
+`[RivetExample]` is property-level schema metadata. Use the endpoint builder example methods or `[RivetRequestExample]` / `[RivetResponseExample]` when you want request-body or response-body content examples instead.

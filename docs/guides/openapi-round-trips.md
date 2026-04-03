@@ -20,6 +20,7 @@ ignore them, the spec stays valid.
 | Enum member names (`in-progress`)          | PascalCased (`InProgress`)        | Preserved automatically                    |
 | Form-encoded bodies                        | Converted to JSON                 | Preserved via `.FormEncoded()`             |
 | Void error responses (404 no body)         | Dropped                           | Preserved via `.Returns(statusCode)`       |
+| Request/response content examples          | Usually dropped or flattened      | Preserved via endpoint example metadata    |
 
 ## How it works
 
@@ -125,6 +126,18 @@ These use builder methods you'll see in the generated contracts:
 
 - **Form-encoded bodies** — `application/x-www-form-urlencoded` content type is preserved via `.FormEncoded()`
 - **Void error responses** — error responses without a body (e.g., 404 with no content) are preserved via `.Returns(statusCode)`
+- **Endpoint/content examples** — request and response examples are preserved via `.RequestExampleJson()`, `.RequestExampleRef()`, `.ResponseExampleJson()`, and `.ResponseExampleRef()`
+
+## Endpoint example round-trips
+
+Rivet treats endpoint/content examples as a separate fidelity category from property-level `[RivetExample]` metadata.
+
+- Request-body examples round-trip through `TsEndpointDefinition.RequestExamples`.
+- Response-body examples round-trip through `TsResponseType.Examples`.
+- Named examples stay named.
+- Ref-backed examples stay ref-backed when Rivet has both the component example id and the resolved JSON payload.
+
+If Rivet has the resolved payload but not enough information to emit a safe component ref, it falls back to inline emission instead of writing a broken `$ref`. That preserves the example content, but not the original ref shape.
 
 ## What doesn't survive
 
