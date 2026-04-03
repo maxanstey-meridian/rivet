@@ -124,6 +124,33 @@ public sealed class OpenApiRoundTripTests
         return document.ToJsonString();
     }
 
+    private static string BuildGitHubSetActionsCacheRetentionLimitFixtureSpec()
+    {
+        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
+        var document = CreateFixtureSliceDocument("openapi-github.json");
+        var paths = (JsonObject)document["paths"]!;
+        var sourcePath = source["paths"]?["/enterprises/{enterprise}/actions/cache/retention-limit"] as JsonObject;
+
+        Assert.NotNull(sourcePath);
+
+        var put = sourcePath["put"]!.DeepClone()!.AsObject();
+        put["responses"] = new JsonObject
+        {
+            ["204"] = put["responses"]!["204"]!.DeepClone(),
+        };
+
+        paths["/enterprises/{enterprise}/actions/cache/retention-limit"] = new JsonObject
+        {
+            ["put"] = put,
+        };
+
+        CopyComponentEntries(source, document, "parameters", "enterprise");
+        CopyComponentEntries(source, document, "schemas", "actions-cache-retention-limit-for-enterprise");
+        CopyComponentEntries(source, document, "examples", "actions-cache-retention-limit");
+
+        return document.ToJsonString();
+    }
+
     private static JsonElement ImportCompileWalkAndEmit(string spec, string ns)
     {
         var result = CompilationHelper.Import(spec, ns);
@@ -604,6 +631,34 @@ public sealed class OpenApiRoundTripTests
                 .GetProperty("value")
                 .GetProperty("message")
                 .GetString());
+    }
+
+    [Fact]
+    public void GitHub_SetActionsCacheRetentionLimit_Request_RefExample_Survives_Import_Compile_Walk_Emit()
+    {
+        var emitted = ImportCompileWalkAndEmit(
+            BuildGitHubSetActionsCacheRetentionLimitFixtureSpec(),
+            "GitHubRoundTrip");
+
+        var examples = emitted.GetProperty("paths")
+            .GetProperty("/enterprises/{enterprise}/actions/cache/retention-limit")
+            .GetProperty("put")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples");
+
+        Assert.Equal(
+            "#/components/examples/actions-cache-retention-limit",
+            examples.GetProperty("selected_actions").GetProperty("$ref").GetString());
+        Assert.Equal(
+            80,
+            emitted.GetProperty("components")
+                .GetProperty("examples")
+                .GetProperty("actions-cache-retention-limit")
+                .GetProperty("value")
+                .GetProperty("max_cache_retention_days")
+                .GetInt32());
     }
 
     [Fact]

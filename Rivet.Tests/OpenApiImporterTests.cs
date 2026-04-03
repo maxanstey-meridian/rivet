@@ -600,6 +600,33 @@ public sealed class OpenApiImporterTests
         return document.ToJsonString();
     }
 
+    private static string BuildGitHubSetActionsCacheRetentionLimitFixtureSpec()
+    {
+        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
+        var document = CreateFixtureSliceDocument("openapi-github.json");
+        var paths = (JsonObject)document["paths"]!;
+        var sourcePath = source["paths"]?["/enterprises/{enterprise}/actions/cache/retention-limit"] as JsonObject;
+
+        Assert.NotNull(sourcePath);
+
+        var put = sourcePath["put"]!.DeepClone()!.AsObject();
+        put["responses"] = new JsonObject
+        {
+            ["204"] = put["responses"]!["204"]!.DeepClone(),
+        };
+
+        paths["/enterprises/{enterprise}/actions/cache/retention-limit"] = new JsonObject
+        {
+            ["put"] = put,
+        };
+
+        CopyComponentEntries(source, document, "parameters", "enterprise");
+        CopyComponentEntries(source, document, "schemas", "actions-cache-retention-limit-for-enterprise");
+        CopyComponentEntries(source, document, "examples", "actions-cache-retention-limit");
+
+        return document.ToJsonString();
+    }
+
     private static string BuildGitHubUpdateImportFixtureSpec()
     {
         var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
@@ -807,6 +834,25 @@ public sealed class OpenApiImporterTests
         Assert.Null(example.Json);
         Assert.Equal("delete-budget", example.ComponentExampleId);
         Assert.Equal("""{"message":"Budget successfully deleted.","budget_id":"2c1feb79-3947-4dc8-a16e-80cbd732cc0b"}""", example.ResolvedJson);
+    }
+
+    [Fact]
+    public void GitHub_SetActionsCacheRetentionLimit_Request_RefExample_Preserves_Ref_And_ResolvedJson()
+    {
+        var (_, endpoints) = ImportSpecAndWalkContracts(
+            BuildGitHubSetActionsCacheRetentionLimitFixtureSpec(),
+            "GitHub.Contracts");
+
+        var endpoint = endpoints.Single(e =>
+            e.HttpMethod == "PUT" &&
+            e.RouteTemplate == "/enterprises/{enterprise}/actions/cache/retention-limit");
+
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("selected_actions", requestExample.Name);
+        Assert.Equal("application/json", requestExample.MediaType);
+        Assert.Null(requestExample.Json);
+        Assert.Equal("actions-cache-retention-limit", requestExample.ComponentExampleId);
+        Assert.Equal("""{"max_cache_retention_days":80}""", requestExample.ResolvedJson);
     }
 
     [Fact]
