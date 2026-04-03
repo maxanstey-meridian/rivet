@@ -267,7 +267,14 @@ internal static class CSharpWriter
 
         // Emit .Status() when the code differs from the HTTP method default
         var defaultStatus = field.HttpMethod switch { "Post" => 201, "Delete" => 204, _ => 200 };
-        if (field.SuccessStatus is not null && field.SuccessStatus != defaultStatus)
+        var needsExplicitSuccessStatusForExamples =
+            field.SuccessStatus is not null
+            && field.OutputType is null
+            && field.FileContentType is null
+            && field.ResponseExamples.Any(example => example.StatusCode == field.SuccessStatus.Value);
+
+        if (field.SuccessStatus is not null
+            && (field.SuccessStatus != defaultStatus || needsExplicitSuccessStatusForExamples))
         {
             calls.Add($".Status({field.SuccessStatus})");
         }

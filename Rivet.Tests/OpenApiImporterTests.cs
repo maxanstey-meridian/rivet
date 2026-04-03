@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.CodeAnalysis;
 using Rivet.Tool.Import;
 using Rivet.Tool.Model;
@@ -492,22 +493,139 @@ public sealed class OpenApiImporterTests
         return File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
     }
 
-    private static Compilation CompileImportedFixtureDeduped(string fixtureName, string ns)
+    private static JsonObject CreateFixtureSliceDocument(string fixtureName)
     {
-        var result = CompilationHelper.Import(LoadFixture(fixtureName), ns);
-        var uniqueSources = result.Files
-            .GroupBy(file => file.FileName)
-            .Select(group => group.First().Content)
-            .ToArray();
+        var root = JsonNode.Parse(LoadFixture(fixtureName))!.AsObject();
 
-        return CompilationHelper.CreateCompilationFromMultiple(uniqueSources);
+        return new JsonObject
+        {
+            ["openapi"] = root["openapi"]!.DeepClone(),
+            ["info"] = root["info"]!.DeepClone(),
+            ["paths"] = new JsonObject(),
+        };
     }
 
-    private static IReadOnlyList<TsEndpointDefinition> ImportFixtureAndWalkContracts(string fixtureName, string ns)
+    private static JsonObject GetOrAddComponents(JsonObject document)
     {
-        var compilation = CompileImportedFixtureDeduped(fixtureName, ns);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        return CompilationHelper.WalkContracts(compilation, discovered, walker);
+        document["components"] ??= new JsonObject();
+        return (JsonObject)document["components"]!;
+    }
+
+    private static void CopyComponentEntries(
+        JsonObject sourceDocument,
+        JsonObject targetDocument,
+        string sectionName,
+        params string[] keys)
+    {
+        var sourceSection = sourceDocument["components"]?[sectionName] as JsonObject;
+        Assert.NotNull(sourceSection);
+
+        var components = GetOrAddComponents(targetDocument);
+        components[sectionName] ??= new JsonObject();
+        var targetSection = (JsonObject)components[sectionName]!;
+
+        foreach (var key in keys)
+        {
+            targetSection[key] = sourceSection[key]!.DeepClone();
+        }
+    }
+
+    private static string BuildTwilioCreateAccountFixtureSpec()
+    {
+        var source = JsonNode.Parse(LoadFixture("openapi-twilio.json"))!.AsObject();
+        var document = CreateFixtureSliceDocument("openapi-twilio.json");
+        var paths = (JsonObject)document["paths"]!;
+        var sourcePath = source["paths"]?["/2010-04-01/Accounts.json"] as JsonObject;
+
+        Assert.NotNull(sourcePath);
+        paths["/2010-04-01/Accounts.json"] = new JsonObject
+        {
+            ["post"] = sourcePath["post"]!.DeepClone(),
+        };
+
+        return document.ToJsonString();
+    }
+
+    private static string BuildGitHubUpdateBudgetFixtureSpec()
+    {
+        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
+        var document = CreateFixtureSliceDocument("openapi-github.json");
+        var paths = (JsonObject)document["paths"]!;
+        var sourcePath = source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"] as JsonObject;
+
+        Assert.NotNull(sourcePath);
+
+        var patch = sourcePath["patch"]!.DeepClone()!.AsObject();
+        patch["responses"] = new JsonObject
+        {
+            ["404"] = patch["responses"]!["404"]!.DeepClone(),
+        };
+
+        paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
+        {
+            ["patch"] = patch,
+        };
+
+        CopyComponentEntries(source, document, "parameters", "org", "budget");
+        CopyComponentEntries(source, document, "schemas", "basic-error");
+
+        return document.ToJsonString();
+    }
+
+    private static string BuildGitHubDeleteBudgetFixtureSpec()
+    {
+        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
+        var document = CreateFixtureSliceDocument("openapi-github.json");
+        var paths = (JsonObject)document["paths"]!;
+        var sourcePath = source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"] as JsonObject;
+
+        Assert.NotNull(sourcePath);
+
+        var delete = sourcePath["delete"]!.DeepClone()!.AsObject();
+        delete["responses"] = new JsonObject
+        {
+            ["200"] = delete["responses"]!["200"]!.DeepClone(),
+        };
+
+        paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
+        {
+            ["delete"] = delete,
+        };
+
+        CopyComponentEntries(source, document, "parameters", "org", "budget");
+        CopyComponentEntries(source, document, "responses", "delete-budget");
+        CopyComponentEntries(source, document, "examples", "delete-budget");
+        CopyComponentEntries(source, document, "schemas", "delete-budget");
+
+        return document.ToJsonString();
+    }
+
+    private static string BuildGitHubUpdateImportFixtureSpec()
+    {
+        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
+        var document = CreateFixtureSliceDocument("openapi-github.json");
+        var paths = (JsonObject)document["paths"]!;
+        var sourcePath = source["paths"]?["/repos/{owner}/{repo}/import"] as JsonObject;
+
+        Assert.NotNull(sourcePath);
+
+        var patch = sourcePath["patch"]!.DeepClone()!.AsObject();
+        patch["responses"] = new JsonObject
+        {
+            ["204"] = new JsonObject
+            {
+                ["description"] = "No Content",
+            },
+        };
+
+        paths["/repos/{owner}/{repo}/import"] = new JsonObject
+        {
+            ["patch"] = patch,
+        };
+
+        CopyComponentEntries(source, document, "parameters", "owner", "repo");
+
+        return document.ToJsonString();
     }
 
     private static (ImportResult Result, IReadOnlyList<TsEndpointDefinition> Endpoints) ImportSpecAndWalkContracts(
@@ -625,7 +743,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Twilio_CreateAccount_FormUrlEncoded_RequestExample_Survives_Import_RoundTrip()
     {
-        var endpoints = ImportFixtureAndWalkContracts("openapi-twilio.json", "Twilio.Contracts");
+        var (_, endpoints) = ImportSpecAndWalkContracts(BuildTwilioCreateAccountFixtureSpec(), "Twilio.Contracts");
 
         var endpoint = endpoints.Single(e =>
             e.HttpMethod == "POST" &&
@@ -644,7 +762,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void GitHub_UpdateBudgetOrg_404_Named_ResponseExamples_Survive_Import_RoundTrip()
     {
-        var endpoints = ImportFixtureAndWalkContracts("openapi-github.json", "GitHub.Contracts");
+        var (_, endpoints) = ImportSpecAndWalkContracts(BuildGitHubUpdateBudgetFixtureSpec(), "GitHub.Contracts");
 
         var endpoint = endpoints.Single(e =>
             e.HttpMethod == "PATCH" &&
@@ -675,7 +793,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void GitHub_DeleteBudgetOrg_RefBacked_ResponseExample_Preserves_Ref_And_ResolvedJson()
     {
-        var endpoints = ImportFixtureAndWalkContracts("openapi-github.json", "GitHub.Contracts");
+        var (_, endpoints) = ImportSpecAndWalkContracts(BuildGitHubDeleteBudgetFixtureSpec(), "GitHub.Contracts");
 
         var endpoint = endpoints.Single(e =>
             e.HttpMethod == "DELETE" &&
@@ -694,9 +812,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void GitHub_UpdateImport_Exampleless_RequestEntry_Is_Explicit_Not_Silent()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-github.json"), "GitHub.Contracts");
+        var spec = BuildGitHubUpdateImportFixtureSpec();
+        var result = CompilationHelper.Import(spec, "GitHub.Contracts");
         var content = CompilationHelper.FindFile(result, "MigrationsContract.cs");
-        var compilation = CompileImportedFixtureDeduped("openapi-github.json", "GitHub.Contracts");
+        var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
@@ -845,6 +964,107 @@ public sealed class OpenApiImporterTests
             contract);
         Assert.Contains(
             ".ResponseExampleJson(202, \"\\\"queued\\\"\", mediaType: \"text/plain\")",
+            contract);
+    }
+
+    [Fact]
+    public void Example_Bearing_Unsupported_Error_Response_Remains_Reachable_After_Import_RoundTrip()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "TaskDto": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" }
+                    },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/tasks/{id}": {
+                    "get": {
+                        "operationId": "tasks_get",
+                        "tags": ["Tasks"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
+                                    }
+                                }
+                            },
+                            "404": {
+                                "description": "Not found",
+                                "content": {
+                                    "text/plain": {
+                                        "example": "missing"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var (result, endpoints) = ImportSpecAndWalkContracts(spec);
+        var contract = CompilationHelper.FindFile(result, "TasksContract.cs");
+        var endpoint = Assert.Single(endpoints);
+
+        var response = endpoint.Responses.Single(r => r.StatusCode == 404);
+        Assert.Null(response.DataType);
+        Assert.Equal("Not found", response.Description);
+
+        var responseExample = Assert.Single(response.Examples!);
+        Assert.Equal("text/plain", responseExample.MediaType);
+        Assert.Equal("\"missing\"", responseExample.Json);
+
+        Assert.Contains(".Returns(404, \"Not found\")", contract);
+        Assert.Contains(
+            ".ResponseExampleJson(404, \"\\\"missing\\\"\", mediaType: \"text/plain\")",
+            contract);
+    }
+
+    [Fact]
+    public void Example_Bearing_Default_Success_Response_Without_Type_Forces_Status_Declaration()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+                "/api/previews/{id}": {
+                    "get": {
+                        "operationId": "previews_get",
+                        "tags": ["Previews"],
+                        "responses": {
+                            "200": {
+                                "description": "Preview text",
+                                "content": {
+                                    "text/plain": {
+                                        "example": "preview"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var (result, endpoints) = ImportSpecAndWalkContracts(spec);
+        var contract = CompilationHelper.FindFile(result, "PreviewsContract.cs");
+        var endpoint = Assert.Single(endpoints);
+
+        var response = Assert.Single(endpoint.Responses);
+        Assert.Equal(200, response.StatusCode);
+        Assert.Null(response.DataType);
+
+        var responseExample = Assert.Single(response.Examples!);
+        Assert.Equal("text/plain", responseExample.MediaType);
+        Assert.Equal("\"preview\"", responseExample.Json);
+
+        Assert.Contains(".Status(200)", contract);
+        Assert.Contains(
+            ".ResponseExampleJson(200, \"\\\"preview\\\"\", mediaType: \"text/plain\")",
             contract);
     }
 

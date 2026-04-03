@@ -84,6 +84,11 @@ internal static class ContractBuilder
         var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, unsupported);
         var requestExamples = ResolveRequestExamples(operation, unsupported);
         var responseExamples = ResolveResponseExamples(operation, unsupported);
+        errorResponses = EnsureExampleStatusesAreDeclared(
+            operation,
+            successStatus,
+            errorResponses,
+            responseExamples);
 
         // Security
         var (isAnonymous, securityScheme) = ResolveSecurity(operation, globalSecurityScheme);
@@ -392,6 +397,50 @@ internal static class ContractBuilder
         }
 
         return responseExamples;
+    }
+
+    private static IReadOnlyList<GeneratedErrorResponse> EnsureExampleStatusesAreDeclared(
+        OpenApiOperation operation,
+        int? successStatus,
+        IReadOnlyList<GeneratedErrorResponse> errorResponses,
+        IReadOnlyList<GeneratedEndpointResponseExample> responseExamples)
+    {
+        if (responseExamples.Count == 0)
+        {
+            return errorResponses;
+        }
+
+        var declaredStatuses = errorResponses
+            .Select(response => response.StatusCode)
+            .ToHashSet();
+        var descriptionsByStatus = (operation.Responses ?? [])
+            .Select(entry => new
+            {
+                StatusCode = NormalizeStatusCode(entry.Key),
+                Description = string.IsNullOrEmpty(entry.Value.Description) ? null : entry.Value.Description,
+            })
+            .Where(entry => entry.StatusCode is not null)
+            .GroupBy(entry => entry.StatusCode!.Value)
+            .ToDictionary(group => group.Key, group => group.First().Description);
+
+        var augmentedResponses = errorResponses.ToList();
+
+        foreach (var statusCode in responseExamples
+                     .Select(example => example.StatusCode)
+                     .Distinct()
+                     .OrderBy(code => code))
+        {
+            if (statusCode == successStatus || declaredStatuses.Contains(statusCode))
+            {
+                continue;
+            }
+
+            descriptionsByStatus.TryGetValue(statusCode, out var description);
+            augmentedResponses.Add(new GeneratedErrorResponse(statusCode, null, description));
+            declaredStatuses.Add(statusCode);
+        }
+
+        return augmentedResponses;
     }
 
     private static IReadOnlyList<TsEndpointExample> ResolveMediaExamples(
