@@ -705,6 +705,55 @@ public sealed class RealWorldImportTests
             responseExample.ResolvedJson);
     }
 
+    [Fact]
+    [Trait("Category", "Slow")]
+    public void GitHub_Full_RoundTrip_Retains_Named_ResponseExamples()
+    {
+        var r = FullRoundTripLenient("openapi-github.json", "GitHub");
+        var emitted = JsonSerializer.Deserialize<JsonElement>(r.EmittedJson);
+
+        var responseExamples = emitted.GetProperty("paths")
+            .GetProperty("/organizations/{org}/settings/billing/budgets/{budget_id}")
+            .GetProperty("patch")
+            .GetProperty("responses")
+            .GetProperty("404")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples");
+
+        Assert.Equal(
+            "Budget with ID 550e8400-e29b-41d4-a716-446655440000 not found.",
+            responseExamples.GetProperty("budget-not-found").GetProperty("value").GetProperty("message").GetString());
+        Assert.Equal(
+            "Not Found",
+            responseExamples.GetProperty("feature-not-enabled").GetProperty("value").GetProperty("message").GetString());
+
+        var endpoint = r.Endpoints2.Single(candidate =>
+            candidate.HttpMethod == "PATCH" &&
+            candidate.RouteTemplate == "/organizations/{org}/settings/billing/budgets/{budget_id}");
+
+        var response = endpoint.Responses.Single(rsp => rsp.StatusCode == 404);
+        Assert.NotNull(response.Examples);
+        Assert.Collection(
+            response.Examples!,
+            first =>
+            {
+                Assert.Equal("budget-not-found", first.Name);
+                Assert.Equal("application/json", first.MediaType);
+                Assert.Equal("""{"message":"Budget with ID 550e8400-e29b-41d4-a716-446655440000 not found.","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""", first.Json);
+                Assert.Null(first.ComponentExampleId);
+                Assert.Null(first.ResolvedJson);
+            },
+            second =>
+            {
+                Assert.Equal("feature-not-enabled", second.Name);
+                Assert.Equal("application/json", second.MediaType);
+                Assert.Equal("""{"message":"Not Found","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""", second.Json);
+                Assert.Null(second.ComponentExampleId);
+                Assert.Null(second.ResolvedJson);
+            });
+    }
+
     // ========== Large real-world specs — full round-trip ==========
 
     [Fact]

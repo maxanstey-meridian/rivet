@@ -524,6 +524,150 @@ public sealed class ControllerEndpointTests
     }
 
     [Fact]
+    public void Controller_QueryOnly_RequestExample_Is_Preserved_In_Model_Without_RequestBody()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record SearchResultDto(string Id);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/search")]
+                [ProducesResponseType(typeof(SearchResultDto[]), 200)]
+                [RivetRequestExample("{\"status\":\"open\"}", name: "filter")]
+                public static Task<IActionResult> Search([FromQuery] string status)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("filter", requestExample.Name);
+        Assert.Equal("application/json", requestExample.MediaType);
+        Assert.Equal("""{"status":"open"}""", requestExample.Json);
+        Assert.Null(requestExample.ComponentExampleId);
+        Assert.Null(requestExample.ResolvedJson);
+    }
+
+    [Fact]
+    public void RivetClient_AutoDiscovered_Method_Preserves_Request_And_Response_Examples()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateItemRequest(string Name);
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [RivetClient]
+            [Route("api/items")]
+            public sealed class ItemsController
+            {
+                [HttpPost("")]
+                [ProducesResponseType(typeof(ItemDto), 201)]
+                [ProducesResponseType(typeof(ProblemDto), 422)]
+                [RivetRequestExample("{\"name\":\"Ada\"}", name: "starter")]
+                [RivetResponseExample(422, "{\"title\":\"Validation failed\"}", name: "validationProblem")]
+                public Task<IActionResult> Create(
+                    [FromBody] CreateItemRequest request,
+                    CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("starter", requestExample.Name);
+        Assert.Equal("""{"name":"Ada"}""", requestExample.Json);
+
+        var response = endpoint.Responses.Single(r => r.StatusCode == 422);
+        var responseExample = Assert.Single(response.Examples!);
+        Assert.Equal("validationProblem", responseExample.Name);
+        Assert.Equal("""{"title":"Validation failed"}""", responseExample.Json);
+    }
+
+    [Fact]
+    public void Controller_Multiple_ExampleAttributes_Preserve_Declaration_Order()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateItemRequest(string Name);
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [Route("api/items")]
+            public sealed class ItemsController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(typeof(ItemDto), 201)]
+                [ProducesResponseType(typeof(ProblemDto), 422)]
+                [RivetRequestExample("{\"name\":\"Ada\"}", name: "starter")]
+                [RivetRequestExample("{\"name\":\"Bea\"}", name: "followUp")]
+                [RivetResponseExample(422, "{\"title\":\"Validation failed\"}", name: "validationProblem")]
+                [RivetResponseExample(422, "{\"title\":\"Already archived\"}", name: "archivedProblem")]
+                public Task<IActionResult> Create(
+                    [FromBody] CreateItemRequest request,
+                    CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(endpoint.RequestExamples);
+        Assert.Equal(2, requestExamples.Count);
+        Assert.Equal("starter", requestExamples[0].Name);
+        Assert.Equal("""{"name":"Ada"}""", requestExamples[0].Json);
+        Assert.Equal("followUp", requestExamples[1].Name);
+        Assert.Equal("""{"name":"Bea"}""", requestExamples[1].Json);
+
+        var response = endpoint.Responses.Single(r => r.StatusCode == 422);
+        var responseExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(response.Examples);
+        Assert.Equal(2, responseExamples.Count);
+        Assert.Equal("validationProblem", responseExamples[0].Name);
+        Assert.Equal("""{"title":"Validation failed"}""", responseExamples[0].Json);
+        Assert.Equal("archivedProblem", responseExamples[1].Name);
+        Assert.Equal("""{"title":"Already archived"}""", responseExamples[1].Json);
+    }
+
+    [Fact]
     public void RivetClient_AutoDiscoversPublicHttpMethods()
     {
         var source = """

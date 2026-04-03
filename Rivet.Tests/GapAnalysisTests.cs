@@ -216,6 +216,31 @@ public sealed class GapAnalysisTests
         Assert.Contains("REF-BACKED EXAMPLE LOSS: 1", fidelity.Failures);
     }
 
+    [Fact]
+    [Trait("Category", "Slow")]
+    public void Full_Gap_Analysis_Report_Includes_Endpoint_Example_Fidelity_Block()
+    {
+        var originalOut = Console.Out;
+        using var writer = new StringWriter();
+
+        try
+        {
+            Console.SetOut(writer);
+            Report_Full_Gap_Analysis("openapi-github.json", "GitHub");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        var output = writer.ToString();
+        Assert.Contains("ENDPOINT EXAMPLE FIDELITY:", output);
+        Assert.Contains("Request example loss:", output);
+        Assert.Contains("Response example loss:", output);
+        Assert.Contains("Named example loss:", output);
+        Assert.Contains("Ref-backed example loss:", output);
+    }
+
     /// <summary>
     /// Walks the raw OpenAPI JSON and counts inline enums on properties (type: string + enum: [...]),
     /// then checks how many the importer actually captured vs dropped to string.

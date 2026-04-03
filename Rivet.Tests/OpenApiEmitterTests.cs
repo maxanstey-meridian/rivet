@@ -730,6 +730,162 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void Controller_QueryOnly_RequestExample_Is_Not_Emitted_Without_RequestBody()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record SearchResultDto(string Id);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/search")]
+                [ProducesResponseType(typeof(SearchResultDto[]), 200)]
+                [RivetRequestExample("{\"status\":\"open\"}", name: "filter")]
+                public static Task<IActionResult> Search([FromQuery] string status)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        using var doc = EmitOpenApiFromController(source);
+        var get = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/search")
+            .GetProperty("get");
+
+        Assert.False(get.TryGetProperty("requestBody", out _));
+    }
+
+    [Fact]
+    public void RivetClient_AutoDiscovered_Method_Emits_Request_And_Response_Examples()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateItemRequest(string Name);
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [RivetClient]
+            [Route("api/items")]
+            public sealed class ItemsController
+            {
+                [HttpPost("")]
+                [ProducesResponseType(typeof(ItemDto), 201)]
+                [ProducesResponseType(typeof(ProblemDto), 422)]
+                [RivetRequestExample("{\"name\":\"Ada\"}", name: "starter")]
+                [RivetResponseExample(422, "{\"title\":\"Validation failed\"}", name: "validationProblem")]
+                public Task<IActionResult> Create(
+                    [FromBody] CreateItemRequest request,
+                    CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        using var doc = EmitOpenApiFromController(source);
+        var post = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/items")
+            .GetProperty("post");
+
+        var requestExamples = post.GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples");
+        Assert.Equal("Ada", requestExamples.GetProperty("starter").GetProperty("value").GetProperty("name").GetString());
+
+        var responseExamples = post.GetProperty("responses")
+            .GetProperty("422")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples");
+        Assert.Equal(
+            "Validation failed",
+            responseExamples.GetProperty("validationProblem").GetProperty("value").GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public void Controller_Multiple_ExampleAttributes_Emit_As_Examples_Collections_In_Declaration_Order()
+    {
+        var source = """
+            using System;
+            using System.Linq;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateItemRequest(string Name);
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [Route("api/items")]
+            public sealed class ItemsController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(typeof(ItemDto), 201)]
+                [ProducesResponseType(typeof(ProblemDto), 422)]
+                [RivetRequestExample("{\"name\":\"Ada\"}", name: "starter")]
+                [RivetRequestExample("{\"name\":\"Bea\"}", name: "followUp")]
+                [RivetResponseExample(422, "{\"title\":\"Validation failed\"}", name: "validationProblem")]
+                [RivetResponseExample(422, "{\"title\":\"Already archived\"}", name: "archivedProblem")]
+                public Task<IActionResult> Create(
+                    [FromBody] CreateItemRequest request,
+                    CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        using var doc = EmitOpenApiFromController(source);
+        var post = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/items")
+            .GetProperty("post");
+
+        var requestExamples = post.GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples")
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .ToArray();
+        Assert.Equal(["starter", "followUp"], requestExamples);
+
+        var responseExamples = post.GetProperty("responses")
+            .GetProperty("422")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples")
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .ToArray();
+        Assert.Equal(["validationProblem", "archivedProblem"], responseExamples);
+    }
+
+    [Fact]
     public void Multipart_RequestExampleRef_Emits_Component_Example_Reference()
     {
         var source = """
