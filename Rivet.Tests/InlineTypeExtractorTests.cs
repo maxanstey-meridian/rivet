@@ -1313,7 +1313,7 @@ public sealed class InlineTypeExtractorTests
 
         var result = InlineTypeExtractor.DeriveStructuralName(inline);
 
-        Assert.Equal("IdName", result);
+        Assert.Equal("Name", result);  // "id" is common, skipped
     }
 
     [Fact]
@@ -1329,7 +1329,7 @@ public sealed class InlineTypeExtractorTests
 
         var result = InlineTypeExtractor.DeriveStructuralName(inline);
 
-        Assert.Equal("IdNamePlus3", result);
+        Assert.Equal("NameEmail", result);  // "id" skipped, capped at 2 distinctive fields
     }
 
     [Fact]
@@ -1399,7 +1399,7 @@ public sealed class InlineTypeExtractorTests
         var result = InlineTypeExtractor.Extract(endpoints, []);
 
         Assert.Single(result.ExtractedTypes);
-        Assert.Equal("IdNameDto", result.ExtractedTypes[0].Name);
+        Assert.Equal("NameDto", result.ExtractedTypes[0].Name);  // "id" is common, skipped
     }
 
     [Fact]
@@ -1423,7 +1423,7 @@ public sealed class InlineTypeExtractorTests
         var result = InlineTypeExtractor.Extract(endpoints, []);
 
         Assert.Single(result.ExtractedTypes);
-        Assert.Equal("IdNamePlus3Dto", result.ExtractedTypes[0].Name);
+        Assert.Equal("NameEmailDto", result.ExtractedTypes[0].Name);  // "id" skipped, capped at 2
     }
 
     [Fact]
@@ -1451,8 +1451,8 @@ public sealed class InlineTypeExtractorTests
         var result = InlineTypeExtractor.Extract(endpoints, []);
 
         // The outer { data: ... } wrapper appears across 3 controllers → structural path
-        // DeriveStructuralName must NOT return "Data" — it should skip the data field
-        Assert.DoesNotContain(result.ExtractedTypes, t => t.Name.StartsWith("Data"));
+        // Must not produce "DataDto" (the old bad name) — "DataResponse" is acceptable for a wrapper
+        Assert.DoesNotContain(result.ExtractedTypes, t => t.Name == "DataDto");
     }
 
     [Fact]
@@ -2074,7 +2074,7 @@ public sealed class InlineTypeExtractorTests
 
         var result = InlineTypeExtractor.DeriveStructuralName(inline);
 
-        Assert.Equal("Object", result);
+        Assert.Equal("Data", result);  // data is no longer stripped when it's the only field
     }
 
     // Gap 6: Extract-level collision between two different Response wrappers

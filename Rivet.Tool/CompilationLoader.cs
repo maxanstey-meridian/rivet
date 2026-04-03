@@ -9,7 +9,7 @@ internal static class CompilationLoader
 {
     public static async Task<Compilation?> LoadProjectAsync(string csprojPath)
     {
-        MSBuildLocator.RegisterDefaults();
+        EnsureMSBuildRegistered();
 
         using var workspace = MSBuildWorkspace.Create();
 
@@ -44,6 +44,102 @@ internal static class CompilationLoader
         }
 
         return compilation;
+    }
+
+    private static void EnsureMSBuildRegistered()
+    {
+        if (MSBuildLocator.IsRegistered)
+        {
+            return;
+        }
+
+        foreach (var sdkPath in GetSdkCandidatePaths())
+        {
+            if (!File.Exists(Path.Combine(sdkPath, "MSBuild.dll")))
+            {
+                continue;
+            }
+
+            MSBuildLocator.RegisterMSBuildPath(sdkPath);
+            return;
+        }
+
+        MSBuildLocator.RegisterDefaults();
+    }
+
+    private static IEnumerable<string> GetSdkCandidatePaths()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var root in GetDotNetRoots())
+        {
+            var sdkRoot = Path.Combine(root, "sdk");
+            if (!Directory.Exists(sdkRoot))
+            {
+                continue;
+            }
+
+            var sdkDirectories = Directory.GetDirectories(sdkRoot)
+                .OrderByDescending(static path => ParseVersion(Path.GetFileName(path)));
+
+            foreach (var sdkDirectory in sdkDirectories)
+            {
+                var fullPath = Path.GetFullPath(sdkDirectory);
+                if (seen.Add(fullPath))
+                {
+                    yield return fullPath;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> GetDotNetRoots()
+    {
+        foreach (var envVar in new[] { "DOTNET_ROOT", "DOTNET_ROOT_X64" })
+        {
+            var value = Environment.GetEnvironmentVariable(envVar);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                yield return value;
+            }
+        }
+
+        foreach (var root in new[]
+                 {
+                     "/usr/local/share/dotnet",
+                     "/usr/local/share/dotnet/x64",
+                     "/opt/homebrew/share/dotnet",
+                     "/opt/homebrew/opt/dotnet/libexec",
+                 })
+        {
+            if (Directory.Exists(root))
+            {
+                yield return root;
+            }
+        }
+
+        const string homebrewCellar = "/opt/homebrew/Cellar/dotnet";
+        if (!Directory.Exists(homebrewCellar))
+        {
+            yield break;
+        }
+
+        foreach (var cellarInstall in Directory.GetDirectories(homebrewCellar)
+                     .OrderByDescending(static path => ParseVersion(Path.GetFileName(path))))
+        {
+            var libexecPath = Path.Combine(cellarInstall, "libexec");
+            if (Directory.Exists(libexecPath))
+            {
+                yield return libexecPath;
+            }
+        }
+    }
+
+    private static Version ParseVersion(string value)
+    {
+        return Version.TryParse(value, out var version)
+            ? version
+            : new Version(0, 0);
     }
 
     public static Compilation? CompileFromFiles(string[] paths)

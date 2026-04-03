@@ -181,15 +181,34 @@ public static class InlineTypeExtractor
             if (type.Fields.Count < existing.Fields.Count)
             {
                 var candidate = baseName + "Summary" + suffix;
-                if (!usedNames.Contains(candidate))
+                if (!usedNames.Contains(candidate) && !HasStutter(candidate))
                     return candidate;
             }
 
             if (type.Fields.Count > existing.Fields.Count)
             {
                 var candidate = baseName + "Detail" + suffix;
-                if (!usedNames.Contains(candidate))
+                if (!usedNames.Contains(candidate) && !HasStutter(candidate))
                     return candidate;
+            }
+
+            // Strategy: same field names but different optionality → Ref for the more-optional variant
+            if (type.Fields.Count == existing.Fields.Count)
+            {
+                var typeOptional = type.Fields.Count(f => f.Type is TsType.Nullable);
+                var existingOptional = existing.Fields.Count(f => f.Type is TsType.Nullable);
+                if (typeOptional > existingOptional)
+                {
+                    var candidate = baseName + "Ref" + suffix;
+                    if (!usedNames.Contains(candidate))
+                        return candidate;
+                }
+                else if (typeOptional < existingOptional)
+                {
+                    var candidate = baseName + "Detail" + suffix;
+                    if (!usedNames.Contains(candidate))
+                        return candidate;
+                }
             }
 
             // Find a distinguishing field name
@@ -198,12 +217,37 @@ public static class InlineTypeExtractor
             if (distinguishing != default)
             {
                 var candidate = baseName + ToPascalCase(distinguishing.Name) + suffix;
-                if (!usedNames.Contains(candidate))
+                if (!usedNames.Contains(candidate) && !HasStutter(candidate))
                     return candidate;
             }
         }
 
         return ResolveCollision(name, usedNames);
+    }
+
+    private static bool HasStutter(string name)
+    {
+        var words = SplitPascalCase(name);
+        for (var i = 1; i < words.Count; i++)
+            if (words[i].Equals(words[i - 1], StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
+
+    private static List<string> SplitPascalCase(string s)
+    {
+        var words = new List<string>();
+        var start = 0;
+        for (var i = 1; i < s.Length; i++)
+        {
+            if (char.IsUpper(s[i]))
+            {
+                words.Add(s[start..i]);
+                start = i;
+            }
+        }
+        words.Add(s[start..]);
+        return words;
     }
 
     private static string ResolveCollision(string name, HashSet<string> usedNames)
@@ -214,14 +258,26 @@ public static class InlineTypeExtractor
         return name + i;
     }
 
+    private static readonly HashSet<string> CommonFields =
+        new(StringComparer.OrdinalIgnoreCase) { "id", "created_at", "updated_at" };
+
     internal static string DeriveStructuralName(TsType.InlineObject type)
     {
         var fields = type.Fields.Where(f => f.Name != "data").ToList();
+        // Don't strip data when it's the only field — "Object" is never useful
+        if (fields.Count == 0)
+            fields = type.Fields.ToList();
         if (fields.Count == 0)
             return "Object";
-        if (fields.Count <= 2)
-            return string.Concat(fields.Select(f => ToPascalCase(f.Name)));
-        return string.Concat(fields.Take(2).Select(f => ToPascalCase(f.Name))) + $"Plus{fields.Count - 2}";
+
+        // Prefer distinctive fields over common boilerplate
+        var distinctive = fields.Where(f => !CommonFields.Contains(f.Name)).ToList();
+        var naming = distinctive.Count > 0 ? distinctive : fields;
+
+        if (naming.Count <= 2)
+            return string.Concat(naming.Select(f => ToPascalCase(f.Name)));
+        // Cap at 2 fields — no Plus{N} suffix
+        return string.Concat(naming.Take(2).Select(f => ToPascalCase(f.Name)));
     }
 
     internal static string ToPascalCase(string s) =>
