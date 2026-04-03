@@ -662,6 +662,30 @@ public sealed class RealWorldImportTests
         AssertFullRoundTrip(r, "Twilio");
     }
 
+    [Fact]
+    public void Twilio_Full_RoundTrip_Retains_Example_Bearing_Operation()
+    {
+        var r = FullRoundTripLenient("openapi-twilio.json", "Twilio");
+        var emitted = JsonSerializer.Deserialize<JsonElement>(r.EmittedJson);
+
+        var requestExamples = emitted.GetProperty("paths")
+            .GetProperty("/2010-04-01/Accounts.json")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/x-www-form-urlencoded")
+            .GetProperty("examples");
+
+        Assert.True(requestExamples.TryGetProperty("create", out var createExample));
+        Assert.Equal("friendly_name", createExample.GetProperty("value").GetProperty("FriendlyName").GetString());
+
+        var reimportedEndpoint = r.Endpoints2.Single(endpoint =>
+            endpoint.HttpMethod == "POST" &&
+            endpoint.RouteTemplate == "/2010-04-01/Accounts.json");
+        Assert.NotNull(reimportedEndpoint.RequestExamples);
+        Assert.NotEmpty(reimportedEndpoint.RequestExamples!);
+    }
+
     // ========== Naming edge cases — full round-trip ==========
 
     [Fact]

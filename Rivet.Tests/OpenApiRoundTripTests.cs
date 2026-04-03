@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
@@ -11,6 +12,128 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class OpenApiRoundTripTests
 {
+    private static string LoadFixture(string name)
+    {
+        return File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
+    }
+
+    private static JsonObject CreateFixtureSliceDocument(string fixtureName)
+    {
+        var root = JsonNode.Parse(LoadFixture(fixtureName))!.AsObject();
+
+        return new JsonObject
+        {
+            ["openapi"] = root["openapi"]!.DeepClone(),
+            ["info"] = root["info"]!.DeepClone(),
+            ["paths"] = new JsonObject(),
+        };
+    }
+
+    private static JsonObject GetOrAddComponents(JsonObject document)
+    {
+        document["components"] ??= new JsonObject();
+        return (JsonObject)document["components"]!;
+    }
+
+    private static void CopyComponentEntries(
+        JsonObject sourceDocument,
+        JsonObject targetDocument,
+        string sectionName,
+        params string[] keys)
+    {
+        var sourceSection = sourceDocument["components"]?[sectionName] as JsonObject;
+        Assert.NotNull(sourceSection);
+
+        var components = GetOrAddComponents(targetDocument);
+        components[sectionName] ??= new JsonObject();
+        var targetSection = (JsonObject)components[sectionName]!;
+
+        foreach (var key in keys)
+        {
+            targetSection[key] = sourceSection[key]!.DeepClone();
+        }
+    }
+
+    private static string BuildTwilioCreateAccountFixtureSpec()
+    {
+        var source = JsonNode.Parse(LoadFixture("openapi-twilio.json"))!.AsObject();
+        var document = CreateFixtureSliceDocument("openapi-twilio.json");
+        var paths = (JsonObject)document["paths"]!;
+        var sourcePath = source["paths"]?["/2010-04-01/Accounts.json"] as JsonObject;
+
+        Assert.NotNull(sourcePath);
+        paths["/2010-04-01/Accounts.json"] = new JsonObject
+        {
+            ["post"] = sourcePath["post"]!.DeepClone(),
+        };
+
+        return document.ToJsonString();
+    }
+
+    private static string BuildGitHubUpdateBudgetFixtureSpec()
+    {
+        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
+        var document = CreateFixtureSliceDocument("openapi-github.json");
+        var paths = (JsonObject)document["paths"]!;
+        var sourcePath = source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"] as JsonObject;
+
+        Assert.NotNull(sourcePath);
+
+        var patch = sourcePath["patch"]!.DeepClone()!.AsObject();
+        patch["responses"] = new JsonObject
+        {
+            ["404"] = patch["responses"]!["404"]!.DeepClone(),
+        };
+
+        paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
+        {
+            ["patch"] = patch,
+        };
+
+        CopyComponentEntries(source, document, "parameters", "org", "budget");
+        CopyComponentEntries(source, document, "schemas", "basic-error");
+
+        return document.ToJsonString();
+    }
+
+    private static string BuildGitHubDeleteBudgetFixtureSpec()
+    {
+        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
+        var document = CreateFixtureSliceDocument("openapi-github.json");
+        var paths = (JsonObject)document["paths"]!;
+        var sourcePath = source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"] as JsonObject;
+
+        Assert.NotNull(sourcePath);
+
+        var delete = sourcePath["delete"]!.DeepClone()!.AsObject();
+        delete["responses"] = new JsonObject
+        {
+            ["200"] = delete["responses"]!["200"]!.DeepClone(),
+        };
+
+        paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
+        {
+            ["delete"] = delete,
+        };
+
+        CopyComponentEntries(source, document, "parameters", "org", "budget");
+        CopyComponentEntries(source, document, "responses", "delete-budget");
+        CopyComponentEntries(source, document, "examples", "delete-budget");
+        CopyComponentEntries(source, document, "schemas", "delete-budget");
+
+        return document.ToJsonString();
+    }
+
+    private static JsonElement ImportCompileWalkAndEmit(string spec, string ns)
+    {
+        var result = CompilationHelper.Import(spec, ns);
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        return JsonSerializer.Deserialize<JsonElement>(emittedJson);
+    }
+
     private static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker) RoundTrip(
         string csharpSource, string? security = null)
     {
@@ -415,6 +538,72 @@ public sealed class OpenApiRoundTripTests
         Assert.Equal(2, examples.Count);
         Assert.Equal("""{"id":"ord_123"}""", examples[0].Json);
         Assert.Equal("""{"id":"ord_124"}""", examples[1].Json);
+    }
+
+    [Fact]
+    public void Twilio_CreateAccount_Request_Example_Survives_Import_Compile_Walk_Emit()
+    {
+        var emitted = ImportCompileWalkAndEmit(BuildTwilioCreateAccountFixtureSpec(), "TwilioRoundTrip");
+
+        var content = emitted.GetProperty("paths")
+            .GetProperty("/2010-04-01/Accounts.json")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/x-www-form-urlencoded");
+
+        Assert.False(content.TryGetProperty("example", out _));
+        var example = content.GetProperty("examples").GetProperty("create").GetProperty("value");
+        Assert.Equal("friendly_name", example.GetProperty("FriendlyName").GetString());
+    }
+
+    [Fact]
+    public void GitHub_UpdateBudget_404_Named_Response_Examples_Survive_Import_Compile_Walk_Emit()
+    {
+        var emitted = ImportCompileWalkAndEmit(BuildGitHubUpdateBudgetFixtureSpec(), "GitHubRoundTrip");
+
+        var examples = emitted.GetProperty("paths")
+            .GetProperty("/organizations/{org}/settings/billing/budgets/{budget_id}")
+            .GetProperty("patch")
+            .GetProperty("responses")
+            .GetProperty("404")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples");
+
+        Assert.Equal(
+            "Budget with ID 550e8400-e29b-41d4-a716-446655440000 not found.",
+            examples.GetProperty("budget-not-found").GetProperty("value").GetProperty("message").GetString());
+        Assert.Equal(
+            "Not Found",
+            examples.GetProperty("feature-not-enabled").GetProperty("value").GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public void GitHub_DeleteBudget_RefBacked_Response_Example_Survives_Import_Compile_Walk_Emit()
+    {
+        var emitted = ImportCompileWalkAndEmit(BuildGitHubDeleteBudgetFixtureSpec(), "GitHubRoundTrip");
+
+        var examples = emitted.GetProperty("paths")
+            .GetProperty("/organizations/{org}/settings/billing/budgets/{budget_id}")
+            .GetProperty("delete")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples");
+
+        Assert.Equal(
+            "#/components/examples/delete-budget",
+            examples.GetProperty("default").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "Budget successfully deleted.",
+            emitted.GetProperty("components")
+                .GetProperty("examples")
+                .GetProperty("delete-budget")
+                .GetProperty("value")
+                .GetProperty("message")
+                .GetString());
     }
 
     [Fact]
