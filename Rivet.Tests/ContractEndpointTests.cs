@@ -770,6 +770,41 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void RequestExampleRef_On_AcceptsFile_Defaults_To_MultipartFormData()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadResultDto(string Id);
+
+            [RivetContract]
+            public static class UploadsContract
+            {
+                public static readonly RouteDefinition<UploadResultDto> Upload =
+                    Define.Post<UploadResultDto>("/api/files")
+                        .AcceptsFile()
+                        .RequestExampleRef(
+                            "upload-example",
+                            "{\"file\":\"ignored\"}",
+                            name: "upload");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var example = Assert.Single(ep.RequestExamples!);
+        Assert.Equal("upload", example.Name);
+        Assert.Equal("multipart/form-data", example.MediaType);
+        Assert.Null(example.Json);
+        Assert.Equal("upload-example", example.ComponentExampleId);
+        Assert.Equal("""{"file":"ignored"}""", example.ResolvedJson);
+    }
+
+    [Fact]
     public void InputOnly_RequestExamples_And_Untyped_ResponseExamples_Are_Preserved()
     {
         var source = """
@@ -873,6 +908,33 @@ public sealed class ContractEndpointTests
         Assert.Equal("accepted", example.Name);
         Assert.Equal("application/json", example.MediaType);
         Assert.Equal("""{"id":"ord_123"}""", example.Json);
+    }
+
+    [Fact]
+    public void ResponseExampleJson_Attaches_To_Synthesized_Delete_Success_Response()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly RouteDefinition DeleteSession =
+                    Define.Delete("/api/auth/session")
+                        .ResponseExampleJson(204, "{\"message\":\"deleted\"}", name: "deleted");
+            }
+            """;
+
+        var (endpoints, _) = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 204);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("deleted", example.Name);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Equal("""{"message":"deleted"}""", example.Json);
     }
 
     [Fact]

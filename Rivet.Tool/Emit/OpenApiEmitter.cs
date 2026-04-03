@@ -23,6 +23,7 @@ public static class OpenApiEmitter
     {
         var paths = BuildPaths(endpoints, security);
         var schemas = BuildSchemas(endpoints, definitions, brands, enums);
+        var examples = BuildComponentExamples(endpoints);
 
         var doc = new Dictionary<string, object>
         {
@@ -40,6 +41,11 @@ public static class OpenApiEmitter
         if (schemas.Count > 0)
         {
             components["schemas"] = schemas;
+        }
+
+        if (examples.Count > 0)
+        {
+            components["examples"] = examples;
         }
 
         if (security is not null)
@@ -221,13 +227,15 @@ public static class OpenApiEmitter
             operation["requestBody"] = new Dictionary<string, object>
             {
                 ["required"] = true,
-                ["content"] = new Dictionary<string, object>
-                {
-                    ["multipart/form-data"] = new Dictionary<string, object>
+                ["content"] = WithExamples(
+                    new Dictionary<string, object>
                     {
-                        ["schema"] = multipartSchema,
+                        ["multipart/form-data"] = new Dictionary<string, object>
+                        {
+                            ["schema"] = multipartSchema,
+                        },
                     },
-                },
+                    ep.RequestExamples)
             };
         }
         else if (bodyParam is not null)
@@ -238,13 +246,15 @@ public static class OpenApiEmitter
             operation["requestBody"] = new Dictionary<string, object>
             {
                 ["required"] = true,
-                ["content"] = new Dictionary<string, object>
-                {
-                    [bodyContentType] = new Dictionary<string, object>
+                ["content"] = WithExamples(
+                    new Dictionary<string, object>
                     {
-                        ["schema"] = MapTsTypeToJsonSchema(bodyParam.Type),
+                        [bodyContentType] = new Dictionary<string, object>
+                        {
+                            ["schema"] = MapTsTypeToJsonSchema(bodyParam.Type),
+                        },
                     },
-                },
+                    ep.RequestExamples)
             };
         }
         else if (ep.RequestType is not null)
@@ -255,13 +265,15 @@ public static class OpenApiEmitter
             operation["requestBody"] = new Dictionary<string, object>
             {
                 ["required"] = true,
-                ["content"] = new Dictionary<string, object>
-                {
-                    [requestTypeContentType] = new Dictionary<string, object>
+                ["content"] = WithExamples(
+                    new Dictionary<string, object>
                     {
-                        ["schema"] = MapTsTypeToJsonSchema(ep.RequestType),
+                        [requestTypeContentType] = new Dictionary<string, object>
+                        {
+                            ["schema"] = MapTsTypeToJsonSchema(ep.RequestType),
+                        },
                     },
-                },
+                    ep.RequestExamples)
             };
         }
 
@@ -276,27 +288,39 @@ public static class OpenApiEmitter
 
             if (resp.DataType is not null)
             {
-                respObj["content"] = new Dictionary<string, object>
-                {
-                    ["application/json"] = new Dictionary<string, object>
+                respObj["content"] = WithExamples(
+                    new Dictionary<string, object>
                     {
-                        ["schema"] = MapTsTypeToJsonSchema(resp.DataType),
+                        ["application/json"] = new Dictionary<string, object>
+                        {
+                            ["schema"] = MapTsTypeToJsonSchema(resp.DataType),
+                        },
                     },
-                };
+                    resp.Examples);
             }
             else if (ep.FileContentType is not null && resp.StatusCode is >= 200 and < 300)
             {
-                respObj["content"] = new Dictionary<string, object>
-                {
-                    [ep.FileContentType] = new Dictionary<string, object>
+                respObj["content"] = WithExamples(
+                    new Dictionary<string, object>
                     {
-                        ["schema"] = new Dictionary<string, object>
+                        [ep.FileContentType] = new Dictionary<string, object>
                         {
-                            ["type"] = "string",
-                            ["format"] = "binary",
+                            ["schema"] = new Dictionary<string, object>
+                            {
+                                ["type"] = "string",
+                                ["format"] = "binary",
+                            },
                         },
                     },
-                };
+                    resp.Examples);
+            }
+            else if (resp.Examples is not null)
+            {
+                var content = WithExamples(new Dictionary<string, object>(), resp.Examples);
+                if (content.Count > 0)
+                {
+                    respObj["content"] = content;
+                }
             }
 
             responses[resp.StatusCode.ToString()] = respObj;
@@ -327,6 +351,127 @@ public static class OpenApiEmitter
 
         return operation;
     }
+
+    private static Dictionary<string, object> BuildComponentExamples(IReadOnlyList<TsEndpointDefinition> endpoints)
+    {
+        var examples = new Dictionary<string, object>();
+
+        foreach (var endpoint in endpoints)
+        {
+            AddComponentExamples(examples, endpoint.RequestExamples);
+
+            foreach (var response in endpoint.Responses)
+            {
+                AddComponentExamples(examples, response.Examples);
+            }
+        }
+
+        return examples;
+    }
+
+    private static void AddComponentExamples(
+        Dictionary<string, object> target,
+        IReadOnlyList<TsEndpointExample>? examples)
+    {
+        if (examples is null)
+        {
+            return;
+        }
+
+        foreach (var example in examples)
+        {
+            if (example.ComponentExampleId is null || example.ResolvedJson is null || target.ContainsKey(example.ComponentExampleId))
+            {
+                continue;
+            }
+
+            target[example.ComponentExampleId] = new Dictionary<string, object>
+            {
+                ["value"] = ParseJson(example.ResolvedJson),
+            };
+        }
+    }
+
+    private static Dictionary<string, object> WithExamples(
+        Dictionary<string, object> content,
+        IReadOnlyList<TsEndpointExample>? examples)
+    {
+        if (examples is null || examples.Count == 0)
+        {
+            return content;
+        }
+
+        var templateSchema = content.Values
+            .OfType<Dictionary<string, object>>()
+            .Select(entry => entry.TryGetValue("schema", out var schema) ? schema : null)
+            .FirstOrDefault(schema => schema is not null);
+
+        foreach (var group in examples.GroupBy(example => example.MediaType))
+        {
+            if (!content.TryGetValue(group.Key, out var mediaContentObj))
+            {
+                var mediaContent = new Dictionary<string, object>();
+                if (templateSchema is not null)
+                {
+                    mediaContent["schema"] = templateSchema;
+                }
+
+                content[group.Key] = mediaContent;
+                mediaContentObj = mediaContent;
+            }
+
+            var mediaContentDict = (Dictionary<string, object>)mediaContentObj;
+            var groupedExamples = group.ToList();
+
+            if (groupedExamples.Count == 1
+                && groupedExamples[0].Name is null
+                && groupedExamples[0].Json is not null
+                && groupedExamples[0].ComponentExampleId is null)
+            {
+                var inlineExampleJson = groupedExamples[0].Json;
+                mediaContentDict["example"] = ParseJson(inlineExampleJson!);
+                continue;
+            }
+
+            var examplesDict = new Dictionary<string, object>();
+            for (var index = 0; index < groupedExamples.Count; index++)
+            {
+                var example = groupedExamples[index];
+                var key = example.Name ?? $"example{index + 1}";
+                examplesDict[key] = ToOpenApiExample(example);
+            }
+
+            mediaContentDict["examples"] = examplesDict;
+        }
+
+        return content;
+    }
+
+    private static object ToOpenApiExample(TsEndpointExample example)
+    {
+        if (example.ComponentExampleId is not null && example.ResolvedJson is not null)
+        {
+            return new Dictionary<string, object>
+            {
+                ["$ref"] = $"#/components/examples/{example.ComponentExampleId}",
+            };
+        }
+
+        var json = example.Json ?? example.ResolvedJson;
+        if (json is null)
+        {
+            return new Dictionary<string, object>();
+        }
+
+        return new Dictionary<string, object>
+        {
+            ["value"] = ParseJson(json),
+        };
+    }
+
+    private static object ParseJson(string json) =>
+        JsonSerializer.Deserialize<object>(json)
+        ?? throw new InvalidOperationException("Expected example JSON to deserialize.");
 
     public static Dictionary<string, object> MapTsTypeToJsonSchema(TsType type)
     {

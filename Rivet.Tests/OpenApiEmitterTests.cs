@@ -247,6 +247,92 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void Endpoint_Examples_Are_Emitted_On_Request_And_Response_Content()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "createOrder",
+                "POST",
+                "/api/orders",
+                [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderInput"), ParamSource.Body)],
+                new TsType.TypeRef("OrderDto"),
+                "orders",
+                [
+                    new TsResponseType(
+                        201,
+                        new TsType.TypeRef("OrderDto"),
+                        Examples:
+                        [
+                            new TsEndpointExample(
+                                "application/json",
+                                Name: "created",
+                                Json: "{\"id\":\"ord_123\"}"),
+                            new TsEndpointExample(
+                                "application/json",
+                                Name: "createdFromTemplate",
+                                ComponentExampleId: "order-created-template",
+                                ResolvedJson: "{\"id\":\"ord_456\"}"),
+                        ]),
+                ],
+                RequestExamples:
+                [
+                    new TsEndpointExample(
+                        "application/json",
+                        Json: "{\"customerId\":\"cust_123\"}"),
+                ]),
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["CreateOrderInput"] = new(
+                "CreateOrderInput",
+                [],
+                [new TsPropertyDefinition("customerId", new TsType.Primitive("string"), false)]),
+            ["OrderDto"] = new(
+                "OrderDto",
+                [],
+                [new TsPropertyDefinition("id", new TsType.Primitive("string"), false)]),
+        };
+
+        using var doc = EmitOpenApiFromModel(
+            endpoints,
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var post = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/orders")
+            .GetProperty("post");
+
+        var requestContent = post.GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json");
+        Assert.Equal(
+            "cust_123",
+            requestContent.GetProperty("example").GetProperty("customerId").GetString());
+        Assert.False(requestContent.TryGetProperty("examples", out _));
+
+        var responseContent = post.GetProperty("responses")
+            .GetProperty("201")
+            .GetProperty("content")
+            .GetProperty("application/json");
+        var responseExamples = responseContent.GetProperty("examples");
+
+        Assert.Equal(
+            "ord_123",
+            responseExamples.GetProperty("created").GetProperty("value").GetProperty("id").GetString());
+        Assert.Equal(
+            "#/components/examples/order-created-template",
+            responseExamples.GetProperty("createdFromTemplate").GetProperty("$ref").GetString());
+
+        var componentExample = doc.RootElement.GetProperty("components")
+            .GetProperty("examples")
+            .GetProperty("order-created-template");
+        Assert.Equal("ord_456", componentExample.GetProperty("value").GetProperty("id").GetString());
+    }
+
+    [Fact]
     public void Schema_Generation_Object_Properties_Required()
     {
         var source = """
