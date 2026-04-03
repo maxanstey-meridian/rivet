@@ -282,6 +282,142 @@ public sealed class OpenApiRoundTripTests
     }
 
     [Fact]
+    public void RequestExampleRef_Survives_OpenApi_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginRequest(string Email, string Password);
+
+            [RivetType]
+            public sealed record TokenDto(string Token);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly Define Login =
+                    Define.Post<LoginRequest, TokenDto>("/api/login")
+                        .FormEncoded()
+                        .RequestExampleRef(
+                            "login-request",
+                            "{\"email\":\"ada@example.com\",\"password\":\"secret\"}",
+                            name: "loginRequest");
+            }
+            """;
+
+        var (endpoints, _) = RoundTrip(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("application/x-www-form-urlencoded", requestExample.MediaType);
+        Assert.Equal("loginRequest", requestExample.Name);
+        Assert.Null(requestExample.Json);
+        Assert.Equal("login-request", requestExample.ComponentExampleId);
+        Assert.Equal("""{"email":"ada@example.com","password":"secret"}""", requestExample.ResolvedJson);
+    }
+
+    [Fact]
+    public void ResponseExampleJson_On_201_And_204_Survives_OpenApi_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateOrderRequest(string CustomerId);
+
+            [RivetType]
+            public sealed record OrderDto(string Id);
+
+            [RivetContract]
+            public static class OrdersContract
+            {
+                public static readonly Define CreateOrder =
+                    Define.Post<CreateOrderRequest, OrderDto>("/api/orders")
+                        .ResponseExampleJson(201, "{\"id\":\"ord_123\"}", name: "created");
+
+                public static readonly RouteDefinition DeleteOrder =
+                    Define.Delete("/api/orders/{id}")
+                        .ResponseExampleJson(204, "{\"message\":\"deleted\"}", name: "deleted");
+            }
+            """;
+
+        var (endpoints, _) = RoundTrip(source);
+
+        var createOrder = endpoints.Single(endpoint => endpoint.HttpMethod == "POST");
+        var createdResponse = createOrder.Responses.Single(response => response.StatusCode == 201);
+        var createdExample = Assert.Single(createdResponse.Examples!);
+        Assert.Equal("created", createdExample.Name);
+        Assert.Equal("""{"id":"ord_123"}""", createdExample.Json);
+
+        var deleteOrder = endpoints.Single(endpoint => endpoint.HttpMethod == "DELETE");
+        var deletedResponse = deleteOrder.Responses.Single(response => response.StatusCode == 204);
+        var deletedExample = Assert.Single(deletedResponse.Examples!);
+        Assert.Equal("deleted", deletedExample.Name);
+        Assert.Equal("""{"message":"deleted"}""", deletedExample.Json);
+    }
+
+    [Fact]
+    public void Unnamed_Multiple_Examples_Get_AutoKeys_And_Preserve_Count_After_RoundTrip()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "createOrder",
+                "POST",
+                "/api/orders",
+                [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+                new TsType.TypeRef("OrderDto"),
+                "orders",
+                [
+                    new TsResponseType(
+                        201,
+                        new TsType.TypeRef("OrderDto"),
+                        Examples:
+                        [
+                            new TsEndpointExample("application/json", Json: "{\"id\":\"ord_123\"}"),
+                            new TsEndpointExample("application/json", Json: "{\"id\":\"ord_124\"}")
+                        ])
+                ])
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["CreateOrderRequest"] = new(
+                "CreateOrderRequest",
+                [],
+                [new TsPropertyDefinition("customerId", new TsType.Primitive("string"), false)]),
+            ["OrderDto"] = new(
+                "OrderDto",
+                [],
+                [new TsPropertyDefinition("id", new TsType.Primitive("string"), false)])
+        };
+
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            security: null);
+
+        var importResult = OpenApiImporter.Import(json, new ImportOptions("RoundTrip"));
+        var recompilation = CompilationHelper.CreateCompilationFromMultiple(importResult.Files.Select(file => file.Content).ToArray());
+        var (reDiscovered, rewalker) = CompilationHelper.DiscoverAndWalk(recompilation);
+        var reEndpoints = CompilationHelper.WalkContracts(recompilation, reDiscovered, rewalker);
+
+        var endpoint = Assert.Single(reEndpoints);
+        var response = endpoint.Responses.Single(item => item.StatusCode == 201);
+        var examples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(response.Examples);
+        Assert.Equal(2, examples.Count);
+        Assert.Equal("""{"id":"ord_123"}""", examples[0].Json);
+        Assert.Equal("""{"id":"ord_124"}""", examples[1].Json);
+    }
+
+    [Fact]
     public void Multi_Response_Endpoints_Survive_RoundTrip()
     {
         var source = """

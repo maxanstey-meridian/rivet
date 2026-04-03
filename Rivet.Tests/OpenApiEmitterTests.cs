@@ -578,11 +578,62 @@ public sealed class OpenApiEmitterTests
             .GetProperty("responses")
             .GetProperty("202");
 
-        if (response.TryGetProperty("content", out var content)
-            && content.TryGetProperty("application/json", out var mediaType))
+        Assert.False(response.TryGetProperty("content", out _));
+    }
+
+    [Fact]
+    public void Unnamed_Multiple_Examples_Get_AutoKeys_And_Preserve_Count()
+    {
+        var endpoints = new List<TsEndpointDefinition>
         {
-            Assert.False(mediaType.TryGetProperty("examples", out _));
-        }
+            new(
+                "createOrder",
+                "POST",
+                "/api/orders",
+                [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+                new TsType.TypeRef("OrderDto"),
+                "orders",
+                [
+                    new TsResponseType(
+                        201,
+                        new TsType.TypeRef("OrderDto"),
+                        Examples:
+                        [
+                            new TsEndpointExample("application/json", Json: "{\"id\":\"ord_123\"}"),
+                            new TsEndpointExample("application/json", Json: "{\"id\":\"ord_124\"}")
+                        ])
+                ])
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["CreateOrderRequest"] = new(
+                "CreateOrderRequest",
+                [],
+                [new TsPropertyDefinition("customerId", new TsType.Primitive("string"), false)]),
+            ["OrderDto"] = new(
+                "OrderDto",
+                [],
+                [new TsPropertyDefinition("id", new TsType.Primitive("string"), false)])
+        };
+
+        using var doc = EmitOpenApiFromModel(
+            endpoints,
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var examples = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/orders")
+            .GetProperty("post")
+            .GetProperty("responses")
+            .GetProperty("201")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples");
+
+        Assert.Equal("ord_123", examples.GetProperty("example1").GetProperty("value").GetProperty("id").GetString());
+        Assert.Equal("ord_124", examples.GetProperty("example2").GetProperty("value").GetProperty("id").GetString());
     }
 
     [Fact]

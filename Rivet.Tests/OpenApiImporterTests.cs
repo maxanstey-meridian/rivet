@@ -1384,6 +1384,91 @@ public sealed class OpenApiImporterTests
             CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs"));
     }
 
+    [Fact]
+    public void Wildcard_And_Default_ResponseExamples_Map_To_400_And_500()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "TaskDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                },
+                "ClientErrorDto": {
+                    "type": "object",
+                    "properties": { "error": { "type": "string" } },
+                    "required": ["error"]
+                },
+                "ServerErrorDto": {
+                    "type": "object",
+                    "properties": { "error": { "type": "string" } },
+                    "required": ["error"]
+                }
+                """,
+            paths: """
+                "/api/tasks": {
+                    "get": {
+                        "operationId": "tasks_list",
+                        "tags": ["Tasks"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
+                                    }
+                                }
+                            },
+                            "4XX": {
+                                "description": "Client error",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ClientErrorDto" },
+                                        "examples": {
+                                            "clientProblem": {
+                                                "value": { "error": "Bad request" }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "default": {
+                                "description": "Server error",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/ServerErrorDto" },
+                                        "examples": {
+                                            "serverProblem": {
+                                                "value": { "error": "Unexpected failure" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+
+        var endpoint = Assert.Single(endpoints);
+
+        var clientError = endpoint.Responses.Single(response => response.StatusCode == 400);
+        var clientExample = Assert.Single(clientError.Examples!);
+        Assert.Equal("clientProblem", clientExample.Name);
+        Assert.Equal("""{"error":"Bad request"}""", clientExample.Json);
+
+        var serverError = endpoint.Responses.Single(response => response.StatusCode == 500);
+        var serverExample = Assert.Single(serverError.Examples!);
+        Assert.Equal("serverProblem", serverExample.Name);
+        Assert.Equal("""{"error":"Unexpected failure"}""", serverExample.Json);
+    }
+
     // ========== InputRouteDefinition<T> (input-only endpoints) ==========
 
     [Fact]
