@@ -835,6 +835,81 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Response_Invalid_Example_Entries_Are_Explicit_Not_Silent()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "API", "version": "1.0.0" },
+              "components": {
+                "schemas": {
+                  "ProblemDto": {
+                    "type": "object",
+                    "properties": {
+                      "message": { "type": "string" }
+                    },
+                    "required": ["message"]
+                  }
+                }
+              },
+              "paths": {
+                "/api/orders/{id}": {
+                  "get": {
+                    "operationId": "orders_get",
+                    "tags": ["Orders"],
+                    "responses": {
+                      "422": {
+                        "description": "Problem response",
+                        "content": {
+                          "application/json": {
+                            "schema": { "$ref": "#/components/schemas/ProblemDto" },
+                            "examples": {
+                              "validProblem": {
+                                "value": { "message": "Validation failed" }
+                              },
+                              "missingValue": {
+                                "summary": "No payload"
+                              },
+                              "missingRef": {
+                                "$ref": "#/components/examples/missing-problem"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        var (result, endpoints) = ImportSpecAndWalkContracts(spec, "Test");
+        var contract = CompilationHelper.FindFile(result, "OrdersContract.cs");
+        var endpoint = Assert.Single(endpoints);
+
+        var response = endpoint.Responses.Single(item => item.StatusCode == 422);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("validProblem", example.Name);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Equal("""{"message":"Validation failed"}""", example.Json);
+        Assert.Null(example.ComponentExampleId);
+        Assert.Null(example.ResolvedJson);
+
+        Assert.Contains(
+            ".ResponseExampleJson(422, \"{\\\"message\\\":\\\"Validation failed\\\"}\", mediaType: \"application/json\"",
+            contract);
+        Assert.Contains("name: \"validProblem\"", contract);
+
+        Assert.Contains(
+            "[rivet:unsupported response-example status=422 media-type=application/json name=missingValue reason=missing-value]",
+            contract);
+        Assert.Contains(
+            "[rivet:unsupported response-example status=422 media-type=application/json name=missingRef component-example-id=missing-problem reason=unresolved-ref]",
+            contract);
+    }
+
+    [Fact]
     public void Singular_MediaType_Example_On_Request_And_Response_Survives_Import_RoundTrip()
     {
         var spec = CompilationHelper.BuildSpec(

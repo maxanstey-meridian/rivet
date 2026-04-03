@@ -682,8 +682,12 @@ public sealed class RealWorldImportTests
         var reimportedEndpoint = r.Endpoints2.Single(endpoint =>
             endpoint.HttpMethod == "POST" &&
             endpoint.RouteTemplate == "/2010-04-01/Accounts.json");
-        Assert.NotNull(reimportedEndpoint.RequestExamples);
-        Assert.NotEmpty(reimportedEndpoint.RequestExamples!);
+        var reimportedExample = Assert.Single(reimportedEndpoint.RequestExamples!);
+        Assert.Equal("create", reimportedExample.Name);
+        Assert.Equal("application/x-www-form-urlencoded", reimportedExample.MediaType);
+        Assert.Equal("""{"FriendlyName":"friendly_name"}""", reimportedExample.Json);
+        Assert.Null(reimportedExample.ComponentExampleId);
+        Assert.Null(reimportedExample.ResolvedJson);
     }
 
     // ========== Naming edge cases — full round-trip ==========

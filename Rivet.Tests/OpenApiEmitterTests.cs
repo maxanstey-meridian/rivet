@@ -360,6 +360,60 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void Response_Single_Unnamed_Inline_Example_Uses_Singular_Example()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "createOrder",
+                "POST",
+                "/api/orders",
+                [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderInput"), ParamSource.Body)],
+                new TsType.TypeRef("OrderDto"),
+                "orders",
+                [
+                    new TsResponseType(
+                        201,
+                        new TsType.TypeRef("OrderDto"),
+                        Examples:
+                        [
+                            new TsEndpointExample("application/json", Json: "{\"id\":\"ord_123\"}")
+                        ]),
+                ]),
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["CreateOrderInput"] = new(
+                "CreateOrderInput",
+                [],
+                [new TsPropertyDefinition("customerId", new TsType.Primitive("string"), false)]),
+            ["OrderDto"] = new(
+                "OrderDto",
+                [],
+                [new TsPropertyDefinition("id", new TsType.Primitive("string"), false)]),
+        };
+
+        using var doc = EmitOpenApiFromModel(
+            endpoints,
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var responseContent = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/orders")
+            .GetProperty("post")
+            .GetProperty("responses")
+            .GetProperty("201")
+            .GetProperty("content")
+            .GetProperty("application/json");
+
+        Assert.Equal("#/components/schemas/OrderDto", responseContent.GetProperty("schema").GetProperty("$ref").GetString());
+        Assert.Equal("ord_123", responseContent.GetProperty("example").GetProperty("id").GetString());
+        Assert.False(responseContent.TryGetProperty("examples", out _));
+    }
+
+    [Fact]
     public void Response_RefBacked_Example_Uses_Component_Example_Reference()
     {
         var endpoints = new List<TsEndpointDefinition>
