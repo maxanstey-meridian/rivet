@@ -510,6 +510,17 @@ public sealed class OpenApiImporterTests
         return CompilationHelper.WalkContracts(compilation, discovered, walker);
     }
 
+    private static (ImportResult Result, IReadOnlyList<TsEndpointDefinition> Endpoints) ImportSpecAndWalkContracts(
+        string spec,
+        string ns = "Test")
+    {
+        var result = CompilationHelper.Import(spec, ns);
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        return (result, endpoints);
+    }
+
 
     [Fact]
     public void Fixture_Generated_CSharp_Compiles()
@@ -702,6 +713,139 @@ public sealed class OpenApiImporterTests
         Assert.Contains(
             "[rivet:unsupported request-example media-type=application/json name=example-3 reason=missing-value]",
             content);
+    }
+
+    [Fact]
+    public void Singular_MediaType_Example_On_Request_And_Response_Survives_Import_RoundTrip()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "CreateWidgetRequest": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" }
+                    },
+                    "required": ["name"]
+                },
+                "WidgetResponse": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" },
+                        "name": { "type": "string" }
+                    },
+                    "required": ["id", "name"]
+                }
+                """,
+            paths: """
+                "/api/widgets": {
+                    "post": {
+                        "operationId": "widgets_create",
+                        "tags": ["Widgets"],
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/CreateWidgetRequest" },
+                                    "example": { "name": "starter-widget" }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "201": {
+                                "description": "Created",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/WidgetResponse" },
+                                        "example": { "id": "wid_123", "name": "starter-widget" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var (result, endpoints) = ImportSpecAndWalkContracts(spec);
+        var contract = CompilationHelper.FindFile(result, "WidgetsContract.cs");
+        var endpoint = Assert.Single(endpoints);
+
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("application/json", requestExample.MediaType);
+        Assert.Null(requestExample.Name);
+        Assert.Equal("""{"name":"starter-widget"}""", requestExample.Json);
+        Assert.Null(requestExample.ComponentExampleId);
+        Assert.Null(requestExample.ResolvedJson);
+
+        var response = endpoint.Responses.Single(r => r.StatusCode == 201);
+        var responseExample = Assert.Single(response.Examples!);
+        Assert.Equal("application/json", responseExample.MediaType);
+        Assert.Null(responseExample.Name);
+        Assert.Equal("""{"id":"wid_123","name":"starter-widget"}""", responseExample.Json);
+        Assert.Null(responseExample.ComponentExampleId);
+        Assert.Null(responseExample.ResolvedJson);
+
+        Assert.Contains(
+            ".RequestExampleJson(\"{\\\"name\\\":\\\"starter-widget\\\"}\", mediaType: \"application/json\")",
+            contract);
+        Assert.Contains(
+            ".ResponseExampleJson(201, \"{\\\"id\\\":\\\"wid_123\\\",\\\"name\\\":\\\"starter-widget\\\"}\", mediaType: \"application/json\")",
+            contract);
+    }
+
+    [Fact]
+    public void Examples_Survive_When_Request_Has_No_Schema_And_Response_Content_Type_Is_Unsupported()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+                "/api/previews": {
+                    "post": {
+                        "operationId": "previews_queue",
+                        "tags": ["Previews"],
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "example": { "mode": "fast" }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "202": {
+                                "description": "Queued",
+                                "content": {
+                                    "text/plain": {
+                                        "example": "queued"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var (result, endpoints) = ImportSpecAndWalkContracts(spec);
+        var contract = CompilationHelper.FindFile(result, "PreviewsContract.cs");
+        var endpoint = Assert.Single(endpoints);
+
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("application/json", requestExample.MediaType);
+        Assert.Equal("""{"mode":"fast"}""", requestExample.Json);
+
+        var response = endpoint.Responses.Single(r => r.StatusCode == 202);
+        var responseExample = Assert.Single(response.Examples!);
+        Assert.Equal("text/plain", responseExample.MediaType);
+        Assert.Equal("\"queued\"", responseExample.Json);
+
+        Assert.Contains("[rivet:unsupported body content-type=application/json]", contract);
+        Assert.Contains("[rivet:unsupported response status=202 content-type=text/plain]", contract);
+        Assert.Contains(
+            ".RequestExampleJson(\"{\\\"mode\\\":\\\"fast\\\"}\", mediaType: \"application/json\")",
+            contract);
+        Assert.Contains(
+            ".ResponseExampleJson(202, \"\\\"queued\\\"\", mediaType: \"text/plain\")",
+            contract);
     }
 
     [Fact]
