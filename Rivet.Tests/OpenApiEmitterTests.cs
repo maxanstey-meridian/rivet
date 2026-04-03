@@ -20,6 +20,17 @@ public sealed class OpenApiEmitterTests
         return JsonDocument.Parse(json);
     }
 
+    private static JsonDocument EmitOpenApiFromController(
+        string source,
+        SecurityConfig? security = null)
+    {
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
+        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, security);
+        return JsonDocument.Parse(json);
+    }
+
     private static JsonDocument EmitOpenApiFromModel(
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
@@ -515,6 +526,72 @@ public sealed class OpenApiEmitterTests
         Assert.Equal(
             "secret",
             mediaType.GetProperty("example").GetProperty("password").GetString());
+    }
+
+    [Fact]
+    public void Controller_ExampleAttributes_Emit_Request_And_Response_OpenApi_Metadata()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateItemRequest(string Name);
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [Route("api/items")]
+            public sealed class ItemsController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(typeof(ItemDto), 201)]
+                [ProducesResponseType(typeof(ProblemDto), 422)]
+                [RivetRequestExample("{\"name\":\"Ada\"}")]
+                [RivetResponseExample(
+                    422,
+                    "{\"title\":\"Validation failed\"}",
+                    componentExampleId: "validation-problem",
+                    name: "validationProblem")]
+                public Task<IActionResult> Create(
+                    [FromBody] CreateItemRequest request,
+                    CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        using var doc = EmitOpenApiFromController(source);
+        var post = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/items")
+            .GetProperty("post");
+
+        var requestContent = post.GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json");
+        Assert.Equal("Ada", requestContent.GetProperty("example").GetProperty("name").GetString());
+
+        var responseExamples = post.GetProperty("responses")
+            .GetProperty("422")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples");
+        Assert.Equal(
+            "#/components/examples/validation-problem",
+            responseExamples.GetProperty("validationProblem").GetProperty("$ref").GetString());
+
+        var componentExample = doc.RootElement.GetProperty("components")
+            .GetProperty("examples")
+            .GetProperty("validation-problem");
+        Assert.Equal("Validation failed", componentExample.GetProperty("value").GetProperty("title").GetString());
     }
 
     [Fact]

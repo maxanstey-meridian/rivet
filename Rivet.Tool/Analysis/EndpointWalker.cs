@@ -79,13 +79,162 @@ public static class EndpointWalker
         fullRoute = RouteParser.StripRouteConstraints(fullRoute);
 
         var parameters = ExtractParams(wkt, method, typeWalker, fullRoute);
-        var responses = ExtractAllResponseTypes(wkt, method, typeWalker);
+        var responses = ExtractAllResponseTypes(wkt, method, typeWalker).ToList();
         var returnType = ExtractReturnType(wkt, method, typeWalker);
+        var requestExamples = ExtractRequestExamples(wkt, method, parameters);
+        ApplyResponseExamples(responses, ExtractResponseExamples(wkt, method), Naming.ToCamelCase(method.Name));
         var name = Naming.ToCamelCase(method.Name);
         var controllerName = DeriveControllerFileName(method.ContainingType);
 
-        return new TsEndpointDefinition(name, httpMethod, fullRoute, parameters, returnType, controllerName, responses);
+        return new TsEndpointDefinition(
+            name,
+            httpMethod,
+            fullRoute,
+            parameters,
+            returnType,
+            controllerName,
+            responses,
+            RequestExamples: requestExamples);
     }
+
+    private static IReadOnlyList<TsEndpointExample>? ExtractRequestExamples(
+        WellKnownTypes wkt,
+        IMethodSymbol method,
+        IReadOnlyList<TsEndpointParam> parameters)
+    {
+        if (wkt.RivetRequestExample is null)
+        {
+            return null;
+        }
+
+        var examples = method.GetAttributes()
+            .Where(attr => SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.RivetRequestExample))
+            .Select(attr => ToRequestExample(attr, DefaultRequestExampleMediaType(parameters)))
+            .Where(example => example is not null)
+            .Cast<TsEndpointExample>()
+            .ToList();
+
+        return examples.Count == 0 ? null : examples;
+    }
+
+    private static IReadOnlyList<PendingResponseExample> ExtractResponseExamples(WellKnownTypes wkt, IMethodSymbol method)
+    {
+        if (wkt.RivetResponseExample is null)
+        {
+            return [];
+        }
+
+        return method.GetAttributes()
+            .Where(attr => SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.RivetResponseExample))
+            .Select(ToPendingResponseExample)
+            .Where(example => example is not null)
+            .Cast<PendingResponseExample>()
+            .ToList();
+    }
+
+    private static string DefaultRequestExampleMediaType(IReadOnlyList<TsEndpointParam> parameters)
+    {
+        return parameters.Any(parameter => parameter.Source is ParamSource.File or ParamSource.FormField)
+            ? "multipart/form-data"
+            : "application/json";
+    }
+
+    private static TsEndpointExample? ToRequestExample(AttributeData attr, string defaultMediaType)
+    {
+        if (attr.ConstructorArguments.Length == 0 || attr.ConstructorArguments[0].Value is not string json)
+        {
+            return null;
+        }
+
+        var componentExampleId = GetStringArg(attr, 1);
+        return ToEndpointExample(defaultMediaType, GetStringArg(attr, 2), json, componentExampleId, GetStringArg(attr, 3));
+    }
+
+    private static PendingResponseExample? ToPendingResponseExample(AttributeData attr)
+    {
+        if (attr.ConstructorArguments.Length < 2
+            || attr.ConstructorArguments[0].Value is not int statusCode
+            || attr.ConstructorArguments[1].Value is not string json)
+        {
+            return null;
+        }
+
+        return new PendingResponseExample(
+            statusCode,
+            GetStringArg(attr, 3),
+            GetStringArg(attr, 4),
+            json,
+            GetStringArg(attr, 2));
+    }
+
+    private static TsEndpointExample ToEndpointExample(
+        string defaultMediaType,
+        string? name,
+        string jsonOrResolvedJson,
+        string? componentExampleId,
+        string? mediaType)
+    {
+        return componentExampleId is null
+            ? new TsEndpointExample(mediaType ?? defaultMediaType, name, Json: jsonOrResolvedJson)
+            : new TsEndpointExample(
+                mediaType ?? defaultMediaType,
+                name,
+                ComponentExampleId: componentExampleId,
+                ResolvedJson: jsonOrResolvedJson);
+    }
+
+    private static void ApplyResponseExamples(
+        List<TsResponseType> responses,
+        IReadOnlyList<PendingResponseExample> responseExamples,
+        string endpointName)
+    {
+        if (responseExamples.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var group in responseExamples.GroupBy(example => example.StatusCode))
+        {
+            var mappedExamples = group
+                .Select(example => ToEndpointExample(
+                    "application/json",
+                    example.Name,
+                    example.JsonOrResolvedJson,
+                    example.ComponentExampleId,
+                    example.MediaType))
+                .ToList();
+
+            var responseIndex = responses.FindIndex(response => response.StatusCode == group.Key);
+            if (responseIndex < 0)
+            {
+                Console.Error.WriteLine(
+                    $"warning: ignoring response example for undeclared status {group.Key} on controller endpoint '{endpointName}'");
+                continue;
+            }
+
+            var response = responses[responseIndex];
+            var mergedExamples = response.Examples is null
+                ? mappedExamples
+                : response.Examples.Concat(mappedExamples).ToList();
+            responses[responseIndex] = response with { Examples = mergedExamples };
+        }
+
+        responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
+    }
+
+    private static string? GetStringArg(AttributeData attr, int index)
+    {
+        return attr.ConstructorArguments.Length > index
+            ? attr.ConstructorArguments[index].Value as string
+            : null;
+    }
+
+    private sealed record PendingResponseExample(
+        int StatusCode,
+        string? Name,
+        string? MediaType,
+        string JsonOrResolvedJson,
+        string? ComponentExampleId);
 
     /// <summary>
     /// Derives a camelCase file name from the controller class.

@@ -24,6 +24,8 @@ public sealed class WellKnownTypes
 
     // Response metadata
     public readonly INamedTypeSymbol? ProducesResponseType;
+    public readonly INamedTypeSymbol? RivetRequestExample;
+    public readonly INamedTypeSymbol? RivetResponseExample;
 
     // Task wrappers (OriginalDefinition for generic matching)
     public readonly INamedTypeSymbol? TaskOfT;
@@ -92,6 +94,8 @@ public sealed class WellKnownTypes
 
         // Response metadata
         ProducesResponseType = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute");
+        RivetRequestExample = compilation.GetTypeByMetadataName("Rivet.RivetRequestExampleAttribute");
+        RivetResponseExample = compilation.GetTypeByMetadataName("Rivet.RivetResponseExampleAttribute");
 
         // Task wrappers
         TaskOfT = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task`1");

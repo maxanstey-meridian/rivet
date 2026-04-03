@@ -1,10 +1,18 @@
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
 public sealed class ControllerEndpointTests
 {
+    private static IReadOnlyList<TsEndpointDefinition> WalkEndpoints(string source)
+    {
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        return CompilationHelper.WalkEndpoints(compilation, discovered, walker);
+    }
+
     private static string GenerateClient(string source)
     {
         var compilation = CompilationHelper.CreateCompilation(source);
@@ -253,6 +261,142 @@ public sealed class ControllerEndpointTests
         Assert.Contains("body: request", client);
         // CancellationToken should be skipped
         Assert.DoesNotContain("ct:", client);
+    }
+
+    [Fact]
+    public void Controller_ExampleAttributes_Populate_Request_And_Response_Examples()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateItemRequest(string Name);
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [Route("api/items")]
+            public sealed class ItemsController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(typeof(ItemDto), 201)]
+                [ProducesResponseType(typeof(ProblemDto), 422)]
+                [RivetRequestExample("{\"name\":\"Ada\"}")]
+                [RivetResponseExample(422, "{\"title\":\"Validation failed\"}", name: "validationProblem")]
+                public Task<IActionResult> Create(
+                    [FromBody] CreateItemRequest request,
+                    CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("application/json", requestExample.MediaType);
+        Assert.Equal("""{"name":"Ada"}""", requestExample.Json);
+        Assert.Null(requestExample.Name);
+        Assert.Null(requestExample.ComponentExampleId);
+        Assert.Null(requestExample.ResolvedJson);
+
+        var response = endpoint.Responses.Single(r => r.StatusCode == 422);
+        var responseExample = Assert.Single(response.Examples!);
+        Assert.Equal("validationProblem", responseExample.Name);
+        Assert.Equal("application/json", responseExample.MediaType);
+        Assert.Equal("""{"title":"Validation failed"}""", responseExample.Json);
+        Assert.Null(responseExample.ComponentExampleId);
+        Assert.Null(responseExample.ResolvedJson);
+    }
+
+    [Fact]
+    public void Controller_ResponseExampleAttribute_Preserves_Ref_Metadata_And_MediaType_Override()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/items/{id}")]
+                [ProducesResponseType(typeof(ItemDto), 200)]
+                [ProducesResponseType(typeof(ProblemDto), 422)]
+                [RivetResponseExample(
+                    422,
+                    "{\"title\":\"Bad request\"}",
+                    componentExampleId: "problem-example",
+                    name: "problem",
+                    mediaType: "application/problem+json")]
+                public static Task<IActionResult> Get([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var response = endpoint.Responses.Single(r => r.StatusCode == 422);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("problem", example.Name);
+        Assert.Equal("application/problem+json", example.MediaType);
+        Assert.Null(example.Json);
+        Assert.Equal("problem-example", example.ComponentExampleId);
+        Assert.Equal("""{"title":"Bad request"}""", example.ResolvedJson);
+    }
+
+    [Fact]
+    public void Controller_ResponseExampleAttribute_Without_Declared_Response_Is_Ignored()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/items/{id}")]
+                [ProducesResponseType(typeof(ItemDto), 200)]
+                [RivetResponseExample(422, "{\"title\":\"Validation failed\"}", name: "validationProblem")]
+                public static Task<IActionResult> Get([FromRoute] Guid id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        Assert.Single(endpoint.Responses);
+        Assert.Equal(200, endpoint.Responses[0].StatusCode);
+        Assert.Null(endpoint.Responses[0].Examples);
+        Assert.DoesNotContain(endpoint.Responses, response => response.StatusCode == 422);
     }
 
     [Fact]
