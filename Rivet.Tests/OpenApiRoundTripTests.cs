@@ -230,6 +230,58 @@ public sealed class OpenApiRoundTripTests
     }
 
     [Fact]
+    public void Endpoint_Examples_Survive_OpenApi_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginRequest(string Email, string Password);
+
+            [RivetType]
+            public sealed record TokenDto(string Token);
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly Define Login =
+                    Define.Post<LoginRequest, TokenDto>("/api/login")
+                        .FormEncoded()
+                        .RequestExampleJson(
+                            "{\"email\":\"ada@example.com\",\"password\":\"secret\"}",
+                            name: "loginRequest")
+                        .Returns<ProblemDto>(422)
+                        .ResponseExampleRef(
+                            422,
+                            "login-problem",
+                            "{\"title\":\"Bad credentials\"}",
+                            name: "badCredentials");
+            }
+            """;
+
+        var (endpoints, _) = RoundTrip(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("application/x-www-form-urlencoded", requestExample.MediaType);
+        Assert.Equal("loginRequest", requestExample.Name);
+        Assert.Equal("""{"email":"ada@example.com","password":"secret"}""", requestExample.Json);
+
+        var response = endpoint.Responses.First(r => r.StatusCode == 422);
+        var responseExample = Assert.Single(response.Examples!);
+        Assert.Equal("application/json", responseExample.MediaType);
+        Assert.Equal("badCredentials", responseExample.Name);
+        Assert.Null(responseExample.Json);
+        Assert.Equal("login-problem", responseExample.ComponentExampleId);
+        Assert.Equal("""{"title":"Bad credentials"}""", responseExample.ResolvedJson);
+    }
+
+    [Fact]
     public void Multi_Response_Endpoints_Survive_RoundTrip()
     {
         var source = """

@@ -62,12 +62,20 @@ internal sealed record GeneratedEndpointField(
     string? SecurityScheme,
     IReadOnlyList<string> UnsupportedMarkers = null!,
     string? FileContentType = null,
-    bool IsFormEncoded = false)
+    bool IsFormEncoded = false,
+    IReadOnlyList<TsEndpointExample>? RequestExamples = null,
+    IReadOnlyList<GeneratedEndpointResponseExample>? ResponseExamples = null)
 {
     public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
+    public IReadOnlyList<TsEndpointExample> RequestExamples { get; init; } = RequestExamples ?? [];
+    public IReadOnlyList<GeneratedEndpointResponseExample> ResponseExamples { get; init; } = ResponseExamples ?? [];
 }
 
 internal sealed record GeneratedErrorResponse(
     int StatusCode,
     string? TypeName,
     string? Description);
+
+internal sealed record GeneratedEndpointResponseExample(
+    int StatusCode,
+    TsEndpointExample Example);

@@ -408,6 +408,7 @@ public static class OpenApiEmitter
 
         foreach (var group in examples.GroupBy(example => example.MediaType))
         {
+            var createdMediaContent = false;
             if (!content.TryGetValue(group.Key, out var mediaContentObj))
             {
                 var mediaContent = new Dictionary<string, object>();
@@ -418,6 +419,7 @@ public static class OpenApiEmitter
 
                 content[group.Key] = mediaContent;
                 mediaContentObj = mediaContent;
+                createdMediaContent = true;
             }
 
             var mediaContentDict = (Dictionary<string, object>)mediaContentObj;
@@ -438,7 +440,21 @@ public static class OpenApiEmitter
             {
                 var example = groupedExamples[index];
                 var key = example.Name ?? $"example{index + 1}";
-                examplesDict[key] = ToOpenApiExample(example);
+                var renderedExample = ToOpenApiExample(example);
+                if (renderedExample is not null)
+                {
+                    examplesDict[key] = renderedExample;
+                }
+            }
+
+            if (examplesDict.Count == 0)
+            {
+                if (createdMediaContent && mediaContentDict.Count == 0)
+                {
+                    content.Remove(group.Key);
+                }
+
+                continue;
             }
 
             mediaContentDict["examples"] = examplesDict;
@@ -447,7 +463,7 @@ public static class OpenApiEmitter
         return content;
     }
 
-    private static object ToOpenApiExample(TsEndpointExample example)
+    private static object? ToOpenApiExample(TsEndpointExample example)
     {
         if (example.ComponentExampleId is not null && example.ResolvedJson is not null)
         {
@@ -460,7 +476,7 @@ public static class OpenApiEmitter
         var json = example.Json ?? example.ResolvedJson;
         if (json is null)
         {
-            return new Dictionary<string, object>();
+            return null;
         }
 
         return new Dictionary<string, object>

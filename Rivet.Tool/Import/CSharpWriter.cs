@@ -278,6 +278,15 @@ internal static class CSharpWriter
             calls.Add($".Accepts<{field.InputType}>()");
         }
 
+        foreach (var requestExample in field.RequestExamples)
+        {
+            var requestCall = BuildRequestExampleCall(requestExample);
+            if (requestCall is not null)
+            {
+                calls.Add(requestCall);
+            }
+        }
+
         foreach (var error in field.ErrorResponses)
         {
             if (error.TypeName is not null)
@@ -301,6 +310,15 @@ internal static class CSharpWriter
                 {
                     calls.Add($".Returns({error.StatusCode})");
                 }
+            }
+        }
+
+        foreach (var responseExample in field.ResponseExamples)
+        {
+            var responseCall = BuildResponseExampleCall(responseExample);
+            if (responseCall is not null)
+            {
+                calls.Add(responseCall);
             }
         }
 
@@ -331,6 +349,45 @@ internal static class CSharpWriter
         }
 
         return calls;
+    }
+
+    private static string? BuildRequestExampleCall(Rivet.Tool.Model.TsEndpointExample example)
+    {
+        if (example.Json is not null)
+        {
+            return $".RequestExampleJson(\"{EscapeString(example.Json)}\", mediaType: \"{EscapeString(example.MediaType)}\"{BuildOptionalExampleArguments(example)})";
+        }
+
+        if (example.ComponentExampleId is not null && example.ResolvedJson is not null)
+        {
+            return $".RequestExampleRef(\"{EscapeString(example.ComponentExampleId)}\", \"{EscapeString(example.ResolvedJson)}\", mediaType: \"{EscapeString(example.MediaType)}\"{BuildOptionalExampleArguments(example)})";
+        }
+
+        return null;
+    }
+
+    private static string? BuildResponseExampleCall(GeneratedEndpointResponseExample responseExample)
+    {
+        var example = responseExample.Example;
+
+        if (example.Json is not null)
+        {
+            return $".ResponseExampleJson({responseExample.StatusCode}, \"{EscapeString(example.Json)}\", mediaType: \"{EscapeString(example.MediaType)}\"{BuildOptionalExampleArguments(example)})";
+        }
+
+        if (example.ComponentExampleId is not null && example.ResolvedJson is not null)
+        {
+            return $".ResponseExampleRef({responseExample.StatusCode}, \"{EscapeString(example.ComponentExampleId)}\", \"{EscapeString(example.ResolvedJson)}\", mediaType: \"{EscapeString(example.MediaType)}\"{BuildOptionalExampleArguments(example)})";
+        }
+
+        return null;
+    }
+
+    private static string BuildOptionalExampleArguments(Rivet.Tool.Model.TsEndpointExample example)
+    {
+        return example.Name is not null
+            ? $", name: \"{EscapeString(example.Name)}\""
+            : "";
     }
 
     private static string EscapeString(string value)

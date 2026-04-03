@@ -31,6 +31,12 @@ public sealed class OpenApiEmitterTests
         return JsonDocument.Parse(json);
     }
 
+    private static JsonDocument EmitOpenApiFromJsonContract(string json)
+    {
+        var spec = CompilationHelper.EmitOpenApiFromJson(json);
+        return JsonDocument.Parse(spec);
+    }
+
     [Fact]
     public void Get_Endpoint_Path_OperationId_Tags_Parameters_Response()
     {
@@ -330,6 +336,253 @@ public sealed class OpenApiEmitterTests
             .GetProperty("examples")
             .GetProperty("order-created-template");
         Assert.Equal("ord_456", componentExample.GetProperty("value").GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public void FormEncoded_RequestExampleJson_Emits_FormUrlEncoded_Example()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginInput(string Email, string Password);
+
+            [RivetType]
+            public sealed record TokenDto(string Token);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly Define Login =
+                    Define.Post<LoginInput, TokenDto>("/api/login")
+                        .FormEncoded()
+                        .RequestExampleJson("{\"email\":\"ada@example.com\",\"password\":\"secret\"}");
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var mediaType = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/login")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/x-www-form-urlencoded");
+
+        Assert.Equal(
+            "ada@example.com",
+            mediaType.GetProperty("example").GetProperty("email").GetString());
+        Assert.Equal(
+            "secret",
+            mediaType.GetProperty("example").GetProperty("password").GetString());
+    }
+
+    [Fact]
+    public void Multipart_RequestExampleRef_Emits_Component_Example_Reference()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadResultDto(string Id);
+
+            [RivetContract]
+            public static class UploadsContract
+            {
+                public static readonly RouteDefinition<UploadResultDto> Upload =
+                    Define.Post<UploadResultDto>("/api/files")
+                        .AcceptsFile()
+                        .RequestExampleRef(
+                            "upload-example",
+                            "{\"file\":\"ignored\"}",
+                            name: "upload");
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var multipart = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/files")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("multipart/form-data");
+
+        Assert.Equal(
+            "#/components/examples/upload-example",
+            multipart.GetProperty("examples").GetProperty("upload").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "ignored",
+            doc.RootElement.GetProperty("components")
+                .GetProperty("examples")
+                .GetProperty("upload-example")
+                .GetProperty("value")
+                .GetProperty("file")
+                .GetString());
+    }
+
+    [Fact]
+    public void ResponseExampleJson_With_AlternateMediaType_Emits_Matching_Content()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .Returns<ProblemDto>(422)
+                        .ResponseExampleJson(
+                            422,
+                            "{\"title\":\"Bad request\"}",
+                            name: "problem",
+                            mediaType: "application/problem+json");
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var mediaType = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/tasks/{id}")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("422")
+            .GetProperty("content")
+            .GetProperty("application/problem+json");
+
+        Assert.Equal("#/components/schemas/ProblemDto", mediaType.GetProperty("schema").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "Bad request",
+            mediaType.GetProperty("examples").GetProperty("problem").GetProperty("value").GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public void Untyped_204_ResponseExampleJson_Emits_Content_Without_Schema()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly RouteDefinition DeleteSession =
+                    Define.Delete("/api/auth/session")
+                        .ResponseExampleJson(204, "{\"message\":\"deleted\"}", name: "deleted");
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var mediaType = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/auth/session")
+            .GetProperty("delete")
+            .GetProperty("responses")
+            .GetProperty("204")
+            .GetProperty("content")
+            .GetProperty("application/json");
+
+        Assert.False(mediaType.TryGetProperty("schema", out _));
+        Assert.Equal(
+            "deleted",
+            mediaType.GetProperty("examples").GetProperty("deleted").GetProperty("value").GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public void File_ResponseExampleRef_Emits_File_Content_Type_And_Component_Example()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class DocumentsContract
+            {
+                public static readonly RouteDefinition Download =
+                    Define.Get("/api/documents/{id}")
+                        .ProducesFile("application/pdf")
+                        .ResponseExampleRef(200, "document-example", "{\"href\":\"/api/documents/123\"}", name: "document");
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var mediaType = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/documents/{id}")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("content")
+            .GetProperty("application/pdf");
+
+        Assert.Equal("string", mediaType.GetProperty("schema").GetProperty("type").GetString());
+        Assert.Equal("binary", mediaType.GetProperty("schema").GetProperty("format").GetString());
+        Assert.Equal(
+            "#/components/examples/document-example",
+            mediaType.GetProperty("examples").GetProperty("document").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "/api/documents/123",
+            doc.RootElement.GetProperty("components")
+                .GetProperty("examples")
+                .GetProperty("document-example")
+                .GetProperty("value")
+                .GetProperty("href")
+                .GetString());
+    }
+
+    [Fact]
+    public void JsonContract_ComponentExampleId_Without_ResolvedJson_Does_Not_Emit_Empty_Example_Object()
+    {
+        var contractJson = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createOrder",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/orders",
+                        "controllerName": "orders",
+                        "params": [],
+                        "responses": [
+                            {
+                                "statusCode": 202,
+                                "examples": [
+                                    {
+                                        "mediaType": "application/json",
+                                        "name": "accepted",
+                                        "componentExampleId": "order-accepted"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        using var doc = EmitOpenApiFromJsonContract(contractJson);
+        var response = doc.RootElement.GetProperty("paths")
+            .GetProperty("/orders")
+            .GetProperty("post")
+            .GetProperty("responses")
+            .GetProperty("202");
+
+        if (response.TryGetProperty("content", out var content)
+            && content.TryGetProperty("application/json", out var mediaType))
+        {
+            Assert.False(mediaType.TryGetProperty("examples", out _));
+        }
     }
 
     [Fact]

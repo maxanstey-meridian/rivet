@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Import;
 
@@ -81,6 +82,8 @@ internal static class ContractBuilder
 
         // Error responses
         var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, unsupported);
+        var requestExamples = ResolveRequestExamples(operation);
+        var responseExamples = ResolveResponseExamples(operation);
 
         // Security
         var (isAnonymous, securityScheme) = ResolveSecurity(operation, globalSecurityScheme);
@@ -88,7 +91,8 @@ internal static class ContractBuilder
         return new GeneratedEndpointField(
             fieldName, method, route, inputType, outputType,
             summary, description, successStatus, errorResponses,
-            isAnonymous, securityScheme, unsupported, fileContentType, isFormEncoded);
+            isAnonymous, securityScheme, unsupported, fileContentType, isFormEncoded,
+            requestExamples, responseExamples);
     }
 
     private static (string? InputType, bool IsFormEncoded) ResolveInputType(
@@ -345,6 +349,147 @@ internal static class ContractBuilder
         }
 
         return errors;
+    }
+
+    private static IReadOnlyList<TsEndpointExample> ResolveRequestExamples(OpenApiOperation operation)
+    {
+        if (operation.RequestBody?.Content is not { Count: > 0 } content)
+        {
+            return [];
+        }
+
+        return ResolveMediaExamples(content);
+    }
+
+    private static IReadOnlyList<GeneratedEndpointResponseExample> ResolveResponseExamples(OpenApiOperation operation)
+    {
+        if (operation.Responses is null)
+        {
+            return [];
+        }
+
+        var responseExamples = new List<GeneratedEndpointResponseExample>();
+
+        foreach (var (statusStr, response) in operation.Responses)
+        {
+            var statusCode = NormalizeStatusCode(statusStr);
+            if (statusCode is null || response.Content is not { Count: > 0 } content)
+            {
+                continue;
+            }
+
+            foreach (var example in ResolveMediaExamples(content))
+            {
+                responseExamples.Add(new GeneratedEndpointResponseExample(statusCode.Value, example));
+            }
+        }
+
+        return responseExamples;
+    }
+
+    private static IReadOnlyList<TsEndpointExample> ResolveMediaExamples(
+        IDictionary<string, OpenApiMediaType> content)
+    {
+        var examples = new List<TsEndpointExample>();
+
+        foreach (var (mediaType, media) in content)
+        {
+            if (media.Example is not null)
+            {
+                examples.Add(new TsEndpointExample(
+                    mediaType,
+                    Json: media.Example.ToJsonString()));
+            }
+
+            if (media.Examples is null)
+            {
+                continue;
+            }
+
+            foreach (var (name, example) in media.Examples)
+            {
+                var endpointExample = ResolveExample(mediaType, name, example);
+                if (endpointExample is not null)
+                {
+                    examples.Add(endpointExample);
+                }
+            }
+        }
+
+        return examples;
+    }
+
+    private static TsEndpointExample? ResolveExample(
+        string mediaType,
+        string? name,
+        IOpenApiExample example)
+    {
+        var componentExampleId = TryGetComponentExampleId(example);
+        var resolvedJson = TryGetExampleJson(example);
+
+        if (componentExampleId is not null)
+        {
+            return resolvedJson is not null
+                ? new TsEndpointExample(
+                    mediaType,
+                    name,
+                    ComponentExampleId: componentExampleId,
+                    ResolvedJson: resolvedJson)
+                : new TsEndpointExample(
+                    mediaType,
+                    name,
+                    ComponentExampleId: componentExampleId);
+        }
+
+        return resolvedJson is not null
+            ? new TsEndpointExample(mediaType, name, Json: resolvedJson)
+            : null;
+    }
+
+    private static string? TryGetComponentExampleId(IOpenApiExample example)
+    {
+        return example switch
+        {
+            OpenApiExampleReference exampleReference => exampleReference.Reference?.Id,
+            _ => null,
+        };
+    }
+
+    private static string? TryGetExampleJson(IOpenApiExample example)
+    {
+        if (example.Value is not null)
+        {
+            return example.Value.ToJsonString();
+        }
+
+        return example switch
+        {
+            OpenApiExampleReference { RecursiveTarget.Value: not null } exampleReference
+                => exampleReference.RecursiveTarget.Value.ToJsonString(),
+            OpenApiExampleReference { Target.Value: not null } exampleReference
+                => exampleReference.Target.Value.ToJsonString(),
+            _ => null,
+        };
+    }
+
+    private static int? NormalizeStatusCode(string statusStr)
+    {
+        if (statusStr == "default")
+        {
+            return 500;
+        }
+
+        if (statusStr is "4XX" or "4xx")
+        {
+            return 400;
+        }
+
+        if (statusStr is "5XX" or "5xx")
+        {
+            return 500;
+        }
+
+        return int.TryParse(statusStr, out var code) ? code : null;
     }
 
     private static bool TryGetSchemaForContentType(
