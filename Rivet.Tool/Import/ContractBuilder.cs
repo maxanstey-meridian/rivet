@@ -82,8 +82,8 @@ internal static class ContractBuilder
 
         // Error responses
         var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, unsupported);
-        var requestExamples = ResolveRequestExamples(operation);
-        var responseExamples = ResolveResponseExamples(operation);
+        var requestExamples = ResolveRequestExamples(operation, unsupported);
+        var responseExamples = ResolveResponseExamples(operation, unsupported);
 
         // Security
         var (isAnonymous, securityScheme) = ResolveSecurity(operation, globalSecurityScheme);
@@ -351,17 +351,21 @@ internal static class ContractBuilder
         return errors;
     }
 
-    private static IReadOnlyList<TsEndpointExample> ResolveRequestExamples(OpenApiOperation operation)
+    private static IReadOnlyList<TsEndpointExample> ResolveRequestExamples(
+        OpenApiOperation operation,
+        List<string> unsupported)
     {
         if (operation.RequestBody?.Content is not { Count: > 0 } content)
         {
             return [];
         }
 
-        return ResolveMediaExamples(content);
+        return ResolveMediaExamples(content, unsupported, "request-example");
     }
 
-    private static IReadOnlyList<GeneratedEndpointResponseExample> ResolveResponseExamples(OpenApiOperation operation)
+    private static IReadOnlyList<GeneratedEndpointResponseExample> ResolveResponseExamples(
+        OpenApiOperation operation,
+        List<string> unsupported)
     {
         if (operation.Responses is null)
         {
@@ -378,7 +382,10 @@ internal static class ContractBuilder
                 continue;
             }
 
-            foreach (var example in ResolveMediaExamples(content))
+            foreach (var example in ResolveMediaExamples(
+                content,
+                unsupported,
+                $"response-example status={statusCode.Value}"))
             {
                 responseExamples.Add(new GeneratedEndpointResponseExample(statusCode.Value, example));
             }
@@ -388,7 +395,9 @@ internal static class ContractBuilder
     }
 
     private static IReadOnlyList<TsEndpointExample> ResolveMediaExamples(
-        IDictionary<string, OpenApiMediaType> content)
+        IDictionary<string, OpenApiMediaType> content,
+        List<string> unsupported,
+        string markerPrefix)
     {
         var examples = new List<TsEndpointExample>();
 
@@ -408,10 +417,21 @@ internal static class ContractBuilder
 
             foreach (var (name, example) in media.Examples)
             {
-                var endpointExample = ResolveExample(mediaType, name, example);
+                var endpointExample = ResolveExample(mediaType, name, example, out var reason);
                 if (endpointExample is not null)
                 {
                     examples.Add(endpointExample);
+                    continue;
+                }
+
+                if (reason is not null)
+                {
+                    unsupported.Add(BuildExampleUnsupportedMarker(
+                        markerPrefix,
+                        mediaType,
+                        name,
+                        TryGetComponentExampleId(example),
+                        reason));
                 }
             }
         }
@@ -422,28 +442,55 @@ internal static class ContractBuilder
     private static TsEndpointExample? ResolveExample(
         string mediaType,
         string? name,
-        IOpenApiExample example)
+        IOpenApiExample example,
+        out string? reason)
     {
         var componentExampleId = TryGetComponentExampleId(example);
         var resolvedJson = TryGetExampleJson(example);
 
         if (componentExampleId is not null)
         {
+            reason = resolvedJson is null ? "unresolved-ref" : null;
             return resolvedJson is not null
                 ? new TsEndpointExample(
                     mediaType,
                     name,
                     ComponentExampleId: componentExampleId,
                     ResolvedJson: resolvedJson)
-                : new TsEndpointExample(
-                    mediaType,
-                    name,
-                    ComponentExampleId: componentExampleId);
+                : null;
         }
 
+        reason = resolvedJson is null ? "missing-value" : null;
         return resolvedJson is not null
             ? new TsEndpointExample(mediaType, name, Json: resolvedJson)
             : null;
+    }
+
+    private static string BuildExampleUnsupportedMarker(
+        string markerPrefix,
+        string mediaType,
+        string? name,
+        string? componentExampleId,
+        string reason)
+    {
+        var parts = new List<string>
+        {
+            markerPrefix,
+            $"media-type={mediaType}",
+        };
+
+        if (name is not null)
+        {
+            parts.Add($"name={name}");
+        }
+
+        if (componentExampleId is not null)
+        {
+            parts.Add($"component-example-id={componentExampleId}");
+        }
+
+        parts.Add($"reason={reason}");
+        return string.Join(" ", parts);
     }
 
     private static string? TryGetComponentExampleId(IOpenApiExample example)

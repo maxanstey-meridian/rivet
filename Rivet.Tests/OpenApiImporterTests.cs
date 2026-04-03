@@ -487,9 +487,27 @@ public sealed class OpenApiImporterTests
 
     // ========== Fixture-based round-trip tests ==========
 
-    private static string LoadFixture()
+    private static string LoadFixture(string name = "openapi-import.json")
     {
-        return File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "openapi-import.json"));
+        return File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
+    }
+
+    private static Compilation CompileImportedFixtureDeduped(string fixtureName, string ns)
+    {
+        var result = CompilationHelper.Import(LoadFixture(fixtureName), ns);
+        var uniqueSources = result.Files
+            .GroupBy(file => file.FileName)
+            .Select(group => group.First().Content)
+            .ToArray();
+
+        return CompilationHelper.CreateCompilationFromMultiple(uniqueSources);
+    }
+
+    private static IReadOnlyList<TsEndpointDefinition> ImportFixtureAndWalkContracts(string fixtureName, string ns)
+    {
+        var compilation = CompileImportedFixtureDeduped(fixtureName, ns);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        return CompilationHelper.WalkContracts(compilation, discovered, walker);
     }
 
 
@@ -591,6 +609,99 @@ public sealed class OpenApiImporterTests
 
         var deleteTask = endpoints.First(e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{taskId}");
         Assert.Contains(deleteTask.Responses, r => r.StatusCode == 204);
+    }
+
+    [Fact]
+    public void Twilio_CreateAccount_FormUrlEncoded_RequestExample_Survives_Import_RoundTrip()
+    {
+        var endpoints = ImportFixtureAndWalkContracts("openapi-twilio.json", "Twilio.Contracts");
+
+        var endpoint = endpoints.Single(e =>
+            e.HttpMethod == "POST" &&
+            e.RouteTemplate == "/2010-04-01/Accounts.json");
+
+        Assert.True(endpoint.IsFormEncoded);
+
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("application/x-www-form-urlencoded", requestExample.MediaType);
+        Assert.Equal("create", requestExample.Name);
+        Assert.Equal("""{"FriendlyName":"friendly_name"}""", requestExample.Json);
+        Assert.Null(requestExample.ComponentExampleId);
+        Assert.Null(requestExample.ResolvedJson);
+    }
+
+    [Fact]
+    public void GitHub_UpdateBudgetOrg_404_Named_ResponseExamples_Survive_Import_RoundTrip()
+    {
+        var endpoints = ImportFixtureAndWalkContracts("openapi-github.json", "GitHub.Contracts");
+
+        var endpoint = endpoints.Single(e =>
+            e.HttpMethod == "PATCH" &&
+            e.RouteTemplate == "/organizations/{org}/settings/billing/budgets/{budget_id}");
+
+        var response = endpoint.Responses.Single(r => r.StatusCode == 404);
+        Assert.NotNull(response.Examples);
+        Assert.Collection(
+            response.Examples!,
+            first =>
+            {
+                Assert.Equal("budget-not-found", first.Name);
+                Assert.Equal("application/json", first.MediaType);
+                Assert.Equal("""{"message":"Budget with ID 550e8400-e29b-41d4-a716-446655440000 not found.","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""", first.Json);
+                Assert.Null(first.ComponentExampleId);
+                Assert.Null(first.ResolvedJson);
+            },
+            second =>
+            {
+                Assert.Equal("feature-not-enabled", second.Name);
+                Assert.Equal("application/json", second.MediaType);
+                Assert.Equal("""{"message":"Not Found","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""", second.Json);
+                Assert.Null(second.ComponentExampleId);
+                Assert.Null(second.ResolvedJson);
+            });
+    }
+
+    [Fact]
+    public void GitHub_DeleteBudgetOrg_RefBacked_ResponseExample_Preserves_Ref_And_ResolvedJson()
+    {
+        var endpoints = ImportFixtureAndWalkContracts("openapi-github.json", "GitHub.Contracts");
+
+        var endpoint = endpoints.Single(e =>
+            e.HttpMethod == "DELETE" &&
+            e.RouteTemplate == "/organizations/{org}/settings/billing/budgets/{budget_id}");
+
+        var response = endpoint.Responses.Single(r => r.StatusCode == 200);
+        var example = Assert.Single(response.Examples!);
+
+        Assert.Equal("default", example.Name);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Null(example.Json);
+        Assert.Equal("delete-budget", example.ComponentExampleId);
+        Assert.Equal("""{"message":"Budget successfully deleted.","budget_id":"2c1feb79-3947-4dc8-a16e-80cbd732cc0b"}""", example.ResolvedJson);
+    }
+
+    [Fact]
+    public void GitHub_UpdateImport_Exampleless_RequestEntry_Is_Explicit_Not_Silent()
+    {
+        var result = CompilationHelper.Import(LoadFixture("openapi-github.json"), "GitHub.Contracts");
+        var content = CompilationHelper.FindFile(result, "MigrationsContract.cs");
+        var compilation = CompileImportedFixtureDeduped("openapi-github.json", "GitHub.Contracts");
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+
+        var endpoint = endpoints.Single(e =>
+            e.HttpMethod == "PATCH" &&
+            e.RouteTemplate == "/repos/{owner}/{repo}/import");
+
+        Assert.NotNull(endpoint.RequestExamples);
+        Assert.Collection(
+            endpoint.RequestExamples!,
+            first => Assert.Equal("example-1", first.Name),
+            second => Assert.Equal("example-2", second.Name));
+
+        Assert.Contains(
+            "[rivet:unsupported request-example media-type=application/json name=example-3 reason=missing-value]",
+            content);
     }
 
     [Fact]
