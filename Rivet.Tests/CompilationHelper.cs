@@ -55,6 +55,8 @@ public static class CompilationHelper
             [System.AttributeUsage(System.AttributeTargets.Parameter)]
             public class FromBodyAttribute : System.Attribute { }
             [System.AttributeUsage(System.AttributeTargets.Parameter)]
+            public class FromFormAttribute : System.Attribute { }
+            [System.AttributeUsage(System.AttributeTargets.Parameter)]
             public class FromQueryAttribute : System.Attribute { }
             [System.AttributeUsage(System.AttributeTargets.Parameter)]
             public class FromRouteAttribute : System.Attribute { }

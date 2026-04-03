@@ -81,7 +81,8 @@ public static class EndpointWalker
         var parameters = ExtractParams(wkt, method, typeWalker, fullRoute);
         var responses = ExtractAllResponseTypes(wkt, method, typeWalker).ToList();
         var returnType = ExtractReturnType(wkt, method, typeWalker);
-        var requestExamples = ExtractRequestExamples(wkt, method, parameters);
+        var isFormEncoded = HasFromFormBody(method, wkt);
+        var requestExamples = ExtractRequestExamples(wkt, method, parameters, isFormEncoded);
         ApplyResponseExamples(responses, ExtractResponseExamples(wkt, method), Naming.ToCamelCase(method.Name));
         var name = Naming.ToCamelCase(method.Name);
         var controllerName = DeriveControllerFileName(method.ContainingType);
@@ -94,13 +95,15 @@ public static class EndpointWalker
             returnType,
             controllerName,
             responses,
+            IsFormEncoded: isFormEncoded,
             RequestExamples: requestExamples);
     }
 
     private static IReadOnlyList<TsEndpointExample>? ExtractRequestExamples(
         WellKnownTypes wkt,
         IMethodSymbol method,
-        IReadOnlyList<TsEndpointParam> parameters)
+        IReadOnlyList<TsEndpointParam> parameters,
+        bool isFormEncoded)
     {
         if (wkt.RivetRequestExample is null)
         {
@@ -109,7 +112,7 @@ public static class EndpointWalker
 
         var examples = method.GetAttributes()
             .Where(attr => SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.RivetRequestExample))
-            .Select(attr => ToRequestExample(attr, DefaultRequestExampleMediaType(parameters)))
+            .Select(attr => ToRequestExample(attr, DefaultRequestExampleMediaType(parameters, isFormEncoded)))
             .Where(example => example is not null)
             .Cast<TsEndpointExample>()
             .ToList();
@@ -132,11 +135,25 @@ public static class EndpointWalker
             .ToList();
     }
 
-    private static string DefaultRequestExampleMediaType(IReadOnlyList<TsEndpointParam> parameters)
+    private static string DefaultRequestExampleMediaType(IReadOnlyList<TsEndpointParam> parameters, bool isFormEncoded)
     {
-        return parameters.Any(parameter => parameter.Source is ParamSource.File or ParamSource.FormField)
-            ? "multipart/form-data"
+        if (parameters.Any(parameter => parameter.Source is ParamSource.File or ParamSource.FormField))
+        {
+            return "multipart/form-data";
+        }
+
+        return isFormEncoded
+            ? "application/x-www-form-urlencoded"
             : "application/json";
+    }
+
+    private static bool HasFromFormBody(IMethodSymbol method, WellKnownTypes wkt)
+    {
+        return method.Parameters.Any(param =>
+            param.GetAttributes().Any(attr =>
+                attr.AttributeClass is not null
+                && SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.FromForm)
+                && !SymbolEqualityComparer.Default.Equals(param.Type, wkt.IFormFile)));
     }
 
     private static TsEndpointExample? ToRequestExample(AttributeData attr, string defaultMediaType)
@@ -408,6 +425,8 @@ public static class EndpointWalker
 
             if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromBody))
                 return ParamSource.Body;
+            if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromForm))
+                return ParamSource.Body;
             if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromQuery))
                 return ParamSource.Query;
             if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromRoute))
@@ -585,7 +604,7 @@ public static class EndpointWalker
 
             // ProducesResponseType(typeof(T), statusCode) — two constructor args
             if (attr.ConstructorArguments.Length >= 2
-                && attr.ConstructorArguments[0].Value is INamedTypeSymbol typeArg
+                && attr.ConstructorArguments[0].Value is ITypeSymbol typeArg
                 && attr.ConstructorArguments[1].Value is int statusCode
                 && statusCode >= 200 && statusCode < 300)
             {
@@ -616,7 +635,7 @@ public static class EndpointWalker
 
             // ProducesResponseType(typeof(T), statusCode)
             if (attr.ConstructorArguments.Length >= 2
-                && attr.ConstructorArguments[0].Value is INamedTypeSymbol typeArg
+                && attr.ConstructorArguments[0].Value is ITypeSymbol typeArg
                 && attr.ConstructorArguments[1].Value is int statusCode)
             {
                 var tsType = typeWalker.MapType(typeArg);

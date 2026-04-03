@@ -551,10 +551,56 @@ public sealed class ControllerEndpointTests
         var endpoints = WalkEndpoints(source);
 
         var endpoint = Assert.Single(endpoints);
+        Assert.True(endpoint.ReturnType is TsType.Array { Element: TsType.TypeRef { Name: "SearchResultDto" } });
+        var response = Assert.Single(endpoint.Responses);
+        Assert.Equal(200, response.StatusCode);
+        Assert.True(response.DataType is TsType.Array { Element: TsType.TypeRef { Name: "SearchResultDto" } });
         var requestExample = Assert.Single(endpoint.RequestExamples!);
         Assert.Equal("filter", requestExample.Name);
         Assert.Equal("application/json", requestExample.MediaType);
         Assert.Equal("""{"status":"open"}""", requestExample.Json);
+        Assert.Null(requestExample.ComponentExampleId);
+        Assert.Null(requestExample.ResolvedJson);
+    }
+
+    [Fact]
+    public void Controller_FromForm_RequestExample_Defaults_To_FormUrlEncoded()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginRequest(string Email, string Password);
+
+            [RivetType]
+            public sealed record TokenDto(string Token);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpPost("/api/login")]
+                [ProducesResponseType(typeof(TokenDto), 200)]
+                [RivetRequestExample("{\"email\":\"ada@example.com\",\"password\":\"secret\"}")]
+                public static Task<IActionResult> Login([FromForm] LoginRequest request)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        Assert.True(endpoint.IsFormEncoded);
+        var body = Assert.Single(endpoint.Params);
+        Assert.Equal(ParamSource.Body, body.Source);
+        Assert.True(body.Type is TsType.TypeRef { Name: "LoginRequest" });
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("application/x-www-form-urlencoded", requestExample.MediaType);
+        Assert.Equal("""{"email":"ada@example.com","password":"secret"}""", requestExample.Json);
         Assert.Null(requestExample.ComponentExampleId);
         Assert.Null(requestExample.ResolvedJson);
     }

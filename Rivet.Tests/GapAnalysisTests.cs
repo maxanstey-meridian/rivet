@@ -241,6 +241,54 @@ public sealed class GapAnalysisTests
         Assert.Contains("Ref-backed example loss:", output);
     }
 
+    [Fact]
+    [Trait("Category", "Slow")]
+    public void Full_Gap_Analysis_Report_Prints_Exact_Endpoint_Example_Counts()
+    {
+        var originalJson = LoadFixture("openapi-github.json");
+        var originalDoc = JsonSerializer.Deserialize<JsonElement>(originalJson);
+        var import = OpenApiImporter.Import(originalJson, new ImportOptions("GitHub", null));
+        var sources = import.Files
+            .GroupBy(file => file.FileName)
+            .Select(group => group.First().Content)
+            .ToArray();
+
+        Compilation compilation;
+        try
+        {
+            compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
+        }
+        catch
+        {
+            compilation = CreateCompilationLenient(sources);
+        }
+
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emittedJson = Rivet.Tool.Emit.OpenApiEmitter.Emit(
+            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var emittedDoc = JsonSerializer.Deserialize<JsonElement>(emittedJson);
+        var fidelity = AnalyzeEndpointExampleFidelity(originalDoc, emittedDoc);
+
+        var originalOut = Console.Out;
+        using var writer = new StringWriter();
+        try
+        {
+            Console.SetOut(writer);
+            Report_Full_Gap_Analysis("openapi-github.json", "GitHub");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        var output = writer.ToString();
+        Assert.Contains($"Request example loss:    {fidelity.RequestExampleLoss}", output);
+        Assert.Contains($"Response example loss:   {fidelity.ResponseExampleLoss}", output);
+        Assert.Contains($"Named example loss:      {fidelity.NamedExampleLoss}", output);
+        Assert.Contains($"Ref-backed example loss: {fidelity.RefBackedExampleLoss}", output);
+    }
+
     /// <summary>
     /// Walks the raw OpenAPI JSON and counts inline enums on properties (type: string + enum: [...]),
     /// then checks how many the importer actually captured vs dropped to string.

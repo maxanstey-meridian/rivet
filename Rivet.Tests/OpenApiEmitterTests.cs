@@ -760,6 +760,55 @@ public sealed class OpenApiEmitterTests
             .GetProperty("get");
 
         Assert.False(get.TryGetProperty("requestBody", out _));
+        var schema = get.GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema");
+        Assert.Equal("array", schema.GetProperty("type").GetString());
+        Assert.Equal(
+            "#/components/schemas/SearchResultDto",
+            schema.GetProperty("items").GetProperty("$ref").GetString());
+    }
+
+    [Fact]
+    public void Controller_FromForm_RequestExample_Emits_FormUrlEncoded_Content()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record LoginRequest(string Email, string Password);
+
+            [RivetType]
+            public sealed record TokenDto(string Token);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpPost("/api/login")]
+                [ProducesResponseType(typeof(TokenDto), 200)]
+                [RivetRequestExample("{\"email\":\"ada@example.com\",\"password\":\"secret\"}")]
+                public static Task<IActionResult> Login([FromForm] LoginRequest request)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        using var doc = EmitOpenApiFromController(source);
+        var formContent = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/login")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/x-www-form-urlencoded");
+
+        Assert.Equal("ada@example.com", formContent.GetProperty("example").GetProperty("email").GetString());
+        Assert.Equal("secret", formContent.GetProperty("example").GetProperty("password").GetString());
     }
 
     [Fact]

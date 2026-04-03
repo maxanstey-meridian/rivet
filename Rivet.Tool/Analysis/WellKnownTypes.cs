@@ -19,6 +19,7 @@ public sealed class WellKnownTypes
     // Binding attributes
     public readonly INamedTypeSymbol? Route;
     public readonly INamedTypeSymbol? FromBody;
+    public readonly INamedTypeSymbol? FromForm;
     public readonly INamedTypeSymbol? FromQuery;
     public readonly INamedTypeSymbol? FromRoute;
 
@@ -89,6 +90,7 @@ public sealed class WellKnownTypes
         // Binding attributes
         Route = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.RouteAttribute");
         FromBody = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromBodyAttribute");
+        FromForm = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromFormAttribute");
         FromQuery = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromQueryAttribute");
         FromRoute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromRouteAttribute");
 
