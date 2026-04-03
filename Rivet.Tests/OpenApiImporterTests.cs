@@ -835,6 +835,119 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Request_Example_Survives_For_Unsupported_Request_Content_Type()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+                "/api/messages": {
+                    "post": {
+                        "operationId": "messages_create",
+                        "tags": ["Messages"],
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "text/plain": {
+                                    "example": "hello world"
+                                }
+                            }
+                        },
+                        "responses": {
+                            "204": {
+                                "description": "Created"
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var (result, endpoints) = ImportSpecAndWalkContracts(spec);
+        var contract = CompilationHelper.FindFile(result, "MessagesContract.cs");
+        var endpoint = Assert.Single(endpoints);
+
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("text/plain", requestExample.MediaType);
+        Assert.Null(requestExample.Name);
+        Assert.Equal("\"hello world\"", requestExample.Json);
+        Assert.Null(requestExample.ComponentExampleId);
+        Assert.Null(requestExample.ResolvedJson);
+
+        Assert.Contains("[rivet:unsupported body content-type=text/plain]", contract);
+        Assert.Contains(
+            ".RequestExampleJson(\"\\\"hello world\\\"\", mediaType: \"text/plain\")",
+            contract);
+    }
+
+    [Fact]
+    public void Request_Unresolved_Ref_Example_Is_Explicit_Not_Silent()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "API", "version": "1.0.0" },
+              "components": {
+                "schemas": {
+                  "QueueRequest": {
+                    "type": "object",
+                    "properties": {
+                      "mode": { "type": "string" }
+                    },
+                    "required": ["mode"]
+                  }
+                }
+              },
+              "paths": {
+                "/api/imports": {
+                  "post": {
+                    "operationId": "imports_queue",
+                    "tags": ["Imports"],
+                    "requestBody": {
+                      "required": true,
+                      "content": {
+                        "application/json": {
+                          "schema": { "$ref": "#/components/schemas/QueueRequest" },
+                          "examples": {
+                            "validRequest": {
+                              "value": { "mode": "fast" }
+                            },
+                            "missingRef": {
+                              "$ref": "#/components/examples/missing-request"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "responses": {
+                      "202": {
+                        "description": "Queued"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        var (result, endpoints) = ImportSpecAndWalkContracts(spec, "Test");
+        var contract = CompilationHelper.FindFile(result, "ImportsContract.cs");
+        var endpoint = Assert.Single(endpoints);
+
+        var requestExample = Assert.Single(endpoint.RequestExamples!);
+        Assert.Equal("validRequest", requestExample.Name);
+        Assert.Equal("application/json", requestExample.MediaType);
+        Assert.Equal("""{"mode":"fast"}""", requestExample.Json);
+        Assert.Null(requestExample.ComponentExampleId);
+        Assert.Null(requestExample.ResolvedJson);
+
+        Assert.Contains(
+            ".RequestExampleJson(\"{\\\"mode\\\":\\\"fast\\\"}\", mediaType: \"application/json\", name: \"validRequest\")",
+            contract);
+        Assert.Contains(
+            "[rivet:unsupported request-example media-type=application/json name=missingRef component-example-id=missing-request reason=unresolved-ref]",
+            contract);
+    }
+
+    [Fact]
     public void Response_Invalid_Example_Entries_Are_Explicit_Not_Silent()
     {
         const string spec = """
