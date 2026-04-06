@@ -151,7 +151,7 @@ app.MapGet(MembersContract.List.Route, async (AppDb db, CancellationToken ct) =>
     })).ToResult());  // you write ToResult() once, same pattern as ToActionResult()
 ```
 
-## Add `--compile` → runtime validation with Zod
+## Runtime validation with Zod
 
 ```bash
 dotnet rivet --project Api.csproj --output ./generated --compile
