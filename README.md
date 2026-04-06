@@ -71,7 +71,7 @@ const task = await tasks.get(id);                        // → TaskDetailDto (t
 const result = await tasks.get(id, { unwrap: false });   // → GetResult (no throw)
 ```
 
-## Run Rivet → get a typed runtime client
+## Typed runtime client
 
 ```bash
 dotnet rivet --project Api.csproj --output ./generated
@@ -123,7 +123,7 @@ if (result.status === 200) {
 
 Route parameters, query strings, file uploads (`FormData`), and `void` responses are all handled — the generated client matches the controller signature exactly.
 
-## Or define contracts → get compile-time enforcement
+## Compile-time enforcement
 
 ```csharp
 // Define the API surface — pure Rivet, no ASP.NET dependency
@@ -185,7 +185,7 @@ dotnet rivet --project Api.csproj --output ./generated --jsonschema
 
 This writes `schemas.ts` only — use it with `fromJSONSchema()`, ajv, or any JSON Schema consumer.
 
-## Import OpenAPI → get C# contracts
+## OpenAPI import
 
 Another team owns the API? Import their OpenAPI spec, get typed C# contracts, feed them back into the pipeline. The compiler tells you what broke when the upstream spec changes.
 
