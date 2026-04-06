@@ -71,6 +71,58 @@ const task = await tasks.get(id);                        // → TaskDetailDto (t
 const result = await tasks.get(id, { unwrap: false });   // → GetResult (no throw)
 ```
 
+## Run Rivet → get a typed runtime client
+
+```bash
+dotnet rivet --project Api.csproj --output ./generated
+```
+
+Rivet generates per-controller client modules with a barrel import, a `configureRivet` setup function, and a `RivetError` class — all from your C# source, no config files:
+
+```typescript
+// generated/rivet/client/tasks.ts — one module per controller
+import { rivetFetch, type RivetResult } from "../rivet.js";
+import type { TaskDetailDto } from "../types/tasks.js";
+import type { ErrorDto } from "../types/common.js";
+
+export type GetResult =
+  | { status: 200; data: TaskDetailDto; response: Response }
+  | { status: 404; data: ErrorDto; response: Response }
+  | { status: Exclude<number, 200 | 404>; data: unknown; response: Response };
+
+export function get(id: string): Promise<TaskDetailDto>;
+export function get(id: string, opts: { unwrap: false }): Promise<GetResult>;
+export async function get(id: string, opts?: { unwrap?: boolean }): Promise<TaskDetailDto | GetResult> {
+  // ...
+}
+
+// generated/rivet/client/index.ts — barrel for all controllers
+export * as tasks from "./tasks.js";
+export * as members from "./members.js";
+```
+
+Wire it once, then call your API with full type safety:
+
+```typescript
+import { configureRivet } from "./generated/rivet/rivet.js";
+import { tasks } from "./generated/rivet/client/index.js";
+
+configureRivet({ baseUrl: "https://api.example.com" });
+
+// Default: throws RivetError on non-2xx
+const task = await tasks.get("some-id");   // → TaskDetailDto
+
+// Discriminated union: handle each status explicitly
+const result = await tasks.get("some-id", { unwrap: false });
+if (result.status === 200) {
+  console.log(result.data.title);          // TaskDetailDto
+} else if (result.status === 404) {
+  console.log(result.data.message);        // ErrorDto
+}
+```
+
+Route parameters, query strings, file uploads (`FormData`), and `void` responses are all handled — the generated client matches the controller signature exactly.
+
 ## Or define contracts → get compile-time enforcement
 
 ```csharp
