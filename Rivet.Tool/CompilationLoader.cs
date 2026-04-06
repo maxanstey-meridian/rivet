@@ -53,6 +53,17 @@ internal static class CompilationLoader
             return;
         }
 
+        try
+        {
+            MSBuildLocator.RegisterDefaults();
+            return;
+        }
+        catch (InvalidOperationException)
+        {
+            // Fall back to explicit SDK probing for published apphosts that
+            // do not present a default discoverable SDK installation.
+        }
+
         foreach (var sdkPath in GetSdkCandidatePaths())
         {
             if (!File.Exists(Path.Combine(sdkPath, "MSBuild.dll")))
@@ -60,11 +71,12 @@ internal static class CompilationLoader
                 continue;
             }
 
+            Environment.SetEnvironmentVariable("MSBuildSDKsPath", Path.Combine(sdkPath, "Sdks"));
             MSBuildLocator.RegisterMSBuildPath(sdkPath);
             return;
         }
 
-        MSBuildLocator.RegisterDefaults();
+        throw new InvalidOperationException("No instances of MSBuild could be detected.");
     }
 
     private static IEnumerable<string> GetSdkCandidatePaths()

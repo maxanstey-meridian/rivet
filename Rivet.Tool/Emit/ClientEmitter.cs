@@ -19,9 +19,16 @@ public static partial class ClientEmitter
     /// </summary>
     public static string EmitRivetBase()
     {
-        using var stream = typeof(ClientEmitter).Assembly
-            .GetManifestResourceStream("Rivet.Tool.Templates.rivet.ts")
-            ?? throw new InvalidOperationException("Embedded resource 'Rivet.Tool.Templates.rivet.ts' not found.");
+        var assembly = typeof(ClientEmitter).Assembly;
+        var resourceName = assembly.GetManifestResourceNames()
+            .FirstOrDefault(static name => name.EndsWith("rivet.ts", StringComparison.Ordinal));
+        using var stream = resourceName is not null
+            ? assembly.GetManifestResourceStream(resourceName)
+            : null;
+        if (stream is null)
+        {
+            throw new InvalidOperationException("Embedded resource ending with 'rivet.ts' not found.");
+        }
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }
