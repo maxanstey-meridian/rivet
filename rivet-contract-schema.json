@@ -254,6 +254,14 @@
       "required": ["isAnonymous"],
       "additionalProperties": false
     },
+    "queryAuth": {
+      "type": "object",
+      "properties": {
+        "parameterName": { "type": "string" }
+      },
+      "required": ["parameterName"],
+      "additionalProperties": false
+    },
     "endpointDefinition": {
       "type": "object",
       "properties": {
@@ -271,7 +279,10 @@
         "inputTypeName": { "type": "string" },
         "isFormEncoded": { "type": "boolean" },
         "requestType": { "$ref": "#/$defs/tsType" },
-        "requestExamples": { "type": "array", "items": { "$ref": "#/$defs/endpointExample" } }
+        "requestExamples": { "type": "array", "items": { "$ref": "#/$defs/endpointExample" } },
+        "isFileEndpoint": { "type": "boolean" },
+        "contentType": { "type": "string" },
+        "queryAuth": { "$ref": "#/$defs/queryAuth" }
       },
       "required": ["name", "httpMethod", "routeTemplate", "params", "controllerName", "responses"],
       "additionalProperties": false

@@ -141,6 +141,9 @@ public sealed class ContractEmitterTests
         Assert.False(ep.TryGetProperty("fileContentType", out _));
         Assert.False(ep.TryGetProperty("inputTypeName", out _));
         Assert.False(ep.TryGetProperty("isFormEncoded", out _));
+        Assert.False(ep.TryGetProperty("isFileEndpoint", out _));
+        Assert.False(ep.TryGetProperty("contentType", out _));
+        Assert.False(ep.TryGetProperty("queryAuth", out _));
     }
 
     [Fact]
@@ -823,5 +826,171 @@ public sealed class ContractEmitterTests
         Assert.Equal("Status", root.GetProperty("enums")[0].GetProperty("name").GetString());
         Assert.Equal(1, root.GetProperty("endpoints").GetArrayLength());
         Assert.Equal("getUser", root.GetProperty("endpoints")[0].GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public void QueryAuth_Serializes_With_ParameterName()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "streamVideo",
+            "GET",
+            "/api/media/{id}/stream",
+            [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+            null,
+            "MediaController",
+            [new TsResponseType(200, null)],
+            QueryAuth: new QueryAuthMetadata("token"));
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var ep = doc.RootElement.GetProperty("endpoints")[0];
+
+        Assert.True(ep.TryGetProperty("queryAuth", out var qa));
+        Assert.Equal("token", qa.GetProperty("parameterName").GetString());
+    }
+
+    [Fact]
+    public void QueryAuth_Custom_ParameterName_Serializes()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "streamVideo",
+            "GET",
+            "/api/media/{id}/stream",
+            [],
+            null,
+            "MediaController",
+            [new TsResponseType(200, null)],
+            QueryAuth: new QueryAuthMetadata("key"));
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var qa = doc.RootElement.GetProperty("endpoints")[0].GetProperty("queryAuth");
+
+        Assert.Equal("key", qa.GetProperty("parameterName").GetString());
+    }
+
+    [Fact]
+    public void QueryAuth_Omitted_When_Null()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "getUser",
+            "GET",
+            "/api/users/{id}",
+            [],
+            null,
+            "UsersController",
+            [new TsResponseType(200, null)]);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var ep = doc.RootElement.GetProperty("endpoints")[0];
+
+        Assert.False(ep.TryGetProperty("queryAuth", out _));
+    }
+
+    [Fact]
+    public void IsFileEndpoint_True_Serializes()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "downloadFile",
+            "GET",
+            "/api/files/{id}",
+            [],
+            null,
+            "FilesController",
+            [new TsResponseType(200, null)],
+            IsFileEndpoint: true);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var ep = doc.RootElement.GetProperty("endpoints")[0];
+
+        Assert.True(ep.GetProperty("isFileEndpoint").GetBoolean());
+    }
+
+    [Fact]
+    public void IsFileEndpoint_False_Omitted()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "getUser",
+            "GET",
+            "/api/users/{id}",
+            [],
+            null,
+            "UsersController",
+            [new TsResponseType(200, null)],
+            IsFileEndpoint: false);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var ep = doc.RootElement.GetProperty("endpoints")[0];
+
+        Assert.False(ep.TryGetProperty("isFileEndpoint", out _));
+    }
+
+    [Fact]
+    public void ContentType_Serializes_From_FileContentType()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "streamVideo",
+            "GET",
+            "/api/media/{id}/stream",
+            [],
+            null,
+            "MediaController",
+            [new TsResponseType(200, null)],
+            FileContentType: "video/mp4",
+            IsFileEndpoint: true);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var ep = doc.RootElement.GetProperty("endpoints")[0];
+
+        Assert.Equal("video/mp4", ep.GetProperty("contentType").GetString());
+        // fileContentType is also emitted (existing behaviour)
+        Assert.Equal("video/mp4", ep.GetProperty("fileContentType").GetString());
+    }
+
+    [Fact]
+    public void ContentType_Omitted_When_Null()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "getUser",
+            "GET",
+            "/api/users/{id}",
+            [],
+            null,
+            "UsersController",
+            [new TsResponseType(200, null)]);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var ep = doc.RootElement.GetProperty("endpoints")[0];
+
+        Assert.False(ep.TryGetProperty("contentType", out _));
+    }
+
+    [Fact]
+    public void File_Endpoint_With_QueryAuth_Serializes_All_Fields()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "streamVideo",
+            "GET",
+            "/api/media/{id}/stream",
+            [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+            null,
+            "MediaController",
+            [new TsResponseType(200, null)],
+            FileContentType: "video/mp4",
+            IsFileEndpoint: true,
+            QueryAuth: new QueryAuthMetadata("token"));
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        using var doc = JsonDocument.Parse(json);
+        var ep = doc.RootElement.GetProperty("endpoints")[0];
+
+        Assert.True(ep.GetProperty("isFileEndpoint").GetBoolean());
+        Assert.Equal("video/mp4", ep.GetProperty("contentType").GetString());
+        Assert.Equal("token", ep.GetProperty("queryAuth").GetProperty("parameterName").GetString());
     }
 }

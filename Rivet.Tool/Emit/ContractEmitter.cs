@@ -24,6 +24,8 @@ public static class ContractEmitter
         IReadOnlyList<string>? Values = null,
         IReadOnlyList<int>? IntValues = null);
 
+    internal sealed record ContractQueryAuth(string ParameterName);
+
     internal sealed record ContractEndpoint(
         string Name,
         string HttpMethod,
@@ -39,7 +41,10 @@ public static class ContractEmitter
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? InputTypeName = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFormEncoded = false,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? RequestType = null,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ContractEndpointExample>? RequestExamples = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ContractEndpointExample>? RequestExamples = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFileEndpoint = false,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ContentType = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContractQueryAuth? QueryAuth = null);
 
     internal sealed record ContractResponseType(
         int StatusCode,
@@ -91,7 +96,10 @@ public static class ContractEmitter
             endpoint.InputTypeName,
             endpoint.IsFormEncoded,
             endpoint.RequestType,
-            endpoint.RequestExamples?.Select(ToContractEndpointExample).ToList());
+            endpoint.RequestExamples?.Select(ToContractEndpointExample).ToList(),
+            endpoint.IsFileEndpoint,
+            endpoint.FileContentType,
+            endpoint.QueryAuth is { } qa ? new ContractQueryAuth(qa.ParameterName) : null);
     }
 
     internal static ContractResponseType ToContractResponseType(TsResponseType response)

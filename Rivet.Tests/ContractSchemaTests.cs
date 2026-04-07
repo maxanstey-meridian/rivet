@@ -577,6 +577,94 @@ public sealed class ContractSchemaTests
         Assert.False(result.IsValid);
     }
 
+    [Fact]
+    public void Endpoint_With_QueryAuth_Validates()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "streamVideo",
+            "GET",
+            "/api/media/{id}/stream",
+            [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+            null,
+            "MediaController",
+            [new TsResponseType(200, null)],
+            FileContentType: "video/mp4",
+            IsFileEndpoint: true,
+            QueryAuth: new QueryAuthMetadata("token"));
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var result = Validate(json);
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void Endpoint_With_IsFileEndpoint_Only_Validates()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "downloadFile",
+            "GET",
+            "/api/files/{id}",
+            [],
+            null,
+            "FilesController",
+            [new TsResponseType(200, null)],
+            IsFileEndpoint: true);
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var result = Validate(json);
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void QueryAuth_Missing_ParameterName_Rejected()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "stream",
+                        "httpMethod": "GET",
+                        "routeTemplate": "/stream",
+                        "controllerName": "media",
+                        "params": [],
+                        "responses": [],
+                        "queryAuth": {}
+                    }
+                ]
+            }
+            """;
+
+        var result = Validate(json);
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void QueryAuth_Extra_Property_Rejected()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "stream",
+                        "httpMethod": "GET",
+                        "routeTemplate": "/stream",
+                        "controllerName": "media",
+                        "params": [],
+                        "responses": [],
+                        "queryAuth": { "parameterName": "token", "extra": true }
+                    }
+                ]
+            }
+            """;
+
+        var result = Validate(json);
+        Assert.False(result.IsValid);
+    }
+
     private static string FormatErrors(EvaluationResults results) =>
         string.Join("\n", results.Details
             .Where(d => !d.IsValid && d.Errors is not null)
