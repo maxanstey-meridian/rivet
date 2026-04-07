@@ -449,7 +449,8 @@ public sealed class ClientEmitterTests
         string controller = "buyer",
         TsType? requestType = null,
         bool isFormEncoded = false,
-        IReadOnlyList<TsResponseType>? responses = null) =>
+        IReadOnlyList<TsResponseType>? responses = null,
+        QueryAuthMetadata? queryAuth = null) =>
         new(
             Name: name,
             HttpMethod: method,
@@ -459,7 +460,8 @@ public sealed class ClientEmitterTests
             ControllerName: controller,
             Responses: responses ?? [],
             IsFormEncoded: isFormEncoded,
-            RequestType: requestType);
+            RequestType: requestType,
+            QueryAuth: queryAuth);
 
     [Fact]
     public void RequestType_TypeRef_EmitsBodyParam()
@@ -687,5 +689,122 @@ public sealed class ClientEmitterTests
         // Discriminated union result type should use the extracted name
         Assert.Contains("data: EndpointGetItemDto", client);
         Assert.DoesNotContain("{ id: string; title: string }", client);
+    }
+
+    // --- QueryAuth *Url() function tests ---
+
+    [Fact]
+    public void QueryAuth_EmitsUrlFunction()
+    {
+        var endpoint = MakeEndpoint(
+            name: "getStream",
+            method: "GET",
+            route: "/api/streams/{id}",
+            @params: [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+            returnType: new TsType.Primitive("void"),
+            queryAuth: new QueryAuthMetadata("token"));
+
+        var output = ClientEmitter.EmitControllerClient("streams", [endpoint], new Dictionary<string, string>());
+
+        // Standard fetch function still emitted
+        Assert.Contains("export function getStream(id: string): Promise<void>;", output);
+
+        // *Url() companion function emitted
+        Assert.Contains("export function getStreamUrl(id: string, token: string): string {", output);
+        Assert.Contains("getBaseUrl()", output);
+        Assert.Contains("token=${encodeURIComponent(token)}", output);
+    }
+
+    [Fact]
+    public void QueryAuth_CustomParameterName()
+    {
+        var endpoint = MakeEndpoint(
+            name: "getStream",
+            method: "GET",
+            route: "/api/streams/{id}",
+            @params: [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+            returnType: new TsType.Primitive("void"),
+            queryAuth: new QueryAuthMetadata("key"));
+
+        var output = ClientEmitter.EmitControllerClient("streams", [endpoint], new Dictionary<string, string>());
+
+        Assert.Contains("export function getStreamUrl(id: string, key: string): string {", output);
+        Assert.Contains("key=${encodeURIComponent(key)}", output);
+        Assert.DoesNotContain("token", output.Split('\n').First(l => l.Contains("getStreamUrl")));
+    }
+
+    [Fact]
+    public void QueryAuth_ImportsGetBaseUrl()
+    {
+        var endpoint = MakeEndpoint(
+            name: "getStream",
+            method: "GET",
+            route: "/api/streams",
+            returnType: new TsType.Primitive("void"),
+            queryAuth: new QueryAuthMetadata("token"));
+
+        var output = ClientEmitter.EmitControllerClient("streams", [endpoint], new Dictionary<string, string>());
+
+        Assert.Contains("import { rivetFetch, getBaseUrl, type RivetResult } from \"../rivet.js\";", output);
+    }
+
+    [Fact]
+    public void NoQueryAuth_NoUrlFunction_NoGetBaseUrlImport()
+    {
+        var endpoint = MakeEndpoint(
+            name: "getItem",
+            method: "GET",
+            route: "/api/items/{id}",
+            @params: [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+            returnType: new TsType.Primitive("void"));
+
+        var output = ClientEmitter.EmitControllerClient("items", [endpoint], new Dictionary<string, string>());
+
+        Assert.DoesNotContain("Url(", output);
+        Assert.DoesNotContain("getBaseUrl", output);
+        Assert.Contains("import { rivetFetch, type RivetResult } from \"../rivet.js\";", output);
+    }
+
+    [Fact]
+    public void QueryAuth_WithExistingQueryParams_MergesInUrl()
+    {
+        var endpoint = MakeEndpoint(
+            name: "getStream",
+            method: "GET",
+            route: "/api/streams",
+            @params: [new TsEndpointParam("quality", new TsType.Primitive("string"), ParamSource.Query)],
+            returnType: new TsType.Primitive("void"),
+            queryAuth: new QueryAuthMetadata("token"));
+
+        var output = ClientEmitter.EmitControllerClient("streams", [endpoint], new Dictionary<string, string>());
+
+        // Url function should include both the query param and the token
+        var urlLine = output.Split('\n').First(l => l.Contains("getStreamUrl"));
+        Assert.Contains("quality: string, token: string", urlLine);
+
+        // Both query param and token in the URL
+        Assert.Contains("quality=${encodeURIComponent(String(quality))}", output);
+        Assert.Contains("token=${encodeURIComponent(token)}", output);
+    }
+
+    [Fact]
+    public void QueryAuth_ReturnsStringNotPromise()
+    {
+        var endpoint = MakeEndpoint(
+            name: "getStream",
+            method: "GET",
+            route: "/api/streams",
+            returnType: new TsType.Primitive("void"),
+            queryAuth: new QueryAuthMetadata("token"));
+
+        var output = ClientEmitter.EmitControllerClient("streams", [endpoint], new Dictionary<string, string>());
+
+        Assert.Contains("): string {", output);
+        // The Url function should not contain rivetFetch
+        var urlFuncLines = output.Split('\n')
+            .SkipWhile(l => !l.Contains("getStreamUrl"))
+            .TakeWhile(l => !l.StartsWith("}") || l.Contains("getStreamUrl"))
+            .ToList();
+        Assert.DoesNotContain(urlFuncLines, l => l.Contains("rivetFetch"));
     }
 }

@@ -47,7 +47,11 @@ public static partial class ClientEmitter
         sb.AppendLine();
 
         // Import rivetFetch + types from shared module
-        sb.AppendLine("import { rivetFetch, type RivetResult } from \"../rivet.js\";");
+        var needsGetBaseUrl = endpoints.Any(e => e.QueryAuth is not null);
+        var rivetImports = needsGetBaseUrl
+            ? "import { rivetFetch, getBaseUrl, type RivetResult } from \"../rivet.js\";"
+            : "import { rivetFetch, type RivetResult } from \"../rivet.js\";";
+        sb.AppendLine(rivetImports);
 
         // Import validator assertions
         if (validateMode == ValidateMode.Zod)
@@ -301,6 +305,51 @@ public static partial class ClientEmitter
             sb.AppendLine($"  return rivetFetch<{resultTypeName}>(\"{endpoint.HttpMethod}\", `{route}`{fullFetchStr});");
         }
 
+        sb.AppendLine("}");
+
+        // Emit companion *Url() function for QueryAuth endpoints
+        if (endpoint.QueryAuth is not null)
+        {
+            EmitUrlFunction(sb, endpoint);
+        }
+    }
+
+    private static void EmitUrlFunction(StringBuilder sb, TsEndpointDefinition endpoint)
+    {
+        var funcName = SafeFunctionName(endpoint.Name);
+        var urlFuncName = $"{funcName}Url";
+        var route = InterpolateRoute(endpoint.RouteTemplate, endpoint.Params);
+        var queryAuthParam = endpoint.QueryAuth!.ParameterName;
+
+        // Build parameter list: input params + auth token
+        var paramParts = new List<string>();
+        foreach (var p in endpoint.Params)
+        {
+            paramParts.Add($"{SafeParameterName(p.Name)}: {TypeEmitter.EmitTypeString(p.Type)}");
+        }
+        paramParts.Add($"{SafeParameterName(queryAuthParam)}: string");
+
+        var paramsStr = string.Join(", ", paramParts);
+
+        // Build query string parts
+        var queryParts = new List<string>();
+
+        // Include existing query params
+        var queryParams = endpoint.Params.Where(p => p.Source == ParamSource.Query).ToList();
+        foreach (var qp in queryParams)
+        {
+            var safe = SafeParameterName(qp.Name);
+            queryParts.Add($"{qp.Name}=${{encodeURIComponent(String({safe}))}}");
+        }
+
+        // Append the auth token
+        queryParts.Add($"{queryAuthParam}=${{encodeURIComponent({SafeParameterName(queryAuthParam)})}}");
+
+        var queryString = string.Join("&", queryParts);
+
+        sb.AppendLine();
+        sb.AppendLine($"export function {urlFuncName}({paramsStr}): string {{");
+        sb.AppendLine($"  return `${{getBaseUrl()}}{route}?{queryString}`;");
         sb.AppendLine("}");
     }
 
