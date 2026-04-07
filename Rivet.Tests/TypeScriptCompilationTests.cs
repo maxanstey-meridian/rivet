@@ -505,13 +505,13 @@ public sealed class TypeScriptCompilationTests : IDisposable
             security: null);
         Assert.Contains("\"x-rivet-query-auth\"", openApiJson);
 
-        // 5. TypeScript client includes *Url() function and getBaseUrl
+        // 5. TypeScript client includes *Url() function with route params and getBaseUrl
         var typeFileMap = CompilationHelper.BuildTypeFileMap(walker);
         var groups = ClientEmitter.GroupByController(contractEndpoints.ToList());
         var clientTs = string.Concat(
             groups.Select(g => ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
-        Assert.Contains("streamUrl(", clientTs);
-        Assert.Contains("previewUrl(", clientTs);
+        Assert.Contains("streamUrl(id: string, token: string): string", clientTs);
+        Assert.Contains("previewUrl(id: string, key: string): string", clientTs);
         Assert.Contains("getBaseUrl()", clientTs);
         Assert.DoesNotContain("listUrl(", clientTs);
 

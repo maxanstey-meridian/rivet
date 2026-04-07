@@ -361,6 +361,69 @@ public sealed class ContractWalkerFileEndpointTests
     }
 
     [Fact]
+    public void FileEndpointWithInputType_ExtractsQueryParams()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record FileRequest(string Path);
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly Define Stream =
+                    Define.File<FileRequest>("/api/files/stream")
+                        .QueryAuth();
+            }
+            """;
+
+        var endpoints = Walk(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.True(ep.IsFileEndpoint);
+        // FileRequest.Path should become a query param — it's not in the route template
+        var pathParam = Assert.Single(ep.Params, p => p.Name == "path");
+        Assert.Equal(ParamSource.Query, pathParam.Source);
+    }
+
+    [Fact]
+    public void FileEndpointWithInputType_ExtractsRouteAndQueryParams()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record StreamInput(string Id, string Quality);
+
+            [RivetContract]
+            public static class MediaContract
+            {
+                public static readonly Define Stream =
+                    Define.File<StreamInput>("/api/media/{id}/stream")
+                        .ContentType("video/mp4")
+                        .QueryAuth();
+            }
+            """;
+
+        var endpoints = Walk(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.True(ep.IsFileEndpoint);
+        Assert.Equal(2, ep.Params.Count);
+        var idParam = Assert.Single(ep.Params, p => p.Name == "id");
+        Assert.Equal(ParamSource.Route, idParam.Source);
+        var qualityParam = Assert.Single(ep.Params, p => p.Name == "quality");
+        Assert.Equal(ParamSource.Query, qualityParam.Source);
+    }
+
+    [Fact]
     public void FileResultReturnType_SetsIsFileEndpoint()
     {
         var source = """

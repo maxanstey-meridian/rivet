@@ -180,7 +180,12 @@ public static class ContractWalker
         }
         else if (root.TypeArgs.Count == 1)
         {
-            tOutput = root.TypeArgs[0];
+            // Define.File<TInput> has a single type arg that represents the input type,
+            // while Define.Get<TOutput> has a single type arg that represents the output type.
+            if (isFileEndpoint)
+                tInput = root.TypeArgs[0];
+            else
+                tOutput = root.TypeArgs[0];
         }
 
         // Process chained calls: .Accepts<T>(), .Returns<T>(statusCode[, description]),
