@@ -124,7 +124,9 @@ internal static class EmitPipeline
         {
             var securityConfig = SecurityParser.Parse(options.DefaultSecurity);
             var openApiJson = OpenApiEmitter.Emit(endpoints, input.DefinitionsByName, input.BrandsByName, input.Enums, securityConfig);
-            var openApiFilePath = Path.Combine(outputDir, options.OpenApiPath);
+            var openApiFilePath = Path.IsPathRooted(options.OpenApiPath)
+                ? options.OpenApiPath
+                : Path.GetFullPath(options.OpenApiPath);
             await File.WriteAllTextAsync(openApiFilePath, openApiJson);
             Console.WriteLine($"  {options.OpenApiPath} → {openApiFilePath}");
         }
