@@ -327,6 +327,14 @@ public static class ContractWalker
             tOutput = null; // Named file tuple — don't map to TS, client gets Blob
         }
 
+        // Stream / FileResult return types → implicit file endpoint
+        if (IsFileReturnType(tOutput))
+        {
+            isFileEndpoint = true;
+            fileContentType ??= "application/octet-stream";
+            tOutput = null; // Don't map Stream/FileResult to TS — client gets Blob
+        }
+
         // Build return type from TOutput
         TsType? returnType = tOutput is not null ? typeWalker.MapType(tOutput) : null;
 
@@ -599,6 +607,24 @@ public static class ContractWalker
     private static bool HasFormFileProperty(WellKnownTypes wkt, ITypeSymbol type) =>
         type.GetMembers().OfType<IPropertySymbol>()
             .Any(p => !p.IsImplicitlyDeclared && IsFormFileType(wkt, p.Type));
+
+    /// <summary>
+    /// Checks if the return type is a known file/stream type that should be treated
+    /// as a file endpoint (Stream, FileResult, FileStreamResult, etc.).
+    /// </summary>
+    private static bool IsFileReturnType(ITypeSymbol? type)
+    {
+        if (type is null) return false;
+
+        var ns = type.ContainingNamespace?.ToDisplayString();
+        return type.Name switch
+        {
+            "Stream" when ns is "System.IO" => true,
+            "FileResult" or "FileStreamResult" or "FileContentResult" or "PhysicalFileResult"
+                when ns is "Microsoft.AspNetCore.Mvc" => true,
+            _ => false,
+        };
+    }
 
     /// <summary>
     /// Checks if the type is a (byte[], string) tuple — used for named file downloads

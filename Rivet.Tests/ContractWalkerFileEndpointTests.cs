@@ -151,4 +151,179 @@ public sealed class ContractWalkerFileEndpointTests
         Assert.Equal("application/octet-stream", ep.FileContentType);
         Assert.Null(ep.QueryAuth);
     }
+
+    // --- Return-type heuristic tests ---
+
+    [Fact]
+    public void StreamReturnType_SetsIsFileEndpoint()
+    {
+        var source = """
+            using Rivet;
+            using System.IO;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record StreamInput(string Id);
+
+            [RivetContract]
+            public static class MediaContract
+            {
+                public static readonly Define GetStream =
+                    Define.Get<StreamInput, Stream>("/api/media/{id}/stream");
+            }
+            """;
+
+        var endpoints = Walk(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.True(ep.IsFileEndpoint);
+        Assert.Equal("application/octet-stream", ep.FileContentType);
+        Assert.Null(ep.ReturnType); // Stream should not map to a TS type
+    }
+
+    [Fact]
+    public void FileStreamResultReturnType_SetsIsFileEndpoint()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Microsoft.AspNetCore.Mvc { public class FileStreamResult { } }
+
+            namespace Test
+            {
+                [RivetType]
+                public sealed record DownloadInput(string Id);
+
+                [RivetContract]
+                public static class FilesContract
+                {
+                    public static readonly Define Download =
+                        Define.Get<DownloadInput, Microsoft.AspNetCore.Mvc.FileStreamResult>("/api/files/{id}");
+                }
+            }
+            """;
+
+        var endpoints = Walk(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.True(ep.IsFileEndpoint);
+        Assert.Equal("application/octet-stream", ep.FileContentType);
+        Assert.Null(ep.ReturnType);
+    }
+
+    [Fact]
+    public void FileContentResultReturnType_SetsIsFileEndpoint()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Microsoft.AspNetCore.Mvc { public class FileContentResult { } }
+
+            namespace Test
+            {
+                [RivetContract]
+                public static class FilesContract
+                {
+                    public static readonly Define Download =
+                        Define.Get<Microsoft.AspNetCore.Mvc.FileContentResult>("/api/files/export");
+                }
+            }
+            """;
+
+        var endpoints = Walk(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.True(ep.IsFileEndpoint);
+        Assert.Null(ep.ReturnType);
+    }
+
+    [Fact]
+    public void PhysicalFileResultReturnType_SetsIsFileEndpoint()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Microsoft.AspNetCore.Mvc { public class PhysicalFileResult { } }
+
+            namespace Test
+            {
+                [RivetContract]
+                public static class FilesContract
+                {
+                    public static readonly Define Download =
+                        Define.Get<Microsoft.AspNetCore.Mvc.PhysicalFileResult>("/api/files/physical");
+                }
+            }
+            """;
+
+        var endpoints = Walk(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.True(ep.IsFileEndpoint);
+        Assert.Null(ep.ReturnType);
+    }
+
+    [Fact]
+    public void StandardJsonReturnType_IsNotFileEndpoint()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemInput(string Id);
+
+            [RivetType]
+            public sealed record ItemDto(string Id, string Name);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly Define GetItem =
+                    Define.Get<ItemInput, ItemDto>("/api/items/{id}");
+            }
+            """;
+
+        var endpoints = Walk(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.False(ep.IsFileEndpoint);
+        Assert.NotNull(ep.ReturnType);
+        Assert.Null(ep.FileContentType);
+    }
+
+    [Fact]
+    public void ExplicitDefineFile_TakesPrecedenceOverReturnTypeHeuristic()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record StreamInput(string Id);
+
+            [RivetContract]
+            public static class MediaContract
+            {
+                public static readonly Define GetVideo =
+                    Define.File<StreamInput>("/api/media/{id}/video")
+                        .ContentType("video/mp4");
+            }
+            """;
+
+        var endpoints = Walk(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.True(ep.IsFileEndpoint);
+        Assert.Equal("video/mp4", ep.FileContentType); // Not overridden to octet-stream
+    }
 }
