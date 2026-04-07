@@ -281,7 +281,6 @@
         "requestType": { "$ref": "#/$defs/tsType" },
         "requestExamples": { "type": "array", "items": { "$ref": "#/$defs/endpointExample" } },
         "isFileEndpoint": { "type": "boolean" },
-        "contentType": { "type": "string" },
         "queryAuth": { "$ref": "#/$defs/queryAuth" }
       },
       "required": ["name", "httpMethod", "routeTemplate", "params", "controllerName", "responses"],

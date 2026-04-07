@@ -83,8 +83,10 @@ internal static class ContractBuilder
         // Resolve output type (lowest 2xx response with JSON content)
         var (outputType, successStatus, fileContentType) = ResolveOutputType(operation, mapper, fieldName, unsupported);
 
-        // File endpoint: binary content type means this is a file endpoint
-        var isFileEndpoint = fileContentType is not null;
+        // File endpoint: binary content type on a GET endpoint → Define.File()
+        // Non-GET binary endpoints (e.g. POST → PDF) keep Define.{Method}().ProducesFile()
+        var isFileEndpoint = fileContentType is not null
+            && httpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase);
 
         // Error responses
         var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, unsupported);

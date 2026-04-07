@@ -4093,6 +4093,55 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void NonGet_Binary_Endpoint_Uses_ProducesFile_Not_DefineFile()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+                "/api/reports/generate": {
+                    "post": {
+                        "operationId": "reports_generate",
+                        "tags": ["Reports"],
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "format": { "type": "string" }
+                                        },
+                                        "required": ["format"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {
+                                "description": "PDF report",
+                                "content": {
+                                    "application/pdf": {
+                                        "schema": {
+                                            "type": "string",
+                                            "format": "binary"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """, title: "API");
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "ReportsContract.cs");
+
+        // Non-GET binary endpoint must use Define.Post().ProducesFile(), NOT Define.File()
+        Assert.Contains("Define.Post", content);
+        Assert.Contains(".ProducesFile(\"application/pdf\")", content);
+        Assert.DoesNotContain("Define.File", content);
+        Assert.DoesNotContain("FileRouteDefinition", content);
+    }
+
+    [Fact]
     public void QueryAuth_RoundTrip_Preserves_Metadata()
     {
         var spec = CompilationHelper.BuildSpec(

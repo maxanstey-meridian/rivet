@@ -946,8 +946,6 @@ public sealed class ContractEmitterTests
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
-        Assert.Equal("video/mp4", ep.GetProperty("contentType").GetString());
-        // fileContentType is also emitted (existing behaviour)
         Assert.Equal("video/mp4", ep.GetProperty("fileContentType").GetString());
     }
 
@@ -967,7 +965,7 @@ public sealed class ContractEmitterTests
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
-        Assert.False(ep.TryGetProperty("contentType", out _));
+        Assert.False(ep.TryGetProperty("fileContentType", out _));
     }
 
     [Fact]
@@ -990,7 +988,7 @@ public sealed class ContractEmitterTests
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
         Assert.True(ep.GetProperty("isFileEndpoint").GetBoolean());
-        Assert.Equal("video/mp4", ep.GetProperty("contentType").GetString());
+        Assert.Equal("video/mp4", ep.GetProperty("fileContentType").GetString());
         Assert.Equal("token", ep.GetProperty("queryAuth").GetProperty("parameterName").GetString());
     }
 }

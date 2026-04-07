@@ -43,7 +43,6 @@ public static class ContractEmitter
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? RequestType = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ContractEndpointExample>? RequestExamples = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFileEndpoint = false,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ContentType = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContractQueryAuth? QueryAuth = null);
 
     internal sealed record ContractResponseType(
@@ -98,7 +97,6 @@ public static class ContractEmitter
             endpoint.RequestType,
             endpoint.RequestExamples?.Select(ToContractEndpointExample).ToList(),
             endpoint.IsFileEndpoint,
-            endpoint.FileContentType,
             endpoint.QueryAuth is { } qa ? new ContractQueryAuth(qa.ParameterName) : null);
     }
 
