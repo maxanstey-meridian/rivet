@@ -520,6 +520,131 @@ public sealed class TypeScriptCompilationTests : IDisposable
         Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
     }
 
+    [Fact]
+    public async Task FileEndpointWithInputType_FullRoundTrip()
+    {
+        // A richly annotated file endpoint: typed input (route + query params),
+        // custom content type, QueryAuth with custom param name, and error responses.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace MyApp.Contracts
+            {
+                [RivetType]
+                public sealed record StreamInput(string Id, string Quality);
+
+                public sealed record ErrorDto(string Code, string Message);
+            }
+
+            namespace MyApp.Api
+            {
+                using MyApp.Contracts;
+
+                [RivetContract]
+                public static class MediaContract
+                {
+                    public static readonly FileRouteDefinition<StreamInput> Stream =
+                        Define.File<StreamInput>("/api/media/{id}/stream")
+                            .ContentType("video/mp4")
+                            .QueryAuth("secret")
+                            .Returns<ErrorDto>(404, "Not found")
+                            .Description("Stream a media file");
+                }
+            }
+            """;
+
+        // ── Stage 1: C# → Walk ──
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+
+        var ep = Assert.Single(endpoints);
+        Assert.Equal("stream", ep.Name);
+        Assert.Equal("GET", ep.HttpMethod);
+        Assert.Equal("/api/media/{id}/stream", ep.RouteTemplate);
+        Assert.True(ep.IsFileEndpoint);
+        Assert.Equal("video/mp4", ep.FileContentType);
+        Assert.NotNull(ep.QueryAuth);
+        Assert.Equal("secret", ep.QueryAuth!.ParameterName);
+        Assert.Equal("Stream a media file", ep.Description);
+
+        // Input type produces route + query params
+        Assert.Equal(2, ep.Params.Count);
+        var idParam = Assert.Single(ep.Params, p => p.Name == "id");
+        Assert.Equal(Rivet.Tool.Model.ParamSource.Route, idParam.Source);
+        var qualityParam = Assert.Single(ep.Params, p => p.Name == "quality");
+        Assert.Equal(Rivet.Tool.Model.ParamSource.Query, qualityParam.Source);
+
+        // ── Stage 2: Walk → Contract JSON ──
+        var contractJson = ContractEmitter.Emit(
+            new Dictionary<string, Rivet.Tool.Model.TsTypeDefinition>(walker.Definitions),
+            new Dictionary<string, Rivet.Tool.Model.TsType>(walker.Enums),
+            endpoints.ToList());
+        Assert.Contains("\"isFileEndpoint\": true", contractJson);
+        Assert.Contains("\"fileContentType\": \"video/mp4\"", contractJson);
+        Assert.Contains("\"queryAuth\"", contractJson);
+        Assert.Contains("\"parameterName\": \"secret\"", contractJson);
+
+        // ── Stage 3: Walk → OpenAPI ──
+        var openApiJson = OpenApiEmitter.Emit(
+            endpoints.ToList(), walker.Definitions, walker.Brands, walker.Enums, security: null);
+        Assert.Contains("\"x-rivet-query-auth\"", openApiJson);
+        Assert.Contains("\"parameterName\": \"secret\"", openApiJson);
+        // Route param, query param, and auth param all present
+        Assert.Contains("\"name\": \"id\"", openApiJson);
+        Assert.Contains("\"name\": \"quality\"", openApiJson);
+        Assert.Contains("\"name\": \"secret\"", openApiJson);
+        // Binary response with correct content type
+        Assert.Contains("\"video/mp4\"", openApiJson);
+
+        // ── Stage 4: OpenAPI → Import → C# ──
+        var importResult = CompilationHelper.Import(openApiJson);
+        var contractFile = CompilationHelper.FindFile(importResult, "MediaContract.cs");
+        Assert.Contains("Define.File<", contractFile);
+        Assert.Contains(".ContentType(\"video/mp4\")", contractFile);
+        Assert.Contains(".QueryAuth(\"secret\")", contractFile);
+        Assert.Contains("FileRouteDefinition<", contractFile);
+
+        // ── Stage 5: Imported C# → Compile → Walk again ──
+        var importedCompilation = CompilationHelper.CompileImportResult(importResult);
+        var (importedDiscovered, importedWalker) = CompilationHelper.DiscoverAndWalk(importedCompilation);
+        var importedEndpoints = CompilationHelper.WalkContracts(
+            importedCompilation, importedDiscovered, importedWalker);
+
+        var importedEp = Assert.Single(importedEndpoints);
+        Assert.Equal("GET", importedEp.HttpMethod);
+        Assert.True(importedEp.IsFileEndpoint);
+        Assert.Equal("video/mp4", importedEp.FileContentType);
+        Assert.NotNull(importedEp.QueryAuth);
+        Assert.Equal("secret", importedEp.QueryAuth!.ParameterName);
+        // Input params survive the round-trip
+        var importedIdParam = Assert.Single(importedEp.Params, p => p.Name == "id");
+        Assert.Equal(Rivet.Tool.Model.ParamSource.Route, importedIdParam.Source);
+        var importedQualityParam = Assert.Single(importedEp.Params, p => p.Name == "quality");
+        Assert.Equal(Rivet.Tool.Model.ParamSource.Query, importedQualityParam.Source);
+
+        // ── Stage 6: Walk → TypeScript client ──
+        var typeFileMap = CompilationHelper.BuildTypeFileMap(walker);
+        var groups = ClientEmitter.GroupByController(endpoints.ToList());
+        var clientTs = string.Concat(
+            groups.Select(g => ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
+        // *Url() function has all params: route param, query param, and auth token
+        Assert.Contains("streamUrl(id: string, quality: string, secret: string): string", clientTs);
+        Assert.Contains("getBaseUrl()", clientTs);
+        // URL includes both query param and auth token
+        Assert.Contains("quality=", clientTs);
+        Assert.Contains("secret=", clientTs);
+
+        // ── Stage 7: Full TS compilation ──
+        var (exitCode, output) = await GenerateAndTypeCheck(source);
+        Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
+    }
+
     private async Task<(int ExitCode, string Output)> GenerateAndTypeCheck(string csharpSource)
     {
         // 1. Compile C# and run Rivet analysis
