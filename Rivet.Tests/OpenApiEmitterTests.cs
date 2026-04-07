@@ -2636,4 +2636,185 @@ public sealed class OpenApiEmitterTests
             "Operation should have a 'description' field");
         Assert.Equal("Retrieves an item by ID", desc.GetString());
     }
+
+    [Fact]
+    public void QueryAuth_Emits_Query_Parameter_And_Extension()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("streamVideo",
+                "GET",
+                "/api/media/{id}/stream",
+                [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+                null,
+                "MediaController",
+                [new TsResponseType(200, null)],
+                QueryAuth: new QueryAuthMetadata("token")),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var operation = doc.RootElement
+            .GetProperty("paths").GetProperty("/api/media/{id}/stream")
+            .GetProperty("get");
+
+        // Query parameter for auth token
+        var parameters = operation.GetProperty("parameters");
+        var tokenParam = parameters.EnumerateArray()
+            .First(p => p.GetProperty("name").GetString() == "token");
+        Assert.Equal("query", tokenParam.GetProperty("in").GetString());
+        Assert.True(tokenParam.GetProperty("required").GetBoolean());
+        Assert.Equal("string", tokenParam.GetProperty("schema").GetProperty("type").GetString());
+
+        // x-rivet-query-auth extension
+        var ext = operation.GetProperty("x-rivet-query-auth");
+        Assert.Equal("token", ext.GetProperty("parameterName").GetString());
+    }
+
+    [Fact]
+    public void QueryAuth_Custom_ParameterName_Emits_Correctly()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("streamAudio",
+                "GET",
+                "/api/audio/{id}",
+                [],
+                null,
+                "AudioController",
+                [new TsResponseType(200, null)],
+                QueryAuth: new QueryAuthMetadata("key")),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var operation = doc.RootElement
+            .GetProperty("paths").GetProperty("/api/audio/{id}")
+            .GetProperty("get");
+
+        var parameters = operation.GetProperty("parameters");
+        Assert.Equal(1, parameters.GetArrayLength());
+        var keyParam = parameters[0];
+        Assert.Equal("key", keyParam.GetProperty("name").GetString());
+        Assert.Equal("query", keyParam.GetProperty("in").GetString());
+        Assert.True(keyParam.GetProperty("required").GetBoolean());
+
+        var ext = operation.GetProperty("x-rivet-query-auth");
+        Assert.Equal("key", ext.GetProperty("parameterName").GetString());
+    }
+
+    [Fact]
+    public void Non_QueryAuth_Endpoint_Has_No_Extension_Or_Extra_Param()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("getUser",
+                "GET",
+                "/api/users/{id}",
+                [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+                new TsType.TypeRef("UserDto"),
+                "UsersController",
+                [new TsResponseType(200, new TsType.TypeRef("UserDto"))]),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var operation = doc.RootElement
+            .GetProperty("paths").GetProperty("/api/users/{id}")
+            .GetProperty("get");
+
+        // Only the route param, no query auth param
+        var parameters = operation.GetProperty("parameters");
+        Assert.Equal(1, parameters.GetArrayLength());
+        Assert.Equal("path", parameters[0].GetProperty("in").GetString());
+
+        // No extension
+        Assert.False(operation.TryGetProperty("x-rivet-query-auth", out _));
+    }
+
+    [Fact]
+    public void File_Endpoint_With_ContentType_Emits_Binary_Response()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("streamVideo",
+                "GET",
+                "/api/media/{id}/stream",
+                [],
+                null,
+                "MediaController",
+                [new TsResponseType(200, null)],
+                FileContentType: "video/mp4",
+                IsFileEndpoint: true),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var resp = doc.RootElement
+            .GetProperty("paths").GetProperty("/api/media/{id}/stream")
+            .GetProperty("get")
+            .GetProperty("responses").GetProperty("200");
+
+        var content = resp.GetProperty("content");
+        Assert.True(content.TryGetProperty("video/mp4", out var mediaContent));
+        Assert.Equal("string", mediaContent.GetProperty("schema").GetProperty("type").GetString());
+        Assert.Equal("binary", mediaContent.GetProperty("schema").GetProperty("format").GetString());
+
+        // Should not have application/json
+        Assert.False(content.TryGetProperty("application/json", out _));
+    }
+
+    [Fact]
+    public void File_Endpoint_With_QueryAuth_Emits_Both_Parameter_And_ContentType()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("streamVideo",
+                "GET",
+                "/api/media/{id}/stream",
+                [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+                null,
+                "MediaController",
+                [new TsResponseType(200, null)],
+                FileContentType: "video/mp4",
+                IsFileEndpoint: true,
+                QueryAuth: new QueryAuthMetadata("token")),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var operation = doc.RootElement
+            .GetProperty("paths").GetProperty("/api/media/{id}/stream")
+            .GetProperty("get");
+
+        // Auth query param present
+        var tokenParam = operation.GetProperty("parameters").EnumerateArray()
+            .First(p => p.GetProperty("name").GetString() == "token");
+        Assert.Equal("query", tokenParam.GetProperty("in").GetString());
+
+        // Extension present
+        Assert.Equal("token", operation.GetProperty("x-rivet-query-auth")
+            .GetProperty("parameterName").GetString());
+
+        // Response uses video/mp4
+        var resp = operation.GetProperty("responses").GetProperty("200")
+            .GetProperty("content");
+        Assert.True(resp.TryGetProperty("video/mp4", out _));
+        Assert.False(resp.TryGetProperty("application/json", out _));
+    }
 }

@@ -163,6 +163,18 @@ public static class OpenApiEmitter
             }
         }
 
+        // QueryAuth: emit auth token as a required query parameter
+        if (ep.QueryAuth is not null)
+        {
+            parameters.Add(new Dictionary<string, object>
+            {
+                ["name"] = ep.QueryAuth.ParameterName,
+                ["in"] = "query",
+                ["required"] = true,
+                ["schema"] = new Dictionary<string, object> { ["type"] = "string" },
+            });
+        }
+
         if (parameters.Count > 0)
         {
             operation["parameters"] = parameters;
@@ -347,6 +359,15 @@ public static class OpenApiEmitter
                     new Dictionary<string, object> { [ep.Security.Scheme] = Array.Empty<string>() },
                 };
             }
+        }
+
+        // QueryAuth: emit extension for round-trip fidelity
+        if (ep.QueryAuth is not null)
+        {
+            operation["x-rivet-query-auth"] = new Dictionary<string, object>
+            {
+                ["parameterName"] = ep.QueryAuth.ParameterName,
+            };
         }
 
         return operation;
