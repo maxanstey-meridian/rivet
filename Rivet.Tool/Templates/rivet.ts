@@ -29,6 +29,8 @@ export const configureRivet = (config: RivetConfig): void => {
   _config = config;
 };
 
+export const getBaseUrl = (): string => _config.baseUrl;
+
 const parseBody = async (res: Response): Promise<unknown> => {
   const text = await res.text().catch(() => "");
   if (!text) return undefined;

@@ -238,6 +238,7 @@ public sealed class ClientEmitterTests
         Assert.Contains("export type RivetConfig", rivetBase);
         Assert.Contains("export type RivetResult<T>", rivetBase);
         Assert.Contains("export const configureRivet", rivetBase);
+        Assert.Contains("export const getBaseUrl", rivetBase);
         Assert.Contains("export const rivetFetch", rivetBase);
         Assert.Contains("unwrap?: boolean", rivetBase);
     }
