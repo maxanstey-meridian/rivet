@@ -163,7 +163,7 @@ public sealed class KitchenSinkImportTests
 
         var taskStatus = (TsType.StringUnion)walker.Enums["TaskStatus"];
         Assert.Contains("my_status", taskStatus.Members);
-        Assert.Contains("ACTIVE", taskStatus.Members);
+        Assert.Contains("active", taskStatus.Members);
         Assert.Contains("in-progress", taskStatus.Members);
 
         var singleRole = (TsType.StringUnion)walker.Enums["SingleRole"];
@@ -845,7 +845,7 @@ public sealed class KitchenSinkImportTests
         // Enums (transitively referenced via UserDto → Priority, ProjectTaskDto → TaskStatus)
         // Original values preserved via [JsonStringEnumMemberName] round-trip
         AssertEnumSchema(emittedSchemas, "Priority", ["low", "medium", "high", "critical"]);
-        AssertEnumSchema(emittedSchemas, "TaskStatus", ["my_status", "ACTIVE", "in-progress"]);
+        AssertEnumSchema(emittedSchemas, "TaskStatus", ["my_status", "active", "in-progress"]);
         AssertEnumSchema(emittedSchemas, "SingleRole", ["admin"]);
 
         // Brands (transitively referenced via UserDto)

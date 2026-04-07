@@ -107,7 +107,7 @@ public sealed class TransitiveEndpointTests
         // Email discovered as branded VO via AuthorInfo
         Assert.Contains("""export type Email = string & { readonly __brand: "Email" };""", types);
         // Priority discovered as named enum type via PostDto
-        Assert.Contains("""export type Priority = "Low" | "Medium" | "High";""", types);
+        Assert.Contains("""export type Priority = "low" | "medium" | "high";""", types);
     }
 
     [Fact]

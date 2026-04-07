@@ -139,7 +139,7 @@ public sealed class TypeEmitterTests
         var result = CompilationHelper.EmitTypes(source);
 
         // Enum emitted as named type alias
-        Assert.Contains("""export type Status = "Draft" | "Active" | "Closed";""", result);
+        Assert.Contains("""export type Status = "draft" | "active" | "closed";""", result);
         // Property references the named type
         Assert.Contains("currentStatus: Status;", result);
     }
@@ -269,7 +269,7 @@ public sealed class TypeEmitterTests
 
         var result = CompilationHelper.EmitTypes(source);
 
-        Assert.Contains("export type MessageVisibility = \"Internal\" | \"Public\";", result);
+        Assert.Contains("export type MessageVisibility = \"internal\" | \"public\";", result);
         Assert.Contains("export type CreateMessageCommand = {", result);
         Assert.Contains("submissionId: string;", result);
         Assert.Contains("body: string;", result);
@@ -763,10 +763,10 @@ public sealed class TypeEmitterTests
         var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("export type Priority =", result);
-        Assert.Contains("\"Low\"", result);
-        Assert.Contains("\"Medium\"", result);
-        Assert.Contains("\"High\"", result);
-        Assert.Contains("\"Critical\"", result);
+        Assert.Contains("\"low\"", result);
+        Assert.Contains("\"medium\"", result);
+        Assert.Contains("\"high\"", result);
+        Assert.Contains("\"critical\"", result);
     }
 
     [Fact]

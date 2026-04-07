@@ -286,9 +286,9 @@ public sealed class OpenApiRoundTripTests
         Assert.True(walker.Definitions.ContainsKey("TaskDto"));
         Assert.True(walker.Enums.ContainsKey("Priority"));
         var priorityEnum = (TsType.StringUnion)walker.Enums["Priority"];
-        Assert.Contains("Low", priorityEnum.Members);
-        Assert.Contains("Medium", priorityEnum.Members);
-        Assert.Contains("High", priorityEnum.Members);
+        Assert.Contains("low", priorityEnum.Members);
+        Assert.Contains("medium", priorityEnum.Members);
+        Assert.Contains("high", priorityEnum.Members);
 
         // Property types on TaskDto survive
         var taskDef = walker.Definitions["TaskDto"];
@@ -1810,9 +1810,9 @@ public sealed class OpenApiRoundTripTests
         // --- Enum survived ---
         Assert.True(walker.Enums.ContainsKey("Status"));
         var statusEnum = (TsType.StringUnion)walker.Enums["Status"];
-        Assert.Contains("Active", statusEnum.Members);
-        Assert.Contains("Inactive", statusEnum.Members);
-        Assert.Contains("Archived", statusEnum.Members);
+        Assert.Contains("active", statusEnum.Members);
+        Assert.Contains("inactive", statusEnum.Members);
+        Assert.Contains("archived", statusEnum.Members);
 
         // --- Brand survived ---
         Assert.True(walker.Brands.ContainsKey("Email"),
@@ -2286,10 +2286,10 @@ public sealed class OpenApiRoundTripTests
 
         Assert.True(wlk2.Enums.ContainsKey("Priority"));
         var prioEnum = (TsType.StringUnion)wlk2.Enums["Priority"];
-        Assert.Contains("Low", prioEnum.Members);
-        Assert.Contains("Medium", prioEnum.Members);
-        Assert.Contains("High", prioEnum.Members);
-        Assert.Contains("Critical", prioEnum.Members);
+        Assert.Contains("low", prioEnum.Members);
+        Assert.Contains("medium", prioEnum.Members);
+        Assert.Contains("high", prioEnum.Members);
+        Assert.Contains("critical", prioEnum.Members);
 
         // ───── Assertion group 6: Generic template survived ─────
 
@@ -3083,8 +3083,8 @@ public sealed class OpenApiRoundTripTests
         Assert.True(walker.Enums.ContainsKey("Priority"), "Priority enum should survive");
         var priorityMembers = ((TsType.StringUnion)walker.Enums["Priority"]).Members;
         Assert.Equal(4, priorityMembers.Count);
-        Assert.Contains("Low", priorityMembers);
-        Assert.Contains("Critical", priorityMembers);
+        Assert.Contains("low", priorityMembers);
+        Assert.Contains("critical", priorityMembers);
 
         // ===== TaskDto property types =====
 

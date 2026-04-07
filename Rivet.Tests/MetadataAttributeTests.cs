@@ -381,10 +381,11 @@ public sealed class MetadataAttributeTests
             .EnumerateArray().Select(v => v.GetString()!).ToList();
 
         Assert.Contains("in-progress", values);
-        Assert.Contains("Active", values);
+        Assert.Contains("active", values);
         Assert.Contains("on_hold", values);
         Assert.DoesNotContain("InProgress", values);
         Assert.DoesNotContain("OnHold", values);
+        Assert.DoesNotContain("Active", values);
     }
 
     // ========== void .Returns(statusCode) ==========

@@ -403,7 +403,7 @@ public sealed class TypeWalker
                             {
                                 return original;
                             }
-                            return f.Name;
+                            return Naming.ToCamelCase(f.Name);
                         })
                         .ToList();
 

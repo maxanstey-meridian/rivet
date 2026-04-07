@@ -2307,9 +2307,10 @@ public sealed class ContractEndpointTests
         var statusEnum = (TsType.StringUnion)walker.Enums["Status"];
         Assert.Contains("in-progress", statusEnum.Members);
         Assert.Contains("on_hold", statusEnum.Members);
-        Assert.Contains("Done", statusEnum.Members);
+        Assert.Contains("done", statusEnum.Members);
         Assert.DoesNotContain("InProgress", statusEnum.Members);
         Assert.DoesNotContain("OnHold", statusEnum.Members);
+        Assert.DoesNotContain("Done", statusEnum.Members);
     }
 
     // ========== GAP-4: DELETE default 204 isolated forward test ==========

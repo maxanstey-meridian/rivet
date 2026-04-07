@@ -151,9 +151,9 @@ public sealed class JsonSchemaEmitterTests
         Assert.Equal("string", prioritySchema.GetProperty("type").GetString());
         var members = prioritySchema.GetProperty("enum");
         Assert.Equal(3, members.GetArrayLength());
-        Assert.Equal("Low", members[0].GetString());
-        Assert.Equal("Medium", members[1].GetString());
-        Assert.Equal("High", members[2].GetString());
+        Assert.Equal("low", members[0].GetString());
+        Assert.Equal("medium", members[1].GetString());
+        Assert.Equal("high", members[2].GetString());
     }
 
     [Fact]
