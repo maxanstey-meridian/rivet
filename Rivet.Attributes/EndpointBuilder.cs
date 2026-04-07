@@ -20,6 +20,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     private string? _fileContentType;
     private bool _acceptsFile;
     private bool _formEncoded;
+    private string? _queryAuthParameterName;
     private List<RouteErrorResponse>? _errorResponses;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
@@ -35,6 +36,8 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public string? FileContentType => _fileContentType;
     public bool IsFileUpload => _acceptsFile;
     public bool IsFormEncoded => _formEncoded;
+    public bool IsQueryAuth => _queryAuthParameterName is not null;
+    public string? QueryAuthParameterName => _queryAuthParameterName;
     public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses => _errorResponses;
 
     /// <summary>The resolved success status code (for use in Invoke).</summary>
@@ -60,6 +63,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         target._fileContentType = _fileContentType;
         target._acceptsFile = _acceptsFile;
         target._formEncoded = _formEncoded;
+        target._queryAuthParameterName = _queryAuthParameterName;
         target._errorResponses = _errorResponses?.ToList();
     }
 
@@ -147,6 +151,17 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public TSelf Secure(string scheme)
     {
         _securityScheme = scheme;
+        return (TSelf)this;
+    }
+
+    /// <summary>
+    /// Opts this endpoint into query-based authentication, where the auth token is passed
+    /// as a query parameter instead of a header. Primarily intended for media players
+    /// (ExoPlayer, HLS.js) that cannot inject custom headers on segment requests.
+    /// </summary>
+    public TSelf QueryAuth(string parameterName = "token")
+    {
+        _queryAuthParameterName = parameterName;
         return (TSelf)this;
     }
 
