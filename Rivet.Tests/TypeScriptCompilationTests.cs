@@ -422,6 +422,104 @@ public sealed class TypeScriptCompilationTests : IDisposable
         Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
     }
 
+    [Fact]
+    public async Task FileEndpoint_WithQueryAuth_FullPipeline()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace MyApp.Contracts
+            {
+                public sealed record ErrorDto(string Code, string Message);
+            }
+
+            namespace MyApp.Api
+            {
+                using MyApp.Contracts;
+
+                [RivetContract]
+                public static class StreamingContract
+                {
+                    public static readonly FileRouteDefinition Stream =
+                        Define.File("/api/streams/{id}")
+                            .ContentType("video/mp4")
+                            .QueryAuth()
+                            .Description("Stream a video file");
+
+                    public static readonly FileRouteDefinition Preview =
+                        Define.File("/api/streams/{id}/preview")
+                            .ContentType("image/jpeg")
+                            .QueryAuth("key")
+                            .Returns<ErrorDto>(404, "Not found");
+
+                    public static readonly RouteDefinition<List<ErrorDto>> List =
+                        Define.Get<List<ErrorDto>>("/api/streams");
+                }
+            }
+            """;
+
+        // 1. Compile and walk
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+
+        // 2. Assert walker output for the QueryAuth file endpoint
+        var streamEp = contractEndpoints.Single(e => e.Name == "stream");
+        Assert.True(streamEp.IsFileEndpoint);
+        Assert.Equal("video/mp4", streamEp.FileContentType);
+        Assert.NotNull(streamEp.QueryAuth);
+        Assert.Equal("token", streamEp.QueryAuth!.ParameterName);
+
+        // Custom parameter name
+        var previewEp = contractEndpoints.Single(e => e.Name == "preview");
+        Assert.True(previewEp.IsFileEndpoint);
+        Assert.Equal("image/jpeg", previewEp.FileContentType);
+        Assert.NotNull(previewEp.QueryAuth);
+        Assert.Equal("key", previewEp.QueryAuth!.ParameterName);
+
+        // Standard endpoint is unaffected
+        var listEp = contractEndpoints.Single(e => e.Name == "list");
+        Assert.False(listEp.IsFileEndpoint);
+        Assert.Null(listEp.QueryAuth);
+
+        // 3. Contract JSON emission includes queryAuth and isFileEndpoint
+        var contractJson = ContractEmitter.Emit(
+            new Dictionary<string, Rivet.Tool.Model.TsTypeDefinition>(walker.Definitions),
+            new Dictionary<string, Rivet.Tool.Model.TsType>(walker.Enums),
+            contractEndpoints.ToList());
+        Assert.Contains("\"queryAuth\"", contractJson);
+        Assert.Contains("\"parameterName\": \"token\"", contractJson);
+        Assert.Contains("\"isFileEndpoint\": true", contractJson);
+
+        // 4. OpenAPI emission includes x-rivet-query-auth extension
+        var openApiJson = OpenApiEmitter.Emit(
+            contractEndpoints.ToList(),
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            security: null);
+        Assert.Contains("\"x-rivet-query-auth\"", openApiJson);
+
+        // 5. TypeScript client includes *Url() function and getBaseUrl
+        var typeFileMap = CompilationHelper.BuildTypeFileMap(walker);
+        var groups = ClientEmitter.GroupByController(contractEndpoints.ToList());
+        var clientTs = string.Concat(
+            groups.Select(g => ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
+        Assert.Contains("streamUrl(", clientTs);
+        Assert.Contains("previewUrl(", clientTs);
+        Assert.Contains("getBaseUrl()", clientTs);
+        Assert.DoesNotContain("listUrl(", clientTs);
+
+        // 6. Full TS compilation check — the generated code must type-check
+        var (exitCode, output) = await GenerateAndTypeCheck(source);
+        Assert.True(exitCode == 0, $"tsc --noEmit failed:\n{output}");
+    }
+
     private async Task<(int ExitCode, string Output)> GenerateAndTypeCheck(string csharpSource)
     {
         // 1. Compile C# and run Rivet analysis

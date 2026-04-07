@@ -48,4 +48,11 @@ public static class MembersContract
         Define.Get("/api/health")
             .Description("Health check")
             .Anonymous();
+
+    /// TS: avatarUrl(id: string, token: string): string  — QueryAuth → URL builder for media players
+    public static readonly FileRouteDefinition Avatar =
+        Define.File("/api/members/{id}/avatar")
+            .ContentType("image/jpeg")
+            .QueryAuth()
+            .Description("Download a member's avatar");
 }

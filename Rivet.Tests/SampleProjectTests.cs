@@ -56,7 +56,7 @@ public sealed class SampleProjectTests : IDisposable
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
-        Assert.Equal(5, endpoints.Count);
+        Assert.Equal(6, endpoints.Count);
 
         // List: GET /api/members → List<MemberDto>
         var list = Assert.Single(endpoints, e => e.Name == "list");
@@ -87,6 +87,15 @@ public sealed class SampleProjectTests : IDisposable
         Assert.Null(updateRole.ReturnType);
         Assert.Contains(updateRole.Params, p => p.Name == "id" && p.Source == ParamSource.Route);
         Assert.Contains(updateRole.Params, p => p.Source == ParamSource.Body);
+
+        // Avatar: GET /api/members/{id}/avatar → file (QueryAuth)
+        var avatar = Assert.Single(endpoints, e => e.Name == "avatar");
+        Assert.Equal("GET", avatar.HttpMethod);
+        Assert.Equal("/api/members/{id}/avatar", avatar.RouteTemplate);
+        Assert.True(avatar.IsFileEndpoint);
+        Assert.Equal("image/jpeg", avatar.FileContentType);
+        Assert.NotNull(avatar.QueryAuth);
+        Assert.Equal("token", avatar.QueryAuth!.ParameterName);
 
         // Health: GET /api/health → void
         var health = Assert.Single(endpoints, e => e.Name == "health");
