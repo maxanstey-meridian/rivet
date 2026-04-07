@@ -154,9 +154,10 @@ public static class ContractWalker
             return null;
         }
 
-        // The root call is the factory method: Define.Get<TInput, TOutput>("/route")
+        // The root call is the factory method: Define.Get<TInput, TOutput>("/route") or Define.File("/route")
         var root = chain[0];
-        var httpMethod = root.MethodName.ToUpperInvariant();
+        var isFileEndpoint = root.MethodName == "File";
+        var httpMethod = isFileEndpoint ? "GET" : root.MethodName.ToUpperInvariant();
         var route = root.RouteArg;
 
         if (route is null)
@@ -194,6 +195,7 @@ public static class ContractWalker
         var acceptsFile = false;
         var isFormEncoded = false;
         string? fileContentType = null;
+        QueryAuthMetadata? queryAuth = null;
 
         for (var i = 1; i < chain.Count; i++)
         {
@@ -265,6 +267,14 @@ public static class ContractWalker
             {
                 fileContentType = call.StringArg ?? "application/octet-stream";
             }
+            else if (call.MethodName == "ContentType")
+            {
+                fileContentType = call.StringArg ?? "application/octet-stream";
+            }
+            else if (call.MethodName == "QueryAuth")
+            {
+                queryAuth = new QueryAuthMetadata(call.GetStringArg("parameterName") ?? "token");
+            }
             else if (call.MethodName == "ResponseExampleJson"
                 && call.GetIntArg("statusCode") is int responseStatusCode
                 && call.GetStringArg("json") is not null)
@@ -290,6 +300,13 @@ public static class ContractWalker
                     call.GetStringArg("componentExampleId"),
                     call.GetStringArg("resolvedJson")));
             }
+        }
+
+        // Define.File() defaults to application/octet-stream (constructor calls ProducesFile()
+        // at runtime, but the syntax walker only sees the source-level chain)
+        if (isFileEndpoint)
+        {
+            fileContentType ??= "application/octet-stream";
         }
 
         // [ProducesFile] attribute on the field → file endpoint
@@ -354,7 +371,9 @@ public static class ContractWalker
             fileContentType,
             inputTypeName,
             isFormEncoded,
-            RequestExamples: requestExamples);
+            RequestExamples: requestExamples,
+            IsFileEndpoint: isFileEndpoint,
+            QueryAuth: queryAuth);
     }
 
     private static int DefaultSuccessCode(string httpMethod) =>

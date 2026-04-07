@@ -20,7 +20,9 @@ public sealed record TsEndpointDefinition(
     string? InputTypeName = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFormEncoded = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? RequestType = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsEndpointExample>? RequestExamples = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsEndpointExample>? RequestExamples = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFileEndpoint = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] QueryAuthMetadata? QueryAuth = null);
 
 /// <summary>
 /// Security metadata for an endpoint. null = inherit CLI default.
@@ -49,3 +51,9 @@ public enum ParamSource
     File,
     FormField,
 }
+
+/// <summary>
+/// Query-based auth metadata: the auth token is passed as a query parameter
+/// instead of a header, for clients (media players) that cannot set headers.
+/// </summary>
+public sealed record QueryAuthMetadata(string ParameterName);
