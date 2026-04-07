@@ -32,4 +32,8 @@ public sealed class Define
     public static RouteDefinition<TInput, TOutput> Delete<TInput, TOutput>(string route) => new("DELETE", route);
     public static RouteDefinition<TOutput> Delete<TOutput>(string route) => new("DELETE", route);
     public static RouteDefinition Delete(string route) => new("DELETE", route);
+
+    // FILE (binary/stream endpoints — defaults to GET)
+    public static FileRouteDefinition<TInput> File<TInput>(string route) => new(route);
+    public static FileRouteDefinition File(string route) => new(route);
 }

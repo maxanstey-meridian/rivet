@@ -262,3 +262,47 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
 
     public static implicit operator Define(RouteDefinition _) => default!;
 }
+
+/// <summary>
+/// Route definition for file/stream endpoints that return binary content rather than JSON.
+/// Defaults to GET and sets a content type (application/octet-stream unless overridden).
+/// </summary>
+public sealed class FileRouteDefinition : RouteDefinitionBase<FileRouteDefinition>
+{
+    internal FileRouteDefinition(string route, int defaultStatus = 200)
+        : base("GET", route, defaultStatus)
+    {
+        ProducesFile();
+    }
+
+    /// <summary>
+    /// Sets the response content type for this file endpoint.
+    /// Alias for ProducesFile — preferred on FileRouteDefinition for readability.
+    /// </summary>
+    public FileRouteDefinition ContentType(string mediaType)
+        => ProducesFile(mediaType);
+
+    public static implicit operator Define(FileRouteDefinition _) => default!;
+}
+
+/// <summary>
+/// Route definition for file/stream endpoints with an input type (e.g. route/query params).
+/// Defaults to GET and sets a content type (application/octet-stream unless overridden).
+/// </summary>
+public sealed class FileRouteDefinition<TInput> : RouteDefinitionBase<FileRouteDefinition<TInput>>
+{
+    internal FileRouteDefinition(string route, int defaultStatus = 200)
+        : base("GET", route, defaultStatus)
+    {
+        ProducesFile();
+    }
+
+    /// <summary>
+    /// Sets the response content type for this file endpoint.
+    /// Alias for ProducesFile — preferred on FileRouteDefinition for readability.
+    /// </summary>
+    public FileRouteDefinition<TInput> ContentType(string mediaType)
+        => ProducesFile(mediaType);
+
+    public static implicit operator Define(FileRouteDefinition<TInput> _) => default!;
+}
