@@ -652,7 +652,7 @@ public static class ContractWalker
         }
 
         if (fieldType is INamedTypeSymbol named
-            && named.Name is "RouteDefinition" or "InputRouteDefinition"
+            && named.Name is "RouteDefinition" or "InputRouteDefinition" or "FileRouteDefinition"
             && named.ContainingNamespace?.ToDisplayString() == "Rivet")
         {
             return true;

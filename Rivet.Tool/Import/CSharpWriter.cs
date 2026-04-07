@@ -188,14 +188,22 @@ internal static class CSharpWriter
             sb.AppendLine($"    // [rivet:unsupported {marker}]");
         }
 
-        // Field type: RouteDefinition<TIn, TOut>, RouteDefinition<TOut>, or RouteDefinition
-        var fieldType = BuildFieldType(field.InputType, field.OutputType);
+        // Field type: RouteDefinition<TIn, TOut>, RouteDefinition<TOut>, FileRouteDefinition, etc.
+        var fieldType = BuildFieldType(field.InputType, field.OutputType, field.IsFileEndpoint);
         sb.Append($"    public static readonly {fieldType} {field.FieldName} =");
         sb.AppendLine();
 
         // Factory call
-        var typeArgs = BuildTypeArgs(field.InputType, field.OutputType);
-        sb.Append($"        Define.{field.HttpMethod}{typeArgs}(\"{EscapeString(field.Route)}\")");
+        if (field.IsFileEndpoint)
+        {
+            var fileTypeArgs = field.InputType is not null ? $"<{field.InputType}>" : "";
+            sb.Append($"        Define.File{fileTypeArgs}(\"{EscapeString(field.Route)}\")");
+        }
+        else
+        {
+            var typeArgs = BuildTypeArgs(field.InputType, field.OutputType);
+            sb.Append($"        Define.{field.HttpMethod}{typeArgs}(\"{EscapeString(field.Route)}\")");
+        }
 
         // Builder chain
         var chainCalls = BuildChainCalls(field);
@@ -215,8 +223,15 @@ internal static class CSharpWriter
         }
     }
 
-    private static string BuildFieldType(string? inputType, string? outputType)
+    private static string BuildFieldType(string? inputType, string? outputType, bool isFileEndpoint = false)
     {
+        if (isFileEndpoint)
+        {
+            return inputType is not null
+                ? $"FileRouteDefinition<{inputType}>"
+                : "FileRouteDefinition";
+        }
+
         if (inputType is not null && outputType is not null)
         {
             return $"RouteDefinition<{inputType}, {outputType}>";
@@ -280,7 +295,8 @@ internal static class CSharpWriter
         }
 
         // Input-only endpoint: type arg goes on .Accepts<T>()
-        if (field.InputType is not null && field.OutputType is null)
+        // (File endpoints have the input type on Define.File<T>() already)
+        if (field.InputType is not null && field.OutputType is null && !field.IsFileEndpoint)
         {
             calls.Add($".Accepts<{field.InputType}>()");
         }
@@ -336,13 +352,36 @@ internal static class CSharpWriter
 
         if (field.FileContentType is not null)
         {
-            if (field.FileContentType == "application/octet-stream")
+            if (field.IsFileEndpoint)
             {
-                calls.Add(".ProducesFile()");
+                // File endpoints use .ContentType() instead of .ProducesFile()
+                if (field.FileContentType != "application/octet-stream")
+                {
+                    calls.Add($".ContentType(\"{EscapeString(field.FileContentType)}\")");
+                }
             }
             else
             {
-                calls.Add($".ProducesFile(\"{EscapeString(field.FileContentType)}\")");
+                if (field.FileContentType == "application/octet-stream")
+                {
+                    calls.Add(".ProducesFile()");
+                }
+                else
+                {
+                    calls.Add($".ProducesFile(\"{EscapeString(field.FileContentType)}\")");
+                }
+            }
+        }
+
+        if (field.QueryAuthParameterName is not null)
+        {
+            if (field.QueryAuthParameterName == "token")
+            {
+                calls.Add(".QueryAuth()");
+            }
+            else
+            {
+                calls.Add($".QueryAuth(\"{EscapeString(field.QueryAuthParameterName)}\")");
             }
         }
 

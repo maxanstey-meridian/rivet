@@ -143,8 +143,8 @@ public sealed class ImportMetricTests
         // Image responses are now file endpoints, not unsupported
         Assert.True(UnsupportedResponse(r) <= 1, $"Expected ≤1 unsupported response, got {UnsupportedResponse(r)}");
         Assert.Equal(12, UnsupportedError(r));
-        // Image endpoints should generate .ProducesFile()
-        var fileEndpoints = CountPattern(r, "Contracts/", ".ProducesFile(");
+        // Image endpoints should generate Define.File()
+        var fileEndpoints = CountPattern(r, "Contracts/", "Define.File");
         Assert.True(fileEndpoints >= 11, $"Expected ≥11 file endpoints, got {fileEndpoints}");
     }
 

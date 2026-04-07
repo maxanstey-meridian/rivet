@@ -68,17 +68,23 @@ internal static class ContractBuilder
         var description = string.IsNullOrEmpty(operation.Description) ? null : operation.Description;
         var unsupported = new List<string>();
 
+        // QueryAuth: read x-rivet-query-auth extension
+        var queryAuthParameterName = ResolveQueryAuth(operation);
+
         // Resolve input type (requestBody — $ref resolved by library)
         var (inputType, isFormEncoded) = ResolveInputType(operation, mapper, fieldName, unsupported);
 
         // If no body input, synthesize an input record from path/query parameters
         if (inputType is null)
         {
-            inputType = ResolveParamInputType(operation, mapper, fieldName);
+            inputType = ResolveParamInputType(operation, mapper, fieldName, queryAuthParameterName);
         }
 
         // Resolve output type (lowest 2xx response with JSON content)
         var (outputType, successStatus, fileContentType) = ResolveOutputType(operation, mapper, fieldName, unsupported);
+
+        // File endpoint: binary content type means this is a file endpoint
+        var isFileEndpoint = fileContentType is not null;
 
         // Error responses
         var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, unsupported);
@@ -97,7 +103,7 @@ internal static class ContractBuilder
             fieldName, method, route, inputType, outputType,
             summary, description, successStatus, errorResponses,
             isAnonymous, securityScheme, unsupported, fileContentType, isFormEncoded,
-            requestExamples, responseExamples);
+            requestExamples, responseExamples, isFileEndpoint, queryAuthParameterName);
     }
 
     private static (string? InputType, bool IsFormEncoded) ResolveInputType(
@@ -151,7 +157,7 @@ internal static class ContractBuilder
     }
 
     private static string? ResolveParamInputType(
-        OpenApiOperation operation, SchemaMapper mapper, string fieldName)
+        OpenApiOperation operation, SchemaMapper mapper, string fieldName, string? queryAuthParameterName = null)
     {
         if (operation.Parameters is null or { Count: 0 })
         {
@@ -169,6 +175,14 @@ internal static class ContractBuilder
             }
 
             if (param.Schema is null || param.Name is null)
+            {
+                continue;
+            }
+
+            // Skip QueryAuth token parameter — it's not an input field
+            if (queryAuthParameterName is not null
+                && param.In is ParameterLocation.Query
+                && string.Equals(param.Name, queryAuthParameterName, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -698,6 +712,23 @@ internal static class ContractBuilder
         }
 
         return Naming.ToPascalCaseFromSegments(operationId);
+    }
+
+    private static string? ResolveQueryAuth(OpenApiOperation operation)
+    {
+        if (operation.Extensions is null
+            || !operation.Extensions.TryGetValue("x-rivet-query-auth", out var ext))
+        {
+            return null;
+        }
+
+        if (ext is JsonNodeExtension { Node: JsonObject obj }
+            && obj.TryGetPropertyValue("parameterName", out var nameNode))
+        {
+            return nameNode?.GetValue<string>();
+        }
+
+        return null;
     }
 
     private static string? GetExtensionString(IOpenApiSchema schema, string key)

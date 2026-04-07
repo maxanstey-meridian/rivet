@@ -64,7 +64,9 @@ internal sealed record GeneratedEndpointField(
     string? FileContentType = null,
     bool IsFormEncoded = false,
     IReadOnlyList<TsEndpointExample>? RequestExamples = null,
-    IReadOnlyList<GeneratedEndpointResponseExample>? ResponseExamples = null)
+    IReadOnlyList<GeneratedEndpointResponseExample>? ResponseExamples = null,
+    bool IsFileEndpoint = false,
+    string? QueryAuthParameterName = null)
 {
     public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
     public IReadOnlyList<TsEndpointExample> RequestExamples { get; init; } = RequestExamples ?? [];

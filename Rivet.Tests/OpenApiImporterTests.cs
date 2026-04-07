@@ -2367,8 +2367,9 @@ public sealed class OpenApiImporterTests
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "AvatarContract.cs");
 
-        Assert.Contains(".ProducesFile(\"image/png\")", content);
-        Assert.Contains("public static readonly RouteDefinition Get", content);
+        Assert.Contains("Define.File", content);
+        Assert.Contains(".ContentType(\"image/png\")", content);
+        Assert.Contains("public static readonly FileRouteDefinition Get", content);
     }
 
     [Fact]
@@ -3917,5 +3918,228 @@ public sealed class OpenApiImporterTests
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
         Assert.Empty(errors);
+    }
+
+    // ========== QueryAuth + File Endpoint Import Tests ==========
+
+    [Fact]
+    public void QueryAuth_Extension_Emits_QueryAuth_Call()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+                "/api/media/{id}/stream": {
+                    "get": {
+                        "operationId": "media_streamVideo",
+                        "tags": ["Media"],
+                        "parameters": [
+                            {
+                                "name": "id",
+                                "in": "path",
+                                "required": true,
+                                "schema": { "type": "string" }
+                            },
+                            {
+                                "name": "token",
+                                "in": "query",
+                                "required": true,
+                                "schema": { "type": "string" }
+                            }
+                        ],
+                        "x-rivet-query-auth": { "parameterName": "token" },
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "video/mp4": {
+                                        "schema": { "type": "string", "format": "binary" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """, title: "API");
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "MediaContract.cs");
+
+        Assert.Contains("Define.File", content);
+        Assert.Contains(".QueryAuth()", content);
+        Assert.Contains(".ContentType(\"video/mp4\")", content);
+        Assert.Contains("FileRouteDefinition", content);
+        // Token param should not appear as an input field
+        Assert.DoesNotContain("Token", content);
+    }
+
+    [Fact]
+    public void QueryAuth_Custom_ParameterName_Emits_With_Argument()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+                "/api/audio/{id}": {
+                    "get": {
+                        "operationId": "audio_stream",
+                        "tags": ["Audio"],
+                        "parameters": [
+                            {
+                                "name": "id",
+                                "in": "path",
+                                "required": true,
+                                "schema": { "type": "string" }
+                            },
+                            {
+                                "name": "key",
+                                "in": "query",
+                                "required": true,
+                                "schema": { "type": "string" }
+                            }
+                        ],
+                        "x-rivet-query-auth": { "parameterName": "key" },
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "audio/mpeg": {
+                                        "schema": { "type": "string", "format": "binary" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """, title: "API");
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "AudioContract.cs");
+
+        Assert.Contains(".QueryAuth(\"key\")", content);
+        // Key param should not appear as an input field
+        Assert.DoesNotContain("Key", content.Split("Define.File")[0]);
+    }
+
+    [Fact]
+    public void No_QueryAuth_Extension_Does_Not_Emit_QueryAuth()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "UserDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/users/{id}": {
+                    "get": {
+                        "operationId": "users_get",
+                        "tags": ["Users"],
+                        "parameters": [
+                            {
+                                "name": "id",
+                                "in": "path",
+                                "required": true,
+                                "schema": { "type": "string" }
+                            }
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/UserDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """, title: "API");
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "UsersContract.cs");
+
+        Assert.DoesNotContain("QueryAuth", content);
+        Assert.DoesNotContain("Define.File", content);
+        Assert.Contains("Define.Get", content);
+    }
+
+    [Fact]
+    public void Binary_Response_Without_QueryAuth_Emits_DefineFile()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+                "/api/avatar": {
+                    "get": {
+                        "operationId": "avatar_get",
+                        "tags": ["Avatar"],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "image/png": {
+                                        "schema": { "type": "string", "format": "binary" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """, title: "API");
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "AvatarContract.cs");
+
+        Assert.Contains("Define.File", content);
+        Assert.Contains("FileRouteDefinition", content);
+        Assert.Contains(".ContentType(\"image/png\")", content);
+        Assert.DoesNotContain("QueryAuth", content);
+        Assert.DoesNotContain("ProducesFile", content);
+    }
+
+    [Fact]
+    public void QueryAuth_RoundTrip_Preserves_Metadata()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+                "/api/media/{id}/stream": {
+                    "get": {
+                        "operationId": "media_streamVideo",
+                        "tags": ["Media"],
+                        "parameters": [
+                            {
+                                "name": "id",
+                                "in": "path",
+                                "required": true,
+                                "schema": { "type": "string" }
+                            },
+                            {
+                                "name": "token",
+                                "in": "query",
+                                "required": true,
+                                "schema": { "type": "string" }
+                            }
+                        ],
+                        "x-rivet-query-auth": { "parameterName": "token" },
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "video/mp4": {
+                                        "schema": { "type": "string", "format": "binary" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """, title: "API");
+
+        // Import → compile → walk → assert QueryAuth survives
+        var result = CompilationHelper.Import(spec);
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+
+        var ep = Assert.Single(endpoints);
+        Assert.True(ep.IsFileEndpoint);
+        Assert.NotNull(ep.QueryAuth);
+        Assert.Equal("token", ep.QueryAuth!.ParameterName);
+        Assert.Equal("video/mp4", ep.FileContentType);
     }
 }
