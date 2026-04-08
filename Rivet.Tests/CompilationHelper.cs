@@ -361,6 +361,7 @@ public static class CompilationHelper
             MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "netstandard.dll")),
             MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Private.Uri.dll")),
             MetadataReference.CreateFromFile(typeof(RivetTypeAttribute).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(System.ComponentModel.DataAnnotations.RequiredAttribute).Assembly.Location),
         ];
     }
 }
