@@ -4393,4 +4393,26 @@ public sealed class OpenApiImporterTests
         Assert.Contains("[property: RangeAttribute(0, double.MaxValue)]", content);
         Assert.DoesNotContain("RivetConstraints(Minimum", content);
     }
+
+    [Fact]
+    public void Import_SingleSided_Maximum_Emits_Range()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "score": { "type": "number", "maximum": 100 }
+                    },
+                    "required": ["score"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("[property: RangeAttribute(double.MinValue, 100)]", content);
+        Assert.DoesNotContain("RivetConstraints(Maximum", content);
+    }
 }

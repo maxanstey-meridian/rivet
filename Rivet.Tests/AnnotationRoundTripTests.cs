@@ -304,4 +304,52 @@ public sealed class AnnotationRoundTripTests
         Assert.False(prop.TryGetProperty("maximum", out _),
             "Single-sided minimum must not leak a sentinel maximum into OpenAPI");
     }
+
+    [Fact]
+    public void SingleSided_Maximum_Does_Not_Leak_Minimum_Into_OpenApi()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record SingleMaxDto(
+                [property: RangeAttribute(double.MinValue, 100)]
+                double Score);
+
+            [RivetContract]
+            public static class SingleMaxContract
+            {
+                public static readonly Define GetSingleMax =
+                    Define.Get<SingleMaxDto>("/api/single-max");
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+
+        // TypeWalker should read maximum=100, minimum=null
+        var typeDef = walker.Definitions["SingleMaxDto"];
+        var score = typeDef.Properties.First(p => p.Name == "score");
+        Assert.NotNull(score.Constraints);
+        Assert.Null(score.Constraints!.Minimum);
+        Assert.Equal(100.0, score.Constraints.Maximum);
+
+        // OpenAPI should have "maximum": 100 but no "minimum"
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var openApiJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var doc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(openApiJson);
+
+        var prop = doc.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("SingleMaxDto")
+            .GetProperty("properties")
+            .GetProperty("score");
+
+        Assert.Equal(100.0, prop.GetProperty("maximum").GetDouble());
+        Assert.False(prop.TryGetProperty("minimum", out _),
+            "Single-sided maximum must not leak a sentinel minimum into OpenAPI");
+    }
 }
