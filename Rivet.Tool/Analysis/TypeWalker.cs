@@ -615,8 +615,19 @@ public sealed class TypeWalker
 
     private static bool IsOptionalProperty(IPropertySymbol prop)
     {
-        return prop.GetAttributes().Any(a =>
-            a.AttributeClass?.Name is "RivetOptionalAttribute");
+        var attributes = prop.GetAttributes();
+
+        if (attributes.Any(a => a.AttributeClass?.Name is "RivetOptionalAttribute"))
+            return true;
+
+        if (attributes.Any(a => a.AttributeClass?.Name is "RequiredAttribute"))
+            return false;
+
+        // Nullable reference/value types are optional unless [Required]
+        if (prop.Type.NullableAnnotation == NullableAnnotation.Annotated)
+            return true;
+
+        return false;
     }
 
     /// <summary>

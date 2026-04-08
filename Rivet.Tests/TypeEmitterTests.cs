@@ -57,8 +57,8 @@ public sealed class TypeEmitterTests
 
         var result = CompilationHelper.EmitTypes(source);
 
-        Assert.Contains("maybeCount: number | null;", result);
-        Assert.Contains("maybeActive: boolean | null;", result);
+        Assert.Contains("maybeCount?: number | null;", result);
+        Assert.Contains("maybeActive?: boolean | null;", result);
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public sealed class TypeEmitterTests
 
         var result = CompilationHelper.EmitTypes(source);
 
-        Assert.Contains("maybeName: string | null;", result);
+        Assert.Contains("maybeName?: string | null;", result);
     }
 
     [Fact]
@@ -185,7 +185,7 @@ public sealed class TypeEmitterTests
         var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("required: string;", result);
-        Assert.Contains("optional: string | null;", result);
+        Assert.Contains("optional?: string | null;", result);
     }
 
     [Fact]
@@ -593,7 +593,7 @@ public sealed class TypeEmitterTests
 
         var result = CompilationHelper.EmitTypes(source);
 
-        Assert.Contains("maybePair: { key: string; value: number; } | null;", result);
+        Assert.Contains("maybePair?: { key: string; value: number; } | null;", result);
     }
 
     // ========== Complex generics ==========
@@ -685,7 +685,7 @@ public sealed class TypeEmitterTests
 
         Assert.Contains("export type Chain<T> = {", result);
         Assert.Contains("value: T;", result);
-        Assert.Contains("next: Chain<T> | null;", result);
+        Assert.Contains("next?: Chain<T> | null;", result);
         Assert.Contains("stringChain: Chain<string>;", result);
         Assert.Contains("intChain: Chain<number>;", result);
         Assert.Contains("personChains: Chain<PersonDto>[];", result);

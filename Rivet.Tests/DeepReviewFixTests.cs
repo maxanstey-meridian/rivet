@@ -1189,7 +1189,7 @@ public sealed class DeepReviewFixTests
     // ========== Deep review 2: nullable fields ARE required (positional params are required) ==========
 
     [Fact]
-    public void JsonSchema_Nullable_Field_Is_Required()
+    public void JsonSchema_Nullable_Field_Is_Not_Required()
     {
         // A nullable positional parameter is required (must be present) but nullable (value can be null).
         // OpenAPI explicitly supports required + nullable.
@@ -1219,13 +1219,13 @@ public sealed class DeepReviewFixTests
         var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
 
         Assert.Contains("name", requiredNames);
-        Assert.Contains("description", requiredNames);
+        Assert.DoesNotContain("description", requiredNames);
     }
 
     [Fact]
-    public void OpenApi_Nullable_Field_Is_Required()
+    public void OpenApi_Nullable_Field_Is_Not_Required()
     {
-        // Same check for OpenAPI emitter — should be consistent with JSON Schema
+        // Nullable properties without [Required] should NOT be in the required array
         var source = """
             using Rivet;
 
@@ -1249,7 +1249,7 @@ public sealed class DeepReviewFixTests
         var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
 
         Assert.Contains("name", requiredNames);
-        Assert.Contains("description", requiredNames);
+        Assert.DoesNotContain("description", requiredNames);
     }
 
     // ========== Deep review 2: monomorphised nullable type arg IS required ==========

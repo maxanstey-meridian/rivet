@@ -177,7 +177,7 @@ public sealed class GenericTypeTests
 
         var result = CompilationHelper.EmitTypes(source);
 
-        Assert.Contains("data: unknown | null;", result);
+        Assert.Contains("data?: unknown | null;", result);
     }
 
     [Fact]

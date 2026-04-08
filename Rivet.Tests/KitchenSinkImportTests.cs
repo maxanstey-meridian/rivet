@@ -806,8 +806,8 @@ public sealed class KitchenSinkImportTests
         // UserDto: wide record with every common type
         AssertSchemaProperty(emittedSchemas, "UserDto", "id", "string", "uuid", required: true);
         AssertSchemaProperty(emittedSchemas, "UserDto", "name", "string", null, required: true);
-        // bio is required+nullable: positional constructor param that accepts null
-        AssertSchemaProperty(emittedSchemas, "UserDto", "bio", "string", null, required: true, nullable: true);
+        // bio is nullable without [Required]: optional but nullable
+        AssertSchemaProperty(emittedSchemas, "UserDto", "bio", "string", null, required: false, nullable: true);
         AssertSchemaProperty(emittedSchemas, "UserDto", "age", "integer", null, required: true);
         AssertSchemaProperty(emittedSchemas, "UserDto", "totalPoints", "integer", "int64", required: true);
         AssertSchemaProperty(emittedSchemas, "UserDto", "score", "number", null, required: true);

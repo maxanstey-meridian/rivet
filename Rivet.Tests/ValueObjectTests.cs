@@ -131,6 +131,6 @@ public sealed class ValueObjectTests
         var result = CompilationHelper.EmitTypes(source);
 
         Assert.Contains("""export type Email = string & { readonly __brand: "Email" };""", result);
-        Assert.Contains("email: Email | null;", result);
+        Assert.Contains("email?: Email | null;", result);
     }
 }

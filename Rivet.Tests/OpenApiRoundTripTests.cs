@@ -2679,7 +2679,7 @@ public sealed class OpenApiRoundTripTests
     /// The property must be present but its value can be null.
     /// </summary>
     [Fact]
-    public void NullableProperties_AreRequiredAndNullable()
+    public void NullableProperties_AreOptionalAndNullable()
     {
         var source = """
             using System;
@@ -2717,15 +2717,17 @@ public sealed class OpenApiRoundTripTests
             .EnumerateArray().Select(e => e.GetString()!).ToList();
         var props = schema.GetProperty("properties");
 
-        // All positional params are required — both nullable and non-nullable
+        // Non-nullable params are required
         Assert.Contains("name", required);
         Assert.Contains("age", required);
         Assert.Contains("id", required);
         Assert.Contains("createdAt", required);
-        Assert.Contains("bio", required);
-        Assert.Contains("score", required);
-        Assert.Contains("optionalRef", required);
-        Assert.Contains("deletedAt", required);
+
+        // Nullable params without [Required] are NOT required
+        Assert.DoesNotContain("bio", required);
+        Assert.DoesNotContain("score", required);
+        Assert.DoesNotContain("optionalRef", required);
+        Assert.DoesNotContain("deletedAt", required);
 
         // Nullable fields should still have nullable: true
         Assert.True(props.GetProperty("bio").GetProperty("nullable").GetBoolean());

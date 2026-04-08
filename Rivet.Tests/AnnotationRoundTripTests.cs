@@ -53,6 +53,44 @@ public sealed class AnnotationRoundTripTests
         return JsonDocument.Parse(json).RootElement;
     }
 
+    private const string NullabilityFixture = """
+        #nullable enable
+        using System.ComponentModel.DataAnnotations;
+        using Rivet;
+
+        namespace Test;
+
+        [RivetType]
+        public sealed record NullabilityRecord(
+            [property: Required]
+            string? NullableRequired,
+
+            string? NullableOptional,
+
+            string NonNullableNoAttr);
+        """;
+
+    [Fact]
+    public void Required_Attribute_Overrides_Nullability()
+    {
+        var output = CompilationHelper.EmitSchemas(NullabilityFixture);
+        var defs = ParseDefs(output);
+        var schema = defs.GetProperty("NullabilityRecord");
+
+        var requiredNames = new List<string>();
+        foreach (var item in schema.GetProperty("required").EnumerateArray())
+            requiredNames.Add(item.GetString()!);
+
+        // string? with [Required] → required
+        Assert.Contains("nullableRequired", requiredNames);
+
+        // string? without [Required] → NOT required
+        Assert.DoesNotContain("nullableOptional", requiredNames);
+
+        // string without [Required] → required (existing behaviour)
+        Assert.Contains("nonNullableNoAttr", requiredNames);
+    }
+
     [Fact]
     public void TypeWalker_Reads_DataAnnotations()
     {
