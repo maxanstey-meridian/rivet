@@ -116,6 +116,86 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void Post_InputRouteDefinition_MidPathRouteParam_NoMatchingProp()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemRequest(string Path);
+
+            [RivetContract]
+            public static class TestContract
+            {
+                public static readonly InputRouteDefinition<ItemRequest> AddItem = Define
+                    .Post("/api/collections/{id}/items")
+                    .Accepts<ItemRequest>()
+                    .Status(204);
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("POST", ep.HttpMethod);
+
+        // {id} from route template as standalone string param, body from TInput
+        var routeParam = ep.Params.First(p => p.Source == ParamSource.Route);
+        Assert.Equal("id", routeParam.Name);
+        Assert.True(routeParam.Type is TsType.Primitive { Name: "string" });
+
+        var bodyParam = ep.Params.First(p => p.Source == ParamSource.Body);
+        Assert.Equal("body", bodyParam.Name);
+        Assert.True(bodyParam.Type is TsType.TypeRef { Name: "ItemRequest" });
+
+        // Client should interpolate {id} and pass body
+        Assert.Contains("`/api/collections/${encodeURIComponent(String(id))}/items`", client);
+        Assert.Contains("body: body", client);
+    }
+
+    [Fact]
+    public void Delete_InputRouteDefinition_MidPathRouteParam_NoMatchingProp()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemRequest(string Path);
+
+            [RivetContract]
+            public static class TestContract
+            {
+                public static readonly InputRouteDefinition<ItemRequest> RemoveItem = Define
+                    .Delete("/api/collections/{id}/items")
+                    .Accepts<ItemRequest>();
+            }
+            """;
+
+        var (endpoints, client) = Generate(source);
+
+        Assert.Single(endpoints);
+        var ep = endpoints[0];
+        Assert.Equal("DELETE", ep.HttpMethod);
+
+        // {id} from route as standalone string param, Path from TInput as query
+        var routeParam = ep.Params.First(p => p.Source == ParamSource.Route);
+        Assert.Equal("id", routeParam.Name);
+        Assert.True(routeParam.Type is TsType.Primitive { Name: "string" });
+
+        var queryParam = ep.Params.First(p => p.Source == ParamSource.Query);
+        Assert.Equal("path", queryParam.Name);
+
+        // Client should interpolate {id} and pass query params
+        Assert.Contains("`/api/collections/${encodeURIComponent(String(id))}/items`", client);
+        Assert.Contains("query: { path }", client);
+    }
+
+    [Fact]
     public void Post_RequestExampleJson_Defaults_To_Json_MediaType()
     {
         var source = """

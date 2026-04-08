@@ -560,6 +560,8 @@ public static class ContractWalker
             // GET/DELETE: TInput properties matched by name to route → Route, remaining → Query
             if (tInput is not null)
             {
+                var matchedRouteParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
                 foreach (var member in tInput.GetMembers())
                 {
                     if (member is not IPropertySymbol prop || prop.IsImplicitlyDeclared)
@@ -590,7 +592,21 @@ public static class ContractWalker
                         ? ParamSource.Route
                         : ParamSource.Query;
 
+                    if (source == ParamSource.Route)
+                    {
+                        matchedRouteParams.Add(prop.Name);
+                    }
+
                     parameters.Add(new TsEndpointParam(tsName, tsType, source));
+                }
+
+                // Add route params that have no matching TInput property (default to string)
+                foreach (var paramName in routeParamNames)
+                {
+                    if (!matchedRouteParams.Contains(paramName))
+                    {
+                        parameters.Insert(0, new TsEndpointParam(paramName, new TsType.Primitive("string"), ParamSource.Route));
+                    }
                 }
             }
             else
