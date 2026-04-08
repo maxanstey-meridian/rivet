@@ -61,8 +61,8 @@ public sealed class ZodValidatorEmitterTests
         Assert.Contains("assertUserDto", validators);
         // Schema imports include request type
         Assert.Contains("CreateUserRequestSchema", validators);
-        // Type imports include request type
-        Assert.Contains("CreateUserRequest", validators);
+        // Type imports include request type (not just substring match on assert/schema lines)
+        Assert.Contains("import type { CreateUserRequest", validators);
     }
 
     [Fact]
@@ -132,7 +132,7 @@ public sealed class ZodValidatorEmitterTests
         // Response type still present
         Assert.Contains("assertOrderDto", validators);
         Assert.Contains("OrderDtoSchema", validators);
-        // Type imports include request type
-        Assert.Contains("CreateOrderRequest", validators);
+        // Type imports include request type (not just substring match on assert/schema lines)
+        Assert.Contains("import type { CreateOrderRequest", validators);
     }
 }
