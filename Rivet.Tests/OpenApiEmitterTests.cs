@@ -2817,4 +2817,37 @@ public sealed class OpenApiEmitterTests
         Assert.True(resp.TryGetProperty("video/mp4", out _));
         Assert.False(resp.TryGetProperty("application/json", out _));
     }
+
+    // ========== OpenAPI 3.0 exclusiveMinimum conversion ==========
+
+    [Fact]
+    public void ExclusiveMinimum_Does_Not_Clobber_Existing_Minimum()
+    {
+        using var doc = EmitOpenApi("""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Dto(
+                string Name,
+                [property: RivetConstraints(Minimum = 5, ExclusiveMinimum = 0)]
+                double Value);
+
+            [RivetContract]
+            public static class TestContract
+            {
+                public static readonly RouteDefinition<Dto> GetTest = Define.Get<Dto>("/api/test");
+            }
+            """);
+
+        var props = doc.RootElement
+            .GetProperty("components").GetProperty("schemas").GetProperty("Dto")
+            .GetProperty("properties").GetProperty("value");
+
+        // minimum: 5 must be preserved (not clobbered by exclusiveMinimum value)
+        Assert.Equal(5.0, props.GetProperty("minimum").GetDouble());
+        // exclusiveMinimum converted to boolean for 3.0
+        Assert.True(props.GetProperty("exclusiveMinimum").GetBoolean());
+    }
 }

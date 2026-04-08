@@ -4190,4 +4190,207 @@ public sealed class OpenApiImporterTests
         Assert.Equal("token", ep.QueryAuth!.ParameterName);
         Assert.Equal("video/mp4", ep.FileContentType);
     }
+
+    // ========== CSharpWriter DataAnnotation emission regression guards ==========
+
+    [Fact]
+    public void Import_Emits_StringLength_For_Both_MinMax_Length()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "minLength": 3, "maxLength": 50 }
+                    },
+                    "required": ["name"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("[property: StringLength(50, MinimumLength = 3)]", content);
+        Assert.DoesNotContain("MinLength", content.Replace("MinimumLength", ""));
+        Assert.DoesNotContain("[property: MaxLength", content);
+    }
+
+    [Fact]
+    public void Import_Emits_MinLength_Only_When_No_MaxLength()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "minLength": 1 }
+                    },
+                    "required": ["name"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("[property: MinLength(1)]", content);
+        Assert.DoesNotContain("StringLength", content);
+    }
+
+    [Fact]
+    public void Import_Emits_MaxLength_Only_When_No_MinLength()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "maxLength": 100 }
+                    },
+                    "required": ["name"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("[property: MaxLength(100)]", content);
+        Assert.DoesNotContain("StringLength", content);
+    }
+
+    [Fact]
+    public void Import_Emits_Range_For_Both_Min_Max()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "score": { "type": "number", "minimum": 0, "maximum": 100 }
+                    },
+                    "required": ["score"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("[property: Range(0, 100)]", content);
+        Assert.DoesNotContain("RivetConstraints", content);
+    }
+
+    [Fact]
+    public void Import_Emits_RegularExpression_For_Pattern()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "code": { "type": "string", "pattern": "^[A-Z]{3}$" }
+                    },
+                    "required": ["code"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("[property: RegularExpression(\"^[A-Z]{3}$\")]", content);
+        Assert.DoesNotContain("RivetConstraints", content);
+    }
+
+    [Fact]
+    public void Import_Emits_RivetConstraints_Only_For_Exotic()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "value": { "type": "number", "multipleOf": 0.5 },
+                        "tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 10, "uniqueItems": true }
+                    },
+                    "required": ["value", "tags"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("RivetConstraints(MultipleOf = 0.5)", content);
+        Assert.Contains("RivetConstraints(MinItems = 1, MaxItems = 10, UniqueItems = true)", content);
+        Assert.DoesNotContain("StringLength", content);
+        Assert.DoesNotContain("RegularExpression", content);
+    }
+
+    [Fact]
+    public void Import_Emits_Using_DataAnnotations_When_Standard_Constraints_Present()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "minLength": 1 }
+                    },
+                    "required": ["name"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("using System.ComponentModel.DataAnnotations;", content);
+    }
+
+    [Fact]
+    public void Import_Omits_Using_DataAnnotations_When_Only_Exotic_Constraints()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "value": { "type": "number", "multipleOf": 0.5 }
+                    },
+                    "required": ["value"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.DoesNotContain("System.ComponentModel.DataAnnotations", content);
+        Assert.Contains("RivetConstraints", content);
+    }
+
+    [Fact]
+    public void Import_SingleSided_Minimum_Stays_In_RivetConstraints()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "score": { "type": "number", "minimum": 0 }
+                    },
+                    "required": ["score"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("RivetConstraints(Minimum = 0)", content);
+        Assert.DoesNotContain("[property: Range", content);
+    }
 }

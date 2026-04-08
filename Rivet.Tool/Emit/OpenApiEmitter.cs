@@ -1006,13 +1006,15 @@ public static class OpenApiEmitter
     {
         if (schema.TryGetValue("exclusiveMinimum", out var exMin) && exMin is double exMinVal)
         {
-            schema["minimum"] = exMinVal;
+            if (!schema.ContainsKey("minimum"))
+                schema["minimum"] = exMinVal;
             schema["exclusiveMinimum"] = true;
         }
 
         if (schema.TryGetValue("exclusiveMaximum", out var exMax) && exMax is double exMaxVal)
         {
-            schema["maximum"] = exMaxVal;
+            if (!schema.ContainsKey("maximum"))
+                schema["maximum"] = exMaxVal;
             schema["exclusiveMaximum"] = true;
         }
     }
