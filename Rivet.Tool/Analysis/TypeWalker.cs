@@ -255,6 +255,7 @@ public sealed class TypeWalker
             string? example = null;
             var isReadOnly = false;
             var isWriteOnly = false;
+            var daConstraints = ReadDataAnnotationConstraints(member.GetAttributes());
             foreach (var attr in member.GetAttributes())
             {
                 var attrName = attr.AttributeClass?.Name;
@@ -290,6 +291,28 @@ public sealed class TypeWalker
                 {
                     isWriteOnly = true;
                 }
+            }
+
+            // Merge DataAnnotation constraints with RivetConstraints.
+            // DA wins for overlapping fields; RivetConstraints fills exotic-only.
+            if (daConstraints is not null && constraints is not null)
+            {
+                constraints = new TsPropertyConstraints(
+                    MinLength: daConstraints.MinLength ?? constraints.MinLength,
+                    MaxLength: daConstraints.MaxLength ?? constraints.MaxLength,
+                    Pattern: daConstraints.Pattern ?? constraints.Pattern,
+                    Minimum: daConstraints.Minimum ?? constraints.Minimum,
+                    Maximum: daConstraints.Maximum ?? constraints.Maximum,
+                    ExclusiveMinimum: constraints.ExclusiveMinimum,
+                    ExclusiveMaximum: constraints.ExclusiveMaximum,
+                    MultipleOf: constraints.MultipleOf,
+                    MinItems: constraints.MinItems,
+                    MaxItems: constraints.MaxItems,
+                    UniqueItems: constraints.UniqueItems);
+            }
+            else
+            {
+                constraints ??= daConstraints;
             }
 
             // Apply format to the TsType if it's a primitive without one already
@@ -531,6 +554,61 @@ public sealed class TypeWalker
             MinItems: GetInt("MinItems"),
             MaxItems: GetInt("MaxItems"),
             UniqueItems: GetBool("UniqueItems"));
+
+        return c.HasAny ? c : null;
+    }
+
+    private static TsPropertyConstraints? ReadDataAnnotationConstraints(
+        ImmutableArray<AttributeData> attributes)
+    {
+        int? minLength = null;
+        int? maxLength = null;
+        string? pattern = null;
+        double? minimum = null;
+        double? maximum = null;
+
+        foreach (var attr in attributes)
+        {
+            var name = attr.AttributeClass?.Name;
+            switch (name)
+            {
+                case "MinLengthAttribute" when attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is int ml:
+                    minLength = ml;
+                    break;
+
+                case "MaxLengthAttribute" when attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is int mxl:
+                    maxLength = mxl;
+                    break;
+
+                case "StringLengthAttribute" when attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is int slMax:
+                    maxLength = slMax;
+                    var minLenArg = attr.NamedArguments
+                        .FirstOrDefault(a => a.Key == "MinimumLength");
+                    if (minLenArg.Value.Value is int slMin)
+                        minLength = slMin;
+                    break;
+
+                case "RangeAttribute" when attr.ConstructorArguments.Length >= 2:
+                    minimum = Convert.ToDouble(attr.ConstructorArguments[0].Value);
+                    maximum = Convert.ToDouble(attr.ConstructorArguments[1].Value);
+                    break;
+
+                case "RegularExpressionAttribute" when attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is string pat:
+                    pattern = pat;
+                    break;
+            }
+        }
+
+        var c = new TsPropertyConstraints(
+            MinLength: minLength,
+            MaxLength: maxLength,
+            Pattern: pattern,
+            Minimum: minimum,
+            Maximum: maximum);
 
         return c.HasAny ? c : null;
     }
