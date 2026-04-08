@@ -70,5 +70,10 @@ internal static class SchemaEnricher
             if (cc.MaxItems.HasValue) propSchema["maxItems"] = cc.MaxItems.Value;
             if (cc.UniqueItems == true) propSchema["uniqueItems"] = true;
         }
+
+        if (prop.Format is not null)
+        {
+            propSchema["format"] = prop.Format;
+        }
     }
 }

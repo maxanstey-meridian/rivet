@@ -33,7 +33,13 @@ public sealed class AnnotationRoundTripTests
             string Description,
 
             [property: RivetConstraints(ExclusiveMinimum = 0, MultipleOf = 0.5)]
-            double Score);
+            double Score,
+
+            [property: EmailAddress]
+            string Email,
+
+            [property: Url]
+            string Website);
 
         [RivetContract]
         public static class ConstrainedContract
@@ -127,6 +133,16 @@ public sealed class AnnotationRoundTripTests
         Assert.NotNull(score.Constraints);
         Assert.Equal(0.0, score.Constraints!.ExclusiveMinimum);
         Assert.Equal(0.5, score.Constraints.MultipleOf);
+
+        // Email: [EmailAddress] → Format = "email"
+        var email = typeDef.Properties.First(p => p.Name == "email");
+        Assert.Equal("email", email.Format);
+        Assert.Null(email.Constraints);
+
+        // Website: [Url] → Format = "uri"
+        var website = typeDef.Properties.First(p => p.Name == "website");
+        Assert.Equal("uri", website.Format);
+        Assert.Null(website.Constraints);
     }
 
     [Fact]
@@ -167,6 +183,14 @@ public sealed class AnnotationRoundTripTests
         var score = props.GetProperty("score");
         Assert.Equal(0.0, score.GetProperty("exclusiveMinimum").GetDouble());
         Assert.Equal(0.5, score.GetProperty("multipleOf").GetDouble());
+
+        // Email: format = "email"
+        var email = props.GetProperty("email");
+        Assert.Equal("email", email.GetProperty("format").GetString());
+
+        // Website: format = "uri"
+        var website = props.GetProperty("website");
+        Assert.Equal("uri", website.GetProperty("format").GetString());
     }
 
     [Fact]
@@ -207,6 +231,14 @@ public sealed class AnnotationRoundTripTests
         Assert.Equal(0.0, score.GetProperty("minimum").GetDouble());
         Assert.True(score.GetProperty("exclusiveMinimum").GetBoolean());
         Assert.Equal(0.5, score.GetProperty("multipleOf").GetDouble());
+
+        // Email: format = "email"
+        var email = props.GetProperty("email");
+        Assert.Equal("email", email.GetProperty("format").GetString());
+
+        // Website: format = "uri"
+        var website = props.GetProperty("website");
+        Assert.Equal("uri", website.GetProperty("format").GetString());
     }
 
     [Fact]
@@ -253,6 +285,16 @@ public sealed class AnnotationRoundTripTests
         Assert.NotNull(score.Constraints);
         Assert.Equal(0.0, score.Constraints!.ExclusiveMinimum);
         Assert.Equal(0.5, score.Constraints.MultipleOf);
+
+        // Email: [EmailAddress] → format preserved via DA attribute round-trip
+        var email = typeDef.Properties.First(p => p.Name == "email");
+        Assert.Equal("email", email.Format);
+
+        // Website: [Url] → format absorbed into C# Uri type on import.
+        // Property-level Format is null, but the TsType.Primitive carries format = "uri".
+        var website = typeDef.Properties.First(p => p.Name == "website");
+        var websitePrimitive = Assert.IsType<TsType.Primitive>(website.Type);
+        Assert.Equal("uri", websitePrimitive.Format);
     }
 
     [Fact]

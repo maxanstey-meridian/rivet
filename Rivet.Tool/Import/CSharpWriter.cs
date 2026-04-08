@@ -15,7 +15,8 @@ internal static class CSharpWriter
         var sb = new StringBuilder();
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
-        if (record.Properties.Any(p => p.Constraints is { } cc && HasStandardConstraints(cc)))
+        if (record.Properties.Any(p => p.Constraints is { } cc && HasStandardConstraints(cc))
+            || record.Properties.Any(p => p.Format is "email" or "uri"))
         {
             sb.AppendLine("using System.ComponentModel.DataAnnotations;");
         }
@@ -53,7 +54,15 @@ internal static class CSharpWriter
             {
                 sb.AppendLine("    [property: RivetOptional]");
             }
-            if (prop.Format is not null)
+            if (prop.Format is "email")
+            {
+                sb.AppendLine("    [property: EmailAddress]");
+            }
+            else if (prop.Format is "uri")
+            {
+                sb.AppendLine("    [property: Url]");
+            }
+            else if (prop.Format is not null)
             {
                 sb.AppendLine($"    [property: RivetFormat(\"{prop.Format}\")]");
             }

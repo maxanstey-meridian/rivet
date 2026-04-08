@@ -256,6 +256,7 @@ public sealed class TypeWalker
             var isReadOnly = false;
             var isWriteOnly = false;
             var daConstraints = ReadDataAnnotationConstraints(member.GetAttributes());
+            var daFormat = ReadDataAnnotationFormat(member.GetAttributes());
             foreach (var attr in member.GetAttributes())
             {
                 var attrName = attr.AttributeClass?.Name;
@@ -292,6 +293,9 @@ public sealed class TypeWalker
                     isWriteOnly = true;
                 }
             }
+
+            // DA format is a fallback — explicit [RivetFormat] takes precedence.
+            format ??= daFormat;
 
             // Merge DataAnnotation constraints with RivetConstraints.
             // DA provides standard fields; RivetConstraints provides exotic-only fields.
@@ -610,6 +614,20 @@ public sealed class TypeWalker
             Maximum: maximum);
 
         return c.HasAny ? c : null;
+    }
+
+    private static string? ReadDataAnnotationFormat(ImmutableArray<AttributeData> attributes)
+    {
+        foreach (var attr in attributes)
+        {
+            switch (attr.AttributeClass?.Name)
+            {
+                case "EmailAddressAttribute": return "email";
+                case "UrlAttribute": return "uri";
+            }
+        }
+
+        return null;
     }
 
     private static bool IsOptionalProperty(IPropertySymbol prop)
