@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using Microsoft.CodeAnalysis.CSharp;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Import;
 
@@ -14,6 +15,10 @@ internal static class CSharpWriter
         var sb = new StringBuilder();
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
+        if (record.Properties.Any(p => p.Constraints is { } cc && HasStandardConstraints(cc)))
+        {
+            sb.AppendLine("using System.ComponentModel.DataAnnotations;");
+        }
         if (record.Properties.Any(p => p.CSharpType is "IFormFile" or "IFormFile?"))
         {
             sb.AppendLine("using Microsoft.AspNetCore.Http;");
@@ -78,19 +83,7 @@ internal static class CSharpWriter
             }
             if (prop.Constraints is { HasAny: true } c)
             {
-                var parts = new List<string>();
-                if (c.MinLength.HasValue) parts.Add($"MinLength = {c.MinLength}");
-                if (c.MaxLength.HasValue) parts.Add($"MaxLength = {c.MaxLength}");
-                if (c.Pattern is not null) parts.Add($"Pattern = \"{EscapeString(c.Pattern)}\"");
-                if (c.Minimum.HasValue) parts.Add($"Minimum = {c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}");
-                if (c.Maximum.HasValue) parts.Add($"Maximum = {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)}");
-                if (c.ExclusiveMinimum.HasValue) parts.Add($"ExclusiveMinimum = {c.ExclusiveMinimum.Value.ToString(CultureInfo.InvariantCulture)}");
-                if (c.ExclusiveMaximum.HasValue) parts.Add($"ExclusiveMaximum = {c.ExclusiveMaximum.Value.ToString(CultureInfo.InvariantCulture)}");
-                if (c.MultipleOf.HasValue) parts.Add($"MultipleOf = {c.MultipleOf.Value.ToString(CultureInfo.InvariantCulture)}");
-                if (c.MinItems.HasValue) parts.Add($"MinItems = {c.MinItems}");
-                if (c.MaxItems.HasValue) parts.Add($"MaxItems = {c.MaxItems}");
-                if (c.UniqueItems == true) parts.Add("UniqueItems = true");
-                sb.AppendLine($"    [property: RivetConstraints({string.Join(", ", parts)})]");
+                EmitConstraintAttributes(sb, c);
             }
             sb.AppendLine($"    {prop.CSharpType} {prop.Name}{separator}");
         }
@@ -434,6 +427,63 @@ internal static class CSharpWriter
         return example.Name is not null
             ? $", name: \"{EscapeString(example.Name)}\""
             : "";
+    }
+
+    private static bool HasStandardConstraints(TsPropertyConstraints c)
+        => c.MinLength.HasValue || c.MaxLength.HasValue || c.Pattern is not null
+           || (c.Minimum.HasValue && c.Maximum.HasValue);
+
+    private static void EmitConstraintAttributes(StringBuilder sb, TsPropertyConstraints c)
+    {
+        // StringLength when both min and max length are present
+        if (c.MinLength.HasValue && c.MaxLength.HasValue)
+        {
+            sb.AppendLine($"    [property: StringLength({c.MaxLength}, MinimumLength = {c.MinLength})]");
+        }
+        else if (c.MinLength.HasValue)
+        {
+            sb.AppendLine($"    [property: MinLength({c.MinLength})]");
+        }
+        else if (c.MaxLength.HasValue)
+        {
+            sb.AppendLine($"    [property: MaxLength({c.MaxLength})]");
+        }
+
+        // Range when both minimum and maximum are present
+        if (c.Minimum.HasValue && c.Maximum.HasValue)
+        {
+            sb.AppendLine($"    [property: Range({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]");
+        }
+
+        // Pattern
+        if (c.Pattern is not null)
+        {
+            sb.AppendLine($"    [property: RegularExpression(\"{EscapeString(c.Pattern)}\")]");
+        }
+
+        // Exotic constraints + single-sided min/max → RivetConstraints
+        var exoticParts = new List<string>();
+        if (c.Minimum.HasValue && !c.Maximum.HasValue)
+            exoticParts.Add($"Minimum = {c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}");
+        if (c.Maximum.HasValue && !c.Minimum.HasValue)
+            exoticParts.Add($"Maximum = {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)}");
+        if (c.ExclusiveMinimum.HasValue)
+            exoticParts.Add($"ExclusiveMinimum = {c.ExclusiveMinimum.Value.ToString(CultureInfo.InvariantCulture)}");
+        if (c.ExclusiveMaximum.HasValue)
+            exoticParts.Add($"ExclusiveMaximum = {c.ExclusiveMaximum.Value.ToString(CultureInfo.InvariantCulture)}");
+        if (c.MultipleOf.HasValue)
+            exoticParts.Add($"MultipleOf = {c.MultipleOf.Value.ToString(CultureInfo.InvariantCulture)}");
+        if (c.MinItems.HasValue)
+            exoticParts.Add($"MinItems = {c.MinItems}");
+        if (c.MaxItems.HasValue)
+            exoticParts.Add($"MaxItems = {c.MaxItems}");
+        if (c.UniqueItems == true)
+            exoticParts.Add("UniqueItems = true");
+
+        if (exoticParts.Count > 0)
+        {
+            sb.AppendLine($"    [property: RivetConstraints({string.Join(", ", exoticParts)})]");
+        }
     }
 
     private static string EscapeString(string value)

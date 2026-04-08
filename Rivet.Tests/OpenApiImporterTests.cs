@@ -3034,9 +3034,8 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "ItemDto.cs");
 
-        // minLength: 0 should be preserved as MinLength = 0 in the constraint attribute
-        Assert.Contains("MinLength = 0", content);
-        Assert.Contains("MaxLength = 255", content);
+        // minLength: 0 + maxLength: 255 → [StringLength(255, MinimumLength = 0)]
+        Assert.Contains("StringLength(255, MinimumLength = 0)", content);
     }
 
     // ========== oneOf schema description ==========

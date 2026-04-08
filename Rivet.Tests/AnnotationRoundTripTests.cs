@@ -202,9 +202,10 @@ public sealed class AnnotationRoundTripTests
         Assert.Equal(10, description.GetProperty("minLength").GetInt32());
         Assert.Equal(500, description.GetProperty("maxLength").GetInt32());
 
-        // Score
+        // Score — OpenAPI 3.0: exclusiveMinimum is boolean, value goes in minimum
         var score = props.GetProperty("score");
-        Assert.Equal(0.0, score.GetProperty("exclusiveMinimum").GetDouble());
+        Assert.Equal(0.0, score.GetProperty("minimum").GetDouble());
+        Assert.True(score.GetProperty("exclusiveMinimum").GetBoolean());
         Assert.Equal(0.5, score.GetProperty("multipleOf").GetDouble());
     }
 

@@ -769,6 +769,7 @@ public static class OpenApiEmitter
         {
             var propSchema = MapTsTypeToJsonSchema(prop.Type);
             SchemaEnricher.EnrichPropertySchema(propSchema, prop);
+            ConvertExclusiveToOpenApi30(propSchema);
             properties[prop.Name] = propSchema;
 
             if (!prop.IsOptional)
@@ -847,6 +848,7 @@ public static class OpenApiEmitter
             var resolvedType = ResolveTypeParams(prop.Type, typeParamMap);
             var propSchema = MapTsTypeToJsonSchema(resolvedType);
             SchemaEnricher.EnrichPropertySchema(propSchema, prop);
+            ConvertExclusiveToOpenApi30(propSchema);
             properties[prop.Name] = propSchema;
 
             if (!prop.IsOptional)
@@ -994,6 +996,25 @@ public static class OpenApiEmitter
             TsType.Brand b => b.Name,
             _ => "object",
         };
+    }
+
+    /// <summary>
+    /// Converts numeric exclusiveMinimum/Maximum (JSON Schema / OpenAPI 3.1) to
+    /// OpenAPI 3.0 boolean form: minimum + exclusiveMinimum: true.
+    /// </summary>
+    private static void ConvertExclusiveToOpenApi30(Dictionary<string, object> schema)
+    {
+        if (schema.TryGetValue("exclusiveMinimum", out var exMin) && exMin is double exMinVal)
+        {
+            schema["minimum"] = exMinVal;
+            schema["exclusiveMinimum"] = true;
+        }
+
+        if (schema.TryGetValue("exclusiveMaximum", out var exMax) && exMax is double exMaxVal)
+        {
+            schema["maximum"] = exMaxVal;
+            schema["exclusiveMaximum"] = true;
+        }
     }
 
     private static string UpperFirst(string s) => Naming.ToPascalCase(s);

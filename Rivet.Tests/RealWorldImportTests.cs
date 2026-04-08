@@ -204,6 +204,7 @@ public sealed class RealWorldImportTests
             Path.Combine(runtimeDir, "netstandard.dll"),
             Path.Combine(runtimeDir, "System.Private.Uri.dll"),
             typeof(RivetTypeAttribute).Assembly.Location,
+            typeof(System.ComponentModel.DataAnnotations.RequiredAttribute).Assembly.Location,
         };
         foreach (var extra in new[] { "System.Linq.dll", "System.Console.dll" })
         {
