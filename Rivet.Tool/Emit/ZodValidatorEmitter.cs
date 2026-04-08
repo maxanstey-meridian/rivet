@@ -23,9 +23,16 @@ public static class ZodValidatorEmitter
             .Select(e => e.ReturnType!)
             .Concat(endpoints.SelectMany(e => e.Responses)
                 .Where(r => r.DataType is not null)
-                .Select(r => r.DataType!));
+                .Select(r => r.DataType!))
+            .Concat(endpoints
+                .Where(e => e.RequestType is not null)
+                .Select(e => e.RequestType!))
+            .Concat(endpoints
+                .SelectMany(e => e.Params)
+                .Where(p => p.Source == ParamSource.Body)
+                .Select(p => p.Type));
 
-        var returnTypes = allTypes
+        var validatedTypes = allTypes
             .Select(t => (
                 Type: t,
                 TypeStr: TypeEmitter.EmitTypeString(t),
@@ -34,7 +41,7 @@ public static class ZodValidatorEmitter
             .OrderBy(x => x.AssertName)
             .ToList();
 
-        if (returnTypes.Count == 0)
+        if (validatedTypes.Count == 0)
         {
             return "";
         }
@@ -46,7 +53,7 @@ public static class ZodValidatorEmitter
 
         // Collect schema imports from base types
         var schemaImports = new HashSet<string>();
-        foreach (var (type, _, _) in returnTypes)
+        foreach (var (type, _, _) in validatedTypes)
         {
             CollectSchemaImports(type, schemaImports);
         }
@@ -67,6 +74,14 @@ public static class ZodValidatorEmitter
         {
             TsType.CollectTypeRefs(response.DataType!, typeRefs);
         }
+        foreach (var endpoint in endpoints.Where(e => e.RequestType is not null))
+        {
+            TsType.CollectTypeRefs(endpoint.RequestType!, typeRefs);
+        }
+        foreach (var param in endpoints.SelectMany(e => e.Params).Where(p => p.Source == ParamSource.Body))
+        {
+            TsType.CollectTypeRefs(param.Type, typeRefs);
+        }
 
         var importsByFile = typeRefs
             .Where(t => typeFileMap.ContainsKey(t))
@@ -82,7 +97,7 @@ public static class ZodValidatorEmitter
         sb.AppendLine();
 
         // Cached schema instances
-        foreach (var (type, _, assertName) in returnTypes)
+        foreach (var (type, _, assertName) in validatedTypes)
         {
             var zodExpr = BuildZodExpression(type);
             sb.AppendLine($"const _{assertName} = {zodExpr};");
@@ -91,7 +106,7 @@ public static class ZodValidatorEmitter
         sb.AppendLine();
 
         // Assert functions
-        foreach (var (_, typeStr, assertName) in returnTypes)
+        foreach (var (_, typeStr, assertName) in validatedTypes)
         {
             sb.AppendLine($"export const {assertName} = (data: unknown): {typeStr} => _{assertName}.parse(data) as {typeStr};");
         }

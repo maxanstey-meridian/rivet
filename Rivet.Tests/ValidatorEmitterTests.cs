@@ -249,7 +249,7 @@ public sealed class ValidatorEmitterTests
 
         // Only one assert for ItemDto (shared return type)
         Assert.Contains("assertItemDto", validators);
-        Assert.DoesNotContain("assertCreateItemCommand", validators);
+        Assert.Contains("assertCreateItemCommand", validators);
 
         // GET and POST get assert wrappers, DELETE doesn't
         Assert.Contains("export async function getItem", validatedClient);
