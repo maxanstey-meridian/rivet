@@ -1,4 +1,5 @@
 using Rivet.Tool.Emit;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -97,5 +98,41 @@ public sealed class ZodValidatorEmitterTests
         // Schema and type imports present
         Assert.Contains("ItemDtoSchema", validators);
         Assert.Contains("assertItemDto", validators);
+    }
+
+    [Fact]
+    public void RequestTypeField_EmitsAssertFunction()
+    {
+        // Exercises the RequestType field path (contract/import pipeline),
+        // not the body Params path used by [RivetEndpoint].
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                Name: "createOrder",
+                HttpMethod: "POST",
+                RouteTemplate: "/api/orders",
+                Params: [],
+                ReturnType: new TsType.TypeRef("OrderDto"),
+                ControllerName: "Orders",
+                Responses: [],
+                RequestType: new TsType.TypeRef("CreateOrderRequest"))
+        };
+
+        var typeFileMap = new Dictionary<string, string>
+        {
+            ["OrderDto"] = "orders",
+            ["CreateOrderRequest"] = "orders",
+        };
+
+        var validators = ZodValidatorEmitter.Emit(endpoints, typeFileMap);
+
+        // Request type assert function from RequestType field
+        Assert.Contains("assertCreateOrderRequest", validators);
+        Assert.Contains("CreateOrderRequestSchema", validators);
+        // Response type still present
+        Assert.Contains("assertOrderDto", validators);
+        Assert.Contains("OrderDtoSchema", validators);
+        // Type imports include request type
+        Assert.Contains("CreateOrderRequest", validators);
     }
 }
