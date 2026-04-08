@@ -294,15 +294,15 @@ public sealed class TypeWalker
             }
 
             // Merge DataAnnotation constraints with RivetConstraints.
-            // DA wins for overlapping fields; RivetConstraints fills exotic-only.
+            // DA provides standard fields; RivetConstraints provides exotic-only fields.
             if (daConstraints is not null && constraints is not null)
             {
                 constraints = new TsPropertyConstraints(
-                    MinLength: daConstraints.MinLength ?? constraints.MinLength,
-                    MaxLength: daConstraints.MaxLength ?? constraints.MaxLength,
-                    Pattern: daConstraints.Pattern ?? constraints.Pattern,
-                    Minimum: daConstraints.Minimum ?? constraints.Minimum,
-                    Maximum: daConstraints.Maximum ?? constraints.Maximum,
+                    MinLength: daConstraints.MinLength,
+                    MaxLength: daConstraints.MaxLength,
+                    Pattern: daConstraints.Pattern,
+                    Minimum: daConstraints.Minimum,
+                    Maximum: daConstraints.Maximum,
                     ExclusiveMinimum: constraints.ExclusiveMinimum,
                     ExclusiveMaximum: constraints.ExclusiveMaximum,
                     MultipleOf: constraints.MultipleOf,
@@ -539,15 +539,9 @@ public sealed class TypeWalker
     {
         int? GetInt(string name) => attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is int v && v >= 0 ? v : null;
         double? GetDouble(string name) => attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is double v && !double.IsNaN(v) ? v : null;
-        string? GetString(string name) => attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value as string;
         bool? GetBool(string name) => attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is true ? true : null;
 
         var c = new TsPropertyConstraints(
-            MinLength: GetInt("MinLength"),
-            MaxLength: GetInt("MaxLength"),
-            Pattern: GetString("Pattern"),
-            Minimum: GetDouble("Minimum"),
-            Maximum: GetDouble("Maximum"),
             ExclusiveMinimum: GetDouble("ExclusiveMinimum"),
             ExclusiveMaximum: GetDouble("ExclusiveMaximum"),
             MultipleOf: GetDouble("MultipleOf"),

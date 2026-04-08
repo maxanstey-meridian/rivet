@@ -4278,7 +4278,7 @@ public sealed class OpenApiImporterTests
                 """);
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
-        Assert.Contains("[property: Range(0, 100)]", content);
+        Assert.Contains("[property: RangeAttribute(0, 100)]", content);
         Assert.DoesNotContain("RivetConstraints", content);
     }
 
@@ -4373,7 +4373,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Import_SingleSided_Minimum_Stays_In_RivetConstraints()
+    public void Import_SingleSided_Minimum_Emits_Range()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -4390,7 +4390,7 @@ public sealed class OpenApiImporterTests
                 """);
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
-        Assert.Contains("RivetConstraints(Minimum = 0)", content);
-        Assert.DoesNotContain("[property: Range", content);
+        Assert.Contains("[property: RangeAttribute(0, double.MaxValue)]", content);
+        Assert.DoesNotContain("RivetConstraints(Minimum", content);
     }
 }

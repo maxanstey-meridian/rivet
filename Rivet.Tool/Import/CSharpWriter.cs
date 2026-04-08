@@ -431,7 +431,7 @@ internal static class CSharpWriter
 
     private static bool HasStandardConstraints(TsPropertyConstraints c)
         => c.MinLength.HasValue || c.MaxLength.HasValue || c.Pattern is not null
-           || (c.Minimum.HasValue && c.Maximum.HasValue);
+           || c.Minimum.HasValue || c.Maximum.HasValue;
 
     private static void EmitConstraintAttributes(StringBuilder sb, TsPropertyConstraints c)
     {
@@ -449,10 +449,19 @@ internal static class CSharpWriter
             sb.AppendLine($"    [property: MaxLength({c.MaxLength})]");
         }
 
-        // Range when both minimum and maximum are present
+        // Range when minimum or maximum are present
+        // Use RangeAttribute (not Range) to disambiguate from System.Range
         if (c.Minimum.HasValue && c.Maximum.HasValue)
         {
-            sb.AppendLine($"    [property: Range({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]");
+            sb.AppendLine($"    [property: RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]");
+        }
+        else if (c.Minimum.HasValue)
+        {
+            sb.AppendLine($"    [property: RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, double.MaxValue)]");
+        }
+        else if (c.Maximum.HasValue)
+        {
+            sb.AppendLine($"    [property: RangeAttribute(double.MinValue, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]");
         }
 
         // Pattern
@@ -461,12 +470,8 @@ internal static class CSharpWriter
             sb.AppendLine($"    [property: RegularExpression(\"{EscapeString(c.Pattern)}\")]");
         }
 
-        // Exotic constraints + single-sided min/max → RivetConstraints
+        // Exotic constraints → RivetConstraints
         var exoticParts = new List<string>();
-        if (c.Minimum.HasValue && !c.Maximum.HasValue)
-            exoticParts.Add($"Minimum = {c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}");
-        if (c.Maximum.HasValue && !c.Minimum.HasValue)
-            exoticParts.Add($"Maximum = {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)}");
         if (c.ExclusiveMinimum.HasValue)
             exoticParts.Add($"ExclusiveMinimum = {c.ExclusiveMinimum.Value.ToString(CultureInfo.InvariantCulture)}");
         if (c.ExclusiveMaximum.HasValue)

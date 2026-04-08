@@ -133,12 +133,13 @@ public sealed class MetadataAttributeTests
     public void RivetConstraints_Emit_In_OpenApi()
     {
         var source = """
+            using System.ComponentModel.DataAnnotations;
             using Rivet;
 
             [RivetType]
             public sealed record ItemDto(
-                [property: RivetConstraints(MinLength = 1, MaxLength = 100, Pattern = "^[a-z]+$")] string Name,
-                [property: RivetConstraints(Minimum = 0, Maximum = 999.5, MultipleOf = 0.5)] double Score);
+                [property: MinLength(1), MaxLength(100), RegularExpression("^[a-z]+$")] string Name,
+                [property: Range(0, 999.5), RivetConstraints(MultipleOf = 0.5)] double Score);
 
             [RivetContract]
             public static class ItemContract
@@ -167,11 +168,12 @@ public sealed class MetadataAttributeTests
     public void RivetConstraints_Emit_In_JsonSchema()
     {
         var source = """
+            using System.ComponentModel.DataAnnotations;
             using Rivet;
 
             [RivetType]
             public sealed record ItemDto(
-                [property: RivetConstraints(MinLength = 3, MaxLength = 50)] string Name);
+                [property: StringLength(50, MinimumLength = 3)] string Name);
 
             [RivetContract]
             public static class ItemContract
@@ -522,6 +524,7 @@ public sealed class MetadataAttributeTests
     public void All_Metadata_Attributes_Survive_Forward_Pipeline()
     {
         var source = """
+            using System.ComponentModel.DataAnnotations;
             using Rivet;
 
             [RivetDescription("A product listing")]
@@ -531,12 +534,12 @@ public sealed class MetadataAttributeTests
                 [property: RivetDescription("Unique identifier")]
                 string Id,
 
-                [property: RivetConstraints(MinLength = 1, MaxLength = 200)]
+                [property: MinLength(1), MaxLength(200)]
                 [property: RivetDescription("Product name")]
                 [property: RivetExample("\"Widget Pro\"")] string Name,
 
                 [property: RivetDefault("9.99")]
-                [property: RivetConstraints(Minimum = 0)]
+                [property: Range(0, double.MaxValue)]
                 double Price,
 
                 [property: RivetOptional]
@@ -699,11 +702,12 @@ public sealed class MetadataAttributeTests
     public void RivetConstraints_Overrides_Integer_Range_In_OpenApi()
     {
         var source = """
+            using System.ComponentModel.DataAnnotations;
             using Rivet;
 
             [RivetType]
             public sealed record ItemDto(
-                [property: RivetConstraints(Minimum = 0, Maximum = 100)] int Score);
+                [property: Range(0, 100)] int Score);
 
             [RivetContract]
             public static class ItemContract

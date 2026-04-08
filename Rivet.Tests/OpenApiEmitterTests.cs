@@ -2824,6 +2824,7 @@ public sealed class OpenApiEmitterTests
     public void ExclusiveMinimum_Does_Not_Clobber_Existing_Minimum()
     {
         using var doc = EmitOpenApi("""
+            using System.ComponentModel.DataAnnotations;
             using Rivet;
 
             namespace Test;
@@ -2831,7 +2832,7 @@ public sealed class OpenApiEmitterTests
             [RivetType]
             public sealed record Dto(
                 string Name,
-                [property: RivetConstraints(Minimum = 5, ExclusiveMinimum = 0)]
+                [property: Range(5, double.MaxValue), RivetConstraints(ExclusiveMinimum = 0)]
                 double Value);
 
             [RivetContract]
