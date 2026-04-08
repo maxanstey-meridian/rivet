@@ -586,8 +586,13 @@ public sealed class TypeWalker
                     break;
 
                 case "RangeAttribute" when attr.ConstructorArguments.Length >= 2:
-                    minimum = Convert.ToDouble(attr.ConstructorArguments[0].Value);
-                    maximum = Convert.ToDouble(attr.ConstructorArguments[1].Value);
+                    var rangeMin = Convert.ToDouble(attr.ConstructorArguments[0].Value);
+                    var rangeMax = Convert.ToDouble(attr.ConstructorArguments[1].Value);
+                    // Filter sentinel values emitted by CSharpWriter for single-sided constraints
+                    if (rangeMin is not double.MinValue)
+                        minimum = rangeMin;
+                    if (rangeMax is not double.MaxValue)
+                        maximum = rangeMax;
                     break;
 
                 case "RegularExpressionAttribute" when attr.ConstructorArguments.Length > 0
