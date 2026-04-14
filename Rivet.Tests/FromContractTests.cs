@@ -56,6 +56,35 @@ public sealed class FromContractTests
     }
 
     [Fact]
+    public async Task FromContract_WithRelativeOpenApiPath_WritesSpecUnderOutputDirectory()
+    {
+        var repoRoot = PublishFixture.FindRepoRoot();
+        var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
+        var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
+        var outputDir = Path.Combine(Path.GetTempPath(), $"rivet-from-openapi-test-{Guid.NewGuid():N}");
+        var openApiFileName = "openapi.json";
+
+        try
+        {
+            var (exitCode, output) = await PublishFixture.RunProcessAsync(
+                "dotnet",
+                $"run --project \"{csproj}\" -- --from \"{fixture}\" --openapi \"{openApiFileName}\" --output \"{outputDir}\"",
+                repoRoot);
+
+            Assert.True(exitCode == 0, $"--from --openapi --output failed (exit {exitCode}):\n{output}");
+
+            var expectedOpenApiPath = Path.Combine(outputDir, openApiFileName);
+            Assert.True(File.Exists(expectedOpenApiPath), $"expected OpenAPI file at {expectedOpenApiPath}");
+            Assert.Contains("\"openapi\": \"3.0.3\"", await File.ReadAllTextAsync(expectedOpenApiPath));
+        }
+        finally
+        {
+            if (Directory.Exists(outputDir))
+                Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task FromContract_QuietFlag_SuppressesStdout()
     {
         var repoRoot = PublishFixture.FindRepoRoot();
