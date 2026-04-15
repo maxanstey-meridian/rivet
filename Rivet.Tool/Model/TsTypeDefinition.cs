@@ -3,13 +3,54 @@ using System.Text.Json.Serialization;
 namespace Rivet.Tool.Model;
 
 /// <summary>
-/// A full type declaration: export type Foo&lt;T&gt; = { prop: Type; ... }
+/// A full type declaration: either an object type definition or a named type alias.
 /// </summary>
-public sealed record TsTypeDefinition(
-    string Name,
-    IReadOnlyList<string> TypeParameters,
-    IReadOnlyList<TsPropertyDefinition> Properties,
-    string? Description = null);
+public sealed record TsTypeDefinition
+{
+    [JsonConstructor]
+    private TsTypeDefinition(
+        string Name,
+        IReadOnlyList<string> TypeParameters,
+        TsType? Type = null,
+        IReadOnlyList<TsPropertyDefinition>? Properties = null,
+        string? Description = null)
+    {
+        this.Name = Name;
+        this.TypeParameters = TypeParameters;
+        this.Properties = Properties ?? [];
+        this.Type = Type;
+        this.Description = Description;
+    }
+
+    public TsTypeDefinition(
+        string name,
+        IReadOnlyList<string> typeParameters,
+        IReadOnlyList<TsPropertyDefinition> properties,
+        string? Description = null)
+        : this(name, typeParameters, Type: null, Properties: properties, Description: Description)
+    {
+    }
+
+    public TsTypeDefinition(
+        string name,
+        IReadOnlyList<string> typeParameters,
+        TsType type,
+        string? Description = null)
+        : this(name, typeParameters, Type: type, Properties: null, Description: Description)
+    {
+    }
+
+    public string Name { get; }
+
+    public IReadOnlyList<string> TypeParameters { get; }
+
+    public IReadOnlyList<TsPropertyDefinition> Properties { get; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TsType? Type { get; }
+
+    public string? Description { get; }
+}
 
 /// <summary>
 /// A single property within a type definition.

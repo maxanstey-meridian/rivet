@@ -14,6 +14,12 @@ public static class TypeEmitter
         var typeParams = definition.TypeParameters.Count > 0
             ? $"<{string.Join(", ", definition.TypeParameters)}>"
             : "";
+        if (definition.Type is not null)
+        {
+            sb.AppendLine($"export type {definition.Name}{typeParams} = {EmitType(definition.Type)};");
+            return;
+        }
+
         sb.AppendLine($"export type {definition.Name}{typeParams} = {{");
 
         foreach (var prop in definition.Properties)
@@ -46,6 +52,7 @@ public static class TypeEmitter
             TsType.Generic g => $"{g.Name}<{string.Join(", ", g.TypeArguments.Select(EmitType))}>",
             TsType.Brand b => b.Name,
             TsType.InlineObject obj => $"{{ {string.Join("; ", obj.Fields.Select(f => $"{QuoteIfNeeded(f.Name)}: {EmitType(f.Type)}"))}; }}",
+            TsType.TaggedUnion tu => string.Join(" | ", tu.Variants.Select(v => EmitType(v.Type))),
             _ => "unknown",
         };
 
@@ -137,7 +144,7 @@ public static class TypeEmitter
     private static string WrapIfCompound(TsType element)
     {
         var str = EmitType(element);
-        return element is TsType.Nullable or TsType.StringUnion or TsType.IntUnion
+        return element is TsType.Nullable or TsType.StringUnion or TsType.IntUnion or TsType.TaggedUnion
             ? $"({str})"
             : str;
     }

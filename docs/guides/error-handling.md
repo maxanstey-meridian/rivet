@@ -71,9 +71,9 @@ export function get(id: string, opts: { unwrap: false }): Promise<GetResult>;
 ```typescript
 // Usage — narrow by status
 const result = await tasks.get(id, { unwrap: false });
-if (result.status === 200) {
+if (result.isOk()) {
   result.data.title;    // TaskDetailDto
-} else if (result.status === 404) {
+} else if (result.isNotFound()) {
   result.data.message;  // NotFoundDto
 }
 ```

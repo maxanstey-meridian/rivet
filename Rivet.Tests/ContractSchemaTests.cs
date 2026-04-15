@@ -64,6 +64,16 @@ public sealed class ContractSchemaTests
                 new("typeParam", new TsType.TypeParam("T"), false),
                 new("brand", new TsType.Brand("Email", new TsType.Primitive("string")), false),
                 new("inline", new TsType.InlineObject([("key", new TsType.Primitive("string")), ("val", new TsType.Primitive("number"))]), false),
+                new("tagged", new TsType.TaggedUnion("kind", [
+                    new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
+                        ("kind", new TsType.StringUnion(["hidden"])),
+                        ("message", new TsType.Primitive("string")),
+                    ])),
+                    new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
+                        ("kind", new TsType.StringUnion(["shown"])),
+                        ("summary", new TsType.TypeRef("Summary")),
+                    ])),
+                ]), false),
             ]),
         };
 
@@ -279,6 +289,28 @@ public sealed class ContractSchemaTests
                 new("scores", new TsType.Array(new TsType.Nullable(new TsType.TypeRef("Score"))), false),
                 new("tags", new TsType.Dictionary(new TsType.Array(new TsType.Primitive("string"))), false),
             ]),
+        };
+
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
+        var result = Validate(json);
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void TaggedUnion_TypeAlias_Definition_Validates()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["DisplayState"] = new("DisplayState", [], new TsType.TaggedUnion("kind", [
+                new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
+                    ("kind", new TsType.StringUnion(["hidden"])),
+                    ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
+                ])),
+                new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
+                    ("kind", new TsType.StringUnion(["shown"])),
+                    ("summary", new TsType.TypeRef("Summary")),
+                ])),
+            ])),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);

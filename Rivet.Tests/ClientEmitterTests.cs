@@ -237,10 +237,14 @@ public sealed class ClientEmitterTests
 
         Assert.Contains("export type RivetConfig", rivetBase);
         Assert.Contains("export type RivetResult<T>", rivetBase);
+        Assert.Contains("export type RivetResultOf<TResult extends RivetRawResult>", rivetBase);
         Assert.Contains("export const configureRivet", rivetBase);
         Assert.Contains("export const getBaseUrl", rivetBase);
         Assert.Contains("export const rivetFetch", rivetBase);
         Assert.Contains("unwrap?: boolean", rivetBase);
+        Assert.Contains("isSuccessful(): boolean;", rivetBase);
+        Assert.Contains("isOk(): this is RivetStatusMatch<TResult, 200>;", rivetBase);
+        Assert.Contains("isRedirect(location?: string): boolean;", rivetBase);
     }
 
     [Fact]
@@ -318,7 +322,8 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         // Result DU type with catch-all arm
-        Assert.Contains("export type GetResult =", client);
+        Assert.Contains("import { rivetFetch, type RivetResult, type RivetResultOf } from \"../rivet.js\";", client);
+        Assert.Contains("export type GetResult = RivetResultOf<", client);
         Assert.Contains("{ status: 200; data: TaskDetailDto; response: Response }", client);
         Assert.Contains("{ status: 404; data: NotFoundDto; response: Response }", client);
         Assert.Contains("{ status: Exclude<number, 200 | 404>; data: unknown; response: Response }", client);

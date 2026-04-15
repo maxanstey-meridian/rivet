@@ -1,0 +1,102 @@
+{
+  "types": [
+    {
+      "name": "WorkspaceKey",
+      "typeParameters": [],
+      "properties": [
+        { "name": "appName", "type": { "kind": "primitive", "type": "string" }, "optional": false },
+        { "name": "windowTitle", "type": { "kind": "primitive", "type": "string" }, "optional": false }
+      ]
+    },
+    {
+      "name": "Summary",
+      "typeParameters": [],
+      "properties": [
+        { "name": "project", "type": { "kind": "primitive", "type": "string" }, "optional": false },
+        { "name": "task", "type": { "kind": "primitive", "type": "string" }, "optional": false }
+      ]
+    },
+    {
+      "name": "RefreshDisplayRequest",
+      "typeParameters": [],
+      "properties": [
+        { "name": "workspaceKey", "type": { "kind": "ref", "name": "WorkspaceKey" }, "optional": false }
+      ]
+    },
+    {
+      "name": "DisplayState",
+      "typeParameters": [],
+      "type": {
+        "kind": "taggedUnion",
+        "discriminator": "kind",
+        "variants": [
+          {
+            "tag": "hidden",
+            "type": {
+              "kind": "inlineObject",
+              "properties": [
+                { "name": "kind", "type": { "kind": "stringUnion", "values": ["hidden"] } },
+                { "name": "workspaceKey", "type": { "kind": "nullable", "inner": { "kind": "ref", "name": "WorkspaceKey" } } }
+              ]
+            }
+          },
+          {
+            "tag": "loading",
+            "type": {
+              "kind": "inlineObject",
+              "properties": [
+                { "name": "kind", "type": { "kind": "stringUnion", "values": ["loading"] } },
+                { "name": "requestId", "type": { "kind": "primitive", "type": "string" } },
+                { "name": "workspaceKey", "type": { "kind": "ref", "name": "WorkspaceKey" } }
+              ]
+            }
+          },
+          {
+            "tag": "shown",
+            "type": {
+              "kind": "inlineObject",
+              "properties": [
+                { "name": "kind", "type": { "kind": "stringUnion", "values": ["shown"] } },
+                { "name": "summary", "type": { "kind": "ref", "name": "Summary" } },
+                { "name": "workspaceKey", "type": { "kind": "ref", "name": "WorkspaceKey" } }
+              ]
+            }
+          },
+          {
+            "tag": "error",
+            "type": {
+              "kind": "inlineObject",
+              "properties": [
+                { "name": "kind", "type": { "kind": "stringUnion", "values": ["error"] } },
+                { "name": "message", "type": { "kind": "primitive", "type": "string" } },
+                { "name": "requestId", "type": { "kind": "primitive", "type": "string" } },
+                { "name": "workspaceKey", "type": { "kind": "ref", "name": "WorkspaceKey" } }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "enums": [],
+  "endpoints": [
+    {
+      "name": "refresh",
+      "httpMethod": "POST",
+      "routeTemplate": "/display/refresh",
+      "controllerName": "display",
+      "params": [
+        {
+          "name": "body",
+          "type": { "kind": "ref", "name": "RefreshDisplayRequest" },
+          "source": "body"
+        }
+      ],
+      "requestType": { "kind": "ref", "name": "RefreshDisplayRequest" },
+      "returnType": { "kind": "ref", "name": "DisplayState" },
+      "responses": [
+        { "statusCode": 201, "dataType": { "kind": "ref", "name": "DisplayState" } }
+      ]
+    }
+  ]
+}

@@ -65,6 +65,14 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                         JsonSerializer.Deserialize<TsType>(e.GetProperty("type").GetRawText(), options)!))
                     .ToArray()),
 
+            "taggedUnion" => new TsType.TaggedUnion(
+                root.GetProperty("discriminator").GetString()!,
+                root.GetProperty("variants").EnumerateArray()
+                    .Select(e => new TsType.TaggedUnionVariant(
+                        e.GetProperty("tag").GetString()!,
+                        JsonSerializer.Deserialize<TsType>(e.GetProperty("type").GetRawText(), options)!))
+                    .ToArray()),
+
             _ => throw new JsonException($"Unknown TsType kind: '{kind}'."),
         };
     }
@@ -153,6 +161,21 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                     writer.WriteString("name", name);
                     writer.WritePropertyName("type");
                     JsonSerializer.Serialize(writer, fieldType, options);
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+                break;
+
+            case TsType.TaggedUnion tu:
+                writer.WriteString("kind", "taggedUnion");
+                writer.WriteString("discriminator", tu.Discriminator);
+                writer.WriteStartArray("variants");
+                foreach (var variant in tu.Variants)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("tag", variant.Tag);
+                    writer.WritePropertyName("type");
+                    JsonSerializer.Serialize(writer, variant.Type, options);
                     writer.WriteEndObject();
                 }
                 writer.WriteEndArray();

@@ -2851,4 +2851,35 @@ public sealed class OpenApiEmitterTests
         // exclusiveMinimum converted to boolean for 3.0
         Assert.True(props.GetProperty("exclusiveMinimum").GetBoolean());
     }
+
+    [Fact]
+    public void TaggedUnion_TypeAlias_Emits_OneOf_With_Discriminator()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["DisplayState"] = new("DisplayState", [], new TsType.TaggedUnion("kind", [
+                new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
+                    ("kind", new TsType.StringUnion(["hidden"])),
+                    ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
+                ])),
+                new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
+                    ("kind", new TsType.StringUnion(["shown"])),
+                    ("summary", new TsType.TypeRef("Summary")),
+                ])),
+            ])),
+        };
+
+        using var doc = EmitOpenApiFromModel(
+            [],
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+
+        var schema = doc.RootElement
+            .GetProperty("components").GetProperty("schemas").GetProperty("DisplayState");
+
+        Assert.True(schema.TryGetProperty("oneOf", out var oneOf));
+        Assert.Equal(2, oneOf.GetArrayLength());
+        Assert.Equal("kind", schema.GetProperty("discriminator").GetProperty("propertyName").GetString());
+    }
 }

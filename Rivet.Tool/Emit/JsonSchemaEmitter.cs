@@ -31,7 +31,7 @@ public static class JsonSchemaEmitter
                 continue;
             }
 
-            defs[name] = BuildObjectSchema(def);
+            defs[name] = BuildDefinitionSchema(def);
         }
 
         // Monomorphised generics: find all Generic type refs used in definitions and endpoints
@@ -146,6 +146,8 @@ public static class JsonSchemaEmitter
 
             TsType.InlineObject obj => BuildInlineObjectSchema(obj),
 
+            TsType.TaggedUnion tu => BuildTaggedUnionSchema(tu),
+
             _ => new Dictionary<string, object>(),
         };
     }
@@ -212,12 +214,30 @@ public static class JsonSchemaEmitter
         return new Dictionary<string, object>();
     }
 
-    private static Dictionary<string, object> BuildObjectSchema(TsTypeDefinition def)
+    private static Dictionary<string, object> BuildDefinitionSchema(TsTypeDefinition def)
+    {
+        if (def.Type is not null)
+        {
+            var schema = MapTsTypeToSchema(def.Type);
+            if (def.Description is not null)
+            {
+                schema["description"] = def.Description;
+            }
+
+            return schema;
+        }
+
+        return BuildObjectSchema(def.Properties, def.Description);
+    }
+
+    private static Dictionary<string, object> BuildObjectSchema(
+        IReadOnlyList<TsPropertyDefinition> propertiesDefinition,
+        string? description = null)
     {
         var properties = new Dictionary<string, object>();
         var required = new List<string>();
 
-        foreach (var prop in def.Properties)
+        foreach (var prop in propertiesDefinition)
         {
             var propSchema = MapTsTypeToSchema(prop.Type);
             SchemaEnricher.EnrichPropertySchema(propSchema, prop);
@@ -235,9 +255,9 @@ public static class JsonSchemaEmitter
             ["properties"] = properties,
         };
 
-        if (def.Description is not null)
+        if (description is not null)
         {
-            schema["description"] = def.Description;
+            schema["description"] = description;
         }
 
         if (required.Count > 0)
@@ -254,6 +274,11 @@ public static class JsonSchemaEmitter
     {
         var properties = new Dictionary<string, object>();
         var required = new List<string>();
+
+        if (genericDef.Type is not null)
+        {
+            return MapTsTypeToSchema(ResolveTypeParams(genericDef.Type, typeParamMap));
+        }
 
         foreach (var prop in genericDef.Properties)
         {
@@ -310,6 +335,18 @@ public static class JsonSchemaEmitter
         return schema;
     }
 
+    private static Dictionary<string, object> BuildTaggedUnionSchema(TsType.TaggedUnion tu)
+    {
+        return new Dictionary<string, object>
+        {
+            ["oneOf"] = tu.Variants.Select(variant => (object)MapTsTypeToSchema(variant.Type)).ToList(),
+            ["discriminator"] = new Dictionary<string, object>
+            {
+                ["propertyName"] = tu.Discriminator,
+            },
+        };
+    }
+
     private static TsType ResolveTypeParams(TsType type, Dictionary<string, TsType> map)
         => TsType.ResolveTypeParams(type, map);
 
@@ -319,6 +356,12 @@ public static class JsonSchemaEmitter
     {
         foreach (var (_, def) in definitions)
         {
+            if (def.Type is not null)
+            {
+                CollectGenericsFromType(def.Type, genericInstances);
+                continue;
+            }
+
             foreach (var prop in def.Properties)
             {
                 CollectGenericsFromType(prop.Type, genericInstances);
@@ -371,6 +414,12 @@ public static class JsonSchemaEmitter
                 foreach (var (_, fieldType) in obj.Fields)
                 {
                     CollectGenericsFromType(fieldType, instances);
+                }
+                break;
+            case TsType.TaggedUnion tu:
+                foreach (var variant in tu.Variants)
+                {
+                    CollectGenericsFromType(variant.Type, instances);
                 }
                 break;
         }

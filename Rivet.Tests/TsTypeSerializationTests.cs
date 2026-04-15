@@ -221,6 +221,48 @@ public sealed class TsTypeSerializationTests
     }
 
     [Fact]
+    public void TaggedUnion_Serializes_With_Discriminator_And_Variants()
+    {
+        var type = new TsType.TaggedUnion("kind", [
+            new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
+                ("kind", new TsType.StringUnion(["hidden"])),
+                ("message", new TsType.Primitive("string")),
+            ])),
+        ]);
+        var json = JsonSerializer.Serialize<TsType>(type, Options);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("taggedUnion", root.GetProperty("kind").GetString());
+        Assert.Equal("kind", root.GetProperty("discriminator").GetString());
+        var variants = root.GetProperty("variants");
+        Assert.Single(variants.EnumerateArray());
+        Assert.Equal("hidden", variants[0].GetProperty("tag").GetString());
+    }
+
+    [Fact]
+    public void TaggedUnion_RoundTrips()
+    {
+        var original = new TsType.TaggedUnion("kind", [
+            new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
+                ("kind", new TsType.StringUnion(["hidden"])),
+                ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
+            ])),
+            new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
+                ("kind", new TsType.StringUnion(["shown"])),
+                ("summary", new TsType.TypeRef("Summary")),
+            ])),
+        ]);
+        var json = JsonSerializer.Serialize<TsType>(original, Options);
+        var result = Assert.IsType<TsType.TaggedUnion>(JsonSerializer.Deserialize<TsType>(json, Options));
+        Assert.Equal(original.Discriminator, result.Discriminator);
+        Assert.Equal(original.Variants.Select(v => v.Tag), result.Variants.Select(v => v.Tag));
+        var originalJson = original.Variants.Select(v => JsonSerializer.Serialize(v.Type, Options)).ToList();
+        var resultJson = result.Variants.Select(v => JsonSerializer.Serialize(v.Type, Options)).ToList();
+        Assert.Equal(originalJson, resultJson);
+    }
+
+    [Fact]
     public void InlineObject_RoundTrips()
     {
         var original = new TsType.InlineObject([("key", new TsType.Primitive("string")), ("value", new TsType.Primitive("number"))]);

@@ -48,9 +48,14 @@ public static partial class ClientEmitter
 
         // Import rivetFetch + types from shared module
         var needsGetBaseUrl = endpoints.Any(e => e.QueryAuth is not null);
+        var needsResultOf = endpoints.Any(e => e.Responses.Count >= 2);
         var rivetImports = needsGetBaseUrl
-            ? "import { rivetFetch, getBaseUrl, type RivetResult } from \"../rivet.js\";"
-            : "import { rivetFetch, type RivetResult } from \"../rivet.js\";";
+            ? needsResultOf
+                ? "import { rivetFetch, getBaseUrl, type RivetResult, type RivetResultOf } from \"../rivet.js\";"
+                : "import { rivetFetch, getBaseUrl, type RivetResult } from \"../rivet.js\";"
+            : needsResultOf
+                ? "import { rivetFetch, type RivetResult, type RivetResultOf } from \"../rivet.js\";"
+                : "import { rivetFetch, type RivetResult } from \"../rivet.js\";";
         sb.AppendLine(rivetImports);
 
         // Import validator assertions
@@ -265,12 +270,18 @@ public static partial class ClientEmitter
                 {
                     var responseAssert = ZodValidatorEmitter.GetAssertName(responses[i].DataType!);
                     var prefix = i == 0 ? "    if" : "    else if";
-                    sb.AppendLine($"{prefix} (result.status === {responses[i].StatusCode}) return {{ ...result, data: {responseAssert}(result.data) }};");
+                    sb.AppendLine($"{prefix} (result.status === {responses[i].StatusCode}) {{");
+                    sb.AppendLine($"      result.data = {responseAssert}(result.data);");
+                    sb.AppendLine("      return result;");
+                    sb.AppendLine("    }");
                 }
                 if (endpoint.ReturnType is not null)
                 {
                     var successAssert = ZodValidatorEmitter.GetAssertName(endpoint.ReturnType);
-                    sb.AppendLine($"    else return {{ ...result, data: {successAssert}(result.data) }};");
+                    sb.AppendLine("    else {");
+                    sb.AppendLine($"      result.data = {successAssert}(result.data);");
+                    sb.AppendLine("      return result;");
+                    sb.AppendLine("    }");
                 }
                 else
                 {
@@ -360,7 +371,7 @@ public static partial class ClientEmitter
         bool isFileEndpoint = false)
     {
         var statusCodes = string.Join(" | ", responses.Select(r => r.StatusCode));
-        sb.Append($"export type {typeName} =");
+        sb.AppendLine($"export type {typeName} = RivetResultOf<");
         foreach (var r in responses)
         {
             // File endpoints: success responses (2xx with no DataType) carry Blob, not void
@@ -369,12 +380,11 @@ public static partial class ClientEmitter
                 : isFileEndpoint && r.StatusCode is >= 200 and < 300
                     ? "Blob"
                     : "void";
-            sb.AppendLine();
-            sb.Append($"  | {{ status: {r.StatusCode}; data: {dataType}; response: Response }}");
+            sb.AppendLine($"  | {{ status: {r.StatusCode}; data: {dataType}; response: Response }}");
         }
-        sb.AppendLine();
         sb.Append($"  | {{ status: Exclude<number, {statusCodes}>; data: unknown; response: Response }}");
-        sb.AppendLine(";");
+        sb.AppendLine();
+        sb.AppendLine(">;");
         sb.AppendLine();
     }
 

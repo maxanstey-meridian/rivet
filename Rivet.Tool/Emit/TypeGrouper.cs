@@ -71,9 +71,16 @@ public static class TypeGrouper
         foreach (var def in definitions)
         {
             var refs = new HashSet<string>();
-            foreach (var prop in def.Properties)
+            if (def.Type is not null)
             {
-                TsType.CollectTypeRefs(prop.Type, refs);
+                TsType.CollectTypeRefs(def.Type, refs);
+            }
+            else
+            {
+                foreach (var prop in def.Properties)
+                {
+                    TsType.CollectTypeRefs(prop.Type, refs);
+                }
             }
 
             typeRefs[def.Name] = refs;

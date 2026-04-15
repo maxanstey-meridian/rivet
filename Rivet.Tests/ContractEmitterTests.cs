@@ -504,6 +504,33 @@ public sealed class ContractEmitterTests
     }
 
     [Fact]
+    public void TaggedUnion_TypeAlias_Serializes_As_Type_Without_Properties()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["DisplayState"] = new("DisplayState", [], new TsType.TaggedUnion("kind", [
+                new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
+                    ("kind", new TsType.StringUnion(["hidden"])),
+                    ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
+                ])),
+                new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
+                    ("kind", new TsType.StringUnion(["shown"])),
+                    ("summary", new TsType.TypeRef("Summary")),
+                ])),
+            ])),
+        };
+
+        var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
+        using var doc = JsonDocument.Parse(json);
+        var type = doc.RootElement.GetProperty("types")[0];
+
+        Assert.Equal("DisplayState", type.GetProperty("name").GetString());
+        Assert.True(type.TryGetProperty("type", out var aliasType));
+        Assert.Equal("taggedUnion", aliasType.GetProperty("kind").GetString());
+        Assert.False(type.TryGetProperty("properties", out _));
+    }
+
+    [Fact]
     public void Endpoint_Body_Param_And_Multiple_Responses()
     {
         var endpoint = new TsEndpointDefinition(

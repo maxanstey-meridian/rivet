@@ -132,8 +132,18 @@ public static class ZodValidatorEmitter
             TsType.StringUnion su => $"z.enum([{string.Join(", ", su.Members.Select(m => $"\"{m}\""))}])",
             TsType.IntUnion iu => $"z.union([{string.Join(", ", iu.Members.Select(m => $"z.literal({m})"))}])",
             TsType.InlineObject obj => $"z.object({{ {string.Join(", ", obj.Fields.Select(f => $"{TypeEmitter.QuoteIfNeeded(f.Name)}: {BuildZodExpression(f.Type)}"))} }})",
+            TsType.TaggedUnion tu => $"z.discriminatedUnion(\"{tu.Discriminator}\", [{string.Join(", ", tu.Variants.Select(BuildTaggedUnionVariantExpression))}])",
             TsType.TypeParam => "z.unknown()",
             _ => "z.unknown()",
+        };
+    }
+
+    private static string BuildTaggedUnionVariantExpression(TsType.TaggedUnionVariant variant)
+    {
+        return variant.Type switch
+        {
+            TsType.InlineObject obj => $"z.object({{ {string.Join(", ", obj.Fields.Select(f => $"{TypeEmitter.QuoteIfNeeded(f.Name)}: {BuildZodExpression(f.Type)}"))} }})",
+            _ => BuildZodExpression(variant.Type),
         };
     }
 
@@ -178,6 +188,12 @@ public static class ZodValidatorEmitter
                 foreach (var (_, fieldType) in obj.Fields)
                 {
                     CollectSchemaImports(fieldType, imports);
+                }
+                break;
+            case TsType.TaggedUnion tu:
+                foreach (var variant in tu.Variants)
+                {
+                    CollectSchemaImports(variant.Type, imports);
                 }
                 break;
             case TsType.StringUnion:

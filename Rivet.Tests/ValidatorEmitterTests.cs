@@ -296,8 +296,10 @@ public sealed class ValidatorEmitterTests
         Assert.Contains("""import { assertNotFoundDto, assertTaskDetailDto } from "../validators.js";""", validatedClient);
 
         // Validated client validates each branch by status code
-        Assert.Contains("if (result.status === 200) return { ...result, data: assertTaskDetailDto(result.data) };", validatedClient);
-        Assert.Contains("else if (result.status === 404) return { ...result, data: assertNotFoundDto(result.data) };", validatedClient);
+        Assert.Contains("if (result.status === 200) {", validatedClient);
+        Assert.Contains("result.data = assertTaskDetailDto(result.data);", validatedClient);
+        Assert.Contains("else if (result.status === 404) {", validatedClient);
+        Assert.Contains("result.data = assertNotFoundDto(result.data);", validatedClient);
     }
 
     [Fact]
@@ -500,6 +502,39 @@ public sealed class ValidatorEmitterTests
 
         var assertName = ZodValidatorEmitter.GetAssertName(generic);
         Assert.Equal("assertPagedResult_TaskDto", assertName);
+    }
+
+    [Fact]
+    public void ZodValidatorEmitter_InlineTaggedUnion_Uses_DiscriminatedUnion()
+    {
+        var taggedUnion = new TsType.TaggedUnion("kind", [
+            new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
+                ("kind", new TsType.StringUnion(["hidden"])),
+                ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
+            ])),
+            new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
+                ("kind", new TsType.StringUnion(["shown"])),
+                ("summary", new TsType.TypeRef("Summary")),
+            ])),
+        ]);
+
+        var endpoint = new TsEndpointDefinition(
+            "refresh",
+            "POST",
+            "/display/refresh",
+            [new TsEndpointParam("body", new TsType.TypeRef("RefreshDisplayRequest"), ParamSource.Body)],
+            taggedUnion,
+            "display",
+            [new TsResponseType(201, taggedUnion)],
+            RequestType: new TsType.TypeRef("RefreshDisplayRequest"));
+
+        var validators = ZodValidatorEmitter.Emit([endpoint], new Dictionary<string, string>());
+        var validatedClient = ClientEmitter.EmitControllerClient("display", [endpoint], new Dictionary<string, string>(), ValidateMode.Zod);
+
+        Assert.Contains("z.discriminatedUnion(\"kind\"", validators);
+        Assert.Contains("assertKindUnion", validators);
+        Assert.Contains("""import { assertKindUnion } from "../validators.js";""", validatedClient);
+        Assert.Contains("Promise<{ kind: \"hidden\"; workspaceKey: WorkspaceKey | null; } | { kind: \"shown\"; summary: Summary; }>", validatedClient);
     }
 
     [Fact]

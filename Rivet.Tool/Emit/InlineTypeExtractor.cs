@@ -27,6 +27,8 @@ public static class InlineTypeExtractor
             TsType.Brand b => $"B:{b.Name}({CanonicalHash(b.Inner)})",
             TsType.InlineObject obj => "IO:{" + string.Join(",",
                 obj.Fields.OrderBy(f => f.Name).Select(f => $"{f.Name}:{CanonicalHash(f.Type)}")) + "}",
+            TsType.TaggedUnion tu => "TU:" + tu.Discriminator + "[" + string.Join(",",
+                tu.Variants.OrderBy(v => v.Tag).Select(v => $"{v.Tag}:{CanonicalHash(v.Type)}")) + "]",
             _ => throw new NotSupportedException($"Unknown TsType variant: {type.GetType().Name}"),
         };
     }
@@ -424,6 +426,11 @@ public static class InlineTypeExtractor
             case TsType.Brand b:
                 return new TsType.Brand(b.Name, ReplaceInType(b.Inner, replacements));
 
+            case TsType.TaggedUnion tu:
+                return new TsType.TaggedUnion(
+                    tu.Discriminator,
+                    tu.Variants.Select(v => new TsType.TaggedUnionVariant(v.Tag, ReplaceInType(v.Type, replacements))).ToList());
+
             default:
                 return type;
         }
@@ -471,6 +478,10 @@ public static class InlineTypeExtractor
             case TsType.Brand b:
                 CollectArrayElements(b.Inner, hashes);
                 break;
+            case TsType.TaggedUnion tu:
+                foreach (var variant in tu.Variants)
+                    CollectArrayElements(variant.Type, hashes);
+                break;
         }
     }
 
@@ -499,6 +510,10 @@ public static class InlineTypeExtractor
                 break;
             case TsType.Brand b:
                 CollectFromType(b.Inner, context, results);
+                break;
+            case TsType.TaggedUnion tu:
+                foreach (var variant in tu.Variants)
+                    CollectFromType(variant.Type, $"{context}.variant.{variant.Tag}", results);
                 break;
         }
     }

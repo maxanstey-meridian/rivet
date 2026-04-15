@@ -45,6 +45,11 @@ public abstract record TsType
     /// <summary>Inline object: { key: string; value: number }. Used for tuples.</summary>
     public sealed record InlineObject(IReadOnlyList<(string Name, TsType Type)> Fields) : TsType;
 
+    /// <summary>Discriminated union of object-like variants keyed by a shared string-literal field.</summary>
+    public sealed record TaggedUnion(string Discriminator, IReadOnlyList<TaggedUnionVariant> Variants) : TsType;
+
+    public sealed record TaggedUnionVariant(string Tag, TsType Type);
+
     /// <summary>
     /// Produces a stable, human-readable name suffix for a TsType.
     /// Used by emitters to generate unique names for monomorphised generics, validators, etc.
@@ -68,6 +73,7 @@ public abstract record TsType
             InlineObject obj => obj.Fields.Count <= 3
                 ? string.Concat(obj.Fields.Select(f => char.ToUpperInvariant(f.Name[0]) + f.Name[1..]))
                 : "Object",
+            TaggedUnion tu => char.ToUpperInvariant(tu.Discriminator[0]) + tu.Discriminator[1..] + "Union",
             _ => "Unknown",
         };
     }
@@ -93,6 +99,9 @@ public abstract record TsType
             Dictionary d => new Dictionary(ResolveTypeParams(d.Value, map)),
             Generic g => new Generic(g.Name, g.TypeArguments.Select(a => ResolveTypeParams(a, map)).ToList()),
             InlineObject obj => new InlineObject(obj.Fields.Select(f => (f.Name, ResolveTypeParams(f.Type, map))).ToList()),
+            TaggedUnion tu => new TaggedUnion(
+                tu.Discriminator,
+                tu.Variants.Select(v => new TaggedUnionVariant(v.Tag, ResolveTypeParams(v.Type, map))).ToList()),
             _ => type,
         };
     }
@@ -137,6 +146,12 @@ public abstract record TsType
                 foreach (var (_, fieldType) in obj.Fields)
                 {
                     CollectTypeRefs(fieldType, names);
+                }
+                break;
+            case TaggedUnion tu:
+                foreach (var variant in tu.Variants)
+                {
+                    CollectTypeRefs(variant.Type, names);
                 }
                 break;
         }

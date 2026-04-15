@@ -553,6 +553,8 @@ public static class OpenApiEmitter
 
             TsType.InlineObject obj => BuildInlineObjectSchema(obj),
 
+            TsType.TaggedUnion tu => BuildTaggedUnionSchema(tu),
+
             _ => new Dictionary<string, object> { ["type"] = "object" },
         };
     }
@@ -583,6 +585,18 @@ public static class OpenApiEmitter
         }
 
         return schema;
+    }
+
+    private static Dictionary<string, object> BuildTaggedUnionSchema(TsType.TaggedUnion tu)
+    {
+        return new Dictionary<string, object>
+        {
+            ["oneOf"] = tu.Variants.Select(variant => (object)MapTsTypeToJsonSchema(variant.Type)).ToList(),
+            ["discriminator"] = new Dictionary<string, object>
+            {
+                ["propertyName"] = tu.Discriminator,
+            },
+        };
     }
 
     private static Dictionary<string, object> MapPrimitive(TsType.Primitive p)
@@ -710,7 +724,7 @@ public static class OpenApiEmitter
                 continue;
             }
 
-            schemas[name] = BuildObjectSchema(def);
+            schemas[name] = BuildDefinitionSchema(def);
         }
 
         // Monomorphised generics: find all Generic type refs used across definitions and endpoints
@@ -760,12 +774,30 @@ public static class OpenApiEmitter
         return schemas;
     }
 
-    private static Dictionary<string, object> BuildObjectSchema(TsTypeDefinition def)
+    private static Dictionary<string, object> BuildDefinitionSchema(TsTypeDefinition def)
+    {
+        if (def.Type is not null)
+        {
+            var schema = MapTsTypeToJsonSchema(def.Type);
+            if (def.Description is not null)
+            {
+                schema["description"] = def.Description;
+            }
+
+            return schema;
+        }
+
+        return BuildObjectSchema(def.Properties, def.Description);
+    }
+
+    private static Dictionary<string, object> BuildObjectSchema(
+        IReadOnlyList<TsPropertyDefinition> propertiesDefinition,
+        string? description = null)
     {
         var properties = new Dictionary<string, object>();
         var required = new List<string>();
 
-        foreach (var prop in def.Properties)
+        foreach (var prop in propertiesDefinition)
         {
             var propSchema = MapTsTypeToJsonSchema(prop.Type);
             SchemaEnricher.EnrichPropertySchema(propSchema, prop);
@@ -784,9 +816,9 @@ public static class OpenApiEmitter
             ["properties"] = properties,
         };
 
-        if (def.Description is not null)
+        if (description is not null)
         {
-            schema["description"] = def.Description;
+            schema["description"] = description;
         }
 
         if (required.Count > 0)
@@ -842,6 +874,11 @@ public static class OpenApiEmitter
     {
         var properties = new Dictionary<string, object>();
         var required = new List<string>();
+
+        if (genericDef.Type is not null)
+        {
+            return MapTsTypeToJsonSchema(ResolveTypeParams(genericDef.Type, typeParamMap));
+        }
 
         foreach (var prop in genericDef.Properties)
         {
@@ -904,6 +941,12 @@ public static class OpenApiEmitter
         // Walk all definitions' properties (all schemas are emitted, so all generics must be monomorphised)
         foreach (var (_, def) in definitions)
         {
+            if (def.Type is not null)
+            {
+                CollectGenericsFromType(def.Type, genericInstances);
+                continue;
+            }
+
             foreach (var prop in def.Properties)
             {
                 CollectGenericsFromType(prop.Type, genericInstances);
@@ -935,6 +978,12 @@ public static class OpenApiEmitter
                 foreach (var (_, fieldType) in obj.Fields)
                 {
                     CollectGenericsFromType(fieldType, instances);
+                }
+                break;
+            case TsType.TaggedUnion tu:
+                foreach (var variant in tu.Variants)
+                {
+                    CollectGenericsFromType(variant.Type, instances);
                 }
                 break;
             case TsType.Brand b:
@@ -994,6 +1043,7 @@ public static class OpenApiEmitter
             TsType.Dictionary d => $"Dictionary<string, {GetCSharpTypeName(d.Value)}>",
             TsType.Generic g => $"{g.Name}<{string.Join(", ", g.TypeArguments.Select(GetCSharpTypeName))}>",
             TsType.Brand b => b.Name,
+            TsType.TaggedUnion => "object",
             _ => "object",
         };
     }

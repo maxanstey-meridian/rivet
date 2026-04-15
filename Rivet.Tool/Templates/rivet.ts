@@ -7,7 +7,28 @@ export type RivetConfig = {
   onError?: (error: RivetError) => void;
 };
 
-export type RivetResult<T> = { status: number; data: T; response: Response };
+type RivetRawResult = { status: number; data: unknown; response: Response };
+type RivetStatusMatch<TResult extends RivetRawResult, TStatus extends number> =
+  Extract<TResult, { status: TStatus }> extends never
+    ? TResult
+    : Extract<TResult, { status: TStatus }>;
+
+export type RivetResultMethods<TResult extends RivetRawResult> = {
+  isInvalid(): boolean;
+  isInformational(): boolean;
+  isSuccessful(): boolean;
+  isRedirection(): boolean;
+  isClientError(): boolean;
+  isServerError(): boolean;
+  isOk(): this is RivetStatusMatch<TResult, 200>;
+  isForbidden(): this is RivetStatusMatch<TResult, 403>;
+  isNotFound(): this is RivetStatusMatch<TResult, 404>;
+  isRedirect(location?: string): boolean;
+  isEmpty(): boolean;
+};
+
+export type RivetResultOf<TResult extends RivetRawResult> = TResult & RivetResultMethods<TResult>;
+export type RivetResult<T> = RivetResultOf<{ status: number; data: T; response: Response }>;
 
 export class RivetError extends Error {
   constructor(
@@ -30,6 +51,82 @@ export const configureRivet = (config: RivetConfig): void => {
 };
 
 export const getBaseUrl = (): string => _config.baseUrl;
+
+const isInvalid = function (this: RivetRawResult): boolean {
+  return this.status < 100 || this.status >= 600;
+};
+
+const isInformational = function (this: RivetRawResult): boolean {
+  return this.status >= 100 && this.status < 200;
+};
+
+const isSuccessful = function (this: RivetRawResult): boolean {
+  return this.status >= 200 && this.status < 300;
+};
+
+const isRedirection = function (this: RivetRawResult): boolean {
+  return this.status >= 300 && this.status < 400;
+};
+
+const isClientError = function (this: RivetRawResult): boolean {
+  return this.status >= 400 && this.status < 500;
+};
+
+const isServerError = function (this: RivetRawResult): boolean {
+  return this.status >= 500 && this.status < 600;
+};
+
+const isOk = function (this: RivetRawResult): boolean {
+  return this.status === 200;
+};
+
+const isForbidden = function (this: RivetRawResult): boolean {
+  return this.status === 403;
+};
+
+const isNotFound = function (this: RivetRawResult): boolean {
+  return this.status === 404;
+};
+
+const isRedirect = function (this: RivetRawResult, location?: string): boolean {
+  if (!(this.status >= 300 && this.status < 400)) {
+    return false;
+  }
+
+  if (location === undefined) {
+    return true;
+  }
+
+  return this.response.headers.get("location") === location;
+};
+
+const isEmpty = function (this: RivetRawResult): boolean {
+  return this.status === 204 || this.status === 304;
+};
+
+const attachRivetResultMethods = <TResult extends RivetRawResult>(
+  result: TResult,
+): RivetResultOf<TResult> => {
+  if ("isOk" in result) {
+    return result as RivetResultOf<TResult>;
+  }
+
+  Object.defineProperties(result, {
+    isInvalid: { value: isInvalid, enumerable: false },
+    isInformational: { value: isInformational, enumerable: false },
+    isSuccessful: { value: isSuccessful, enumerable: false },
+    isRedirection: { value: isRedirection, enumerable: false },
+    isClientError: { value: isClientError, enumerable: false },
+    isServerError: { value: isServerError, enumerable: false },
+    isOk: { value: isOk, enumerable: false },
+    isForbidden: { value: isForbidden, enumerable: false },
+    isNotFound: { value: isNotFound, enumerable: false },
+    isRedirect: { value: isRedirect, enumerable: false },
+    isEmpty: { value: isEmpty, enumerable: false },
+  });
+
+  return result as RivetResultOf<TResult>;
+};
 
 const parseBody = async (res: Response): Promise<unknown> => {
   const text = await res.text().catch(() => "");
@@ -79,7 +176,7 @@ export const rivetFetch = async <T>(
   }
   if (options?.unwrap === false) {
     const body = options?.blob && res.ok ? await res.blob() : await parseBody(res);
-    return { status: res.status, data: body, response: res } as T;
+    return attachRivetResultMethods({ status: res.status, data: body, response: res }) as T;
   }
   if (!res.ok) {
     const body = await parseBody(res);

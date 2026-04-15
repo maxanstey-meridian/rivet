@@ -114,9 +114,9 @@ const task = await tasks.get("some-id");   // → TaskDetailDto
 
 // Discriminated union: handle each status explicitly
 const result = await tasks.get("some-id", { unwrap: false });
-if (result.status === 200) {
+if (result.isOk()) {
   console.log(result.data.title);          // TaskDetailDto
-} else if (result.status === 404) {
+} else if (result.isNotFound()) {
   console.log(result.data.message);        // ErrorDto
 }
 ```

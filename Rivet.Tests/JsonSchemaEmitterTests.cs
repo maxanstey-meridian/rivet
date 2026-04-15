@@ -640,4 +640,33 @@ public sealed class JsonSchemaEmitterTests
         var page = mono.GetProperty("properties").GetProperty("page");
         Assert.Equal(1, page.GetProperty("default").GetInt32());
     }
+
+    [Fact]
+    public void TaggedUnion_TypeAlias_Emits_OneOf_With_Discriminator()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["DisplayState"] = new("DisplayState", [], new TsType.TaggedUnion("kind", [
+                new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
+                    ("kind", new TsType.StringUnion(["hidden"])),
+                    ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
+                ])),
+                new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
+                    ("kind", new TsType.StringUnion(["shown"])),
+                    ("summary", new TsType.TypeRef("Summary")),
+                ])),
+            ])),
+        };
+
+        var output = JsonSchemaEmitter.Emit(
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>());
+        var defs = ParseDefs(output);
+
+        var displayState = defs.GetProperty("DisplayState");
+        Assert.True(displayState.TryGetProperty("oneOf", out var oneOf));
+        Assert.Equal(2, oneOf.GetArrayLength());
+        Assert.Equal("kind", displayState.GetProperty("discriminator").GetProperty("propertyName").GetString());
+    }
 }

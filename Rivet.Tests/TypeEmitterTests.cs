@@ -1,4 +1,5 @@
 using Rivet.Tool.Analysis;
+using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -993,5 +994,31 @@ public sealed class TypeEmitterTests
         Assert.Single(resolvedInline.Fields);
         Assert.Equal("data", resolvedInline.Fields[0].Name);
         Assert.Equal(new TsType.TypeRef("TaskDto"), resolvedInline.Fields[0].Type);
+    }
+
+    [Fact]
+    public void TaggedUnion_TypeAlias_Emits_As_Discriminated_Union()
+    {
+        var group = new TypeGrouper.TypeFileGroup(
+            "display",
+            [
+                new TsTypeDefinition("DisplayState", [], new TsType.TaggedUnion("kind", [
+                    new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
+                        ("kind", new TsType.StringUnion(["hidden"])),
+                        ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
+                    ])),
+                    new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
+                        ("kind", new TsType.StringUnion(["shown"])),
+                        ("summary", new TsType.TypeRef("Summary")),
+                    ])),
+                ])),
+            ],
+            [],
+            new Dictionary<string, TsType>(),
+            new Dictionary<string, IReadOnlyList<string>>());
+
+        var output = TypeEmitter.EmitGroupFile(group);
+
+        Assert.Contains("export type DisplayState = { kind: \"hidden\"; workspaceKey: WorkspaceKey | null; } | { kind: \"shown\"; summary: Summary; };", output);
     }
 }

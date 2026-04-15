@@ -15,9 +15,16 @@ public static class ContractEmitter
     };
 
     internal sealed record RivetContract(
-        IReadOnlyList<TsTypeDefinition> Types,
+        IReadOnlyList<ContractTypeDefinition> Types,
         IReadOnlyList<ContractEnum> Enums,
         IReadOnlyList<ContractEndpoint>? Endpoints = null);
+
+    internal sealed record ContractTypeDefinition(
+        string Name,
+        IReadOnlyList<string> TypeParameters,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsPropertyDefinition>? Properties = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? Type = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Description = null);
 
     internal sealed record ContractEnum(
         string Name,
@@ -71,7 +78,7 @@ public static class ContractEmitter
         }).ToList();
 
         var contract = new RivetContract(
-            definitions.Values.ToList(),
+            definitions.Values.Select(ToContractTypeDefinition).ToList(),
             contractEnums,
             endpoints.Select(ToContractEndpoint).ToList());
 
@@ -117,5 +124,15 @@ public static class ContractEmitter
             example.Json,
             example.ComponentExampleId,
             example.ResolvedJson);
+    }
+
+    internal static ContractTypeDefinition ToContractTypeDefinition(TsTypeDefinition definition)
+    {
+        return new ContractTypeDefinition(
+            definition.Name,
+            definition.TypeParameters,
+            definition.Type is null ? definition.Properties : null,
+            definition.Type,
+            definition.Description);
     }
 }

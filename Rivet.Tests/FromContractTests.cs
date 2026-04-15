@@ -119,6 +119,58 @@ public sealed class FromContractTests
     }
 
     [Fact]
+    public async Task FromContract_TaggedUnion_WithCompile_AndOpenApi_Writes_Discriminated_Outputs()
+    {
+        var repoRoot = PublishFixture.FindRepoRoot();
+        var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-tagged-union.json");
+        var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
+        var outputDir = Path.Combine(Path.GetTempPath(), $"rivet-from-tagged-union-{Guid.NewGuid():N}");
+
+        try
+        {
+            var (exitCode, output) = await PublishFixture.RunProcessAsync(
+                "dotnet",
+                $"run --project \"{csproj}\" -- --from \"{fixture}\" --output \"{outputDir}\" --openapi openapi.json --compile",
+                repoRoot);
+
+            Assert.True(exitCode == 0, $"--from tagged union failed (exit {exitCode}):\n{output}");
+
+            var typeFiles = Directory.GetFiles(Path.Combine(outputDir, "types"), "*.ts", SearchOption.AllDirectories);
+            var generatedTypes = string.Join("\n", typeFiles.Select(File.ReadAllText));
+            Assert.Contains("export type DisplayState =", generatedTypes);
+            Assert.Contains("kind: \"hidden\"", generatedTypes);
+            Assert.Contains("kind: \"shown\"", generatedTypes);
+
+            var openApiPath = Path.Combine(outputDir, "openapi.json");
+            Assert.True(File.Exists(openApiPath));
+            var openApiJson = await File.ReadAllTextAsync(openApiPath);
+            Assert.Contains("\"discriminator\"", openApiJson);
+            Assert.Contains("\"propertyName\": \"kind\"", openApiJson);
+
+            var schemasPath = Path.Combine(outputDir, "schemas.ts");
+            Assert.True(File.Exists(schemasPath));
+            var schemas = await File.ReadAllTextAsync(schemasPath);
+            Assert.Contains("DisplayStateSchema", schemas);
+            Assert.Contains("\"oneOf\"", schemas);
+
+            var validatorsPath = Path.Combine(outputDir, "validators.ts");
+            Assert.True(File.Exists(validatorsPath));
+            var validators = await File.ReadAllTextAsync(validatorsPath);
+            Assert.Contains("assertDisplayState", validators);
+
+            var clientFiles = Directory.GetFiles(Path.Combine(outputDir, "client"), "*.ts", SearchOption.AllDirectories);
+            var generatedClient = string.Join("\n", clientFiles.Select(File.ReadAllText));
+            Assert.Contains("Promise<DisplayState>", generatedClient);
+            Assert.Contains("assertDisplayState", generatedClient);
+        }
+        finally
+        {
+            if (Directory.Exists(outputDir))
+                Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task FromContract_InvalidPath_FailsGracefully()
     {
         var repoRoot = PublishFixture.FindRepoRoot();

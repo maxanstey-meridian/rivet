@@ -32,7 +32,7 @@ public static class JsonContractReader
 
         var endpoints = contract.Endpoints?.Select(ToEndpointDefinition).ToList() ?? [];
 
-        return (contract.Types, enums, endpoints);
+        return (contract.Types.Select(ToTypeDefinition).ToList(), enums, endpoints);
     }
 
     private static TsEndpointDefinition ToEndpointDefinition(ContractEmitter.ContractEndpoint endpoint)
@@ -72,5 +72,12 @@ public static class JsonContractReader
             example.Json,
             example.ComponentExampleId,
             example.ResolvedJson);
+    }
+
+    private static TsTypeDefinition ToTypeDefinition(ContractEmitter.ContractTypeDefinition definition)
+    {
+        return definition.Type is not null
+            ? new TsTypeDefinition(definition.Name, definition.TypeParameters, definition.Type, definition.Description)
+            : new TsTypeDefinition(definition.Name, definition.TypeParameters, definition.Properties ?? [], definition.Description);
     }
 }
