@@ -3,7 +3,7 @@
 export type RivetConfig = {
   baseUrl: string;
   headers?: () => Record<string, string> | Promise<Record<string, string>>;
-  fetch?: typeof fetch;
+  fetch?: (...args: Parameters<typeof fetch>) => Response | Promise<Response>;
   onError?: (error: RivetError) => void;
 };
 
@@ -164,11 +164,11 @@ export const rivetFetch = async <T>(
   const f = _config.fetch ?? fetch;
   let res: Response;
   try {
-    res = await f(url.toString(), {
+    res = await Promise.resolve(f(url.toString(), {
       method,
       headers,
       body: options?.body != null ? (isFormData ? options.body as BodyInit : JSON.stringify(options.body)) : undefined,
-    });
+    }));
   } catch (err) {
     const error = new RivetError(method, path, 0, undefined, undefined, { cause: err });
     if (_config.onError) _config.onError(error);
