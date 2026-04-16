@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
 
     <PackageId>Rivet.Attributes</PackageId>
-    <Version>0.33.0</Version>
+    <Version>0.33.1</Version>
     <Authors>Max Anstey</Authors>
     <Description>Marker attributes for Rivet — end-to-end .NET to TypeScript type safety</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -18,6 +18,10 @@
 
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
 </Project>

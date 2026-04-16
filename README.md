@@ -149,6 +149,18 @@ app.MapGet(MembersContract.List.Route, async (AppDb db, CancellationToken ct) =>
     {
         return await db.Members.ToListAsync(ct);
     })).ToResult());  // you write ToResult() once, same pattern as ToActionResult()
+
+// If you want inline non-2xx branches in minimal APIs, return native typed Results<...>
+app.MapPost(MembersContract.Invite.Route, async (InviteMemberRequest request, AppDb db, CancellationToken ct) =>
+    await MembersContract.Invite.Invoke<Created<InviteMemberResponse>, Conflict<ErrorDto>>(request, async req =>
+    {
+        if (await db.Members.AnyAsync(x => x.Email == req.Email, ct))
+        {
+            return TypedResults.Conflict(new ErrorDto("already_exists", "Member already exists"));
+        }
+
+        return TypedResults.Created($"/api/members/{Guid.NewGuid()}", new InviteMemberResponse(Guid.NewGuid()));
+    }));
 ```
 
 ## Runtime validation with Zod

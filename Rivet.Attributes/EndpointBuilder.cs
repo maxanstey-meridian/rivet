@@ -1,5 +1,8 @@
 namespace Rivet;
 
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
+
 /// <summary>
 /// Describes an additional (non-success) response declared via .Returns&lt;T&gt;().
 /// </summary>
@@ -204,6 +207,77 @@ public sealed class RouteDefinition<TInput, TOutput> : RouteDefinitionBase<Route
         return new RivetResult<TOutput>(SuccessStatus, result);
     }
 
+    public async Task<Results<T1, T2>> Invoke<T1, T2>(
+        TInput input,
+        Func<TInput, Task<Results<T1, T2>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        => await InvokeTypedResult(
+            input,
+            typeof(TOutput),
+            handler);
+
+    public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(
+        TInput input,
+        Func<TInput, Task<Results<T1, T2, T3>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        => await InvokeTypedResult(
+            input,
+            typeof(TOutput),
+            handler);
+
+    public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(
+        TInput input,
+        Func<TInput, Task<Results<T1, T2, T3, T4>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        => await InvokeTypedResult(
+            input,
+            typeof(TOutput),
+            handler);
+
+    public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(
+        TInput input,
+        Func<TInput, Task<Results<T1, T2, T3, T4, T5>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        where T5 : IResult
+        => await InvokeTypedResult(
+            input,
+            typeof(TOutput),
+            handler);
+
+    public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(
+        TInput input,
+        Func<TInput, Task<Results<T1, T2, T3, T4, T5, T6>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        where T5 : IResult
+        where T6 : IResult
+        => await InvokeTypedResult(
+            input,
+            typeof(TOutput),
+            handler);
+
+    private async Task<TResult> InvokeTypedResult<TResult>(
+        TInput input,
+        Type successResponseType,
+        Func<TInput, Task<TResult>> handler)
+        where TResult : IResult
+    {
+        var result = await handler(input);
+        TypedResultValidator.Validate(Route, SuccessStatus, successResponseType, RouteErrorResponses, result);
+        return result;
+    }
+
     public static implicit operator Define(RouteDefinition<TInput, TOutput> _) => default!;
 }
 
@@ -222,6 +296,56 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
     {
         var result = await handler();
         return new RivetResult<TOutput>(SuccessStatus, result);
+    }
+
+    public async Task<Results<T1, T2>> Invoke<T1, T2>(
+        Func<Task<Results<T1, T2>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        => await InvokeTypedResult(typeof(TOutput), handler);
+
+    public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(
+        Func<Task<Results<T1, T2, T3>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        => await InvokeTypedResult(typeof(TOutput), handler);
+
+    public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(
+        Func<Task<Results<T1, T2, T3, T4>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        => await InvokeTypedResult(typeof(TOutput), handler);
+
+    public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(
+        Func<Task<Results<T1, T2, T3, T4, T5>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        where T5 : IResult
+        => await InvokeTypedResult(typeof(TOutput), handler);
+
+    public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(
+        Func<Task<Results<T1, T2, T3, T4, T5, T6>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        where T5 : IResult
+        where T6 : IResult
+        => await InvokeTypedResult(typeof(TOutput), handler);
+
+    private async Task<TResult> InvokeTypedResult<TResult>(
+        Type successResponseType,
+        Func<Task<TResult>> handler)
+        where TResult : IResult
+    {
+        var result = await handler();
+        TypedResultValidator.Validate(Route, SuccessStatus, successResponseType, RouteErrorResponses, result);
+        return result;
     }
 
     public static implicit operator Define(RouteDefinition<TOutput> _) => default!;
@@ -243,6 +367,61 @@ public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRout
     {
         await handler(input);
         return new RivetResult(SuccessStatus);
+    }
+
+    public async Task<Results<T1, T2>> Invoke<T1, T2>(
+        TInput input,
+        Func<TInput, Task<Results<T1, T2>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        => await InvokeTypedResult(input, handler);
+
+    public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(
+        TInput input,
+        Func<TInput, Task<Results<T1, T2, T3>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        => await InvokeTypedResult(input, handler);
+
+    public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(
+        TInput input,
+        Func<TInput, Task<Results<T1, T2, T3, T4>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        => await InvokeTypedResult(input, handler);
+
+    public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(
+        TInput input,
+        Func<TInput, Task<Results<T1, T2, T3, T4, T5>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        where T5 : IResult
+        => await InvokeTypedResult(input, handler);
+
+    public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(
+        TInput input,
+        Func<TInput, Task<Results<T1, T2, T3, T4, T5, T6>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        where T5 : IResult
+        where T6 : IResult
+        => await InvokeTypedResult(input, handler);
+
+    private async Task<TResult> InvokeTypedResult<TResult>(
+        TInput input,
+        Func<TInput, Task<TResult>> handler)
+        where TResult : IResult
+    {
+        var result = await handler(input);
+        TypedResultValidator.Validate(Route, SuccessStatus, null, RouteErrorResponses, result);
+        return result;
     }
 
     public static implicit operator Define(InputRouteDefinition<TInput> _) => default!;
@@ -273,6 +452,49 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
     {
         await handler();
         return new RivetResult(SuccessStatus);
+    }
+
+    public async Task<Results<T1, T2>> Invoke<T1, T2>(Func<Task<Results<T1, T2>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        => await InvokeTypedResult(handler);
+
+    public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(Func<Task<Results<T1, T2, T3>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        => await InvokeTypedResult(handler);
+
+    public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(Func<Task<Results<T1, T2, T3, T4>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        => await InvokeTypedResult(handler);
+
+    public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(Func<Task<Results<T1, T2, T3, T4, T5>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        where T5 : IResult
+        => await InvokeTypedResult(handler);
+
+    public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(Func<Task<Results<T1, T2, T3, T4, T5, T6>>> handler)
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult
+        where T4 : IResult
+        where T5 : IResult
+        where T6 : IResult
+        => await InvokeTypedResult(handler);
+
+    private async Task<TResult> InvokeTypedResult<TResult>(Func<Task<TResult>> handler)
+        where TResult : IResult
+    {
+        var result = await handler();
+        TypedResultValidator.Validate(Route, SuccessStatus, null, RouteErrorResponses, result);
+        return result;
     }
 
     public static implicit operator Define(RouteDefinition _) => default!;

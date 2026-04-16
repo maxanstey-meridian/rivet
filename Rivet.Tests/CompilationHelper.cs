@@ -15,120 +15,6 @@ public static class CompilationHelper
     private static readonly MetadataReference[] CoreReferences = GetCoreReferences();
 
     /// <summary>
-    /// Stub ASP.NET MVC attributes so endpoint tests compile without referencing
-    /// the full Microsoft.AspNetCore.Mvc package.
-    /// </summary>
-    private const string AspNetStubs = """
-        namespace Microsoft.AspNetCore.Mvc
-        {
-            [System.AttributeUsage(System.AttributeTargets.Method)]
-            public class HttpGetAttribute : System.Attribute
-            {
-                public HttpGetAttribute() { }
-                public HttpGetAttribute(string template) { }
-            }
-            [System.AttributeUsage(System.AttributeTargets.Method)]
-            public class HttpPostAttribute : System.Attribute
-            {
-                public HttpPostAttribute() { }
-                public HttpPostAttribute(string template) { }
-            }
-            [System.AttributeUsage(System.AttributeTargets.Method)]
-            public class HttpPutAttribute : System.Attribute
-            {
-                public HttpPutAttribute() { }
-                public HttpPutAttribute(string template) { }
-            }
-            [System.AttributeUsage(System.AttributeTargets.Method)]
-            public class HttpDeleteAttribute : System.Attribute
-            {
-                public HttpDeleteAttribute() { }
-                public HttpDeleteAttribute(string template) { }
-            }
-            [System.AttributeUsage(System.AttributeTargets.Method)]
-            public class HttpPatchAttribute : System.Attribute
-            {
-                public HttpPatchAttribute() { }
-                public HttpPatchAttribute(string template) { }
-            }
-            public class ControllerBase { }
-            [System.AttributeUsage(System.AttributeTargets.Parameter)]
-            public class FromBodyAttribute : System.Attribute { }
-            [System.AttributeUsage(System.AttributeTargets.Parameter)]
-            public class FromFormAttribute : System.Attribute { }
-            [System.AttributeUsage(System.AttributeTargets.Parameter)]
-            public class FromQueryAttribute : System.Attribute { }
-            [System.AttributeUsage(System.AttributeTargets.Parameter)]
-            public class FromRouteAttribute : System.Attribute { }
-            [System.AttributeUsage(System.AttributeTargets.Class)]
-            public class RouteAttribute : System.Attribute
-            {
-                public RouteAttribute(string template) { }
-            }
-            [System.AttributeUsage(System.AttributeTargets.Method, AllowMultiple = true)]
-            public class ProducesResponseTypeAttribute : System.Attribute
-            {
-                public ProducesResponseTypeAttribute(System.Type type, int statusCode) { }
-                public ProducesResponseTypeAttribute(int statusCode) { }
-            }
-            public interface IActionResult { }
-            public class ActionResult<TValue> { }
-        }
-        namespace Microsoft.AspNetCore.Http
-        {
-            public interface IFormFile { }
-            public static class StatusCodes
-            {
-                public const int Status200OK = 200;
-                public const int Status201Created = 201;
-                public const int Status204NoContent = 204;
-                public const int Status400BadRequest = 400;
-                public const int Status404NotFound = 404;
-                public const int Status409Conflict = 409;
-            }
-        }
-        namespace Microsoft.AspNetCore.Http.HttpResults
-        {
-            public class Ok<TValue> { }
-            public class Ok { }
-            public class Created<TValue> { }
-            public class Created { }
-            public class Accepted<TValue> { }
-            public class Accepted { }
-            public class NoContent { }
-            public class BadRequest<TValue> { }
-            public class BadRequest { }
-            public class UnauthorizedHttpResult { }
-            public class NotFound<TValue> { }
-            public class NotFound { }
-            public class Conflict<TValue> { }
-            public class Conflict { }
-            public class UnprocessableEntity<TValue> { }
-            public class UnprocessableEntity { }
-            public class Results<T1, T2> { }
-            public class Results<T1, T2, T3> { }
-            public class Results<T1, T2, T3, T4> { }
-            public class Results<T1, T2, T3, T4, T5> { }
-            public class Results<T1, T2, T3, T4, T5, T6> { }
-        }
-        namespace Microsoft.AspNetCore.Builder
-        {
-            public static class EndpointRouteBuilderExtensions
-            {
-                public static void MapGet(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app, string pattern, System.Delegate handler) { }
-                public static void MapPost(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app, string pattern, System.Delegate handler) { }
-                public static void MapPut(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app, string pattern, System.Delegate handler) { }
-                public static void MapDelete(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app, string pattern, System.Delegate handler) { }
-                public static void MapPatch(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app, string pattern, System.Delegate handler) { }
-            }
-        }
-        namespace Microsoft.AspNetCore.Routing
-        {
-            public interface IEndpointRouteBuilder { }
-        }
-        """;
-
-    /// <summary>
     /// Compiles multiple C# source files, each as a separate syntax tree.
     /// Use when sources contain file-scoped namespace declarations.
     /// </summary>
@@ -139,8 +25,6 @@ public static class CompilationHelper
         {
             trees.Add(CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest)));
         }
-
-        trees.Add(CSharpSyntaxTree.ParseText(AspNetStubs, new CSharpParseOptions(LanguageVersion.Latest)));
 
         var compilation = CSharpCompilation.Create(
             "TestAssembly",
@@ -171,7 +55,6 @@ public static class CompilationHelper
         var syntaxTrees = new[]
         {
             CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest)),
-            CSharpSyntaxTree.ParseText(AspNetStubs, new CSharpParseOptions(LanguageVersion.Latest)),
         };
 
         var compilation = CSharpCompilation.Create(
@@ -240,7 +123,7 @@ public static class CompilationHelper
             CoreReferences,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        var mainTree = CSharpSyntaxTree.ParseText(mainSource + "\n" + AspNetStubs);
+        var mainTree = CSharpSyntaxTree.ParseText(mainSource);
         return CSharpCompilation.Create(
             "TestAssembly",
             [mainTree],
@@ -362,6 +245,14 @@ public static class CompilationHelper
             MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Private.Uri.dll")),
             MetadataReference.CreateFromFile(typeof(RivetTypeAttribute).Assembly.Location),
             MetadataReference.CreateFromFile(typeof(System.ComponentModel.DataAnnotations.RequiredAttribute).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Mvc.ControllerBase).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Mvc.IActionResult).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Http.IResult).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Http.IFormFile).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Http.HttpResults.Ok<>).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Routing.RouteData).Assembly.Location),
         ];
     }
 }
