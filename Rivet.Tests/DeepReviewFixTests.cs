@@ -902,7 +902,7 @@ public sealed class DeepReviewFixTests
 
         var (_, client) = GenerateContract(source);
 
-        Assert.Contains("encodeURIComponent(String(id))", client);
+        Assert.Contains("encodeURIComponent(String(input.params.id))", client);
         Assert.DoesNotContain("${id}`", client);
     }
 

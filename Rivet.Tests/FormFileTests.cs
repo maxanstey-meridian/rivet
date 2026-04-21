@@ -71,11 +71,11 @@ public sealed class FormFileTests
         Assert.IsType<TsType.Primitive>(fileParam.Type);
         Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
-        // Function signature takes File
-        Assert.Contains("file: File", client);
+        // Function signature takes transport-shaped input
+        Assert.Contains("input: { body: { file: File; }; }", client);
         // FormData construction
         Assert.Contains("const fd = new FormData();", client);
-        Assert.Contains("fd.append(\"file\", file);", client);
+        Assert.Contains("fd.append(\"file\", input.body.file);", client);
         // Body is fd
         Assert.Contains("body: fd", client);
         // Return type is correct
@@ -128,10 +128,10 @@ public sealed class FormFileTests
         Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
         // Both route param and file param
-        Assert.Contains("id: string, file: File", client);
+        Assert.Contains("input: { params: { id: string; }; body: { file: File; }; }", client);
         Assert.Contains("const fd = new FormData();", client);
-        Assert.Contains("fd.append(\"file\", file);", client);
-        Assert.Contains("${encodeURIComponent(String(id))}", client);
+        Assert.Contains("fd.append(\"file\", input.body.file);", client);
+        Assert.Contains("${encodeURIComponent(String(input.params.id))}", client);
     }
 
     [Fact]
@@ -174,8 +174,8 @@ public sealed class FormFileTests
         Assert.Equal("File", ((TsType.Primitive)avatarParam.Type).Name);
         Assert.Null(ep.ReturnType);
 
-        Assert.Contains("avatar: File", client);
-        Assert.Contains("fd.append(\"avatar\", avatar);", client);
+        Assert.Contains("input: { body: { avatar: File; }; }", client);
+        Assert.Contains("fd.append(\"avatar\", input.body.avatar);", client);
         Assert.Contains("Promise<void>", client);
     }
 
@@ -227,10 +227,10 @@ public sealed class FormFileTests
         Assert.Equal("string", ((TsType.Primitive)titleParam.Type).Name);
 
         // file param is File, title is a FormField appended to FormData
-        Assert.Contains("file: File, title: string", client);
+        Assert.Contains("input: { body: { file: File; title: string; }; }", client);
         Assert.Contains("const fd = new FormData();", client);
-        Assert.Contains("fd.append(\"file\", file);", client);
-        Assert.Contains("fd.append(\"title\", title);", client);
+        Assert.Contains("fd.append(\"file\", input.body.file);", client);
+        Assert.Contains("fd.append(\"title\", input.body.title);", client);
     }
 
     [Fact]
@@ -267,9 +267,9 @@ public sealed class FormFileTests
         Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
         // Should detect IFormFile in TInput and emit File param + FormData
-        Assert.Contains("file: File", client);
+        Assert.Contains("input: { body: { file: File; }; }", client);
         Assert.Contains("const fd = new FormData();", client);
-        Assert.Contains("fd.append(\"file\", file);", client);
+        Assert.Contains("fd.append(\"file\", input.body.file);", client);
         Assert.Contains("body: fd", client);
         Assert.Contains("Promise<FileUploadResult>", client);
     }
@@ -310,10 +310,10 @@ public sealed class FormFileTests
         Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
         // Route param + file param
-        Assert.Contains("id: string, file: File", client);
+        Assert.Contains("input: { params: { id: string; }; body: { file: File; }; }", client);
         Assert.Contains("const fd = new FormData();", client);
-        Assert.Contains("fd.append(\"file\", file);", client);
-        Assert.Contains("${encodeURIComponent(String(id))}", client);
+        Assert.Contains("fd.append(\"file\", input.body.file);", client);
+        Assert.Contains("${encodeURIComponent(String(input.params.id))}", client);
         Assert.Contains("Promise<AttachmentResult>", client);
     }
 
@@ -348,7 +348,7 @@ public sealed class FormFileTests
         Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
         // Direct IFormFile as TInput — emits File param
-        Assert.Contains("file: File", client);
+        Assert.Contains("input: { body: { file: File; }; }", client);
         Assert.Contains("const fd = new FormData();", client);
         Assert.Contains("Promise<AvatarResult>", client);
     }

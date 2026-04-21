@@ -54,16 +54,16 @@ export type InviteResult =
   | { status: 201; data: InviteMemberResponse; response: Response }
   | { status: 422; data: ValidationErrorDto; response: Response };
 
-export function invite(body: InviteMemberRequest): Promise<InviteMemberResponse>;
-export function invite(body: InviteMemberRequest, opts: { unwrap: false }): Promise<InviteResult>;
+export function invite(input: { body: InviteMemberRequest; }): Promise<InviteMemberResponse>;
+export function invite(input: { body: InviteMemberRequest; }, opts: { unwrap: false }): Promise<InviteResult>;
 
 export type RemoveResult =
   | { status: 204; data: void; response: Response }
   | { status: 404; data: NotFoundDto; response: Response }
   | { status: 409; data: void; response: Response };
 
-export function remove(id: string): Promise<void>;
-export function remove(id: string, opts: { unwrap: false }): Promise<RemoveResult>;
+export function remove(input: { params: { id: string; }; }): Promise<void>;
+export function remove(input: { params: { id: string; }; }, opts: { unwrap: false }): Promise<RemoveResult>;
 
 export function health(): Promise<void>;
 ```
@@ -134,8 +134,8 @@ public static class DocumentsContract
 
 ```typescript
 // Generated — returns Blob, error responses still typed
-export function getDocument(id: string): Promise<Blob>;
-export function getDocument(id: string, opts: { unwrap: false }): Promise<GetDocumentResult>;
+export function getDocument(input: { params: { id: string; }; }): Promise<Blob>;
+export function getDocument(input: { params: { id: string; }; }, opts: { unwrap: false }): Promise<GetDocumentResult>;
 ```
 
 The content type defaults to `application/octet-stream`. Pass a specific type for known formats:

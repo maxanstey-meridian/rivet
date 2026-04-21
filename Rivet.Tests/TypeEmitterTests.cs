@@ -190,6 +190,26 @@ public sealed class TypeEmitterTests
     }
 
     [Fact]
+    public void ReadOnlyProperty_EmitsReadonlyModifier()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record WithReadOnly(
+                [property: RivetReadOnly] string Id,
+                string Name);
+            """;
+
+        var result = CompilationHelper.EmitTypes(source);
+
+        Assert.Contains("readonly id: string;", result);
+        Assert.Contains("name: string;", result);
+    }
+
+    [Fact]
     public void NullableArray_WrapsInParens()
     {
         var source = """

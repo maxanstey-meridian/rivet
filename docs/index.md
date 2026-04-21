@@ -161,14 +161,14 @@ export type GetResult =
   | { status: 200; data: TaskDetailDto; response: Response }
   | { status: 404; data: NotFoundDto; response: Response };
 
-export function get(id: string): Promise<TaskDetailDto>;
-export function get(id: string, opts: { unwrap: false }): Promise<GetResult>;
+export function get(input: { params: { id: string; }; }): Promise<TaskDetailDto>;
+export function get(input: { params: { id: string; }; }, opts: { unwrap: false }): Promise<GetResult>;
 
 // Typed request body, 201 default
-export function create(command: CreateTaskCommand): Promise<CreateTaskResult>;
+export function create(input: { body: CreateTaskCommand; }): Promise<CreateTaskResult>;
 
 // delete → remove (reserved word in TS)
-export function remove(id: string): Promise<void>;
+export function remove(input: { params: { id: string; }; }): Promise<void>;
 ```
 
 <h2>Why Rivet?</h2>

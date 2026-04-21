@@ -272,15 +272,15 @@ public sealed class SampleProjectTests : IDisposable
             assert(members[0].email.value === "alice@example.com", "first member email should match");
 
             // Test invite()
-            const invited = await client.invite({ email: { value: "new@example.com" }, role: "member", nickname: "newbie" });
+            const invited = await client.invite({ body: { email: { value: "new@example.com" }, role: "member", nickname: "newbie" } });
             assert(invited.id === "a1b2c3d4-e5f6-4a7b-8c9d-000000000099", "invite() should return the new member id");
 
             // Test remove() — void endpoint
-            const removeResult = await client.remove("some-id");
+            const removeResult = await client.remove({ params: { id: "some-id" } });
             assert(removeResult === undefined, "remove() should return undefined");
 
             // Test updateRole() — void endpoint, 204
-            const updateResult = await client.updateRole("some-id", { role: "viewer" });
+            const updateResult = await client.updateRole({ params: { id: "some-id" }, body: { role: "viewer" } });
             assert(updateResult === undefined, "updateRole() should return undefined");
 
             // Test health() — void endpoint
@@ -448,11 +448,11 @@ public sealed class SampleProjectTests : IDisposable
             assert(result.totalCount === 1, "totalCount should be 1");
 
             // Valid invite passes
-            const invited = await client.invite({ email: "new@example.com", role: "member", nickname: "newbie" });
+            const invited = await client.invite({ body: { email: "new@example.com", role: "member", nickname: "newbie" } });
             assert(invited.id === "a1b2c3d4-e5f6-4a7b-8c9d-000000000099", "invite() should return id");
 
             // Void endpoint — no validation, should work
-            const removeResult = await client.remove("some-id");
+            const removeResult = await client.remove({ params: { id: "some-id" } });
             assert(removeResult === undefined, "remove() should return undefined");
 
             console.log("All zod-validated client tests passed");

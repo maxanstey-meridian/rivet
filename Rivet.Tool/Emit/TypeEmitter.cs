@@ -24,9 +24,10 @@ public static class TypeEmitter
 
         foreach (var prop in definition.Properties)
         {
+            var readOnly = prop.IsReadOnly ? "readonly " : "";
             var optional = prop.IsOptional ? "?" : "";
             var typeStr = EmitType(prop.Type);
-            sb.AppendLine($"  {QuoteIfNeeded(prop.Name)}{optional}: {typeStr};");
+            sb.AppendLine($"  {readOnly}{QuoteIfNeeded(prop.Name)}{optional}: {typeStr};");
         }
 
         sb.AppendLine("};");

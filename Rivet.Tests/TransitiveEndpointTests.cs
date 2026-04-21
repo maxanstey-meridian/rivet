@@ -57,7 +57,7 @@ public sealed class TransitiveEndpointTests
         Assert.Contains("quantity: number;", types);
 
         // Client should reference them
-        Assert.Contains("request: CreateItemRequest", client);
+        Assert.Contains("input: { body: CreateItemRequest; }", client);
         Assert.Contains("Promise<ItemDto>", client);
     }
 

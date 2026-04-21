@@ -57,7 +57,7 @@ public sealed class ControllerEndpointTests
 
         Assert.Contains("export function get(", client);
         Assert.Contains("Promise<ItemDto>", client);
-        Assert.Contains("\"GET\", `/api/items/${encodeURIComponent(String(id))}`", client);
+        Assert.Contains("\"GET\", `/api/items/${encodeURIComponent(String(input.params.id))}`", client);
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public sealed class ControllerEndpointTests
         var client = GenerateClient(source);
 
         // GET combines route + method segment, strips :guid constraint
-        Assert.Contains("""`/api/case-statuses/${encodeURIComponent(String(id))}`""", client);
+        Assert.Contains("""`/api/case-statuses/${encodeURIComponent(String(input.params.id))}`""", client);
         // POST uses controller route only
         Assert.Contains("""`/api/case-statuses`""", client);
     }
@@ -130,8 +130,8 @@ public sealed class ControllerEndpointTests
 
         var client = GenerateClient(source);
 
-        // {id:guid} should become ${encodeURIComponent(String(id))}, not ${id:guid}
-        Assert.Contains("${encodeURIComponent(String(id))}", client);
+        // {id:guid} should become ${encodeURIComponent(String(input.params.id))}, not ${id:guid}
+        Assert.Contains("${encodeURIComponent(String(input.params.id))}", client);
         Assert.DoesNotContain(":guid", client);
     }
 
@@ -256,9 +256,9 @@ public sealed class ControllerEndpointTests
 
         var client = GenerateClient(source);
 
-        Assert.Contains("request: CreateItemRequest", client);
+        Assert.Contains("input: { body: CreateItemRequest; }", client);
         Assert.Contains("Promise<CreateItemResponse>", client);
-        Assert.Contains("body: request", client);
+        Assert.Contains("body: input.body", client);
         // CancellationToken should be skipped
         Assert.DoesNotContain("ct:", client);
     }

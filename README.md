@@ -1,5 +1,4 @@
 <p align="center">
-  <img src="logo.png" alt="Rivet" width="200" />
   <h1 align="center">Rivet</h1>
   <p align="center">
     <a href="https://www.nuget.org/packages/Rivet.Attributes"><img src="https://img.shields.io/nuget/v/Rivet.Attributes?label=Rivet.Attributes" alt="NuGet" /></a>
@@ -67,8 +66,8 @@ export type GetResult =
   | { status: 404; data: ErrorDto; response: Response }
   | { status: Exclude<number, 200 | 404>; data: unknown; response: Response };
 
-const task = await tasks.get(id);                        // → TaskDetailDto (throws on error)
-const result = await tasks.get(id, { unwrap: false });   // → GetResult (no throw)
+const task = await tasks.get({ params: { id } });                        // → TaskDetailDto (throws on error)
+const result = await tasks.get({ params: { id } }, { unwrap: false });   // → GetResult (no throw)
 ```
 
 ## Typed runtime client
@@ -90,9 +89,9 @@ export type GetResult =
   | { status: 404; data: ErrorDto; response: Response }
   | { status: Exclude<number, 200 | 404>; data: unknown; response: Response };
 
-export function get(id: string): Promise<TaskDetailDto>;
-export function get(id: string, opts: { unwrap: false }): Promise<GetResult>;
-export async function get(id: string, opts?: { unwrap?: boolean }): Promise<TaskDetailDto | GetResult> {
+export function get(input: { params: { id: string; }; }): Promise<TaskDetailDto>;
+export function get(input: { params: { id: string; }; }, opts: { unwrap: false }): Promise<GetResult>;
+export async function get(input: { params: { id: string; }; }, opts?: { unwrap?: boolean }): Promise<TaskDetailDto | GetResult> {
   // ...
 }
 
@@ -110,10 +109,10 @@ import { tasks } from "./generated/rivet/client/index.js";
 configureRivet({ baseUrl: "https://api.example.com" });
 
 // Default: throws RivetError on non-2xx
-const task = await tasks.get("some-id");   // → TaskDetailDto
+const task = await tasks.get({ params: { id: "some-id" } });   // → TaskDetailDto
 
 // Discriminated union: handle each status explicitly
-const result = await tasks.get("some-id", { unwrap: false });
+const result = await tasks.get({ params: { id: "some-id" } }, { unwrap: false });
 if (result.isOk()) {
   console.log(result.data.title);          // TaskDetailDto
 } else if (result.isNotFound()) {

@@ -168,13 +168,13 @@ public sealed class ValidatorEmitterTests
         var (_, client, validatedClient) = Generate(source);
 
         // Unvalidated client: overloaded function, no assert
-        Assert.Contains("export function getMessage(id: string): Promise<MessageDto>;", client);
+        Assert.Contains("export function getMessage(input: { params: { id: string; }; }): Promise<MessageDto>;", client);
         Assert.DoesNotContain("assertMessageDto", client);
 
         // Validated client: async + assert wrapper with unwrap branching
         Assert.Contains("""import { assertMessageDto } from "../validators.js";""", validatedClient);
-        Assert.Contains("export function getMessage(id: string): Promise<MessageDto>;", validatedClient);
-        Assert.Contains("export async function getMessage(id: string, opts?: { unwrap?: boolean })", validatedClient);
+        Assert.Contains("export function getMessage(input: { params: { id: string; }; }): Promise<MessageDto>;", validatedClient);
+        Assert.Contains("export async function getMessage(input: { params: { id: string; }; }, opts?: { unwrap?: boolean })", validatedClient);
         // unwrap: false validates the result too
         Assert.Contains("if (opts?.unwrap === false) {", validatedClient);
         Assert.Contains("assertMessageDto(result.data)", validatedClient);
@@ -206,7 +206,7 @@ public sealed class ValidatorEmitterTests
         var (_, _, validatedClient) = Generate(source);
 
         // Void returns don't get assert wrappers — plain function with overloads
-        Assert.Contains("export function remove(id: string): Promise<void>;", validatedClient);
+        Assert.Contains("export function remove(input: { params: { id: string; }; }): Promise<void>;", validatedClient);
         Assert.DoesNotContain("assert", validatedClient);
     }
 
@@ -254,7 +254,7 @@ public sealed class ValidatorEmitterTests
         // GET and POST get assert wrappers, DELETE doesn't
         Assert.Contains("export async function getItem", validatedClient);
         Assert.Contains("export async function createItem", validatedClient);
-        Assert.Contains("export function deleteItem(id: string): Promise<void>;", validatedClient);
+        Assert.Contains("export function deleteItem(input: { params: { id: string; }; }): Promise<void>;", validatedClient);
     }
 
     [Fact]

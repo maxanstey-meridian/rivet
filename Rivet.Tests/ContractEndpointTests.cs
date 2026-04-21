@@ -70,7 +70,7 @@ public sealed class ContractEndpointTests
         Assert.True(ep.Responses[0].DataType is TsType.TypeRef { Name: "TaskDto" });
 
         Assert.Contains("Promise<TaskDto>", client);
-        Assert.Contains("`/api/tasks/${encodeURIComponent(String(id))}`", client);
+        Assert.Contains("`/api/tasks/${encodeURIComponent(String(input.params.id))}`", client);
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public sealed class ContractEndpointTests
 
         Assert.True(ep.ReturnType is TsType.TypeRef { Name: "CommentDto" });
 
-        Assert.Contains("body: body", client);
+        Assert.Contains("body: input.body", client);
     }
 
     [Fact]
@@ -152,8 +152,8 @@ public sealed class ContractEndpointTests
         Assert.True(bodyParam.Type is TsType.TypeRef { Name: "ItemRequest" });
 
         // Client should interpolate {id} and pass body
-        Assert.Contains("`/api/collections/${encodeURIComponent(String(id))}/items`", client);
-        Assert.Contains("body: body", client);
+        Assert.Contains("`/api/collections/${encodeURIComponent(String(input.params.id))}/items`", client);
+        Assert.Contains("body: input.body", client);
     }
 
     [Fact]
@@ -191,8 +191,8 @@ public sealed class ContractEndpointTests
         Assert.Equal("path", queryParam.Name);
 
         // Client should interpolate {id} and pass query params
-        Assert.Contains("`/api/collections/${encodeURIComponent(String(id))}/items`", client);
-        Assert.Contains("query: { path }", client);
+        Assert.Contains("`/api/collections/${encodeURIComponent(String(input.params.id))}/items`", client);
+        Assert.Contains("query: input.query", client);
     }
 
     [Fact]
@@ -1833,7 +1833,7 @@ public sealed class ContractEndpointTests
         Assert.Equal(ParamSource.File, ep.Params[0].Source);
 
         // Client should use FormData
-        Assert.Contains("file: File", client);
+        Assert.Contains("input: { body: { file: File; }; }", client);
         Assert.Contains("FormData", client);
     }
 
@@ -1870,7 +1870,7 @@ public sealed class ContractEndpointTests
         Assert.Equal("file", ep.Params[1].Name);
         Assert.Equal(ParamSource.File, ep.Params[1].Source);
 
-        Assert.Contains("id: string, file: File", client);
+        Assert.Contains("input: { params: { id: string; }; body: { file: File; }; }", client);
     }
 
     [Fact]
@@ -2181,8 +2181,8 @@ public sealed class ContractEndpointTests
         Assert.Equal(ParamSource.FormField, categoryParam.Source);
 
         // Client should append text fields to FormData
-        Assert.Contains("fd.append(\"title\", title)", client);
-        Assert.Contains("fd.append(\"categoryId\", JSON.stringify(categoryId))", client);
+        Assert.Contains("fd.append(\"title\", input.body.title)", client);
+        Assert.Contains("fd.append(\"categoryId\", JSON.stringify(input.body.categoryId))", client);
     }
 
     [Fact]

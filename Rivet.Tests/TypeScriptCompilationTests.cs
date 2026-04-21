@@ -510,8 +510,8 @@ public sealed class TypeScriptCompilationTests : IDisposable
         var groups = ClientEmitter.GroupByController(contractEndpoints.ToList());
         var clientTs = string.Concat(
             groups.Select(g => ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
-        Assert.Contains("streamUrl(id: string, token: string): string", clientTs);
-        Assert.Contains("previewUrl(id: string, key: string): string", clientTs);
+        Assert.Contains("streamUrl(input: { params: { id: string; }; query: { token: string; }; }): string", clientTs);
+        Assert.Contains("previewUrl(input: { params: { id: string; }; query: { key: string; }; }): string", clientTs);
         Assert.Contains("getBaseUrl()", clientTs);
         Assert.DoesNotContain("listUrl(", clientTs);
 
@@ -634,7 +634,7 @@ public sealed class TypeScriptCompilationTests : IDisposable
         var clientTs = string.Concat(
             groups.Select(g => ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
         // *Url() function has all params: route param, query param, and auth token
-        Assert.Contains("streamUrl(id: string, quality: string, secret: string): string", clientTs);
+        Assert.Contains("streamUrl(input: { params: { id: string; }; query: { quality: string; secret: string; }; }): string", clientTs);
         Assert.Contains("getBaseUrl()", clientTs);
         // URL includes both query param and auth token
         Assert.Contains("quality=", clientTs);

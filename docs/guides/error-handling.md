@@ -64,13 +64,13 @@ export type GetResult =
   | { status: 404; data: NotFoundDto; response: Response }
   | { status: Exclude<number, 200 | 404>; data: unknown; response: Response };
 
-export function get(id: string): Promise<TaskDetailDto>;
-export function get(id: string, opts: { unwrap: false }): Promise<GetResult>;
+export function get(input: { params: { id: string; }; }): Promise<TaskDetailDto>;
+export function get(input: { params: { id: string; }; }, opts: { unwrap: false }): Promise<GetResult>;
 ```
 
 ```typescript
 // Usage — narrow by status
-const result = await tasks.get(id, { unwrap: false });
+const result = await tasks.get({ params: { id } }, { unwrap: false });
 if (result.isOk()) {
   result.data.title;    // TaskDetailDto
 } else if (result.isNotFound()) {

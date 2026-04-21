@@ -250,20 +250,20 @@ export type GetResult =
   | { status: 404; data: ErrorDto; response: Response }
   | { status: Exclude<number, 200 | 404>; data: unknown; response: Response };
 
-export function get(id: string): Promise<UserDto>;
-export function get(id: string, opts: { unwrap: false }): Promise<GetResult>;
+export function get(input: { params: { id: string; }; }): Promise<UserDto>;
+export function get(input: { params: { id: string; }; }, opts: { unwrap: false }): Promise<GetResult>;
 
 export type CreateResult =
   | { status: 201; data: CreateUserResponse; response: Response }
   | { status: 422; data: ErrorDto; response: Response }
   | { status: Exclude<number, 201 | 422>; data: unknown; response: Response };
 
-export function create(body: CreateUserRequest): Promise<CreateUserResponse>;
-export function create(body: CreateUserRequest, opts: { unwrap: false }): Promise<CreateResult>;
+export function create(input: { body: CreateUserRequest; }): Promise<CreateUserResponse>;
+export function create(input: { body: CreateUserRequest; }, opts: { unwrap: false }): Promise<CreateResult>;
 
-export function update(id: string, body: UpdateUserRequest): Promise<void>;
+export function update(input: { params: { id: string; }; body: UpdateUserRequest; }): Promise<void>;
 
-export function uploadAvatar(id: string, file: File): Promise<FileUploadResult>;  // .AcceptsFile() → File param
+export function uploadAvatar(input: { params: { id: string; }; body: { file: File; }; }): Promise<FileUploadResult>;  // .AcceptsFile() → FormData body
 ```
 :::
 

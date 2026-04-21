@@ -136,26 +136,23 @@ public static partial class ClientEmitter
                 ? TypeEmitter.EmitTypeString(endpoint.ReturnType)
                 : "void";
 
-        var paramParts = new List<string>();
-        foreach (var p in endpoint.Params)
-        {
-            paramParts.Add($"{SafeParameterName(p.Name)}: {TypeEmitter.EmitTypeString(p.Type)}");
-        }
-
-        var route = InterpolateRoute(endpoint.RouteTemplate, endpoint.Params);
-
+        var routeParams = endpoint.Params.Where(p => p.Source == ParamSource.Route).ToList();
         var fileParams = endpoint.Params.Where(p => p.Source == ParamSource.File).ToList();
         var formFieldParams = endpoint.Params.Where(p => p.Source == ParamSource.FormField).ToList();
         var bodyParam = endpoint.Params.FirstOrDefault(p => p.Source == ParamSource.Body);
         var queryParams = endpoint.Params.Where(p => p.Source == ParamSource.Query).ToList();
+        var requestBodyType = bodyParam is not null
+            ? TypeEmitter.EmitTypeString(bodyParam.Type)
+            : fileParams.Count == 0 && endpoint.RequestType is not null
+                ? TypeEmitter.EmitTypeString(endpoint.RequestType)
+                : null;
 
-        // Fallback: PHP contracts carry body type in RequestType instead of Params
-        if (bodyParam is null && fileParams.Count == 0 && endpoint.RequestType is not null)
-        {
-            paramParts.Add($"body: {TypeEmitter.EmitTypeString(endpoint.RequestType)}");
-        }
-
-        var paramsStr = string.Join(", ", paramParts);
+        var inputType = BuildInputType(routeParams, queryParams, fileParams, formFieldParams, requestBodyType);
+        var paramsStr = inputType is not null ? $"input: {inputType}" : "";
+        var route = InterpolateRoute(
+            endpoint.RouteTemplate,
+            routeParams,
+            param => AccessProperty("input.params", param.Name));
 
         // Determine result type for unwrap: false
         var hasResultDU = endpoint.Responses.Count >= 2;
@@ -181,38 +178,21 @@ public static partial class ClientEmitter
         {
             fetchOptionParts.Add("body: fd");
         }
-        else if (bodyParam is not null)
+        else if (bodyParam is not null || endpoint.RequestType is not null)
         {
             if (endpoint.IsFormEncoded)
             {
-                fetchOptionParts.Add($"body: new URLSearchParams({SafeParameterName(bodyParam.Name)} as Record<string, string>)");
+                fetchOptionParts.Add($"body: new URLSearchParams({AccessProperty("input", "body")} as Record<string, string>)");
                 fetchOptionParts.Add("formEncoded: true");
             }
             else
             {
-                fetchOptionParts.Add($"body: {SafeParameterName(bodyParam.Name)}");
-            }
-        }
-        else if (endpoint.RequestType is not null)
-        {
-            if (endpoint.IsFormEncoded)
-            {
-                fetchOptionParts.Add("body: new URLSearchParams(body as Record<string, string>)");
-                fetchOptionParts.Add("formEncoded: true");
-            }
-            else
-            {
-                fetchOptionParts.Add("body: body");
+                fetchOptionParts.Add($"body: {AccessProperty("input", "body")}");
             }
         }
         if (queryParams.Count > 0)
         {
-            var queryEntries = queryParams.Select(p =>
-            {
-                var safe = SafeParameterName(p.Name);
-                return safe == p.Name ? p.Name : $"{p.Name}: {safe}";
-            });
-            fetchOptionParts.Add($"query: {{ {string.Join(", ", queryEntries)} }}");
+            fetchOptionParts.Add($"query: {AccessProperty("input", "query")}");
         }
 
         if (isFileEndpoint)
@@ -242,18 +222,17 @@ public static partial class ClientEmitter
             sb.AppendLine("  const fd = new FormData();");
             foreach (var fp in fileParams)
             {
-                sb.AppendLine($"  fd.append(\"{fp.Name}\", {SafeParameterName(fp.Name)});");
+                sb.AppendLine($"  fd.append(\"{fp.Name}\", {AccessProperty("input.body", fp.Name)});");
             }
             foreach (var ff in formFieldParams)
             {
-                var safeName = SafeParameterName(ff.Name);
                 if (ff.Type is TsType.Primitive p && p.Name == "string")
                 {
-                    sb.AppendLine($"  fd.append(\"{ff.Name}\", {safeName});");
+                    sb.AppendLine($"  fd.append(\"{ff.Name}\", {AccessProperty("input.body", ff.Name)});");
                 }
                 else
                 {
-                    sb.AppendLine($"  fd.append(\"{ff.Name}\", JSON.stringify({safeName}));");
+                    sb.AppendLine($"  fd.append(\"{ff.Name}\", JSON.stringify({AccessProperty("input.body", ff.Name)}));");
                 }
             }
         }
@@ -329,37 +308,31 @@ public static partial class ClientEmitter
     {
         var funcName = SafeFunctionName(endpoint.Name);
         var urlFuncName = $"{funcName}Url";
-        var route = InterpolateRoute(endpoint.RouteTemplate, endpoint.Params);
+        var routeParams = endpoint.Params.Where(p => p.Source == ParamSource.Route).ToList();
+        var queryParams = endpoint.Params.Where(p => p.Source == ParamSource.Query).ToList();
+        var route = InterpolateRoute(
+            endpoint.RouteTemplate,
+            routeParams,
+            param => AccessProperty("input.params", param.Name));
         var queryAuthParam = endpoint.QueryAuth!.ParameterName;
-
-        // Build parameter list: input params + auth token
-        var paramParts = new List<string>();
-        foreach (var p in endpoint.Params)
-        {
-            paramParts.Add($"{SafeParameterName(p.Name)}: {TypeEmitter.EmitTypeString(p.Type)}");
-        }
-        paramParts.Add($"{SafeParameterName(queryAuthParam)}: string");
-
-        var paramsStr = string.Join(", ", paramParts);
+        var inputType = BuildUrlInputType(routeParams, queryParams, queryAuthParam);
 
         // Build query string parts
         var queryParts = new List<string>();
 
         // Include existing query params
-        var queryParams = endpoint.Params.Where(p => p.Source == ParamSource.Query).ToList();
         foreach (var qp in queryParams)
         {
-            var safe = SafeParameterName(qp.Name);
-            queryParts.Add($"{qp.Name}=${{encodeURIComponent(String({safe}))}}");
+            queryParts.Add($"{qp.Name}=${{encodeURIComponent(String({AccessProperty("input.query", qp.Name)}))}}");
         }
 
         // Append the auth token
-        queryParts.Add($"{queryAuthParam}=${{encodeURIComponent({SafeParameterName(queryAuthParam)})}}");
+        queryParts.Add($"{queryAuthParam}=${{encodeURIComponent({AccessProperty("input.query", queryAuthParam)})}}");
 
         var queryString = string.Join("&", queryParts);
 
         sb.AppendLine();
-        sb.AppendLine($"export function {urlFuncName}({paramsStr}): string {{");
+        sb.AppendLine($"export function {urlFuncName}(input: {inputType}): string {{");
         sb.AppendLine($"  return `${{getBaseUrl()}}{route}?{queryString}`;");
         sb.AppendLine("}");
     }
@@ -403,20 +376,68 @@ public static partial class ClientEmitter
         return name;
     }
 
-    private static string SafeParameterName(string name)
+    private static string? BuildInputType(
+        IReadOnlyList<TsEndpointParam> routeParams,
+        IReadOnlyList<TsEndpointParam> queryParams,
+        IReadOnlyList<TsEndpointParam> fileParams,
+        IReadOnlyList<TsEndpointParam> formFieldParams,
+        string? requestBodyType)
     {
-        if (TsReservedWords.All.Contains(name))
+        var fields = new List<string>();
+
+        if (routeParams.Count > 0)
         {
-            return $"_{name}";
+            fields.Add($"params: {BuildObjectType(routeParams)}");
         }
 
-        return name;
+        if (queryParams.Count > 0)
+        {
+            fields.Add($"query: {BuildObjectType(queryParams)}");
+        }
+
+        if (fileParams.Count > 0 || formFieldParams.Count > 0)
+        {
+            fields.Add($"body: {BuildObjectType(fileParams.Concat(formFieldParams).ToList())}");
+        }
+        else if (requestBodyType is not null)
+        {
+            fields.Add($"body: {requestBodyType}");
+        }
+
+        return fields.Count > 0 ? $"{{ {string.Join("; ", fields)}; }}" : null;
     }
 
-    private static string InterpolateRoute(string template, IReadOnlyList<TsEndpointParam> allParams)
+    private static string BuildUrlInputType(
+        IReadOnlyList<TsEndpointParam> routeParams,
+        IReadOnlyList<TsEndpointParam> queryParams,
+        string queryAuthParam)
     {
-        var routeParams = allParams.Where(p => p.Source == ParamSource.Route).ToList();
+        var fields = new List<string>();
 
+        if (routeParams.Count > 0)
+        {
+            fields.Add($"params: {BuildObjectType(routeParams)}");
+        }
+
+        var queryShape = queryParams
+            .Concat(new[] { new TsEndpointParam(queryAuthParam, new TsType.Primitive("string"), ParamSource.Query) })
+            .ToList();
+        fields.Add($"query: {BuildObjectType(queryShape)}");
+
+        return $"{{ {string.Join("; ", fields)}; }}";
+    }
+
+    private static string BuildObjectType(IReadOnlyList<TsEndpointParam> parameters)
+    {
+        return $"{{ {string.Join("; ", parameters.Select(
+            p => $"{TypeEmitter.QuoteIfNeeded(p.Name)}: {TypeEmitter.EmitTypeString(p.Type)}"))}; }}";
+    }
+
+    private static string InterpolateRoute(
+        string template,
+        IReadOnlyList<TsEndpointParam> routeParams,
+        Func<TsEndpointParam, string> emitValue)
+    {
         var result = RouteParamRegex().Replace(template, match =>
         {
             var paramName = match.Groups[1].Value;
@@ -424,7 +445,7 @@ public static partial class ClientEmitter
                 string.Equals(p.Name, paramName, StringComparison.OrdinalIgnoreCase));
             if (param is not null)
             {
-                return $"${{encodeURIComponent(String({SafeParameterName(param.Name)}))}}";
+                return $"${{encodeURIComponent(String({emitValue(param)}))}}";
             }
 
             throw new InvalidOperationException(
@@ -433,6 +454,14 @@ public static partial class ClientEmitter
         });
 
         return result;
+    }
+
+    private static string AccessProperty(string target, string propertyName)
+    {
+        var property = TypeEmitter.QuoteIfNeeded(propertyName);
+        return property == propertyName
+            ? $"{target}.{propertyName}"
+            : $"{target}[{property}]";
     }
 
     private static HashSet<string> CollectReferencedTypeNames(IReadOnlyList<TsEndpointDefinition> endpoints)

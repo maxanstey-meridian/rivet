@@ -60,11 +60,11 @@ public sealed class ClientEmitterTests
 
         Assert.Contains("""import type { CreateMessageCommand, MessageDto } from "../types/test.js";""", client);
         // Overload signatures
-        Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand): Promise<MessageDto>;", client);
-        Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand, opts: { unwrap: true }): Promise<MessageDto>;", client);
-        Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand, opts: { unwrap: false }): Promise<RivetResult<MessageDto>>;", client);
+        Assert.Contains("export function createMessage(input: { params: { id: string; }; body: CreateMessageCommand; }): Promise<MessageDto>;", client);
+        Assert.Contains("export function createMessage(input: { params: { id: string; }; body: CreateMessageCommand; }, opts: { unwrap: true }): Promise<MessageDto>;", client);
+        Assert.Contains("export function createMessage(input: { params: { id: string; }; body: CreateMessageCommand; }, opts: { unwrap: false }): Promise<RivetResult<MessageDto>>;", client);
         // Implementation body
-        Assert.Contains("""rivetFetch<RivetResult<MessageDto>>("POST", `/api/submissions/${encodeURIComponent(String(id))}/messages`, { body: body, unwrap: opts?.unwrap });""", client);
+        Assert.Contains("""rivetFetch<RivetResult<MessageDto>>("POST", `/api/submissions/${encodeURIComponent(String(input.params.id))}/messages`, { body: input.body, unwrap: opts?.unwrap });""", client);
     }
 
     [Fact]
@@ -93,8 +93,8 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("export function getSubmission(id: string): Promise<SubmissionDto>;", client);
-        Assert.Contains("""rivetFetch<RivetResult<SubmissionDto>>("GET", `/api/submissions/${encodeURIComponent(String(id))}`, { unwrap: opts?.unwrap });""", client);
+        Assert.Contains("export function getSubmission(input: { params: { id: string; }; }): Promise<SubmissionDto>;", client);
+        Assert.Contains("""rivetFetch<RivetResult<SubmissionDto>>("GET", `/api/submissions/${encodeURIComponent(String(input.params.id))}`, { unwrap: opts?.unwrap });""", client);
     }
 
     [Fact]
@@ -120,9 +120,9 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("export function deleteSubmission(id: string): Promise<void>;", client);
-        Assert.Contains("export function deleteSubmission(id: string, opts: { unwrap: false }): Promise<RivetResult<void>>;", client);
-        Assert.Contains("""rivetFetch<RivetResult<void>>("DELETE", `/api/submissions/${encodeURIComponent(String(id))}`, { unwrap: opts?.unwrap });""", client);
+        Assert.Contains("export function deleteSubmission(input: { params: { id: string; }; }): Promise<void>;", client);
+        Assert.Contains("export function deleteSubmission(input: { params: { id: string; }; }, opts: { unwrap: false }): Promise<RivetResult<void>>;", client);
+        Assert.Contains("""rivetFetch<RivetResult<void>>("DELETE", `/api/submissions/${encodeURIComponent(String(input.params.id))}`, { unwrap: opts?.unwrap });""", client);
     }
 
     [Fact]
@@ -153,8 +153,8 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("export function listSubmissions(status: string, page: number): Promise<SubmissionDto[]>;", client);
-        Assert.Contains("query: { status, page }", client);
+        Assert.Contains("export function listSubmissions(input: { query: { status: string; page: number; }; }): Promise<SubmissionDto[]>;", client);
+        Assert.Contains("query: input.query", client);
     }
 
     [Fact]
@@ -189,7 +189,7 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         // Only route param should appear, DI params skipped
-        Assert.Contains("export function getThing(id: string): Promise<ResultDto>;", client);
+        Assert.Contains("export function getThing(input: { params: { id: string; }; }): Promise<ResultDto>;", client);
         Assert.DoesNotContain("service:", client);
         Assert.DoesNotContain("ct:", client);
     }
@@ -286,8 +286,8 @@ public sealed class ClientEmitterTests
 
         var (_, client) = Generate(source);
 
-        Assert.Contains("export function createMessage(id: string, body: CreateMessageCommand): Promise<MessageDto>;", client);
-        Assert.Contains("""rivetFetch<RivetResult<MessageDto>>("POST", `/api/submissions/${encodeURIComponent(String(id))}/messages`, { body: body, unwrap: opts?.unwrap });""", client);
+        Assert.Contains("export function createMessage(input: { params: { id: string; }; body: CreateMessageCommand; }): Promise<MessageDto>;", client);
+        Assert.Contains("""rivetFetch<RivetResult<MessageDto>>("POST", `/api/submissions/${encodeURIComponent(String(input.params.id))}/messages`, { body: input.body, unwrap: opts?.unwrap });""", client);
     }
 
     [Fact]
@@ -329,8 +329,8 @@ public sealed class ClientEmitterTests
         Assert.Contains("{ status: Exclude<number, 200 | 404>; data: unknown; response: Response }", client);
 
         // Overloads use GetResult for unwrap: false
-        Assert.Contains("export function get(id: string): Promise<TaskDetailDto>;", client);
-        Assert.Contains("export function get(id: string, opts: { unwrap: false }): Promise<GetResult>;", client);
+        Assert.Contains("export function get(input: { params: { id: string; }; }): Promise<TaskDetailDto>;", client);
+        Assert.Contains("export function get(input: { params: { id: string; }; }, opts: { unwrap: false }): Promise<GetResult>;", client);
     }
 
     [Fact]
@@ -363,7 +363,7 @@ public sealed class ClientEmitterTests
 
         // Single response → no DU, uses RivetResult<T>
         Assert.DoesNotContain("export type GetResult", client);
-        Assert.Contains("export function get(id: string, opts: { unwrap: false }): Promise<RivetResult<TaskDetailDto>>;", client);
+        Assert.Contains("export function get(input: { params: { id: string; }; }, opts: { unwrap: false }): Promise<RivetResult<TaskDetailDto>>;", client);
     }
 
     [Fact]
@@ -394,15 +394,14 @@ public sealed class ClientEmitterTests
     }
 
     [Fact]
-    public void SafeParameterName_ReservedWords_GetPrefixed()
+    public void AccessProperty_UsesDotOrBracketNotation()
     {
-        var safeParam = typeof(ClientEmitter)
-            .GetMethod("SafeParameterName", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        var accessProperty = typeof(ClientEmitter)
+            .GetMethod("AccessProperty", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
 
-        Assert.Equal("_class", safeParam.Invoke(null, ["class"]) as string);
-        Assert.Equal("_return", safeParam.Invoke(null, ["return"]) as string);
-        Assert.Equal("_delete", safeParam.Invoke(null, ["delete"]) as string);
-        Assert.Equal("normalName", safeParam.Invoke(null, ["normalName"]) as string);
+        Assert.Equal("input.query.class", accessProperty.Invoke(null, ["input.query", "class"]) as string);
+        Assert.Equal("input.query.normalName", accessProperty.Invoke(null, ["input.query", "normalName"]) as string);
+        Assert.Equal("input.query[\"kebab-case\"]", accessProperty.Invoke(null, ["input.query", "kebab-case"]) as string);
     }
 
     [Fact]
@@ -485,11 +484,11 @@ public sealed class ClientEmitterTests
         var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], typeFileMap);
 
         // All three overloads should include body param
-        Assert.Contains("export function createBuyer(body: CreateBuyerRequest): Promise<BuyerDto>;", output);
-        Assert.Contains("export function createBuyer(body: CreateBuyerRequest, opts: { unwrap: true }): Promise<BuyerDto>;", output);
-        Assert.Contains("export function createBuyer(body: CreateBuyerRequest, opts: { unwrap: false }): Promise<RivetResult<BuyerDto>>;", output);
+        Assert.Contains("export function createBuyer(input: { body: CreateBuyerRequest; }): Promise<BuyerDto>;", output);
+        Assert.Contains("export function createBuyer(input: { body: CreateBuyerRequest; }, opts: { unwrap: true }): Promise<BuyerDto>;", output);
+        Assert.Contains("export function createBuyer(input: { body: CreateBuyerRequest; }, opts: { unwrap: false }): Promise<RivetResult<BuyerDto>>;", output);
         // Fetch options should include body
-        Assert.Contains("body: body", output);
+        Assert.Contains("body: input.body", output);
         // Import should include the request type
         Assert.Contains("CreateBuyerRequest", output.Split('\n').First(l => l.StartsWith("import type")));
     }
@@ -506,8 +505,8 @@ public sealed class ClientEmitterTests
 
         var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], new Dictionary<string, string>());
 
-        Assert.Contains("body: { id: number; name: string; }", output);
-        Assert.Contains("body: body", output);
+        Assert.Contains("input: { body: { id: number; name: string; }; }", output);
+        Assert.Contains("body: input.body", output);
     }
 
     [Fact]
@@ -521,11 +520,11 @@ public sealed class ClientEmitterTests
         var typeFileMap = new Dictionary<string, string> { ["LoginRequest"] = "auth" };
         var output = ClientEmitter.EmitControllerClient("auth", [endpoint], typeFileMap);
 
-        Assert.Contains("body: new URLSearchParams(body as Record<string, string>)", output);
+        Assert.Contains("body: new URLSearchParams(input.body as Record<string, string>)", output);
         Assert.Contains("formEncoded: true", output);
-        // Ensure raw body: body is not emitted (URLSearchParams wrapping is used instead)
+        // Ensure raw body: input.body is not emitted (URLSearchParams wrapping is used instead)
         var fetchLines = output.Split('\n').Where(l => l.Contains("body:")).ToList();
-        Assert.All(fetchLines, l => Assert.DoesNotContain("body: body", l));
+        Assert.All(fetchLines, l => Assert.DoesNotContain("body: input.body", l));
     }
 
     [Fact]
@@ -560,7 +559,7 @@ public sealed class ClientEmitterTests
 
         var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], typeFileMap);
 
-        Assert.Contains("body: LegacyRequest", output);
+        Assert.Contains("input: { body: LegacyRequest; }", output);
         // Signature should NOT contain the RequestType name
         var signatures = output.Split('\n').Where(l => l.StartsWith("export function")).ToList();
         Assert.All(signatures, s => Assert.DoesNotContain("CreateBuyerRequest", s));
@@ -582,9 +581,9 @@ public sealed class ClientEmitterTests
         var output = ClientEmitter.EmitControllerClient("docs", [endpoint], new Dictionary<string, string>());
 
         // File param should appear in signature, but NOT a body param from RequestType
-        Assert.Contains("file: File", output);
+        Assert.Contains("input: { body: { file: File; }; }", output);
         var signatures = output.Split('\n').Where(l => l.StartsWith("export function")).ToList();
-        Assert.All(signatures, s => Assert.DoesNotContain("body:", s));
+        Assert.All(signatures, s => Assert.DoesNotContain("UploadRequest", s));
         // Fetch options should use fd (FormData), not body
         Assert.Contains("body: fd", output);
     }
@@ -606,9 +605,9 @@ public sealed class ClientEmitterTests
 
         var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], typeFileMap);
 
-        Assert.Contains("export function createBuyer(id: string, body: CreateBuyerRequest): Promise<BuyerDto>;", output);
-        Assert.Contains("export function createBuyer(id: string, body: CreateBuyerRequest, opts: { unwrap: true }): Promise<BuyerDto>;", output);
-        Assert.Contains("export function createBuyer(id: string, body: CreateBuyerRequest, opts: { unwrap: false }): Promise<RivetResult<BuyerDto>>;", output);
+        Assert.Contains("export function createBuyer(input: { params: { id: string; }; body: CreateBuyerRequest; }): Promise<BuyerDto>;", output);
+        Assert.Contains("export function createBuyer(input: { params: { id: string; }; body: CreateBuyerRequest; }, opts: { unwrap: true }): Promise<BuyerDto>;", output);
+        Assert.Contains("export function createBuyer(input: { params: { id: string; }; body: CreateBuyerRequest; }, opts: { unwrap: false }): Promise<RivetResult<BuyerDto>>;", output);
     }
 
     [Fact]
@@ -623,9 +622,9 @@ public sealed class ClientEmitterTests
         var typeFileMap = new Dictionary<string, string> { ["CreateBuyerRequest"] = "buyer" };
         var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], typeFileMap);
 
-        Assert.Contains("export function createBuyer(status: string, body: CreateBuyerRequest): Promise<void>;", output);
-        Assert.Contains("body: body", output);
-        Assert.Contains("query: { status }", output);
+        Assert.Contains("export function createBuyer(input: { query: { status: string; }; body: CreateBuyerRequest; }): Promise<void>;", output);
+        Assert.Contains("body: input.body", output);
+        Assert.Contains("query: input.query", output);
     }
 
     [Fact]
@@ -654,8 +653,8 @@ public sealed class ClientEmitterTests
         Assert.Contains("{ status: 200; data: BuyerDto; response: Response }", output);
         Assert.Contains("{ status: 422; data: ValidationError; response: Response }", output);
         // Body param in all overloads including the DU variant
-        Assert.Contains("export function createBuyer(body: CreateBuyerRequest): Promise<BuyerDto>;", output);
-        Assert.Contains("export function createBuyer(body: CreateBuyerRequest, opts: { unwrap: false }): Promise<CreateBuyerResult>;", output);
+        Assert.Contains("export function createBuyer(input: { body: CreateBuyerRequest; }): Promise<BuyerDto>;", output);
+        Assert.Contains("export function createBuyer(input: { body: CreateBuyerRequest; }, opts: { unwrap: false }): Promise<CreateBuyerResult>;", output);
     }
 
     [Fact]
@@ -713,12 +712,12 @@ public sealed class ClientEmitterTests
         var output = ClientEmitter.EmitControllerClient("streams", [endpoint], new Dictionary<string, string>());
 
         // Standard fetch function still emitted
-        Assert.Contains("export function getStream(id: string): Promise<void>;", output);
+        Assert.Contains("export function getStream(input: { params: { id: string; }; }): Promise<void>;", output);
 
         // *Url() companion function emitted
-        Assert.Contains("export function getStreamUrl(id: string, token: string): string {", output);
+        Assert.Contains("export function getStreamUrl(input: { params: { id: string; }; query: { token: string; }; }): string {", output);
         Assert.Contains("getBaseUrl()", output);
-        Assert.Contains("token=${encodeURIComponent(token)}", output);
+        Assert.Contains("token=${encodeURIComponent(input.query.token)}", output);
     }
 
     [Fact]
@@ -734,8 +733,8 @@ public sealed class ClientEmitterTests
 
         var output = ClientEmitter.EmitControllerClient("streams", [endpoint], new Dictionary<string, string>());
 
-        Assert.Contains("export function getStreamUrl(id: string, key: string): string {", output);
-        Assert.Contains("key=${encodeURIComponent(key)}", output);
+        Assert.Contains("export function getStreamUrl(input: { params: { id: string; }; query: { key: string; }; }): string {", output);
+        Assert.Contains("key=${encodeURIComponent(input.query.key)}", output);
         Assert.DoesNotContain("token", output.Split('\n').First(l => l.Contains("getStreamUrl")));
     }
 
@@ -786,11 +785,11 @@ public sealed class ClientEmitterTests
 
         // Url function should include both the query param and the token
         var urlLine = output.Split('\n').First(l => l.Contains("getStreamUrl"));
-        Assert.Contains("quality: string, token: string", urlLine);
+        Assert.Contains("input: { query: { quality: string; token: string; }; }", urlLine);
 
         // Both query param and token in the URL
-        Assert.Contains("quality=${encodeURIComponent(String(quality))}", output);
-        Assert.Contains("token=${encodeURIComponent(token)}", output);
+        Assert.Contains("quality=${encodeURIComponent(String(input.query.quality))}", output);
+        Assert.Contains("token=${encodeURIComponent(input.query.token)}", output);
     }
 
     [Fact]

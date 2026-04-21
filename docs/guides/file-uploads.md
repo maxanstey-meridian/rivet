@@ -16,13 +16,13 @@ public async Task<IActionResult> Attach(Guid id, IFormFile file, CancellationTok
 ```
 
 ```typescript
-// Generated — File parameter, FormData construction handled automatically
-export function attach(id: string, file: File): Promise<AttachmentResultDto>;
-export function attach(id: string, file: File, opts: { unwrap: false }): Promise<RivetResult<AttachmentResultDto>>;
-export async function attach(id: string, file: File, opts?: { unwrap?: boolean }) {
+// Generated — transport-shaped input, FormData construction handled automatically
+export function attach(input: { params: { id: string; }; body: { file: File; }; }): Promise<AttachmentResultDto>;
+export function attach(input: { params: { id: string; }; body: { file: File; }; }, opts: { unwrap: false }): Promise<RivetResult<AttachmentResultDto>>;
+export async function attach(input: { params: { id: string; }; body: { file: File; }; }, opts?: { unwrap?: boolean }) {
   const fd = new FormData();
-  fd.append("file", file);
-  return rivetFetch("POST", `/api/tasks/${id}/attachments`, { body: fd, unwrap: opts?.unwrap });
+  fd.append("file", input.body.file);
+  return rivetFetch("POST", `/api/tasks/${input.params.id}/attachments`, { body: fd, unwrap: opts?.unwrap });
 }
 ```
 
