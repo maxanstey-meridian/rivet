@@ -630,7 +630,7 @@ public sealed class TypeWalker
         return null;
     }
 
-    private static bool IsOptionalProperty(IPropertySymbol prop)
+    public static bool IsOptionalProperty(IPropertySymbol prop)
     {
         var attributes = prop.GetAttributes();
 

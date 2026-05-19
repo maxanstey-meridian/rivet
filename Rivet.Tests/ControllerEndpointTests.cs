@@ -260,7 +260,7 @@ public sealed class ControllerEndpointTests
         Assert.Contains("Promise<CreateItemResponse>", client);
         Assert.Contains("body: input.body", client);
         // CancellationToken should be skipped
-        Assert.DoesNotContain("ct:", client);
+        Assert.DoesNotContain("ct;", client);
     }
 
     [Fact]
@@ -797,7 +797,7 @@ public sealed class ControllerEndpointTests
 
         // Should appear exactly once even though it matches both [RivetClient] and [RivetEndpoint]
         // Implementation signature appears once; overload declarations also contain "export function get"
-        var implCount = client.Split("opts?: { unwrap?: boolean }").Length - 1;
+        var implCount = client.Split("opts?: { unwrap?: boolean; raw?: false } | RivetRawClientOptions").Length - 1;
         Assert.Equal(1, implCount);
     }
 

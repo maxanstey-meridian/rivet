@@ -216,14 +216,16 @@ public sealed class SampleProjectTests : IDisposable
 
         // 4. Compile TS → JS
         var (tscExit, tscOutput) = await RunProcessAsync(
-            "npx", $"--yes tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
+            "npx", $"--yes --package typescript tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
             workingDir: _tempDir);
         Assert.True(tscExit == 0, $"tsc failed:\n{tscOutput}");
 
         // 5. Write test script with mocked fetch and static fixture responses
         await File.WriteAllTextAsync(Path.Combine(_tempDir, "test.mjs"), """
             // Mock fetch with static responses matching contract shapes
+            let lastRequest = null;
             globalThis.fetch = async (url, opts) => {
+              lastRequest = { url, opts };
               const path = new URL(url).pathname;
               const method = (opts?.method ?? "GET").toUpperCase();
 
@@ -270,6 +272,17 @@ public sealed class SampleProjectTests : IDisposable
             assert(members.length === 2, "list() should return 2 members");
             assert(members[0].name === "Alice", "first member should be Alice");
             assert(members[0].email.value === "alice@example.com", "first member email should match");
+
+            // Test generated path/url builders
+            assert(client.listPath() === "/api/members", `listPath() should return /api/members, got ${client.listPath()}`);
+            assert(client.listUrl() === "http://localhost:9999/api/members", `listUrl() should include base URL, got ${client.listUrl()}`);
+
+            // Test raw mode on a generated endpoint
+            const rawList = await client.list({ raw: true, redirect: "manual", credentials: "include" });
+            assert(rawList instanceof Response, "raw list() should return a Response");
+            assert(rawList.status === 200, `raw list() should preserve status, got ${rawList.status}`);
+            assert(lastRequest.opts.redirect === "manual", `raw list() should pass redirect, got ${lastRequest.opts.redirect}`);
+            assert(lastRequest.opts.credentials === "include", `raw list() should pass credentials, got ${lastRequest.opts.credentials}`);
 
             // Test invite()
             const invited = await client.invite({ body: { email: { value: "new@example.com" }, role: "member", nickname: "newbie" } });
@@ -393,7 +406,7 @@ public sealed class SampleProjectTests : IDisposable
 
         // 6. Compile TS → JS
         var (tscExit, tscOutput) = await RunProcessAsync(
-            "npx", $"--yes tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
+            "npx", $"--yes --package typescript tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
             workingDir: _tempDir);
         Assert.True(tscExit == 0, $"tsc failed:\n{tscOutput}");
 
@@ -500,12 +513,12 @@ public sealed class SampleProjectTests : IDisposable
             """);
 
         var (tscExit, tscOutput) = await RunProcessAsync(
-            "npx", $"--yes tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
+            "npx", $"--yes --package typescript tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
             workingDir: _tempDir);
         Assert.True(tscExit == 0, $"tsc failed:\n{tscOutput}");
 
         await File.WriteAllTextAsync(Path.Combine(_tempDir, "test.mjs"), """
-            import { configureRivet, rivetFetch } from "./dist/rivet.js";
+            import { configureRivet, rivetBuildPath, rivetBuildUrl, rivetFetch, rivetFetchRaw } from "./dist/rivet.js";
 
             let mockResponse;
             globalThis.fetch = async () => mockResponse;
@@ -646,12 +659,12 @@ public sealed class SampleProjectTests : IDisposable
             """);
 
         var (tscExit, tscOutput) = await RunProcessAsync(
-            "npx", $"--yes tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
+            "npx", $"--yes --package typescript tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
             workingDir: _tempDir);
         Assert.True(tscExit == 0, $"tsc failed:\n{tscOutput}");
 
         await File.WriteAllTextAsync(Path.Combine(_tempDir, "test.mjs"), """
-            import { configureRivet, rivetFetch } from "./dist/rivet.js";
+            import { configureRivet, rivetBuildPath, rivetBuildUrl, rivetFetch, rivetFetchRaw } from "./dist/rivet.js";
 
             function assert(condition, message) {
               if (!condition) throw new Error(`FAIL: ${message}`);
@@ -755,6 +768,54 @@ public sealed class SampleProjectTests : IDisposable
               assert(capturedBodies[4] === undefined, `body: undefined should arrive as undefined, got: ${JSON.stringify(capturedBodies[4])}`);
             }
 
+            // ===== 5. raw fetch options =====
+            {
+              let capturedUrl = null;
+              let capturedOpts = null;
+              globalThis.fetch = async (url, opts) => {
+                capturedUrl = url;
+                capturedOpts = opts;
+                return new Response("redirect", { status: 302, headers: { location: "/next" } });
+              };
+              configureRivet({
+                baseUrl: "http://localhost:9999",
+                headers: () => ({ "X-Configured": "yes" }),
+              });
+
+              const response = await rivetFetchRaw("POST", "/raw", {
+                body: "payload",
+                headers: { "X-Call": "one" },
+                query: { q: "hello", skip: null },
+                redirect: "manual",
+                credentials: "include",
+              });
+
+              assert(response.status === 302, `raw response should not throw or parse, got: ${response.status}`);
+              const rawUrl = new URL(capturedUrl);
+              assert(rawUrl.searchParams.get("q") === "hello", "raw fetch should append query params");
+              assert(!rawUrl.searchParams.has("skip"), "raw fetch should skip null query params");
+              assert(capturedOpts.headers["X-Configured"] === "yes", "raw fetch should include configured headers");
+              assert(capturedOpts.headers["X-Call"] === "one", "raw fetch should include call headers");
+              assert(capturedOpts.redirect === "manual", `raw fetch should pass redirect, got: ${capturedOpts.redirect}`);
+              assert(capturedOpts.credentials === "include", `raw fetch should pass credentials, got: ${capturedOpts.credentials}`);
+              assert(capturedOpts.body === "payload", `raw fetch should pass body, got: ${capturedOpts.body}`);
+            }
+
+            // ===== 6. path and URL builders =====
+            {
+              configureRivet({ baseUrl: "http://localhost:9999/base/" });
+              const path = rivetBuildPath("/search", {
+                q: "hello world",
+                tags: ["a", "b"],
+                empty: null,
+                zero: 0,
+              });
+              assert(path === "/search?q=hello+world&tags=a&tags=b&zero=0", `unexpected path: ${path}`);
+
+              const url = rivetBuildUrl("/search", { q: "hello" });
+              assert(url === "http://localhost:9999/search?q=hello", `unexpected url: ${url}`);
+            }
+
             console.log("All config options tests passed");
             """);
 
@@ -792,7 +853,7 @@ public sealed class SampleProjectTests : IDisposable
             """);
 
         var (tscExit, tscOutput) = await RunProcessAsync(
-            "npx", $"--yes tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
+            "npx", $"--yes --package typescript tsc --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
             workingDir: _tempDir);
         Assert.True(tscExit == 0, $"tsc failed:\n{tscOutput}");
 

@@ -1,0 +1,82 @@
+version: "3"
+
+tasks:
+    dev:
+        desc: Start docs dev server
+        dir: docs
+        cmds:
+            - pnpm docs:dev
+
+    docs:dev:
+        desc: Start docs dev server
+        dir: docs
+        cmds:
+            - pnpm docs:dev
+
+    docs:build:
+        desc: Build docs
+        dir: docs
+        cmds:
+            - pnpm docs:build
+
+    analyze:
+        desc: Refresh GitNexus code intelligence index
+        cmds:
+            - pnpm analyze
+
+    gitnexus:status:
+        desc: Show GitNexus index status
+        cmds:
+            - pnpm exec gitnexus status
+
+    build:
+        desc: Build solution
+        cmds:
+            - dotnet build ./Rivet.slnx
+
+    samples:build:
+        desc: Build sample projects
+        cmds:
+            - dotnet build ./samples/ContractApi/ContractApi.csproj
+            - dotnet build ./samples/AnnotationApi/AnnotationApi.csproj
+            - dotnet build ./samples/TypeShowcase/TypeShowcase.csproj
+            - dotnet build ./samples/ImportDemo/ImportDemo.csproj
+
+    test:
+        desc: Run test suite
+        cmds:
+            - dotnet test ./Rivet.Tests/Rivet.Tests.csproj
+
+    format:
+        desc: Format C# projects
+        cmds:
+            - dotnet format ./Rivet.slnx style --severity warn
+            - dotnet format ./Rivet.slnx analyzers --severity warn
+            - dotnet format ./Rivet.slnx whitespace
+
+    format:verbose:
+        desc: Verify C# formatting
+        cmds:
+            - dotnet format ./Rivet.slnx style --severity warn --verify-no-changes --verbosity minimal
+            - dotnet format ./Rivet.slnx analyzers --severity warn --verify-no-changes --verbosity minimal
+            - dotnet format ./Rivet.slnx whitespace --verify-no-changes --verbosity minimal
+
+    check:
+        desc: Run build, tests, samples, and docs build
+        cmds:
+            - task: build
+            - task: test
+            - task: samples:build
+            - task: docs:build
+
+    pack:
+        desc: Pack NuGet packages
+        cmds:
+            - dotnet pack ./Rivet.Attributes/Rivet.Attributes.csproj --configuration Release --output ./nupkg
+            - dotnet pack ./Rivet.Tool/Rivet.Tool.csproj --configuration Release --output ./nupkg
+
+    install:
+        desc: Install JavaScript dependencies
+        cmds:
+            - pnpm --dir docs install
+            - npm install --prefix Rivet.Tests/js

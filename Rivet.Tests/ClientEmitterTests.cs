@@ -24,7 +24,12 @@ public sealed class ClientEmitterTests
         var typeGrouping = TypeGrouper.Group(allDefinitions, brands, walker.Enums, allNamespaces);
         var typeFileMap = typeGrouping.BuildTypeFileMap();
         var types = string.Concat(typeGrouping.Groups.Select(TypeEmitter.EmitGroupFile));
-        var client = ClientEmitter.EmitControllerClient("endpoints", extraction.Endpoints, typeFileMap);
+
+        var definitionsByName = new Dictionary<string, TsTypeDefinition>(walker.Definitions);
+        foreach (var def in extraction.ExtractedTypes)
+            definitionsByName[def.Name] = def;
+
+        var client = ClientEmitter.EmitControllerClient("endpoints", extraction.Endpoints, typeFileMap, ValidateMode.None, definitionsByName);
         return (types, client);
     }
 
@@ -158,6 +163,104 @@ public sealed class ClientEmitterTests
     }
 
     [Fact]
+    public void OptionalQueryParams_EmitsWithOptionalMarker()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record SubmissionDto(Guid Id, string Reference);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/submissions")]
+                public static Task<List<SubmissionDto>> ListSubmissions([FromQuery] string? status, [FromQuery] int? page)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (_, client) = Generate(source);
+
+        Assert.Contains("status?: string | null", client);
+        Assert.Contains("page?: number | null", client);
+    }
+
+    [Fact]
+    public void NonNullableQueryParams_DoNotEmitOptionalMarker()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record SubmissionDto(Guid Id, string Reference);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpGet("/api/submissions")]
+                public static Task<List<SubmissionDto>> ListSubmissions([FromQuery] string status, [FromQuery] int page)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (_, client) = Generate(source);
+
+        Assert.Contains("status: string", client);
+        Assert.Contains("page: number", client);
+        Assert.DoesNotContain("status?:", client);
+        Assert.DoesNotContain("page?:", client);
+    }
+
+    [Fact]
+    public void OptionalQueryParams_FromDefinitionsByName_EmitsWithOptionalMarker()
+    {
+        var endpoint = MakeEndpoint(
+            name: "listSubmissions",
+            method: "GET",
+            route: "/api/submissions",
+            @params:
+            [
+                new TsEndpointParam("status", new TsType.Primitive("string"), ParamSource.Query),
+                new TsEndpointParam("page", new TsType.Primitive("number"), ParamSource.Query),
+            ],
+            returnType: new TsType.Primitive("void"),
+            inputTypeName: "ListSubmissionsInput");
+
+        var definitionsByName = new Dictionary<string, TsTypeDefinition>
+        {
+            ["ListSubmissionsInput"] = new(
+                "ListSubmissionsInput",
+                [],
+                [
+                    new TsPropertyDefinition("status", new TsType.Primitive("string"), IsOptional: true),
+                    new TsPropertyDefinition("page", new TsType.Primitive("number"), IsOptional: false),
+                ]),
+        };
+
+        var client = ClientEmitter.EmitControllerClient(
+            "submissions",
+            [endpoint],
+            new Dictionary<string, string>(),
+            ValidateMode.None,
+            definitionsByName);
+
+        Assert.Contains("query: { status?: string; page: number; }", client);
+    }
+
+    [Fact]
     public void DiParams_Skipped()
     {
         var source = """
@@ -191,7 +294,7 @@ public sealed class ClientEmitterTests
         // Only route param should appear, DI params skipped
         Assert.Contains("export function getThing(input: { params: { id: string; }; }): Promise<ResultDto>;", client);
         Assert.DoesNotContain("service:", client);
-        Assert.DoesNotContain("ct:", client);
+        Assert.DoesNotContain("ct;", client);
     }
 
     [Fact]
@@ -240,8 +343,12 @@ public sealed class ClientEmitterTests
         Assert.Contains("export type RivetResultOf<TResult extends RivetRawResult>", rivetBase);
         Assert.Contains("export const configureRivet", rivetBase);
         Assert.Contains("export const getBaseUrl", rivetBase);
+        Assert.Contains("export const rivetBuildPath", rivetBase);
+        Assert.Contains("export const rivetBuildUrl", rivetBase);
+        Assert.Contains("export const rivetFetchRaw", rivetBase);
         Assert.Contains("export const rivetFetch", rivetBase);
         Assert.Contains("unwrap?: boolean", rivetBase);
+        Assert.Contains("raw: true", rivetBase);
         Assert.Contains("isSuccessful(): boolean;", rivetBase);
         Assert.Contains("isOk(): this is RivetStatusMatch<TResult, 200>;", rivetBase);
         Assert.Contains("isRedirect(location?: string): boolean;", rivetBase);
@@ -322,7 +429,7 @@ public sealed class ClientEmitterTests
         var (_, client) = Generate(source);
 
         // Result DU type with catch-all arm
-        Assert.Contains("import { rivetFetch, type RivetResult, type RivetResultOf } from \"../rivet.js\";", client);
+        Assert.Contains("import { rivetBuildPath, rivetBuildUrl, rivetFetch, rivetFetchRaw, type RivetRawClientOptions, type RivetResult, type RivetResultOf } from \"../rivet.js\";", client);
         Assert.Contains("export type GetResult = RivetResultOf<", client);
         Assert.Contains("{ status: 200; data: TaskDetailDto; response: Response }", client);
         Assert.Contains("{ status: 404; data: NotFoundDto; response: Response }", client);
@@ -455,7 +562,8 @@ public sealed class ClientEmitterTests
         TsType? requestType = null,
         bool isFormEncoded = false,
         IReadOnlyList<TsResponseType>? responses = null,
-        QueryAuthMetadata? queryAuth = null) =>
+        QueryAuthMetadata? queryAuth = null,
+        string? inputTypeName = null) =>
         new(
             Name: name,
             HttpMethod: method,
@@ -464,6 +572,7 @@ public sealed class ClientEmitterTests
             ReturnType: returnType,
             ControllerName: controller,
             Responses: responses ?? [],
+            InputTypeName: inputTypeName,
             IsFormEncoded: isFormEncoded,
             RequestType: requestType,
             QueryAuth: queryAuth);
@@ -658,6 +767,69 @@ public sealed class ClientEmitterTests
     }
 
     [Fact]
+    public void RawMode_EmitsOverloadAndUsesRawFetch()
+    {
+        var endpoint = MakeEndpoint(
+            name: "login",
+            method: "GET",
+            route: "/api/auth/login",
+            returnType: new TsType.Primitive("void"));
+
+        var output = ClientEmitter.EmitControllerClient("auth", [endpoint], new Dictionary<string, string>());
+
+        Assert.Contains("export function login(opts: RivetRawClientOptions): Promise<Response>;", output);
+        Assert.Contains("opts?: { unwrap?: boolean; raw?: false } | RivetRawClientOptions", output);
+        Assert.Contains("if (opts?.raw === true)", output);
+        Assert.Contains("""return rivetFetchRaw("GET", `/api/auth/login`, { headers: opts.headers, redirect: opts.redirect, credentials: opts.credentials, signal: opts.signal });""", output);
+    }
+
+    [Fact]
+    public void RawMode_WithJsonBody_SerializesBodyAndMergesHeaders()
+    {
+        var endpoint = MakeEndpoint(
+            name: "createBuyer",
+            method: "POST",
+            route: "/api/buyers",
+            requestType: new TsType.TypeRef("CreateBuyerRequest"),
+            returnType: new TsType.TypeRef("BuyerDto"));
+
+        var typeFileMap = new Dictionary<string, string>
+        {
+            ["CreateBuyerRequest"] = "buyer",
+            ["BuyerDto"] = "buyer",
+        };
+
+        var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], typeFileMap);
+
+        Assert.Contains("export function createBuyer(input: { body: CreateBuyerRequest; }, opts: RivetRawClientOptions): Promise<Response>;", output);
+        Assert.Contains("""return rivetFetchRaw("POST", `/api/buyers`, { body: JSON.stringify(input.body), headers: { "Content-Type": "application/json", ...opts.headers }, redirect: opts.redirect, credentials: opts.credentials, signal: opts.signal });""", output);
+    }
+
+    [Fact]
+    public void PathBuilders_BodyOnlyEndpoint_HasNoInput()
+    {
+        var endpoint = MakeEndpoint(
+            name: "createBuyer",
+            method: "POST",
+            route: "/api/buyers",
+            requestType: new TsType.TypeRef("CreateBuyerRequest"),
+            returnType: new TsType.TypeRef("BuyerDto"));
+
+        var typeFileMap = new Dictionary<string, string>
+        {
+            ["CreateBuyerRequest"] = "buyer",
+            ["BuyerDto"] = "buyer",
+        };
+
+        var output = ClientEmitter.EmitControllerClient("buyer", [endpoint], typeFileMap);
+
+        Assert.Contains("export function createBuyerPath(): string {", output);
+        Assert.Contains("export function createBuyerUrl(): string {", output);
+        Assert.Contains("return rivetBuildPath(`/api/buyers`);", output);
+        Assert.Contains("return rivetBuildUrl(`/api/buyers`);", output);
+    }
+
+    [Fact]
     public void InlineTypeExtracted_ResultType_UsesName()
     {
         var source = """
@@ -714,10 +886,11 @@ public sealed class ClientEmitterTests
         // Standard fetch function still emitted
         Assert.Contains("export function getStream(input: { params: { id: string; }; }): Promise<void>;", output);
 
-        // *Url() companion function emitted
+        // *Path() and *Url() companion functions emitted
+        Assert.Contains("export function getStreamPath(input: { params: { id: string; }; query: { token: string; }; }): string {", output);
         Assert.Contains("export function getStreamUrl(input: { params: { id: string; }; query: { token: string; }; }): string {", output);
-        Assert.Contains("getBaseUrl()", output);
-        Assert.Contains("token=${encodeURIComponent(input.query.token)}", output);
+        Assert.Contains("rivetBuildPath(`/api/streams/${encodeURIComponent(String(input.params.id))}`, input.query)", output);
+        Assert.Contains("rivetBuildUrl(`/api/streams/${encodeURIComponent(String(input.params.id))}`, input.query)", output);
     }
 
     [Fact]
@@ -733,13 +906,13 @@ public sealed class ClientEmitterTests
 
         var output = ClientEmitter.EmitControllerClient("streams", [endpoint], new Dictionary<string, string>());
 
+        Assert.Contains("export function getStreamPath(input: { params: { id: string; }; query: { key: string; }; }): string {", output);
         Assert.Contains("export function getStreamUrl(input: { params: { id: string; }; query: { key: string; }; }): string {", output);
-        Assert.Contains("key=${encodeURIComponent(input.query.key)}", output);
         Assert.DoesNotContain("token", output.Split('\n').First(l => l.Contains("getStreamUrl")));
     }
 
     [Fact]
-    public void QueryAuth_ImportsGetBaseUrl()
+    public void Client_ImportsPathUrlAndRawHelpers()
     {
         var endpoint = MakeEndpoint(
             name: "getStream",
@@ -750,11 +923,11 @@ public sealed class ClientEmitterTests
 
         var output = ClientEmitter.EmitControllerClient("streams", [endpoint], new Dictionary<string, string>());
 
-        Assert.Contains("import { rivetFetch, getBaseUrl, type RivetResult } from \"../rivet.js\";", output);
+        Assert.Contains("import { rivetBuildPath, rivetBuildUrl, rivetFetch, rivetFetchRaw, type RivetRawClientOptions, type RivetResult } from \"../rivet.js\";", output);
     }
 
     [Fact]
-    public void NoQueryAuth_NoUrlFunction_NoGetBaseUrlImport()
+    public void NoQueryAuth_StillEmitsPathAndUrlFunctions()
     {
         var endpoint = MakeEndpoint(
             name: "getItem",
@@ -765,9 +938,10 @@ public sealed class ClientEmitterTests
 
         var output = ClientEmitter.EmitControllerClient("items", [endpoint], new Dictionary<string, string>());
 
-        Assert.DoesNotContain("Url(", output);
-        Assert.DoesNotContain("getBaseUrl", output);
-        Assert.Contains("import { rivetFetch, type RivetResult } from \"../rivet.js\";", output);
+        Assert.Contains("export function getItemPath(input: { params: { id: string; }; }): string {", output);
+        Assert.Contains("export function getItemUrl(input: { params: { id: string; }; }): string {", output);
+        Assert.Contains("rivetBuildPath(`/api/items/${encodeURIComponent(String(input.params.id))}`)", output);
+        Assert.Contains("rivetBuildUrl(`/api/items/${encodeURIComponent(String(input.params.id))}`)", output);
     }
 
     [Fact]
@@ -787,9 +961,8 @@ public sealed class ClientEmitterTests
         var urlLine = output.Split('\n').First(l => l.Contains("getStreamUrl"));
         Assert.Contains("input: { query: { quality: string; token: string; }; }", urlLine);
 
-        // Both query param and token in the URL
-        Assert.Contains("quality=${encodeURIComponent(String(input.query.quality))}", output);
-        Assert.Contains("token=${encodeURIComponent(input.query.token)}", output);
+        Assert.Contains("rivetBuildPath(`/api/streams`, input.query)", output);
+        Assert.Contains("rivetBuildUrl(`/api/streams`, input.query)", output);
     }
 
     [Fact]

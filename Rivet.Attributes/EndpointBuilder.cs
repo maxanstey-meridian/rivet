@@ -25,6 +25,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     private bool _formEncoded;
     private string? _queryAuthParameterName;
     private List<RouteErrorResponse>? _errorResponses;
+    private bool _skipValidation;
 
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
@@ -42,6 +43,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public bool IsQueryAuth => _queryAuthParameterName is not null;
     public string? QueryAuthParameterName => _queryAuthParameterName;
     public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses => _errorResponses;
+    public bool ShouldSkipValidation => _skipValidation;
 
     /// <summary>The resolved success status code (for use in Invoke).</summary>
     protected int SuccessStatus => _successStatus;
@@ -68,6 +70,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         target._formEncoded = _formEncoded;
         target._queryAuthParameterName = _queryAuthParameterName;
         target._errorResponses = _errorResponses?.ToList();
+        target._skipValidation = _skipValidation;
     }
 
     public TSelf Summary(string summary)
@@ -97,6 +100,17 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public TSelf FormEncoded()
     {
         _formEncoded = true;
+        return (TSelf)this;
+    }
+
+    /// <summary>
+    /// Skip typed-result validation for endpoints that return framework result types
+    /// (e.g. ChallengeHttpResult, SignOutHttpResult) which do not implement
+    /// IStatusCodeHttpResult and therefore cannot be validated by Rivet's validator.
+    /// </summary>
+    public TSelf SkipValidation()
+    {
+        _skipValidation = true;
         return (TSelf)this;
     }
 
@@ -274,7 +288,7 @@ public sealed class RouteDefinition<TInput, TOutput> : RouteDefinitionBase<Route
         where TResult : IResult
     {
         var result = await handler(input);
-        TypedResultValidator.Validate(Route, SuccessStatus, successResponseType, RouteErrorResponses, result);
+        TypedResultValidator.Validate(Route, SuccessStatus, successResponseType, RouteErrorResponses, result, ShouldSkipValidation);
         return result;
     }
 
@@ -297,6 +311,11 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
         var result = await handler();
         return new RivetResult<TOutput>(SuccessStatus, result);
     }
+
+    public async Task<T1> Invoke<T1>(
+        Func<Task<T1>> handler)
+        where T1 : IResult
+        => await InvokeTypedResult(typeof(TOutput), handler);
 
     public async Task<Results<T1, T2>> Invoke<T1, T2>(
         Func<Task<Results<T1, T2>>> handler)
@@ -344,7 +363,7 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
         where TResult : IResult
     {
         var result = await handler();
-        TypedResultValidator.Validate(Route, SuccessStatus, successResponseType, RouteErrorResponses, result);
+        TypedResultValidator.Validate(Route, SuccessStatus, successResponseType, RouteErrorResponses, result, ShouldSkipValidation);
         return result;
     }
 
@@ -368,6 +387,12 @@ public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRout
         await handler(input);
         return new RivetResult(SuccessStatus);
     }
+
+    public async Task<T1> Invoke<T1>(
+        TInput input,
+        Func<TInput, Task<T1>> handler)
+        where T1 : IResult
+        => await InvokeTypedResult(input, handler);
 
     public async Task<Results<T1, T2>> Invoke<T1, T2>(
         TInput input,
@@ -420,7 +445,7 @@ public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRout
         where TResult : IResult
     {
         var result = await handler(input);
-        TypedResultValidator.Validate(Route, SuccessStatus, null, RouteErrorResponses, result);
+        TypedResultValidator.Validate(Route, SuccessStatus, null, RouteErrorResponses, result, ShouldSkipValidation);
         return result;
     }
 
@@ -453,6 +478,10 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
         await handler();
         return new RivetResult(SuccessStatus);
     }
+
+    public async Task<T1> Invoke<T1>(Func<Task<T1>> handler)
+        where T1 : IResult
+        => await InvokeTypedResult(handler);
 
     public async Task<Results<T1, T2>> Invoke<T1, T2>(Func<Task<Results<T1, T2>>> handler)
         where T1 : IResult
@@ -493,7 +522,7 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
         where TResult : IResult
     {
         var result = await handler();
-        TypedResultValidator.Validate(Route, SuccessStatus, null, RouteErrorResponses, result);
+        TypedResultValidator.Validate(Route, SuccessStatus, null, RouteErrorResponses, result, ShouldSkipValidation);
         return result;
     }
 

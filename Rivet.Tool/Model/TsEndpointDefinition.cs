@@ -41,7 +41,7 @@ public sealed record TsResponseType(
 /// <summary>
 /// A parameter to a client function.
 /// </summary>
-public sealed record TsEndpointParam(string Name, TsType Type, ParamSource Source);
+public sealed record TsEndpointParam(string Name, TsType Type, ParamSource Source, bool IsOptional = false);
 
 public enum ParamSource
 {

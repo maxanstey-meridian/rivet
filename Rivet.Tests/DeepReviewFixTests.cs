@@ -875,7 +875,7 @@ public sealed class DeepReviewFixTests
         var rivetBase = ClientEmitter.EmitRivetBase();
 
         Assert.Contains("Array.isArray(v)", rivetBase);
-        Assert.Contains("url.searchParams.append(k, String(item))", rivetBase);
+        Assert.Contains("searchParams.append(k, String(item))", rivetBase);
     }
 
     // --- Fix 8: Route encodeURIComponent ---
