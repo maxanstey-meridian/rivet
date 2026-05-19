@@ -229,7 +229,8 @@
       "properties": {
         "name": { "type": "string" },
         "type": { "$ref": "#/$defs/tsType" },
-        "source": { "type": "string", "enum": ["route", "body", "query", "file", "formField"] }
+        "source": { "type": "string", "enum": ["route", "body", "query", "file", "formField"] },
+        "isOptional": { "type": "boolean" }
       },
       "required": ["name", "type", "source"],
       "additionalProperties": false

@@ -505,15 +505,17 @@ public sealed class TypeScriptCompilationTests : IDisposable
             security: null);
         Assert.Contains("\"x-rivet-query-auth\"", openApiJson);
 
-        // 5. TypeScript client includes *Url() function with route params and getBaseUrl
+        // 5. TypeScript client includes *Path()/*Url() functions with route params and QueryAuth
         var typeFileMap = CompilationHelper.BuildTypeFileMap(walker);
         var groups = ClientEmitter.GroupByController(contractEndpoints.ToList());
         var clientTs = string.Concat(
             groups.Select(g => ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
+        Assert.Contains("streamPath(input: { params: { id: string; }; query: { token: string; }; }): string", clientTs);
         Assert.Contains("streamUrl(input: { params: { id: string; }; query: { token: string; }; }): string", clientTs);
+        Assert.Contains("previewPath(input: { params: { id: string; }; query: { key: string; }; }): string", clientTs);
         Assert.Contains("previewUrl(input: { params: { id: string; }; query: { key: string; }; }): string", clientTs);
-        Assert.Contains("getBaseUrl()", clientTs);
-        Assert.DoesNotContain("listUrl(", clientTs);
+        Assert.Contains("listPath(", clientTs);
+        Assert.Contains("listUrl(", clientTs);
 
         // 6. Full TS compilation check — the generated code must type-check
         var (exitCode, output) = await GenerateAndTypeCheck(source);
@@ -633,12 +635,11 @@ public sealed class TypeScriptCompilationTests : IDisposable
         var groups = ClientEmitter.GroupByController(endpoints.ToList());
         var clientTs = string.Concat(
             groups.Select(g => ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
-        // *Url() function has all params: route param, query param, and auth token
+        // *Path()/*Url() functions have all params: route param, query param, and auth token
+        Assert.Contains("streamPath(input: { params: { id: string; }; query: { quality: string; secret: string; }; }): string", clientTs);
         Assert.Contains("streamUrl(input: { params: { id: string; }; query: { quality: string; secret: string; }; }): string", clientTs);
-        Assert.Contains("getBaseUrl()", clientTs);
-        // URL includes both query param and auth token
-        Assert.Contains("quality=", clientTs);
-        Assert.Contains("secret=", clientTs);
+        Assert.Contains("rivetBuildPath", clientTs);
+        Assert.Contains("rivetBuildUrl", clientTs);
 
         // ── Stage 7: Full TS compilation ──
         var (exitCode, output) = await GenerateAndTypeCheck(source);
@@ -733,7 +734,7 @@ public sealed class TypeScriptCompilationTests : IDisposable
         var psi = new ProcessStartInfo
         {
             FileName = "npx",
-            Arguments = $"--yes tsc --noEmit --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
+            Arguments = $"--yes --package typescript tsc --noEmit --project \"{Path.Combine(_tempDir, "tsconfig.json")}\"",
             WorkingDirectory = _tempDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

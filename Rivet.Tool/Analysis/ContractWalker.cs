@@ -560,6 +560,7 @@ public static class ContractWalker
             // GET/DELETE: TInput properties matched by name to route → Route, remaining → Query
             if (tInput is not null)
             {
+                inputTypeName = tInput.Name;
                 var matchedRouteParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 foreach (var member in tInput.GetMembers())

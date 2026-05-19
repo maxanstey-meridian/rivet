@@ -174,7 +174,7 @@ public sealed class ValidatorEmitterTests
         // Validated client: async + assert wrapper with unwrap branching
         Assert.Contains("""import { assertMessageDto } from "../validators.js";""", validatedClient);
         Assert.Contains("export function getMessage(input: { params: { id: string; }; }): Promise<MessageDto>;", validatedClient);
-        Assert.Contains("export async function getMessage(input: { params: { id: string; }; }, opts?: { unwrap?: boolean })", validatedClient);
+        Assert.Contains("export async function getMessage(input: { params: { id: string; }; }, opts?: { unwrap?: boolean; raw?: false } | RivetRawClientOptions)", validatedClient);
         // unwrap: false validates the result too
         Assert.Contains("if (opts?.unwrap === false) {", validatedClient);
         Assert.Contains("assertMessageDto(result.data)", validatedClient);

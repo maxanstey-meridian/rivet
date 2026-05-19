@@ -9,8 +9,14 @@ internal static class TypedResultValidator
         int successStatus,
         Type? successResponseType,
         IReadOnlyList<RouteErrorResponse>? errorResponses,
-        IResult result)
+        IResult result,
+        bool skipValidation = false)
     {
+        if (skipValidation)
+        {
+            return;
+        }
+
         var branch = Unwrap(result);
 
         if (branch is not IStatusCodeHttpResult statusCodeResult)
