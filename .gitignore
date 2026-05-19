@@ -1,4 +1,5 @@
 .DS_Store
+node_modules/
 bin/
 obj/
 nupkg/
@@ -25,5 +26,6 @@ docs/.vitepress/cache/
 
 .orch/
 .plans/
+.claude/
 vendor/
 .orchrc.json

@@ -10,8 +10,9 @@ export default defineConfig({
     logo: "/logo.png",
 
     nav: [
-      { text: "Guide", link: "/getting-started" },
-      { text: "Reference", link: "/reference/cli" },
+      { text: "Get Started", link: "/getting-started" },
+      { text: "Tutorial", link: "/guides/tutorial" },
+      { text: "CLI", link: "/reference/cli" },
       {
         text: "NuGet",
         link: "https://www.nuget.org/packages/Rivet.Attributes",
@@ -30,33 +31,12 @@ export default defineConfig({
         text: "Guides",
         items: [
           { text: "Tutorial: Zero to Typed Client", link: "/guides/tutorial" },
-          { text: "Contracts", link: "/guides/contracts" },
-          { text: "Contract Coverage", link: "/guides/contract-coverage" },
-          { text: "Runtime Validation", link: "/guides/runtime-validation" },
-          { text: "OpenAPI Emission", link: "/guides/openapi-emission" },
-          { text: "OpenAPI Import", link: "/guides/openapi-import" },
-          { text: "OpenAPI Round-Trips", link: "/guides/openapi-round-trips" },
-          { text: "Error Handling", link: "/guides/error-handling" },
-          { text: "File Uploads", link: "/guides/file-uploads" },
         ],
       },
       {
         text: "Reference",
         items: [
           { text: "CLI", link: "/reference/cli" },
-          { text: "Type Mapping", link: "/reference/type-mapping" },
-          { text: "Attributes", link: "/reference/attributes" },
-          { text: "Client Configuration", link: "/reference/client-config" },
-          { text: "Route Definition", link: "/reference/endpoint-builder" },
-          { text: "Vendor Extensions", link: "/reference/vendor-extensions" },
-        ],
-      },
-      {
-        text: "Misc",
-        items: [
-          { text: "How It Works", link: "/misc/how-it-works" },
-          { text: "Limitations", link: "/misc/limitations" },
-          { text: "AI Disclosure", link: "/misc/ai-disclosure" },
         ],
       },
     ],

@@ -1,0 +1,37 @@
+{
+  "name": "rivet",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "analyze": "gitnexus analyze --skip-agents-md"
+  },
+  "devDependencies": {
+    "gitnexus": "1.6.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@ladybugdb/core",
+      "gitnexus",
+      "onnxruntime-node",
+      "protobufjs",
+      "sharp",
+      "tree-sitter",
+      "tree-sitter-c",
+      "tree-sitter-c-sharp",
+      "tree-sitter-cpp",
+      "tree-sitter-go",
+      "tree-sitter-java",
+      "tree-sitter-javascript",
+      "tree-sitter-kotlin",
+      "tree-sitter-php",
+      "tree-sitter-python",
+      "tree-sitter-ruby",
+      "tree-sitter-rust",
+      "tree-sitter-typescript"
+    ],
+    "ignoredBuiltDependencies": [
+      "@scarf/scarf"
+    ]
+  },
+  "packageManager": "pnpm@10.24.0"
+}

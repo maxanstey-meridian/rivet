@@ -106,7 +106,7 @@ internal static class EmitPipeline
             var clientFileNames = new List<string>();
             foreach (var (controllerName, controllerEndpoints) in controllerGroups)
             {
-                var clientContent = ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints, typeFileMap);
+                var clientContent = ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints, typeFileMap, ValidateMode.None, input.DefinitionsByName);
                 var clientPath = Path.Combine(clientDir, $"{controllerName}.ts");
                 await File.WriteAllTextAsync(clientPath, clientContent);
                 Console.WriteLine($"  client/{controllerName}.ts → {clientPath}");
@@ -172,7 +172,7 @@ internal static class EmitPipeline
                 foreach (var (controllerName, controllerEndpoints) in controllerGroups)
                 {
                     var validatedContent = ClientEmitter.EmitControllerClient(
-                        controllerName, controllerEndpoints, typeFileMap, ValidateMode.Zod);
+                        controllerName, controllerEndpoints, typeFileMap, ValidateMode.Zod, input.DefinitionsByName);
                     var clientPath = Path.Combine(clientDir, $"{controllerName}.ts");
                     await File.WriteAllTextAsync(clientPath, validatedContent);
                     Console.WriteLine($"  client/{controllerName}.ts → {clientPath} (validated)");
@@ -206,7 +206,7 @@ internal static class EmitPipeline
             {
                 Console.WriteLine();
                 Console.WriteLine($"=== client/{controllerName}.ts ===");
-                Console.Write(ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints, typeFileMap));
+                Console.Write(ClientEmitter.EmitControllerClient(controllerName, controllerEndpoints, typeFileMap, ValidateMode.None, input.DefinitionsByName));
             }
         }
 

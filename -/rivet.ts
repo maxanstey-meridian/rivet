@@ -7,26 +7,6 @@ export type RivetConfig = {
   onError?: (error: RivetError) => void;
 };
 
-export type RivetQuery = Record<string, unknown>;
-
-export type RivetRawClientOptions = {
-  raw: true;
-  unwrap?: never;
-  headers?: Record<string, string>;
-  redirect?: RequestRedirect;
-  credentials?: RequestCredentials;
-  signal?: AbortSignal;
-};
-
-export type RivetFetchRawOptions = {
-  body?: BodyInit;
-  headers?: Record<string, string>;
-  query?: RivetQuery;
-  redirect?: RequestRedirect;
-  credentials?: RequestCredentials;
-  signal?: AbortSignal;
-};
-
 type RivetRawResult = { status: number; data: unknown; response: Response };
 type RivetStatusMatch<TResult extends RivetRawResult, TStatus extends number> =
   Extract<TResult, { status: TStatus }> extends never
@@ -71,32 +51,6 @@ export const configureRivet = (config: RivetConfig): void => {
 };
 
 export const getBaseUrl = (): string => _config.baseUrl;
-
-const appendQueryParams = (searchParams: URLSearchParams, query?: RivetQuery): void => {
-  if (!query) {
-    return;
-  }
-
-  for (const [k, v] of Object.entries(query)) {
-    if (v == null) continue;
-    if (Array.isArray(v)) {
-      for (const item of v) searchParams.append(k, String(item));
-    } else {
-      searchParams.set(k, String(v));
-    }
-  }
-};
-
-export const rivetBuildPath = (path: string, query?: RivetQuery): string => {
-  const searchParams = new URLSearchParams();
-  appendQueryParams(searchParams, query);
-  const queryString = searchParams.toString();
-
-  return queryString ? `${path}?${queryString}` : path;
-};
-
-export const rivetBuildUrl = (path: string, query?: RivetQuery): string =>
-  new URL(rivetBuildPath(path, query), _config.baseUrl).toString();
 
 const isInvalid = function (this: RivetRawResult): boolean {
   return this.status < 100 || this.status >= 600;
@@ -184,39 +138,22 @@ const parseBody = async (res: Response): Promise<unknown> => {
   return text;
 };
 
-export const rivetFetchRaw = async (
-  method: string,
-  path: string,
-  options?: RivetFetchRawOptions,
-): Promise<Response> => {
-  const url = new URL(rivetBuildPath(path, options?.query), _config.baseUrl);
-  const headers: Record<string, string> = {
-    ...(await _config.headers?.()),
-    ...options?.headers,
-  };
-  const f = _config.fetch ?? fetch;
-  try {
-    return await Promise.resolve(f(url.toString(), {
-      method,
-      headers,
-      body: options?.body,
-      redirect: options?.redirect,
-      credentials: options?.credentials,
-      signal: options?.signal,
-    }));
-  } catch (err) {
-    const error = new RivetError(method, path, 0, undefined, undefined, { cause: err });
-    if (_config.onError) _config.onError(error);
-    throw error;
-  }
-};
-
 export const rivetFetch = async <T>(
   method: string,
   path: string,
-  options?: { body?: unknown; query?: RivetQuery; unwrap?: boolean; blob?: boolean },
+  options?: { body?: unknown; query?: Record<string, unknown>; unwrap?: boolean; blob?: boolean },
 ): Promise<T> => {
-  const url = new URL(rivetBuildPath(path, options?.query), _config.baseUrl);
+  const url = new URL(`${_config.baseUrl}${path}`);
+  if (options?.query) {
+    for (const [k, v] of Object.entries(options.query)) {
+      if (v == null) continue;
+      if (Array.isArray(v)) {
+        for (const item of v) url.searchParams.append(k, String(item));
+      } else {
+        url.searchParams.set(k, String(v));
+      }
+    }
+  }
   const headers: Record<string, string> = {
     ...(await _config.headers?.()),
   };
