@@ -32,7 +32,11 @@ internal sealed class SchemaMapper
     /// <summary>
     /// Register a synthetic record (e.g. parameter input records built by ContractBuilder).
     /// </summary>
-    public void AddExtraRecord(GeneratedRecord record) => _ctx.ExtraRecords.Add(record);
+    /// <summary>
+    /// Dedup-with-shape-check (I3 guard): identical shape reuses the existing record;
+    /// a name collision with a different shape gets a suffixed name. Returns the name to reference.
+    /// </summary>
+    public string AddExtraRecord(GeneratedRecord record) => _ctx.AddOrReuseExtraRecord(record);
 
     /// <summary>
     /// Check if a type name was already mapped from components/schemas.
@@ -73,9 +77,13 @@ internal sealed class SchemaMapper
             if (templateRecord is not null)
             {
                 records.Add(templateRecord);
+                _ctx.ReservedTypeNames.Add(templateRecord.Name);
             }
         }
 
+        // Pre-pass: claim every component schema's C# name BEFORE any type resolution runs,
+        // so synthetic records/enums created during resolution can never reuse a component
+        // name with a different shape (I3 — two types in one Types/{Name}.cs file).
         foreach (var (key, schema) in schemas)
         {
             var name = SanitizeName(key);
@@ -93,6 +101,17 @@ internal sealed class SchemaMapper
 
             // Track mapping from original OpenAPI key to (possibly deduped) C# name
             _ctx.SchemaNameMap[key] = name;
+
+            // $ref aliases produce no file of their own; everything else claims its name
+            if (schema is not OpenApiSchemaReference)
+            {
+                _ctx.ReservedTypeNames.Add(name);
+            }
+        }
+
+        foreach (var (key, schema) in schemas)
+        {
+            var name = _ctx.SchemaNameMap[key];
 
             // Skip $ref aliases — these are resolved by the library and handled inline
             if (schema is OpenApiSchemaReference)
@@ -310,8 +329,7 @@ internal sealed class SchemaMapper
                 var allOfName = context ?? _ctx.NextSyntheticName("Composed");
                 var record = _synth.ResolveAllOfRecord(allOfName, schema.AllOf);
                 record = _synth.MergeWithSiblingProperties(record, schema, allOfName);
-                _ctx.ExtraRecords.Add(record);
-                result = allOfName + "?";
+                result = _ctx.AddOrReuseExtraRecord(record) + "?";
                 return true;
             }
 
@@ -389,8 +407,7 @@ internal sealed class SchemaMapper
             var allOfName = context ?? _ctx.NextSyntheticName("Composed");
             var record = _synth.ResolveAllOfRecord(allOfName, schema.AllOf);
             record = _synth.MergeWithSiblingProperties(record, schema, allOfName);
-            _ctx.ExtraRecords.Add(record);
-            result = allOfName;
+            result = _ctx.AddOrReuseExtraRecord(record);
             return true;
         }
 
@@ -415,8 +432,7 @@ internal sealed class SchemaMapper
     {
         var name = context ?? _ctx.NextSyntheticName("Composed");
         var record = _synth.ResolveUnionRecord(name, variants);
-        _ctx.ExtraRecords.Add(record);
-        return name;
+        return _ctx.AddOrReuseExtraRecord(record);
     }
 
     private string ResolveFallbackType(IOpenApiSchema schema, string? context)
@@ -573,9 +589,9 @@ internal sealed class SchemaMapper
 
         var name = context ?? _ctx.NextSyntheticName("Enum");
         var enumDef = SchemaClassifier.MapEnum(name, schema);
-        _ctx.ExtraEnums.Add(enumDef);
-        _ctx.SchemaFingerprints[fingerprint] = name;
-        return name;
+        var finalName = _ctx.AddOrReuseExtraEnum(enumDef);
+        _ctx.SchemaFingerprints[fingerprint] = finalName;
+        return finalName;
     }
 
     private string SynthesizeInlineIntEnum(IOpenApiSchema schema, string? context)
@@ -588,9 +604,9 @@ internal sealed class SchemaMapper
 
         var name = context ?? _ctx.NextSyntheticName("Enum");
         var enumDef = SchemaClassifier.MapIntEnum(name, schema);
-        _ctx.ExtraEnums.Add(enumDef);
-        _ctx.SchemaFingerprints[fingerprint] = name;
-        return name;
+        var finalName = _ctx.AddOrReuseExtraEnum(enumDef);
+        _ctx.SchemaFingerprints[fingerprint] = finalName;
+        return finalName;
     }
 
     private string ResolveObjectType(IOpenApiSchema schema, string? context)
@@ -612,9 +628,9 @@ internal sealed class SchemaMapper
 
             var name = context ?? $"Synthetic{++_ctx.SyntheticCounter}";
             var record = _synth.MapRecord(name, schema);
-            _ctx.ExtraRecords.Add(record);
-            _ctx.SchemaFingerprints[fingerprint] = name;
-            return name;
+            var finalName = _ctx.AddOrReuseExtraRecord(record);
+            _ctx.SchemaFingerprints[fingerprint] = finalName;
+            return finalName;
         }
 
         // Bare object with no properties or additionalProperties → untyped map

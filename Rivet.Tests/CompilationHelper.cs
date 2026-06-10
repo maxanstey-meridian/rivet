@@ -110,6 +110,34 @@ public static class CompilationHelper
         return CoverageChecker.Check(compilation, wkt, contractEndpoints);
     }
 
+    private static readonly object StdErrLock = new();
+
+    /// <summary>
+    /// Captures everything written to Console.Error while <paramref name="action"/> runs.
+    /// Serialized behind a process-wide lock because Console.SetError is global —
+    /// concurrent captures from parallel test collections would otherwise race.
+    /// Assert with Contains (other tests may emit unrelated warnings concurrently).
+    /// </summary>
+    public static string CaptureStdErr(Action action)
+    {
+        lock (StdErrLock)
+        {
+            var original = Console.Error;
+            using var writer = new StringWriter();
+            try
+            {
+                Console.SetError(writer);
+                action();
+            }
+            finally
+            {
+                Console.SetError(original);
+            }
+
+            return writer.ToString();
+        }
+    }
+
     /// <summary>
     /// Creates a compilation where domainSource lives in a separate "project" (CompilationReference),
     /// simulating types from a referenced project assembly.

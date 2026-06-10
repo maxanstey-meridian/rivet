@@ -54,6 +54,51 @@ public sealed class ContractInvokeTypedResultsTests
     }
 
     [Fact]
+    public async Task Invoke_VoidDeleteContract_WithoutExplicitStatus_DefaultsTo204_AndNoContentDoesNotThrow()
+    {
+        // A1 repro: no .Status(204) — the runtime default for void DELETE must itself be 204,
+        // so a handler returning TypedResults.NoContent() (the status the contract advertises)
+        // must validate cleanly instead of throwing at request time.
+        var route = Define.Delete("/api/items/{id}")
+            .Returns(StatusCodes.Status404NotFound, "Not found");
+
+        Assert.Equal(StatusCodes.Status204NoContent, route.SuccessStatusCode);
+
+        var result = await route.Invoke<NoContent, NotFound>(
+            () => Task.FromResult<Results<NoContent, NotFound>>(TypedResults.NoContent()));
+
+        var branch = Assert.IsType<NoContent>(result.Result);
+        Assert.Equal(StatusCodes.Status204NoContent, branch.StatusCode);
+    }
+
+    [Fact]
+    public void Returns_DuplicateStatus_Throws()
+    {
+        // R1 guard: duplicate .Returns for the same status used to be appended silently and
+        // blow up inside TypedResultValidator (SingleOrDefault) on the first matching response.
+        // The builder must reject the duplicate registration immediately instead.
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            Define.Get<ItemDto>("/api/items/{id}")
+                .Returns<ErrorDto>(StatusCodes.Status404NotFound)
+                .Returns<NotFoundDto>(StatusCodes.Status404NotFound));
+
+        Assert.Contains("404", exception.Message);
+        Assert.Contains("already declared", exception.Message);
+    }
+
+    [Fact]
+    public void Returns_DuplicateStatus_UntypedOverload_Throws()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            Define.Delete("/api/items/{id}")
+                .Returns(StatusCodes.Status404NotFound)
+                .Returns(StatusCodes.Status404NotFound, "Not found"));
+
+        Assert.Contains("404", exception.Message);
+        Assert.Contains("already declared", exception.Message);
+    }
+
+    [Fact]
     public async Task Invoke_InputOnlyContract_WithTypedResultsErrorBranch_ReturnsNativeResult()
     {
         var route = Define.Put("/api/items/{id}")

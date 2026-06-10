@@ -282,8 +282,15 @@ internal static class CSharpWriter
             calls.Add($".Description(\"{EscapeString(field.Description)}\")");
         }
 
-        // Emit .Status() when the code differs from the HTTP method default
-        var defaultStatus = field.HttpMethod switch { "Post" => 201, "Delete" => 204, _ => 200 };
+        // Emit .Status() when the code differs from the HTTP method default.
+        // Must agree with Rivet.Define runtime defaults: POST → 201;
+        // DELETE without output → 204; DELETE with output → 200; otherwise 200.
+        var defaultStatus = field.HttpMethod switch
+        {
+            "Post" => 201,
+            "Delete" when field.OutputType is null => 204,
+            _ => 200,
+        };
         var needsExplicitSuccessStatusForExamples =
             field.SuccessStatus is not null
             && field.OutputType is null

@@ -45,6 +45,9 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses => _errorResponses;
     public bool ShouldSkipValidation => _skipValidation;
 
+    /// <summary>The resolved success status code for this endpoint.</summary>
+    public int SuccessStatusCode => _successStatus;
+
     /// <summary>The resolved success status code (for use in Invoke).</summary>
     protected int SuccessStatus => _successStatus;
 
@@ -118,19 +121,25 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         => Returns<TResponse>(statusCode, null);
 
     public TSelf Returns<TResponse>(int statusCode, string? description)
-    {
-        _errorResponses ??= [];
-        _errorResponses.Add(new RouteErrorResponse(statusCode, typeof(TResponse), description));
-        return (TSelf)this;
-    }
+        => AddErrorResponse(new RouteErrorResponse(statusCode, typeof(TResponse), description));
 
     public TSelf Returns(int statusCode)
         => Returns(statusCode, null);
 
     public TSelf Returns(int statusCode, string? description)
+        => AddErrorResponse(new RouteErrorResponse(statusCode, null, description));
+
+    private TSelf AddErrorResponse(RouteErrorResponse response)
     {
         _errorResponses ??= [];
-        _errorResponses.Add(new RouteErrorResponse(statusCode, null, description));
+
+        if (_errorResponses.Any(existing => existing.StatusCode == response.StatusCode))
+        {
+            throw new InvalidOperationException(
+                $"Status {response.StatusCode} is already declared via .Returns() — declare each status only once.");
+        }
+
+        _errorResponses.Add(response);
         return (TSelf)this;
     }
 

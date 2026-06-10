@@ -2343,7 +2343,9 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Unsupported_Response_Content_Type_Emits_Marker_Comment()
+    // Renamed from Unsupported_Response_Content_Type_Emits_Marker_Comment: behavior improved —
+    // binary image responses now become Define.File endpoints; no unsupported marker is emitted.
+    public void Binary_Image_Response_Becomes_File_Endpoint()
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """

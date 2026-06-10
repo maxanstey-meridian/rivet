@@ -80,11 +80,11 @@ internal sealed class RecordSynthesizer(
             }
             else if (variant.Properties is { Count: > 0 })
             {
-                // Inline object → synthesize sub-record
+                // Inline object → synthesize sub-record (dedup-with-shape-check, I3 guard)
                 var subName = $"{name}Option{optionIndex}";
                 var record = MapRecord(subName, variant);
-                ctx.ExtraRecords.Add(record);
-                properties.Add(new RecordProperty($"As{subName}", $"{subName}?", false));
+                var finalSubName = ctx.AddOrReuseExtraRecord(record);
+                properties.Add(new RecordProperty($"As{finalSubName}", $"{finalSubName}?", false));
                 optionIndex++;
             }
             else

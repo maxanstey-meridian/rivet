@@ -318,13 +318,19 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        IReadOnlyList<TsEndpointDefinition> endpoints = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() => (endpoints, _) = Generate(source));
 
         var ep = Assert.Single(endpoints);
         Assert.Single(ep.Responses);
         Assert.Equal(200, ep.Responses[0].StatusCode);
         Assert.Null(ep.Responses[0].Examples);
         Assert.DoesNotContain(ep.Responses, response => response.StatusCode == 422);
+
+        // The silent drop must be loud: a warning naming the status and the endpoint.
+        Assert.Contains(
+            "warning: ignoring response example for undeclared status 422 on contract endpoint 'getTask'",
+            stderr);
     }
 
     [Fact]
@@ -2393,12 +2399,19 @@ public sealed class ContractEndpointTests
         Assert.DoesNotContain("Done", statusEnum.Members);
     }
 
-    // ========== GAP-4: DELETE default 204 isolated forward test ==========
+    // ========== GAP-4 / A1: DELETE default status — cross-system agreement ==========
+    // Policy: DELETE without an output type defaults to 204; DELETE with an output type
+    // defaults to 200 (204-with-body is invalid HTTP). The runtime (Define.Delete) and the
+    // walker (ContractWalker.DefaultSuccessCode) must implement the same policy so the
+    // generated contract and the live server can never diverge again.
 
     [Fact]
-    public void Delete_Without_Status_Defaults_To_204()
+    public void Delete_Default_Status_Runtime_And_Walker_Agree()
     {
-        var source = """
+        // --- Void DELETE: both sides default to 204 ---
+        Assert.Equal(204, Define.Delete("/api/items/{id}").SuccessStatusCode);
+
+        var voidSource = """
             using Rivet;
 
             namespace Test;
@@ -2411,12 +2424,36 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
-        var ep = Assert.Single(endpoints);
+        var (voidEndpoints, _) = Generate(voidSource);
+        var voidEp = Assert.Single(voidEndpoints);
+        var voidSuccess = voidEp.Responses.FirstOrDefault(r => r.StatusCode is >= 200 and < 300);
+        Assert.NotNull(voidSuccess);
+        Assert.Equal(204, voidSuccess.StatusCode);
 
-        var successResp = ep.Responses.FirstOrDefault(r => r.StatusCode is >= 200 and < 300);
-        Assert.NotNull(successResp);
-        Assert.Equal(204, successResp.StatusCode);
+        // --- DELETE with an output type: both sides default to 200 ---
+        Assert.Equal(200, Define.Delete<TsEndpointDefinition>("/api/items/{id}").SuccessStatusCode);
+
+        var outputSource = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record DeletedDto(string Id);
+
+            [RivetContract]
+            public static class ItemContract
+            {
+                public static readonly RouteDefinition<DeletedDto> DeleteItem =
+                    Define.Delete<DeletedDto>("/api/items/{id}");
+            }
+            """;
+
+        var (outputEndpoints, _) = Generate(outputSource);
+        var outputEp = Assert.Single(outputEndpoints);
+        var outputSuccess = outputEp.Responses.FirstOrDefault(r => r.StatusCode is >= 200 and < 300);
+        Assert.NotNull(outputSuccess);
+        Assert.Equal(200, outputSuccess.StatusCode);
     }
 
     // ========== GAP-5: FormEncoded on all route definition types ==========

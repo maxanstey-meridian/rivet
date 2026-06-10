@@ -134,9 +134,9 @@ public sealed class SampleProjectTests : IDisposable
         using var inviteDoc = JsonDocument.Parse(inviteBody);
         Assert.True(inviteDoc.RootElement.TryGetProperty("id", out _));
 
-        // DELETE /api/members/{id} → 200
+        // DELETE /api/members/{id} → 204 (A1 policy: DELETE without output defaults to 204)
         var deleteResponse = await http.DeleteAsync($"/api/members/{Guid.NewGuid()}", cts.Token);
-        Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
         // PUT /api/members/{id}/role → 204
         var updatePayload = new StringContent(

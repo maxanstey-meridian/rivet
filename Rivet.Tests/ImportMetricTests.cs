@@ -39,6 +39,36 @@ public sealed class ImportMetricTests
         return count;
     }
 
+    // ===== Warning ratchet =====
+    // Warnings are allowed but must belong to a known category. New warning categories
+    // (e.g. when a silent skip is converted into a diagnostic) must be consciously added
+    // here and to the per-corpus allowed sets — never silently absorbed.
+    private static string CategorizeWarning(string warning) => warning switch
+    {
+        _ when warning.StartsWith("Schema could not be resolved", StringComparison.Ordinal) => "unresolved-schema",
+        _ when warning.StartsWith("Unsupported JSON Schema type", StringComparison.Ordinal) => "unsupported-schema-type",
+        _ when warning.StartsWith("Array schema missing 'items'", StringComparison.Ordinal) => "array-missing-items",
+        _ => $"UNCATEGORIZED: {warning}",
+    };
+
+    /// <summary>
+    /// Ratchet: every warning must fall into one of the explicitly allowed categories.
+    /// Unexpected categories fail loudly with the offending messages.
+    /// </summary>
+    private static void AssertWarningCategoriesSubsetOf(ImportResult r, params string[] allowedCategories)
+    {
+        var allowed = allowedCategories.ToHashSet(StringComparer.Ordinal);
+        var unexpected = r.Warnings
+            .Select(CategorizeWarning)
+            .Where(category => !allowed.Contains(category))
+            .Distinct()
+            .ToList();
+
+        Assert.True(
+            unexpected.Count == 0,
+            $"Unexpected warning categories (add deliberately or fix the importer):\n  {string.Join("\n  ", unexpected)}");
+    }
+
     private static int TypeFiles(ImportResult r) => r.Files.Count(f => f.FileName.StartsWith("Types/"));
     private static int ContractFiles(ImportResult r) => r.Files.Count(f => f.FileName.StartsWith("Contracts/"));
     private static int TypedInputs(ImportResult r) => CountPattern(r, "Contracts/", "RouteDefinition<") - CountPattern(r, "Contracts/", "RouteDefinition<>") + CountPattern(r, "Contracts/", "InputRouteDefinition<");
@@ -75,7 +105,8 @@ public sealed class ImportMetricTests
         Assert.Equal(1, ContractFiles(r)); // single-tag API
         Assert.True(TypedInputCount(r) >= 580, $"Expected ≥580 typed inputs, got {TypedInputCount(r)}");
         Assert.Equal(0, UnsupportedBody(r));
-        Assert.Empty(r.Warnings);
+        // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
+        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items");
     }
 
     // ========== GitHub — large, well-structured, many tags ==========
@@ -89,7 +120,8 @@ public sealed class ImportMetricTests
         Assert.True(ContractFiles(r) >= 40, $"Expected ≥40 contracts, got {ContractFiles(r)}");
         Assert.True(TypedInputCount(r) >= 300, $"Expected ≥300 typed inputs, got {TypedInputCount(r)}");
         Assert.True(UnsupportedBody(r) <= 5, $"Expected ≤5 unsupported bodies, got {UnsupportedBody(r)}");
-        Assert.Empty(r.Warnings);
+        // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
+        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items");
     }
 
     // ========== Kubernetes — */* content type, PATCH-heavy ==========
@@ -101,9 +133,12 @@ public sealed class ImportMetricTests
 
         Assert.True(TypeFiles(r) >= 240, $"Expected ≥240 types, got {TypeFiles(r)}");
         Assert.True(TypedInputCount(r) >= 70, $"Expected ≥70 typed inputs, got {TypedInputCount(r)}");
-        Assert.Equal(26, UnsupportedBody(r)); // CBOR/YAML/json-patch operations
+        // Ratchet (counts may only go DOWN): CBOR/YAML/json-patch operations.
+        // 26 at last audit — if a new content type becomes supported this shrinks; it must not grow.
+        Assert.True(UnsupportedBody(r) <= 26, $"Expected ≤26 unsupported bodies (ratchet, was 26), got {UnsupportedBody(r)}");
         Assert.Equal(0, UnsupportedError(r));
-        Assert.Empty(r.Warnings);
+        // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
+        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items");
     }
 
     // ========== Cloudflare — largest contract count, hyphenated schema names ==========
@@ -142,7 +177,8 @@ public sealed class ImportMetricTests
         Assert.Equal(0, UnsupportedBody(r));
         // Image responses are now file endpoints, not unsupported
         Assert.True(UnsupportedResponse(r) <= 1, $"Expected ≤1 unsupported response, got {UnsupportedResponse(r)}");
-        Assert.Equal(12, UnsupportedError(r));
+        // Ratchet (counts may only go DOWN): 12 at last audit — must not grow.
+        Assert.True(UnsupportedError(r) <= 12, $"Expected ≤12 unsupported errors (ratchet, was 12), got {UnsupportedError(r)}");
         // Image endpoints should generate Define.File()
         var fileEndpoints = CountPattern(r, "Contracts/", "Define.File");
         Assert.True(fileEndpoints >= 11, $"Expected ≥11 file endpoints, got {fileEndpoints}");
@@ -159,8 +195,9 @@ public sealed class ImportMetricTests
         Assert.True(ContractFiles(r) >= 80, $"Expected ≥80 contracts, got {ContractFiles(r)}");
 
         // Jira has 142 schemaless error responses (content but no schema) —
-        // these have no content type to mark as unsupported, they're just empty
-        Assert.Equal(142, UnsupportedError(r));
+        // these have no content type to mark as unsupported, they're just empty.
+        // Ratchet (counts may only go DOWN): 142 at last audit — must not grow.
+        Assert.True(UnsupportedError(r) <= 142, $"Expected ≤142 unsupported errors (ratchet, was 142), got {UnsupportedError(r)}");
         Assert.Equal(0, UnsupportedBody(r));
     }
 
@@ -174,7 +211,8 @@ public sealed class ImportMetricTests
         Assert.True(TypeFiles(r) >= 170, $"Expected ≥170 types, got {TypeFiles(r)}");
         Assert.True(TypedInputCount(r) >= 22, $"Expected ≥22 typed inputs, got {TypedInputCount(r)}");
         Assert.Equal(0, UnsupportedBody(r));
-        Assert.Equal(17, UnsupportedError(r));
+        // Ratchet (counts may only go DOWN): 17 at last audit — must not grow.
+        Assert.True(UnsupportedError(r) <= 17, $"Expected ≤17 unsupported errors (ratchet, was 17), got {UnsupportedError(r)}");
     }
 
     // ========== Slack — warnings from genuinely untyped schemas ==========

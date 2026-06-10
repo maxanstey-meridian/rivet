@@ -211,7 +211,10 @@ internal static class ContractBuilder
         // If a schema with this name was already mapped from components/schemas, reuse it
         if (!mapper.HasMappedSchema(recordName))
         {
-            mapper.AddExtraRecord(new GeneratedRecord(recordName, SchemaClassifier.DeduplicateProperties(properties)));
+            // Dedup-with-shape-check (I3): a same-named synthetic input with a different shape
+            // (e.g. two tags both synthesizing GetByIdInput) gets a disambiguated name.
+            recordName = mapper.AddExtraRecord(
+                new GeneratedRecord(recordName, SchemaClassifier.DeduplicateProperties(properties)));
         }
 
         return recordName;

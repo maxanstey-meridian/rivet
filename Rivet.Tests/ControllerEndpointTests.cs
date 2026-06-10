@@ -478,13 +478,19 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var endpoints = WalkEndpoints(source);
+        IReadOnlyList<TsEndpointDefinition> endpoints = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() => endpoints = WalkEndpoints(source));
 
         var endpoint = Assert.Single(endpoints);
         Assert.Single(endpoint.Responses);
         Assert.Equal(200, endpoint.Responses[0].StatusCode);
         Assert.Null(endpoint.Responses[0].Examples);
         Assert.DoesNotContain(endpoint.Responses, response => response.StatusCode == 422);
+
+        // The silent drop must be loud: a warning naming the status and the endpoint.
+        Assert.Contains(
+            "warning: ignoring response example for undeclared status 422 on controller endpoint 'get'",
+            stderr);
     }
 
     [Fact]
@@ -793,12 +799,11 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var client = GenerateClient(source);
+        var endpoints = WalkEndpoints(source);
 
-        // Should appear exactly once even though it matches both [RivetClient] and [RivetEndpoint]
-        // Implementation signature appears once; overload declarations also contain "export function get"
-        var implCount = client.Split("opts?: { unwrap?: boolean; raw?: false } | RivetRawClientOptions").Length - 1;
-        Assert.Equal(1, implCount);
+        // Discovered exactly once even though it matches both [RivetClient] and [RivetEndpoint]
+        var endpoint = Assert.Single(endpoints);
+        Assert.Equal("get", endpoint.Name);
     }
 
     [Fact]

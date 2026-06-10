@@ -351,13 +351,13 @@ public static class ContractWalker
         // so the client emitter generates a discriminated union (not RivetResult<void>)
         if (returnType is not null)
         {
-            var successCode = successStatusOverride ?? DefaultSuccessCode(httpMethod);
+            var successCode = successStatusOverride ?? DefaultSuccessCode(httpMethod, hasOutput: true);
             responses.Insert(0, new TsResponseType(successCode, returnType));
         }
         else if (fileContentType is not null || successStatusOverride is not null || responses.Count > 0
-            || DefaultSuccessCode(httpMethod) != 200)
+            || DefaultSuccessCode(httpMethod, hasOutput: false) != 200)
         {
-            var successCode = successStatusOverride ?? DefaultSuccessCode(httpMethod);
+            var successCode = successStatusOverride ?? DefaultSuccessCode(httpMethod, hasOutput: false);
             responses.Insert(0, new TsResponseType(successCode, null));
         }
 
@@ -389,8 +389,19 @@ public static class ContractWalker
             QueryAuth: queryAuth);
     }
 
-    private static int DefaultSuccessCode(string httpMethod) =>
-        httpMethod switch { "POST" => 201, "DELETE" => 204, _ => 200 };
+    /// <summary>
+    /// Default success status for an endpoint with no explicit .Status(...) call.
+    /// Must agree with the runtime defaults in Rivet.Define (Endpoint.cs):
+    /// POST → 201; DELETE without an output type → 204; DELETE with an output type → 200
+    /// (204-with-body is invalid HTTP); everything else → 200.
+    /// </summary>
+    private static int DefaultSuccessCode(string httpMethod, bool hasOutput) =>
+        httpMethod switch
+        {
+            "POST" => 201,
+            "DELETE" when !hasOutput => 204,
+            _ => 200,
+        };
 
     private static string DefaultRequestExampleMediaType(
         bool isFormEncoded,

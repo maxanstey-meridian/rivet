@@ -29,9 +29,11 @@ public sealed class Define
     public static RouteDefinition Patch(string route) => new("PATCH", route);
 
     // DELETE
+    // Policy (agreed with ContractWalker.DefaultSuccessCode): DELETE with an output type
+    // defaults to 200 (204-with-body is invalid HTTP); DELETE without an output type defaults to 204.
     public static RouteDefinition<TInput, TOutput> Delete<TInput, TOutput>(string route) => new("DELETE", route);
     public static RouteDefinition<TOutput> Delete<TOutput>(string route) => new("DELETE", route);
-    public static RouteDefinition Delete(string route) => new("DELETE", route);
+    public static RouteDefinition Delete(string route) => new("DELETE", route, 204);
 
     // FILE (binary/stream endpoints — defaults to GET)
     public static FileRouteDefinition<TInput> File<TInput>(string route) => new(route);

@@ -32,10 +32,9 @@ public sealed class RealWorldImportTests
 
     private static List<Diagnostic> GetCompilationErrors(ImportResult result)
     {
-        // Deduplicate files by name (importer may produce duplicate entries for shared schemas)
-        var uniqueFiles = result.Files
-            .GroupBy(f => f.FileName)
-            .Select(g => g.First().Content)
+        // Identical-content duplicates are tolerated (importer may emit the same shared schema
+        // twice); same-name-different-content duplicates are the I3 corruption shape and fail loudly.
+        var uniqueFiles = DeduplicateFiles(result)
             .Append(ImportStubs)
             .ToArray();
 
@@ -172,8 +171,24 @@ public sealed class RealWorldImportTests
         return new(import1, eps1, wlk1, emittedJson, import2, eps2, wlk2);
     }
 
+    /// <summary>
+    /// Collapses identical-content duplicate files; fails loudly when two emitted files share a
+    /// filename with NON-identical content. Last-write-wins on such collisions silently hands one
+    /// contract the wrong type (finding I3) — the old filename-only dedupe here masked exactly that.
+    /// </summary>
     private static string[] DeduplicateFiles(ImportResult result)
     {
+        var conflicting = result.Files
+            .GroupBy(f => f.FileName)
+            .Where(g => g.Select(f => f.Content).Distinct(StringComparer.Ordinal).Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+
+        Assert.True(
+            conflicting.Count == 0,
+            "Importer emitted the same filename with different content (I3 collision — one consumer " +
+            $"would silently get the wrong type): {string.Join(", ", conflicting)}");
+
         return result.Files
             .GroupBy(f => f.FileName)
             .Select(g => g.First().Content)
