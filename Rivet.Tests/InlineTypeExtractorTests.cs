@@ -720,7 +720,7 @@ public sealed class InlineTypeExtractorTests
     }
 
     [Fact]
-    public void ExtractedTypeProperties_CorrectOptional()
+    public void ExtractedTypeProperties_PreserveNullability()
     {
         var inline = new TsType.InlineObject([
             ("name", new TsType.Primitive("string")),
@@ -740,14 +740,21 @@ public sealed class InlineTypeExtractorTests
         var extracted = result.ExtractedTypes[0];
         Assert.Equal(2, extracted.Properties.Count);
 
+        // E4: extraction must be semantics-preserving. A non-nullable source field stays
+        // required + non-nullable...
         var nameProp = extracted.Properties.First(p => p.Name == "name");
         Assert.False(nameProp.IsOptional);
         Assert.IsType<TsType.Primitive>(nameProp.Type);
 
+        // ...and a Nullable(string) source field must NOT be rewritten to an optional plain
+        // string (`T | null` → `T?` conflates absent with null on the wire). The extracted
+        // property keeps the Nullable wrapper; IsOptional mirrors the inline-object emission
+        // convention (nullable fields are omitted from `required`).
         var nicknameProp = extracted.Properties.First(p => p.Name == "nickname");
         Assert.True(nicknameProp.IsOptional);
-        Assert.IsType<TsType.Primitive>(nicknameProp.Type);
-        Assert.Equal("string", ((TsType.Primitive)nicknameProp.Type).Name);
+        var nullable = Assert.IsType<TsType.Nullable>(nicknameProp.Type);
+        var inner = Assert.IsType<TsType.Primitive>(nullable.Inner);
+        Assert.Equal("string", inner.Name);
     }
 
     [Fact]

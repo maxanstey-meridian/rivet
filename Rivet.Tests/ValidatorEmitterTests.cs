@@ -452,15 +452,23 @@ public sealed class ValidatorEmitterTests
     }
 
     [Fact]
-    public void GetAssertName_InlineObject_UsesFieldNames()
+    public void GetAssertName_InlineObject_UsesFieldNamesAndTypes()
     {
+        // E2: names must include field types — {value: string} and {value: number}
+        // previously collided on the same assert name and validated against the wrong schema.
         var inlineObj = new TsType.InlineObject([
             ("key", new TsType.Primitive("string")),
             ("value", new TsType.Primitive("number")),
         ]);
 
         var assertName = ZodValidatorEmitter.GetAssertName(inlineObj);
-        Assert.Equal("assertKeyValue", assertName);
+        Assert.Equal("assertKey_String_Value_Number", assertName);
+
+        var differentTypes = new TsType.InlineObject([
+            ("key", new TsType.Primitive("string")),
+            ("value", new TsType.Primitive("string")),
+        ]);
+        Assert.NotEqual(assertName, ZodValidatorEmitter.GetAssertName(differentTypes));
     }
 
     [Fact]

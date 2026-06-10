@@ -2024,7 +2024,7 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
-    public void GetTypeNameSuffix_Covers_StringUnion_And_InlineObject()
+    public void GetTypeNameSuffix_Distinct_Instantiations_Get_Distinct_Names()
     {
         // StringUnion inside a generic should produce a readable suffix
         var genericWithUnion = new TsType.Generic("Wrapper",
@@ -2033,12 +2033,33 @@ public sealed class OpenApiEmitterTests
         var parsed = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(schema));
         Assert.Equal("#/components/schemas/Wrapper_AB", parsed.GetProperty("$ref").GetString());
 
-        // InlineObject inside a generic
-        var genericWithInline = new TsType.Generic("Wrapper",
-            [new TsType.InlineObject([("key", new TsType.Primitive("string"))])]);
-        var schema2 = OpenApiEmitter.MapTsTypeToJsonSchema(genericWithInline);
-        var parsed2 = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(schema2));
-        Assert.Equal("#/components/schemas/Wrapper_Key", parsed2.GetProperty("$ref").GetString());
+        // E2 root: inline-object suffixes must incorporate field TYPES, not just names —
+        // Wrapper<{value:string}> and Wrapper<{value:number}> are distinct instantiations
+        // and must never share a component name (the old scheme collapsed both to
+        // "Wrapper_Value" and silently overwrote one schema with the other).
+        var wrapperOfString = new TsType.Generic("Wrapper",
+            [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]);
+        var wrapperOfNumber = new TsType.Generic("Wrapper",
+            [new TsType.InlineObject([("value", new TsType.Primitive("number"))])]);
+
+        var refString = JsonSerializer.Deserialize<JsonElement>(
+                JsonSerializer.Serialize(OpenApiEmitter.MapTsTypeToJsonSchema(wrapperOfString)))
+            .GetProperty("$ref").GetString();
+        var refNumber = JsonSerializer.Deserialize<JsonElement>(
+                JsonSerializer.Serialize(OpenApiEmitter.MapTsTypeToJsonSchema(wrapperOfNumber)))
+            .GetProperty("$ref").GetString();
+
+        Assert.Equal("#/components/schemas/Wrapper_Value_String", refString);
+        Assert.Equal("#/components/schemas/Wrapper_Value_Number", refNumber);
+        Assert.NotEqual(refString, refNumber);
+
+        // Determinism: the same instantiation always maps to the same name
+        var refStringAgain = JsonSerializer.Deserialize<JsonElement>(
+                JsonSerializer.Serialize(OpenApiEmitter.MapTsTypeToJsonSchema(
+                    new TsType.Generic("Wrapper",
+                        [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]))))
+            .GetProperty("$ref").GetString();
+        Assert.Equal(refString, refStringAgain);
 
         // Dictionary suffix
         var genericWithDict = new TsType.Generic("Wrapper",
@@ -2046,6 +2067,61 @@ public sealed class OpenApiEmitterTests
         var schema3 = OpenApiEmitter.MapTsTypeToJsonSchema(genericWithDict);
         var parsed3 = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(schema3));
         Assert.Equal("#/components/schemas/Wrapper_RecordString", parsed3.GetProperty("$ref").GetString());
+    }
+
+    [Fact]
+    public void Colliding_Generic_Instantiations_Get_Deterministic_Numeric_Suffix()
+    {
+        // 4+-member string unions still collapse to the "Enum" suffix — two DIFFERENT
+        // unions inside the same generic would purely both name "Wrapper_Enum". The emitter
+        // must disambiguate deterministically instead of silently overwriting one component.
+        var unionOne = new TsType.StringUnion(["A", "B", "C", "D"]);
+        var unionTwo = new TsType.StringUnion(["W", "X", "Y", "Z"]);
+
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new("getOne", "GET", "/api/one", [],
+                new TsType.Generic("Wrapper", [unionOne]), "test",
+                [new TsResponseType(200, new TsType.Generic("Wrapper", [unionOne]))]),
+            new("getTwo", "GET", "/api/two", [],
+                new TsType.Generic("Wrapper", [unionTwo]), "test",
+                [new TsResponseType(200, new TsType.Generic("Wrapper", [unionTwo]))]),
+        };
+
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Wrapper"] = new("Wrapper", ["T"],
+            [
+                new TsPropertyDefinition("value", new TsType.TypeParam("T"), false),
+            ]),
+        };
+
+        using var doc = EmitOpenApiFromModel(endpoints, definitions,
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>());
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+
+        // Both instantiations exist as distinct components (first keeps the pure name,
+        // second gets a deterministic numeric suffix)
+        Assert.True(schemas.TryGetProperty("Wrapper_Enum", out var first));
+        Assert.True(schemas.TryGetProperty("Wrapper_Enum2", out var second));
+
+        var firstEnum = first.GetProperty("properties").GetProperty("value").GetProperty("enum")
+            .EnumerateArray().Select(e => e.GetString()).ToList();
+        var secondEnum = second.GetProperty("properties").GetProperty("value").GetProperty("enum")
+            .EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Equal(["A", "B", "C", "D"], firstEnum);
+        Assert.Equal(["W", "X", "Y", "Z"], secondEnum);
+
+        // The paths reference the right component each
+        var refOne = doc.RootElement.GetProperty("paths").GetProperty("/api/one").GetProperty("get")
+            .GetProperty("responses").GetProperty("200").GetProperty("content")
+            .GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString();
+        var refTwo = doc.RootElement.GetProperty("paths").GetProperty("/api/two").GetProperty("get")
+            .GetProperty("responses").GetProperty("200").GetProperty("content")
+            .GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString();
+        Assert.Equal("#/components/schemas/Wrapper_Enum", refOne);
+        Assert.Equal("#/components/schemas/Wrapper_Enum2", refTwo);
     }
 
     [Fact]
@@ -2846,10 +2922,75 @@ public sealed class OpenApiEmitterTests
             .GetProperty("components").GetProperty("schemas").GetProperty("Dto")
             .GetProperty("properties").GetProperty("value");
 
-        // minimum: 5 must be preserved (not clobbered by exclusiveMinimum value)
+        // Source means: x >= 5 AND x > 0, which collapses to exactly x >= 5.
+        // 3.0 must emit minimum: 5 WITHOUT exclusiveMinimum: true — emitting both
+        // would mean "> 5" and silently exclude the legal value 5 (E12).
         Assert.Equal(5.0, props.GetProperty("minimum").GetDouble());
-        // exclusiveMinimum converted to boolean for 3.0
+        Assert.False(props.TryGetProperty("exclusiveMinimum", out _));
+    }
+
+    [Fact]
+    public void ExclusiveMinimum_Tighter_Than_Minimum_Wins()
+    {
+        // Mirror case: x >= 0 AND x > 5 collapses to exactly x > 5 —
+        // 3.0 emits minimum: 5 + exclusiveMinimum: true.
+        using var doc = EmitOpenApi("""
+            using System.ComponentModel.DataAnnotations;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Dto(
+                string Name,
+                [property: Range(0, double.MaxValue), RivetConstraints(ExclusiveMinimum = 5)]
+                double Value);
+
+            [RivetContract]
+            public static class TestContract
+            {
+                public static readonly RouteDefinition<Dto> GetTest = Define.Get<Dto>("/api/test");
+            }
+            """);
+
+        var props = doc.RootElement
+            .GetProperty("components").GetProperty("schemas").GetProperty("Dto")
+            .GetProperty("properties").GetProperty("value");
+
+        Assert.Equal(5.0, props.GetProperty("minimum").GetDouble());
         Assert.True(props.GetProperty("exclusiveMinimum").GetBoolean());
+    }
+
+    [Fact]
+    public void ExclusiveMaximum_Looser_Than_Maximum_Is_Dropped()
+    {
+        // x <= 10 AND x < 100 collapses to exactly x <= 10 —
+        // 3.0 emits maximum: 10 WITHOUT exclusiveMaximum: true.
+        using var doc = EmitOpenApi("""
+            using System.ComponentModel.DataAnnotations;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Dto(
+                string Name,
+                [property: Range(double.MinValue, 10), RivetConstraints(ExclusiveMaximum = 100)]
+                double Value);
+
+            [RivetContract]
+            public static class TestContract
+            {
+                public static readonly RouteDefinition<Dto> GetTest = Define.Get<Dto>("/api/test");
+            }
+            """);
+
+        var props = doc.RootElement
+            .GetProperty("components").GetProperty("schemas").GetProperty("Dto")
+            .GetProperty("properties").GetProperty("value");
+
+        Assert.Equal(10.0, props.GetProperty("maximum").GetDouble());
+        Assert.False(props.TryGetProperty("exclusiveMaximum", out _));
     }
 
     [Fact]
@@ -2875,11 +3016,39 @@ public sealed class OpenApiEmitterTests
             new Dictionary<string, TsType.Brand>(),
             new Dictionary<string, TsType>());
 
-        var schema = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("DisplayState");
+        var schemas = doc.RootElement
+            .GetProperty("components").GetProperty("schemas");
+        var schema = schemas.GetProperty("DisplayState");
 
+        // E11: discriminator is only meaningful over $ref'd named schemas with a mapping —
+        // a discriminator on a oneOf of inline schemas is rejected/ignored by consumers.
+
+        // 1. oneOf entries are $refs to named component schemas (no inline variants)
         Assert.True(schema.TryGetProperty("oneOf", out var oneOf));
         Assert.Equal(2, oneOf.GetArrayLength());
-        Assert.Equal("kind", schema.GetProperty("discriminator").GetProperty("propertyName").GetString());
+        var refs = oneOf.EnumerateArray()
+            .Select(v => v.GetProperty("$ref").GetString())
+            .ToList();
+        Assert.Equal(
+            ["#/components/schemas/DisplayState_Hidden", "#/components/schemas/DisplayState_Shown"],
+            refs);
+
+        // 2. the variant components exist and carry the variant shapes
+        var hidden = schemas.GetProperty("DisplayState_Hidden");
+        Assert.Equal("object", hidden.GetProperty("type").GetString());
+        Assert.True(hidden.GetProperty("properties").TryGetProperty("kind", out _));
+        Assert.True(hidden.GetProperty("properties").TryGetProperty("workspaceKey", out _));
+
+        var shown = schemas.GetProperty("DisplayState_Shown");
+        Assert.Equal("object", shown.GetProperty("type").GetString());
+        Assert.True(shown.GetProperty("properties").TryGetProperty("kind", out _));
+        Assert.True(shown.GetProperty("properties").TryGetProperty("summary", out _));
+
+        // 3. discriminator has propertyName plus a complete tag → $ref mapping
+        var discriminator = schema.GetProperty("discriminator");
+        Assert.Equal("kind", discriminator.GetProperty("propertyName").GetString());
+        var mapping = discriminator.GetProperty("mapping");
+        Assert.Equal("#/components/schemas/DisplayState_Hidden", mapping.GetProperty("hidden").GetString());
+        Assert.Equal("#/components/schemas/DisplayState_Shown", mapping.GetProperty("shown").GetString());
     }
 }

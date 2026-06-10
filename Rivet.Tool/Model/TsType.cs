@@ -70,8 +70,12 @@ public abstract record TsType
                 ? string.Concat(su.Members.Select(s => char.ToUpperInvariant(s[0]) + s[1..]))
                 : "Enum",
             IntUnion => "Enum",
+            // Field TYPES are part of the suffix: naming by field names alone made
+            // Wrapper<{value:string}> and Wrapper<{value:number}> collide on "Wrapper_Value"
+            // and silently overwrite each other's component schema (E2).
             InlineObject obj => obj.Fields.Count <= 3
-                ? string.Concat(obj.Fields.Select(f => char.ToUpperInvariant(f.Name[0]) + f.Name[1..]))
+                ? string.Join("_", obj.Fields.Select(f =>
+                    char.ToUpperInvariant(f.Name[0]) + f.Name[1..] + "_" + GetNameSuffix(f.Type)))
                 : "Object",
             TaggedUnion tu => char.ToUpperInvariant(tu.Discriminator[0]) + tu.Discriminator[1..] + "Union",
             _ => "Unknown",

@@ -360,10 +360,11 @@ public static class InlineTypeExtractor
 
     private static TsPropertyDefinition BuildPropertyDefinition(string name, TsType type)
     {
-        if (type is TsType.Nullable nullable)
-            return new TsPropertyDefinition(name, nullable.Inner, IsOptional: true);
-
-        return new TsPropertyDefinition(name, type, IsOptional: false);
+        // Semantics-preserving extraction (E4): a Nullable source field stays Nullable so the
+        // wire format (`prop: T | null`, `nullable: true`) is unchanged by extraction.
+        // IsOptional mirrors the inline-object emission convention: nullable fields are not
+        // listed in `required`, all other fields are.
+        return new TsPropertyDefinition(name, type, IsOptional: type is TsType.Nullable);
     }
 
     private static TsEndpointDefinition ReplaceInEndpoint(

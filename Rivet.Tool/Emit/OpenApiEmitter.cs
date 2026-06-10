@@ -14,7 +14,48 @@ public static class OpenApiEmitter
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
+    /// <summary>
+    /// Per-Emit-call naming state. Component names must be unique per shape — the pure
+    /// name suffixes are lossy in places ("Enum", "Object"), so a pre-pass assigns every
+    /// distinct shape a distinct deterministic name (numeric suffix on residual collisions)
+    /// that all $ref emission sites then consult. Also accumulates tagged-union variant
+    /// component schemas discovered while mapping types.
+    /// </summary>
+    private sealed class EmitContext
+    {
+        /// <summary>Canonical shape hash → assigned component name for monomorphised generics.</summary>
+        public Dictionary<string, string> GenericNames { get; } = [];
+
+        /// <summary>Canonical shape hash → base component name for tagged unions.</summary>
+        public Dictionary<string, string> TaggedUnionNames { get; } = [];
+
+        /// <summary>Variant component schemas synthesized for tagged unions.</summary>
+        public Dictionary<string, object> ExtraComponents { get; } = [];
+    }
+
+    [ThreadStatic]
+    private static EmitContext? _ctx;
+
     public static string Emit(
+        IReadOnlyList<TsEndpointDefinition> endpoints,
+        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
+        IReadOnlyDictionary<string, TsType.Brand> brands,
+        IReadOnlyDictionary<string, TsType> enums,
+        SecurityConfig? security)
+    {
+        _ctx = new EmitContext();
+        try
+        {
+            AssignComponentNames(endpoints, definitions, brands, enums, _ctx);
+            return EmitCore(endpoints, definitions, brands, enums, security);
+        }
+        finally
+        {
+            _ctx = null;
+        }
+    }
+
+    private static string EmitCore(
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
@@ -24,6 +65,19 @@ public static class OpenApiEmitter
         var paths = BuildPaths(endpoints, security);
         var schemas = BuildSchemas(endpoints, definitions, brands, enums);
         var examples = BuildComponentExamples(endpoints);
+
+        // Tagged-union variant components synthesized while mapping types above
+        if (_ctx is not null)
+        {
+            foreach (var (name, schema) in _ctx.ExtraComponents)
+            {
+                if (!schemas.TryAdd(name, schema))
+                {
+                    Console.Error.WriteLine(
+                        $"warning: tagged-union variant component '{name}' collides with an existing schema — existing schema wins");
+                }
+            }
+        }
 
         var doc = new Dictionary<string, object>
         {
@@ -589,12 +643,43 @@ public static class OpenApiEmitter
 
     private static Dictionary<string, object> BuildTaggedUnionSchema(TsType.TaggedUnion tu)
     {
+        // OpenAPI `discriminator` is only meaningful on a oneOf of $ref'd named schemas with
+        // a tag→$ref mapping — consumers reject or ignore a discriminator over inline schemas
+        // (E11). Each inline variant becomes a named component schema referenced via $ref.
+        var baseName = _ctx?.TaggedUnionNames.GetValueOrDefault(InlineTypeExtractor.CanonicalHash(tu))
+            ?? TsType.GetNameSuffix(tu);
+
+        var oneOf = new List<object>();
+        var mapping = new Dictionary<string, object>();
+
+        foreach (var variant in tu.Variants)
+        {
+            var variantSchema = MapTsTypeToJsonSchema(variant.Type);
+
+            string refPath;
+            if (variantSchema.Count == 1 && variantSchema.TryGetValue("$ref", out var existingRef))
+            {
+                // Variant is already a named schema (TypeRef/Generic/Brand) — ref it directly.
+                refPath = (string)existingRef;
+            }
+            else
+            {
+                var componentName = $"{baseName}_{UpperFirst(variant.Tag)}";
+                _ctx?.ExtraComponents.TryAdd(componentName, variantSchema);
+                refPath = $"#/components/schemas/{componentName}";
+            }
+
+            oneOf.Add(new Dictionary<string, object> { ["$ref"] = refPath });
+            mapping[variant.Tag] = refPath;
+        }
+
         return new Dictionary<string, object>
         {
-            ["oneOf"] = tu.Variants.Select(variant => (object)MapTsTypeToJsonSchema(variant.Type)).ToList(),
+            ["oneOf"] = oneOf,
             ["discriminator"] = new Dictionary<string, object>
             {
                 ["propertyName"] = tu.Discriminator,
+                ["mapping"] = mapping,
             },
         };
     }
@@ -706,7 +791,122 @@ public static class OpenApiEmitter
     }
 
     private static string MonomorphisedName(TsType.Generic g)
-        => TsType.MonomorphisedName(g);
+    {
+        // The pure suffix scheme is lossy in places (4+-member unions → "Enum", 4+-field
+        // inline objects → "Object"), so distinct instantiations can share a pure name.
+        // The per-emit registry assigns each distinct shape a distinct deterministic name.
+        if (_ctx is not null
+            && _ctx.GenericNames.TryGetValue(InlineTypeExtractor.CanonicalHash(g), out var assigned))
+        {
+            return assigned;
+        }
+
+        return TsType.MonomorphisedName(g);
+    }
+
+    /// <summary>
+    /// Pre-pass: walks every type reachable from endpoints and definitions and assigns each
+    /// distinct generic instantiation / tagged union a unique component (base) name.
+    /// Identical shapes share a name; distinct shapes whose pure names collide get a
+    /// deterministic numeric suffix (discovery order).
+    /// </summary>
+    private static void AssignComponentNames(
+        IReadOnlyList<TsEndpointDefinition> endpoints,
+        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
+        IReadOnlyDictionary<string, TsType.Brand> brands,
+        IReadOnlyDictionary<string, TsType> enums,
+        EmitContext ctx)
+    {
+        var generics = new List<TsType.Generic>();
+        var taggedUnions = new List<TsType.TaggedUnion>();
+
+        void Walk(TsType? type)
+        {
+            switch (type)
+            {
+                case TsType.Generic g:
+                    generics.Add(g);
+                    foreach (var arg in g.TypeArguments) Walk(arg);
+                    break;
+                case TsType.TaggedUnion tu:
+                    taggedUnions.Add(tu);
+                    foreach (var v in tu.Variants) Walk(v.Type);
+                    break;
+                case TsType.Array a: Walk(a.Element); break;
+                case TsType.Nullable n: Walk(n.Inner); break;
+                case TsType.Dictionary d: Walk(d.Value); break;
+                case TsType.Brand b: Walk(b.Inner); break;
+                case TsType.InlineObject obj:
+                    foreach (var (_, fieldType) in obj.Fields) Walk(fieldType);
+                    break;
+            }
+        }
+
+        foreach (var ep in endpoints)
+        {
+            foreach (var p in ep.Params) Walk(p.Type);
+            Walk(ep.ReturnType);
+            foreach (var r in ep.Responses) Walk(r.DataType);
+            Walk(ep.RequestType);
+        }
+
+        foreach (var (_, def) in definitions)
+        {
+            if (def.Type is not null)
+            {
+                Walk(def.Type);
+                continue;
+            }
+
+            foreach (var prop in def.Properties) Walk(prop.Type);
+        }
+
+        foreach (var (_, brand) in brands) Walk(brand.Inner);
+        foreach (var (_, enumType) in enums) Walk(enumType);
+
+        // Names already claimed by emitted definition/brand/enum schemas
+        var usedNames = new HashSet<string>(definitions
+            .Where(kv => kv.Value.TypeParameters.Count == 0)
+            .Select(kv => kv.Key));
+        usedNames.UnionWith(brands.Keys);
+        usedNames.UnionWith(enums.Keys);
+
+        foreach (var g in generics)
+        {
+            var hash = InlineTypeExtractor.CanonicalHash(g);
+            if (ctx.GenericNames.ContainsKey(hash)) continue;
+            ctx.GenericNames[hash] = ClaimName(TsType.MonomorphisedName(g), usedNames);
+        }
+
+        // Tagged unions that ARE a named type alias keep the alias as base name
+        foreach (var (name, def) in definitions)
+        {
+            if (def.Type is TsType.TaggedUnion aliased)
+            {
+                ctx.TaggedUnionNames.TryAdd(InlineTypeExtractor.CanonicalHash(aliased), name);
+            }
+        }
+
+        foreach (var tu in taggedUnions)
+        {
+            var hash = InlineTypeExtractor.CanonicalHash(tu);
+            if (ctx.TaggedUnionNames.ContainsKey(hash)) continue;
+            ctx.TaggedUnionNames[hash] = ClaimName(TsType.GetNameSuffix(tu), usedNames);
+        }
+    }
+
+    private static string ClaimName(string pureName, HashSet<string> usedNames)
+    {
+        var name = pureName;
+        var i = 2;
+        while (!usedNames.Add(name))
+        {
+            name = pureName + i;
+            i++;
+        }
+
+        return name;
+    }
 
     private static Dictionary<string, object> BuildSchemas(
         IReadOnlyList<TsEndpointDefinition> endpoints,
@@ -1050,22 +1250,48 @@ public static class OpenApiEmitter
 
     /// <summary>
     /// Converts numeric exclusiveMinimum/Maximum (JSON Schema / OpenAPI 3.1) to
-    /// OpenAPI 3.0 boolean form: minimum + exclusiveMinimum: true.
+    /// OpenAPI 3.0 boolean form, preserving the effective (tightest) bound exactly.
+    ///
+    /// The source constraint pair means: x >= minimum AND x > exclusiveMinimum.
+    /// OpenAPI 3.0 can express only a single lower bound (inclusive, or exclusive via
+    /// the boolean flag) — but the conjunction always collapses to exactly one of them:
+    ///   minimum > exclusiveMinimum  →  x >= minimum   (inclusive bound wins)
+    ///   minimum <= exclusiveMinimum →  x > exclusiveMinimum (exclusive bound wins)
+    /// Emitting anything else (e.g. minimum + exclusiveMinimum: true, which 3.0 reads
+    /// as "> minimum") corrupts the constraint. Mirrored for the upper bound.
     /// </summary>
     private static void ConvertExclusiveToOpenApi30(Dictionary<string, object> schema)
     {
         if (schema.TryGetValue("exclusiveMinimum", out var exMin) && exMin is double exMinVal)
         {
-            if (!schema.ContainsKey("minimum"))
+            if (schema.TryGetValue("minimum", out var min)
+                && Convert.ToDouble(min) > exMinVal)
+            {
+                // x >= minimum already implies x > exclusiveMinimum — the inclusive
+                // bound is the binding constraint; drop the exclusive flag entirely.
+                schema.Remove("exclusiveMinimum");
+            }
+            else
+            {
+                // The exclusive bound is the binding constraint: x > exclusiveMinimum.
                 schema["minimum"] = exMinVal;
-            schema["exclusiveMinimum"] = true;
+                schema["exclusiveMinimum"] = true;
+            }
         }
 
         if (schema.TryGetValue("exclusiveMaximum", out var exMax) && exMax is double exMaxVal)
         {
-            if (!schema.ContainsKey("maximum"))
+            if (schema.TryGetValue("maximum", out var max)
+                && Convert.ToDouble(max) < exMaxVal)
+            {
+                // x <= maximum already implies x < exclusiveMaximum.
+                schema.Remove("exclusiveMaximum");
+            }
+            else
+            {
                 schema["maximum"] = exMaxVal;
-            schema["exclusiveMaximum"] = true;
+                schema["exclusiveMaximum"] = true;
+            }
         }
     }
 
