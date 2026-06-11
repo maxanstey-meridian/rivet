@@ -93,9 +93,11 @@ This is mostly deletion; the new code is small (extension emission, conformance 
 - **Phase 4 — importer demotion.** Fix I1/I2/I3, write the supported-profile doc, convert silent skips to diagnostics, add conformance check 4. Mark the feature "onboarding scaffold."
 - **Phase 5 — rivet-ts realignment** (separate effort): scaffold writes/consumes OpenAPI instead of contract JSON; X13 frontend/lowerer collapse; the still-live H/S/P1 fixes from its review. The Hono local-first story is unchanged in spirit — it just speaks the standard format.
 
-## Open questions (not yet decided)
+## Open questions — resolutions (2026-06-11, executed on `v2`; see FABLE_REWRITE_PLAN.md for rationale)
 
-1. **rivet-php:** does it emit OpenAPI directly, or keep producing the internal IR that the .NET tool turns into OpenAPI? (Lean: keep the sidecar producing internal IR — one OpenAPI emitter to harden, not two.)
-2. **Named-method client wrapper:** how much do we miss `api.users.getUser(...)` and per-status discrimination after living with `openapi-fetch` in Phase 2? Build only if the answer is "a lot."
-3. **Zod:** is client-side runtime validation still wanted once `TypedResultValidator` guards the server? If yes, `openapi-zod-client`; if no, drop the requirement entirely.
-4. **Contract JSON:** internal IR or removed? (Phase 5 decides — it's whatever makes the rivet-ts collapse cleanest.)
+1. **rivet-php: keeps producing the internal IR.** `rivet:reflect` → contract JSON → `rivet --from` → OpenAPI. One emitter to harden. Its round-trip tests were re-pointed at OpenAPI output in Phase 3.
+2. **Named-method client wrapper: deferred to WP-2.3 (real-app migration — user task).** Phase 2 evidence is recorded in FABLE_PHASE0.md "Phase 2 notes": per-status narrowing lost nothing on the sample; queryAuth URL-building, blob endpoints, and brand erasure are the concrete pain points. Decide after living with openapi-fetch in a real app.
+3. **Zod: dropped.** Server-side enforcement is `TypedResultValidator` + the Hono adapter's runtime coercion/400s; client-side validation, if ever wanted, is `openapi-zod-client` over the emitted spec (documented in both repos).
+4. **Contract JSON: internal IR.** It crosses exactly one boundary (rivet-ts/rivet-php → the version-pinned .NET binary), is schema-validated in tests, and maps 1:1 onto the Hono runtime's needs. `rivet-contract-schema.json` stays versioned but documented as internal; OpenAPI 3.1 is the sole public format.
+
+All five migration phases were executed on `v2` (waves logged in git history): Phase 0–1 (conformance gate green on 3.1, x-rivet complete, A/R/E/I gap fills), Phase 2 (openapi-fetch dual-run: zero divergences), Phase 3 (commodity emitters deleted, −9,269 lines), Phase 4 (importer demoted, profile documented), Phase 5 (X13 collapse, openapi-fetch client switch, Zod dropped).
