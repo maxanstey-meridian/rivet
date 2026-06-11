@@ -782,7 +782,13 @@ public sealed class OpenApiConformanceTests : IDisposable
             string? InternalNotes,
 
             [property: Obsolete]
-            string LegacySku);
+            string LegacySku,
+
+            [property: RivetDescription("Primary product category")]
+            CategoryDto Category);
+
+        [RivetType]
+        public sealed record CategoryDto(string Name);
 
         [RivetType]
         public sealed record LoginInput(string Username, string Password);

@@ -216,8 +216,10 @@ public sealed class DeepReviewFixTests
             .GetProperty("components").GetProperty("schemas")
             .GetProperty("FlexDto").GetProperty("properties").GetProperty("payload");
 
-        // Should be { "nullable": true } (empty schema + nullable), NOT { "type": "unknown", "nullable": true }
-        Assert.True(payload.GetProperty("nullable").GetBoolean());
+        // 3.1: the empty schema already admits null — no 'nullable', no 'type' (and
+        // never { "type": "unknown" }, which is not a valid JSON Schema type).
+        Assert.False(payload.TryGetProperty("nullable", out _),
+            "3.1 must not emit nullable: true");
         Assert.False(payload.TryGetProperty("type", out _),
             "Nullable unknown should not emit a 'type' field — 'unknown' is not a valid OpenAPI type");
     }

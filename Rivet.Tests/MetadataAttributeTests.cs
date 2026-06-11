@@ -235,7 +235,10 @@ public sealed class MetadataAttributeTests
             .GetProperty("components").GetProperty("schemas").GetProperty("UserDto")
             .GetProperty("properties").GetProperty("email");
 
-        Assert.Equal("jane@example.com", prop.GetProperty("example").GetString());
+        // 3.1: schema-level examples is a JSON Schema 2020-12 array
+        var examples = prop.GetProperty("examples");
+        Assert.Equal(1, examples.GetArrayLength());
+        Assert.Equal("jane@example.com", examples[0].GetString());
     }
 
     // ========== [RivetReadOnly] / [RivetWriteOnly] ==========
@@ -572,7 +575,7 @@ public sealed class MetadataAttributeTests
         Assert.Equal(1, name.GetProperty("minLength").GetInt32());
         Assert.Equal(200, name.GetProperty("maxLength").GetInt32());
         Assert.Equal("Product name", name.GetProperty("description").GetString());
-        Assert.Equal("Widget Pro", name.GetProperty("example").GetString());
+        Assert.Equal("Widget Pro", name.GetProperty("examples")[0].GetString());
 
         // price: default + constraint
         var price = props.GetProperty("price");
@@ -609,7 +612,8 @@ public sealed class MetadataAttributeTests
             .GetProperty("properties").GetProperty("href");
 
         Assert.Equal("uri", prop.GetProperty("format").GetString());
-        Assert.True(prop.GetProperty("nullable").GetBoolean());
+        Assert.Equal(["string", "null"],
+            prop.GetProperty("type").EnumerateArray().Select(t => t.GetString()!).ToArray());
     }
 
     // ========== Monomorphised generic metadata ==========

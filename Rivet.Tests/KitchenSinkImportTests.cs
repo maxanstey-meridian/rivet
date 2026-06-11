@@ -947,7 +947,7 @@ public sealed class KitchenSinkImportTests
         Assert.True(props.TryGetProperty(propName, out var prop),
             $"Property '{propName}' not found in schema '{schemaName}'");
 
-        // Check type (may be nested under allOf for nullable $ref)
+        // Check type (a 3.1 nullable emits a ["T", "null"] type array)
         var actualType = GetType(prop);
         Assert.True(actualType == expectedType,
             $"{schemaName}.{propName}: expected type '{expectedType}', got '{actualType}'");
@@ -956,7 +956,7 @@ public sealed class KitchenSinkImportTests
         if (expectedFormat is not null)
         {
             Assert.True(prop.TryGetProperty("format", out var fmt)
-                || (TryUnwrapAllOf(prop, out var inner) && inner.TryGetProperty("format", out fmt)),
+                || (TryUnwrapNullableComposition(prop, out var inner) && inner.TryGetProperty("format", out fmt)),
                 $"{schemaName}.{propName}: expected format '{expectedFormat}', got none");
             Assert.Equal(expectedFormat, fmt.GetString());
         }
@@ -966,13 +966,13 @@ public sealed class KitchenSinkImportTests
         Assert.True(isRequired == required,
             $"{schemaName}.{propName}: expected required={required}, got {isRequired}");
 
-        // Check nullable
+        // Check nullable — 3.1: the type array carries a "null" member, or the schema
+        // is a oneOf/anyOf with an explicit { "type": "null" } branch
         if (nullable)
         {
-            var isNullable = prop.TryGetProperty("nullable", out var n) && n.GetBoolean()
-                || (TryUnwrapAllOf(prop, out _) && prop.TryGetProperty("nullable", out n) && n.GetBoolean());
+            var isNullable = HasNullType(prop) || TryUnwrapNullableComposition(prop, out _);
             Assert.True(isNullable,
-                $"{schemaName}.{propName}: expected nullable=true");
+                $"{schemaName}.{propName}: expected a 3.1 null type member");
         }
     }
 
@@ -987,13 +987,13 @@ public sealed class KitchenSinkImportTests
         Assert.True(props.TryGetProperty(propName, out var prop),
             $"Property '{propName}' not found in schema '{schemaName}'");
 
-        // $ref may be direct or wrapped in allOf (for nullable)
+        // $ref may be direct or a oneOf branch (for 3.1 nullable)
         string? actualRef = null;
         if (prop.TryGetProperty("$ref", out var refVal))
         {
             actualRef = refVal.GetString();
         }
-        else if (TryUnwrapAllOf(prop, out var inner) && inner.TryGetProperty("$ref", out refVal))
+        else if (TryUnwrapNullableComposition(prop, out var inner) && inner.TryGetProperty("$ref", out refVal))
         {
             actualRef = refVal.GetString();
         }
@@ -1067,18 +1067,43 @@ public sealed class KitchenSinkImportTests
     private static string? GetType(JsonElement prop)
     {
         if (prop.TryGetProperty("type", out var t))
+        {
+            // 3.1 nullable → ["T", "null"]; report the non-null member
+            if (t.ValueKind == JsonValueKind.Array)
+                return t.EnumerateArray().Select(v => v.GetString()).FirstOrDefault(v => v != "null");
             return t.GetString();
-        if (TryUnwrapAllOf(prop, out var inner) && inner.TryGetProperty("type", out t))
+        }
+        if (TryUnwrapNullableComposition(prop, out var inner) && inner.TryGetProperty("type", out t))
             return t.GetString();
         return null;
     }
 
-    private static bool TryUnwrapAllOf(JsonElement prop, out JsonElement inner)
+    private static bool HasNullType(JsonElement prop) =>
+        prop.TryGetProperty("type", out var t)
+        && t.ValueKind == JsonValueKind.Array
+        && t.EnumerateArray().Any(v => v.GetString() == "null");
+
+    /// <summary>
+    /// Unwraps the 3.1 nullable composition oneOf/anyOf [X, { "type": "null" }] → X.
+    /// </summary>
+    private static bool TryUnwrapNullableComposition(JsonElement prop, out JsonElement inner)
     {
-        if (prop.TryGetProperty("allOf", out var allOf) && allOf.GetArrayLength() > 0)
+        foreach (var keyword in new[] { "oneOf", "anyOf" })
         {
-            inner = allOf[0];
-            return true;
+            if (prop.TryGetProperty(keyword, out var branches)
+                && branches.GetArrayLength() == 2)
+            {
+                foreach (var branch in branches.EnumerateArray())
+                {
+                    if (!(branch.TryGetProperty("type", out var t)
+                          && t.ValueKind == JsonValueKind.String
+                          && t.GetString() == "null"))
+                    {
+                        inner = branch;
+                        return true;
+                    }
+                }
+            }
         }
         inner = default;
         return false;

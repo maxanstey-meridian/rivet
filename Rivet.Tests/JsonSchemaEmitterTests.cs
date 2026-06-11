@@ -536,9 +536,9 @@ public sealed class JsonSchemaEmitterTests
         var defs = ParseDefs(output);
         var emailSchema = defs.GetProperty("UserDto").GetProperty("properties").GetProperty("email");
 
-        Assert.True(emailSchema.TryGetProperty("example", out var ex),
-            "JSON Schema should include 'example' on property");
-        Assert.Equal("john@example.com", ex.GetString());
+        Assert.True(emailSchema.TryGetProperty("examples", out var ex),
+            "JSON Schema should include the 2020-12 'examples' array on property");
+        Assert.Equal("john@example.com", ex[0].GetString());
     }
 
     [Fact]

@@ -226,10 +226,13 @@ public sealed class AnnotationRoundTripTests
         Assert.Equal(10, description.GetProperty("minLength").GetInt32());
         Assert.Equal(500, description.GetProperty("maxLength").GetInt32());
 
-        // Score — OpenAPI 3.0: exclusiveMinimum is boolean, value goes in minimum
+        // Score — OpenAPI 3.1: exclusiveMinimum is numeric (JSON Schema 2020-12)
         var score = props.GetProperty("score");
-        Assert.Equal(0.0, score.GetProperty("minimum").GetDouble());
-        Assert.True(score.GetProperty("exclusiveMinimum").GetBoolean());
+        var exclusiveMin = score.GetProperty("exclusiveMinimum");
+        Assert.Equal(JsonValueKind.Number, exclusiveMin.ValueKind);
+        Assert.Equal(0.0, exclusiveMin.GetDouble());
+        Assert.False(score.TryGetProperty("minimum", out _),
+            "numeric exclusiveMinimum must not synthesize a minimum");
         Assert.Equal(0.5, score.GetProperty("multipleOf").GetDouble());
 
         // Email: format = "email"

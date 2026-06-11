@@ -4,7 +4,7 @@ using Rivet.Tool.Model;
 namespace Rivet.Tool.Emit;
 
 /// <summary>
-/// Emits an OpenAPI 3.0 JSON spec from the Rivet model.
+/// Emits an OpenAPI 3.1 JSON spec from the Rivet model.
 /// </summary>
 public static class OpenApiEmitter
 {
@@ -81,7 +81,7 @@ public static class OpenApiEmitter
 
         var doc = new Dictionary<string, object>
         {
-            ["openapi"] = "3.0.3",
+            ["openapi"] = "3.1.0",
             ["info"] = new Dictionary<string, object>
             {
                 ["title"] = "API",
@@ -844,29 +844,47 @@ public static class OpenApiEmitter
 
     private static Dictionary<string, object> MapNullable(TsType.Nullable n)
     {
-        // OpenAPI 3.0: nullable is a property, not a type
-        if (n.Inner is TsType.Primitive p)
-        {
-            var schema = MapPrimitive(p);
-            schema["nullable"] = true;
-            return schema;
-        }
-
         var inner = MapTsTypeToJsonSchema(n.Inner);
 
-        // $ref siblings are ignored in 3.0 — wrap in allOf
+        // OpenAPI 3.1 / JSON Schema 2020-12: null is a type. Schemas with a single
+        // type become a type array; everything else gets an explicit null branch.
+        if (inner.TryGetValue("type", out var typeValue) && typeValue is string typeName)
+        {
+            inner["type"] = new List<string> { typeName, "null" };
+            return inner;
+        }
+
+        // $ref: a sibling `type: "null"` would be ANDed with the referenced schema in
+        // 2020-12, so the null alternative must be a oneOf branch instead.
         if (inner.ContainsKey("$ref"))
         {
             return new Dictionary<string, object>
             {
-                ["allOf"] = new List<object> { inner },
-                ["nullable"] = true,
+                ["oneOf"] = new List<object>
+                {
+                    inner,
+                    new Dictionary<string, object> { ["type"] = "null" },
+                },
             };
         }
 
-        // Inline schema — add nullable directly
-        inner["nullable"] = true;
-        return inner;
+        // Untyped schema (unknown/JsonElement) — already admits null; nothing to add.
+        if (inner.Count == 0)
+        {
+            return inner;
+        }
+
+        // Remaining typeless composites (tagged-union oneOf, x-rivet-csharp-type
+        // untyped schemas): anyOf, because an untyped branch also matches null and
+        // would make a oneOf ambiguous.
+        return new Dictionary<string, object>
+        {
+            ["anyOf"] = new List<object>
+            {
+                inner,
+                new Dictionary<string, object> { ["type"] = "null" },
+            },
+        };
     }
 
     private static Dictionary<string, object> FallbackTypeParam(TsType.TypeParam tp)
@@ -1140,7 +1158,6 @@ public static class OpenApiEmitter
         {
             var propSchema = MapTsTypeToJsonSchema(prop.Type);
             SchemaEnricher.EnrichPropertySchema(propSchema, prop);
-            ConvertExclusiveToOpenApi30(propSchema);
             properties[prop.Name] = propSchema;
 
             if (!prop.IsOptional)
@@ -1224,7 +1241,6 @@ public static class OpenApiEmitter
             var resolvedType = ResolveTypeParams(prop.Type, typeParamMap);
             var propSchema = MapTsTypeToJsonSchema(resolvedType);
             SchemaEnricher.EnrichPropertySchema(propSchema, prop);
-            ConvertExclusiveToOpenApi30(propSchema);
             properties[prop.Name] = propSchema;
 
             if (!prop.IsOptional)
@@ -1393,53 +1409,6 @@ public static class OpenApiEmitter
             TsType.TaggedUnion => "object",
             _ => "object",
         };
-    }
-
-    /// <summary>
-    /// Converts numeric exclusiveMinimum/Maximum (JSON Schema / OpenAPI 3.1) to
-    /// OpenAPI 3.0 boolean form, preserving the effective (tightest) bound exactly.
-    ///
-    /// The source constraint pair means: x >= minimum AND x > exclusiveMinimum.
-    /// OpenAPI 3.0 can express only a single lower bound (inclusive, or exclusive via
-    /// the boolean flag) — but the conjunction always collapses to exactly one of them:
-    ///   minimum > exclusiveMinimum  →  x >= minimum   (inclusive bound wins)
-    ///   minimum <= exclusiveMinimum →  x > exclusiveMinimum (exclusive bound wins)
-    /// Emitting anything else (e.g. minimum + exclusiveMinimum: true, which 3.0 reads
-    /// as "> minimum") corrupts the constraint. Mirrored for the upper bound.
-    /// </summary>
-    private static void ConvertExclusiveToOpenApi30(Dictionary<string, object> schema)
-    {
-        if (schema.TryGetValue("exclusiveMinimum", out var exMin) && exMin is double exMinVal)
-        {
-            if (schema.TryGetValue("minimum", out var min)
-                && Convert.ToDouble(min) > exMinVal)
-            {
-                // x >= minimum already implies x > exclusiveMinimum — the inclusive
-                // bound is the binding constraint; drop the exclusive flag entirely.
-                schema.Remove("exclusiveMinimum");
-            }
-            else
-            {
-                // The exclusive bound is the binding constraint: x > exclusiveMinimum.
-                schema["minimum"] = exMinVal;
-                schema["exclusiveMinimum"] = true;
-            }
-        }
-
-        if (schema.TryGetValue("exclusiveMaximum", out var exMax) && exMax is double exMaxVal)
-        {
-            if (schema.TryGetValue("maximum", out var max)
-                && Convert.ToDouble(max) < exMaxVal)
-            {
-                // x <= maximum already implies x < exclusiveMaximum.
-                schema.Remove("exclusiveMaximum");
-            }
-            else
-            {
-                schema["maximum"] = exMaxVal;
-                schema["exclusiveMaximum"] = true;
-            }
-        }
     }
 
     private static string UpperFirst(string s) => Naming.ToPascalCase(s);

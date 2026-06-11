@@ -122,7 +122,7 @@ public sealed class JsonContractEmitterTests
         var spec = CompilationHelper.EmitOpenApiFromJson(ContractJson);
 
         Assert.Contains("\"openapi\"", spec);
-        Assert.Contains("\"3.0.3\"", spec);
+        Assert.Contains("\"3.1.0\"", spec);
         Assert.Contains("/products/{id}", spec);
         Assert.Contains("/products", spec);
         Assert.Contains("ProductDto", spec);

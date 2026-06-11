@@ -219,14 +219,16 @@ public sealed class ValueObjectTests
         var propBrand = Assert.IsType<TsType.Brand>(nullable.Inner);
         Assert.Equal("Email", propBrand.Name);
 
-        // OpenAPI: nullable $ref → allOf wrapper + nullable: true; not required
+        // OpenAPI 3.1: nullable $ref → oneOf [$ref, { type: "null" }]; not required
         using var doc = CompilationHelper.EmitOpenApi(source);
         var contactSchema = GetSchema(doc, "ContactDto");
         var emailSchema = contactSchema.GetProperty("properties").GetProperty("email");
-        Assert.True(emailSchema.GetProperty("nullable").GetBoolean());
+        var oneOf = emailSchema.GetProperty("oneOf");
+        Assert.Equal(2, oneOf.GetArrayLength());
         Assert.Equal(
             "#/components/schemas/Email",
-            emailSchema.GetProperty("allOf")[0].GetProperty("$ref").GetString());
+            oneOf[0].GetProperty("$ref").GetString());
+        Assert.Equal("null", oneOf[1].GetProperty("type").GetString());
 
         var required = contactSchema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
         Assert.Contains("name", required);

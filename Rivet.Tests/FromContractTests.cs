@@ -75,7 +75,7 @@ public sealed class FromContractTests
 
             var expectedOpenApiPath = Path.Combine(outputDir, openApiFileName);
             Assert.True(File.Exists(expectedOpenApiPath), $"expected OpenAPI file at {expectedOpenApiPath}");
-            Assert.Contains("\"openapi\": \"3.0.3\"", await File.ReadAllTextAsync(expectedOpenApiPath));
+            Assert.Contains("\"openapi\": \"3.1.0\"", await File.ReadAllTextAsync(expectedOpenApiPath));
         }
         finally
         {

@@ -74,7 +74,7 @@ public sealed class OpenApiEmitterTests
         using var doc = EmitOpenApi(source);
         var root = doc.RootElement;
 
-        Assert.Equal("3.0.3", root.GetProperty("openapi").GetString());
+        Assert.Equal("3.1.0", root.GetProperty("openapi").GetString());
 
         var pathItem = root.GetProperty("paths").GetProperty("/api/tasks/{id}");
         var get = pathItem.GetProperty("get");
@@ -1228,7 +1228,7 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
-    public void Nullable_Primitive_Emits_Type_With_Nullable_True()
+    public void Nullable_Primitive_Emits_Type_Array_With_Null()
     {
         var source = """
             using Rivet;
@@ -1253,13 +1253,15 @@ public sealed class OpenApiEmitterTests
             .GetProperty("properties")
             .GetProperty("description");
 
-        // Nullable primitive → type + nullable: true (OpenAPI 3.0)
-        Assert.Equal("string", descProp.GetProperty("type").GetString());
-        Assert.True(descProp.GetProperty("nullable").GetBoolean());
+        // Nullable primitive → type array with "null" (OpenAPI 3.1)
+        var typeArray = descProp.GetProperty("type");
+        Assert.Equal(JsonValueKind.Array, typeArray.ValueKind);
+        Assert.Equal(["string", "null"], typeArray.EnumerateArray().Select(t => t.GetString()!).ToArray());
+        Assert.False(descProp.TryGetProperty("nullable", out _), "3.1 must not emit nullable: true");
     }
 
     [Fact]
-    public void Nullable_Ref_Emits_AllOf_With_Nullable_True()
+    public void Nullable_Ref_Emits_OneOf_With_Null_Branch()
     {
         var source = """
             using Rivet;
@@ -1287,15 +1289,63 @@ public sealed class OpenApiEmitterTests
             .GetProperty("properties")
             .GetProperty("address");
 
-        // Nullable ref → allOf [$ref] + nullable: true (OpenAPI 3.0)
-        var allOf = addressProp.GetProperty("allOf");
-        Assert.Equal(1, allOf.GetArrayLength());
-        Assert.Equal("#/components/schemas/AddressDto", allOf[0].GetProperty("$ref").GetString());
-        Assert.True(addressProp.GetProperty("nullable").GetBoolean());
+        // Nullable ref → oneOf [$ref, { type: "null" }] (OpenAPI 3.1)
+        var oneOf = addressProp.GetProperty("oneOf");
+        Assert.Equal(2, oneOf.GetArrayLength());
+        Assert.Equal("#/components/schemas/AddressDto", oneOf[0].GetProperty("$ref").GetString());
+        Assert.Equal("null", oneOf[1].GetProperty("type").GetString());
+        Assert.False(addressProp.TryGetProperty("nullable", out _), "3.1 must not emit nullable: true");
+        Assert.False(addressProp.TryGetProperty("allOf", out _), "3.1 must not use the allOf nullable wrap");
     }
 
     [Fact]
-    public void Emitted_Json_Contains_No_OpenApi31_Nullable_Patterns()
+    public void Enrichment_Survives_As_Ref_Siblings()
+    {
+        // E7: OpenAPI 3.1 / JSON Schema 2020-12 permits $ref siblings — property
+        // enrichment (description, deprecated, ...) must be emitted alongside the
+        // $ref instead of being dropped or allOf-wrapped.
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CategoryDto(string Name);
+
+            [RivetType]
+            public sealed record ProductDto(
+                string Id,
+                [property: RivetDescription("Primary product category")]
+                CategoryDto Category,
+                [property: Obsolete]
+                CategoryDto LegacyCategory);
+
+            [RivetContract]
+            public static class ProductsContract
+            {
+                public static readonly Define GetProduct =
+                    Define.Get<ProductDto>("/api/products/{id}");
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var props = doc.RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ProductDto")
+            .GetProperty("properties");
+
+        var category = props.GetProperty("category");
+        Assert.Equal("#/components/schemas/CategoryDto", category.GetProperty("$ref").GetString());
+        Assert.Equal("Primary product category", category.GetProperty("description").GetString());
+
+        var legacy = props.GetProperty("legacyCategory");
+        Assert.Equal("#/components/schemas/CategoryDto", legacy.GetProperty("$ref").GetString());
+        Assert.True(legacy.GetProperty("deprecated").GetBoolean());
+    }
+
+    [Fact]
+    public void Emitted_Json_Uses_Only_OpenApi31_Nullable_Patterns()
     {
         var source = """
             using Rivet;
@@ -1319,52 +1369,51 @@ public sealed class OpenApiEmitterTests
         using var doc = EmitOpenApi(source);
         var root = doc.RootElement;
 
-        // Version must be 3.0.x
-        Assert.Equal("3.0.3", root.GetProperty("openapi").GetString());
+        // Version must be 3.1.x
+        Assert.Equal("3.1.0", root.GetProperty("openapi").GetString());
 
         var personSchema = root.GetProperty("components").GetProperty("schemas").GetProperty("PersonDto");
         var props = personSchema.GetProperty("properties");
 
-        // Nullable primitive (Bio) → type + nullable: true
+        // Nullable primitive (Bio) → type: ["string", "null"]
         var bio = props.GetProperty("bio");
-        Assert.Equal("string", bio.GetProperty("type").GetString());
-        Assert.True(bio.GetProperty("nullable").GetBoolean());
+        Assert.Equal(["string", "null"], bio.GetProperty("type").EnumerateArray().Select(t => t.GetString()!).ToArray());
 
-        // Nullable primitive (Age) → type + nullable: true
+        // Nullable primitive (Age) → type: ["integer", "null"]
         var age = props.GetProperty("age");
-        Assert.Equal("integer", age.GetProperty("type").GetString());
-        Assert.True(age.GetProperty("nullable").GetBoolean());
+        Assert.Equal(["integer", "null"], age.GetProperty("type").EnumerateArray().Select(t => t.GetString()!).ToArray());
 
-        // Nullable ref (Address) → allOf + nullable: true, no type array
+        // Nullable ref (Address) → oneOf [$ref, { type: "null" }]
         var address = props.GetProperty("address");
-        Assert.True(address.GetProperty("nullable").GetBoolean());
-        Assert.True(address.TryGetProperty("allOf", out _), "Nullable ref should use allOf pattern");
+        var addressOneOf = address.GetProperty("oneOf");
+        Assert.Equal(2, addressOneOf.GetArrayLength());
+        Assert.Equal("null", addressOneOf[1].GetProperty("type").GetString());
+        Assert.False(address.TryGetProperty("allOf", out _), "3.1 must not use the allOf nullable wrap");
 
-        // No 3.1-style type arrays or { "type": "null" } anywhere
+        // No 3.0-style nullable: true anywhere
         var json = root.GetRawText();
-        Assert.DoesNotContain("\"null\"", json);
-        Assert.DoesNotContain("\"type\": \"null\"", json);
+        Assert.DoesNotContain("\"nullable\"", json);
     }
 
     [Fact]
-    public void Nullable_Inline_Schema_Gets_Nullable_Property()
+    public void Nullable_Inline_Schema_Gets_Type_Array_With_Null()
     {
-        // Nullable array, nullable dictionary — verify nullable is added directly
+        // Nullable array, nullable dictionary — verify the type becomes a ["T", "null"] array
         var nullableArray = OpenApiEmitter.MapTsTypeToJsonSchema(
             new TsType.Nullable(new TsType.Array(new TsType.Primitive("string"))));
         var json = JsonSerializer.Serialize(nullableArray);
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
 
-        Assert.Equal("array", doc.GetProperty("type").GetString());
-        Assert.True(doc.GetProperty("nullable").GetBoolean());
+        Assert.Equal(["array", "null"], doc.GetProperty("type").EnumerateArray().Select(t => t.GetString()!).ToArray());
+        Assert.False(doc.TryGetProperty("nullable", out _));
 
         var nullableDict = OpenApiEmitter.MapTsTypeToJsonSchema(
             new TsType.Nullable(new TsType.Dictionary(new TsType.Primitive("number"))));
         var dictJson = JsonSerializer.Serialize(nullableDict);
         var dictDoc = JsonSerializer.Deserialize<JsonElement>(dictJson);
 
-        Assert.Equal("object", dictDoc.GetProperty("type").GetString());
-        Assert.True(dictDoc.GetProperty("nullable").GetBoolean());
+        Assert.Equal(["object", "null"], dictDoc.GetProperty("type").EnumerateArray().Select(t => t.GetString()!).ToArray());
+        Assert.False(dictDoc.TryGetProperty("nullable", out _));
     }
 
     [Fact]
@@ -1753,7 +1802,7 @@ public sealed class OpenApiEmitterTests
         var root = doc.RootElement;
 
         // Required top-level fields
-        Assert.Equal("3.0.3", root.GetProperty("openapi").GetString());
+        Assert.Equal("3.1.0", root.GetProperty("openapi").GetString());
         Assert.True(root.TryGetProperty("info", out var info));
         Assert.True(info.TryGetProperty("title", out _));
         Assert.True(info.TryGetProperty("version", out _));
@@ -2033,9 +2082,9 @@ public sealed class OpenApiEmitterTests
         Assert.Equal("string", queryParam.Value.GetProperty("schema").GetProperty("type").GetString());
 
         Assert.False(categoryParam.Value.GetProperty("required").GetBoolean(), "Nullable query param should not be required");
-        Assert.Equal("string", categoryParam.Value.GetProperty("schema").GetProperty("type").GetString());
-        Assert.True(categoryParam.Value.GetProperty("schema").GetProperty("nullable").GetBoolean(),
-            "Nullable query param schema should have nullable: true");
+        Assert.Equal(["string", "null"],
+            categoryParam.Value.GetProperty("schema").GetProperty("type")
+                .EnumerateArray().Select(t => t.GetString()!).ToArray());
     }
 
     [Fact]
@@ -2576,12 +2625,12 @@ public sealed class OpenApiEmitterTests
             .GetProperty("application/json")
             .GetProperty("schema");
 
-        // Nullable TypeRef wraps in allOf
-        var allOf = schema.GetProperty("allOf");
-        Assert.Equal(1, allOf.GetArrayLength());
+        // Nullable TypeRef wraps in oneOf with an explicit null branch (3.1)
+        var oneOf = schema.GetProperty("oneOf");
+        Assert.Equal(2, oneOf.GetArrayLength());
         Assert.Equal("#/components/schemas/CreateBuyerRequest",
-            allOf[0].GetProperty("$ref").GetString());
-        Assert.True(schema.GetProperty("nullable").GetBoolean());
+            oneOf[0].GetProperty("$ref").GetString());
+        Assert.Equal("null", oneOf[1].GetProperty("type").GetString());
     }
 
     [Fact]
@@ -2983,10 +3032,10 @@ public sealed class OpenApiEmitterTests
         Assert.False(resp.TryGetProperty("application/json", out _));
     }
 
-    // ========== OpenAPI 3.0 exclusiveMinimum conversion ==========
+    // ========== OpenAPI 3.1 numeric exclusiveMinimum/Maximum ==========
 
     [Fact]
-    public void ExclusiveMinimum_Does_Not_Clobber_Existing_Minimum()
+    public void ExclusiveMinimum_Looser_Than_Minimum_Survives_Numerically()
     {
         using var doc = EmitOpenApi("""
             using System.ComponentModel.DataAnnotations;
@@ -3011,18 +3060,20 @@ public sealed class OpenApiEmitterTests
             .GetProperty("components").GetProperty("schemas").GetProperty("Dto")
             .GetProperty("properties").GetProperty("value");
 
-        // Source means: x >= 5 AND x > 0, which collapses to exactly x >= 5.
-        // 3.0 must emit minimum: 5 WITHOUT exclusiveMinimum: true — emitting both
-        // would mean "> 5" and silently exclude the legal value 5 (E12).
+        // Source means: x >= 5 AND x > 0. 3.1 expresses the conjunction losslessly
+        // with numeric bounds — minimum stays 5 (the binding constraint, E12) and the
+        // exclusive bound is carried as a number, never as the 3.0 boolean flag.
         Assert.Equal(5.0, props.GetProperty("minimum").GetDouble());
-        Assert.False(props.TryGetProperty("exclusiveMinimum", out _));
+        var exclusiveMin = props.GetProperty("exclusiveMinimum");
+        Assert.Equal(JsonValueKind.Number, exclusiveMin.ValueKind);
+        Assert.Equal(0.0, exclusiveMin.GetDouble());
     }
 
     [Fact]
-    public void ExclusiveMinimum_Tighter_Than_Minimum_Wins()
+    public void ExclusiveMinimum_Tighter_Than_Minimum_Survives_Numerically()
     {
-        // Mirror case: x >= 0 AND x > 5 collapses to exactly x > 5 —
-        // 3.0 emits minimum: 5 + exclusiveMinimum: true.
+        // Mirror case: x >= 0 AND x > 5 — the effective bound is x > 5. 3.1 keeps
+        // both numerically; exclusiveMinimum: 5 carries the binding constraint.
         using var doc = EmitOpenApi("""
             using System.ComponentModel.DataAnnotations;
             using Rivet;
@@ -3046,15 +3097,17 @@ public sealed class OpenApiEmitterTests
             .GetProperty("components").GetProperty("schemas").GetProperty("Dto")
             .GetProperty("properties").GetProperty("value");
 
-        Assert.Equal(5.0, props.GetProperty("minimum").GetDouble());
-        Assert.True(props.GetProperty("exclusiveMinimum").GetBoolean());
+        Assert.Equal(0.0, props.GetProperty("minimum").GetDouble());
+        var exclusiveMin = props.GetProperty("exclusiveMinimum");
+        Assert.Equal(JsonValueKind.Number, exclusiveMin.ValueKind);
+        Assert.Equal(5.0, exclusiveMin.GetDouble());
     }
 
     [Fact]
-    public void ExclusiveMaximum_Looser_Than_Maximum_Is_Dropped()
+    public void ExclusiveMaximum_Looser_Than_Maximum_Survives_Numerically()
     {
-        // x <= 10 AND x < 100 collapses to exactly x <= 10 —
-        // 3.0 emits maximum: 10 WITHOUT exclusiveMaximum: true.
+        // x <= 10 AND x < 100 — maximum: 10 is the binding constraint; 3.1 carries
+        // the looser exclusive bound numerically without corrupting it.
         using var doc = EmitOpenApi("""
             using System.ComponentModel.DataAnnotations;
             using Rivet;
@@ -3079,7 +3132,9 @@ public sealed class OpenApiEmitterTests
             .GetProperty("properties").GetProperty("value");
 
         Assert.Equal(10.0, props.GetProperty("maximum").GetDouble());
-        Assert.False(props.TryGetProperty("exclusiveMaximum", out _));
+        var exclusiveMax = props.GetProperty("exclusiveMaximum");
+        Assert.Equal(JsonValueKind.Number, exclusiveMax.ValueKind);
+        Assert.Equal(100.0, exclusiveMax.GetDouble());
     }
 
     [Fact]

@@ -146,8 +146,14 @@ internal sealed class RecordSynthesizer(
                 // Preserve description, example, readOnly, writeOnly
                 var description = string.IsNullOrEmpty(propSchema.Description) ? null : propSchema.Description;
 
+                // 3.1 emits the JSON Schema 2020-12 `examples` array; legacy specs may
+                // still carry the deprecated schema-level `example`.
                 string? example = null;
-                if (propSchema.Example is not null)
+                if (propSchema.Examples is { Count: > 0 } && propSchema.Examples[0] is not null)
+                {
+                    example = propSchema.Examples[0]!.ToJsonString();
+                }
+                else if (propSchema.Example is not null)
                 {
                     example = propSchema.Example.ToJsonString();
                 }

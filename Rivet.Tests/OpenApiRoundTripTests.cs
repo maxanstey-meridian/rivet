@@ -2657,10 +2657,18 @@ public sealed class OpenApiRoundTripTests
         Assert.False(raw.TryGetProperty("x-rivet-csharp-type", out _),
             "JsonElement is the default — should not have x-rivet-csharp-type");
 
-        // Nullable JsonObject → nullable + x-rivet-csharp-type
+        // Nullable JsonObject → type: ["object", "null"] + x-rivet-csharp-type
         var nullCond = props.GetProperty("nullableCondition");
-        Assert.True(nullCond.GetProperty("nullable").GetBoolean());
+        Assert.Equal(["object", "null"],
+            nullCond.GetProperty("type").EnumerateArray().Select(t => t.GetString()!).ToArray());
         Assert.Equal("JsonObject", nullCond.GetProperty("x-rivet-csharp-type").GetString());
+
+        // Nullable JsonNode (typeless) → anyOf [{ x-rivet-csharp-type }, { type: "null" }]
+        var nullPayload = props.GetProperty("nullablePayload");
+        var nullPayloadAnyOf = nullPayload.GetProperty("anyOf");
+        Assert.Equal(2, nullPayloadAnyOf.GetArrayLength());
+        Assert.Equal("JsonNode", nullPayloadAnyOf[0].GetProperty("x-rivet-csharp-type").GetString());
+        Assert.Equal("null", nullPayloadAnyOf[1].GetProperty("type").GetString());
 
         // Import: OpenAPI → C# — verify correct types
         var importResult = OpenApiImporter.Import(json, new ImportOptions("Test"));
@@ -2729,11 +2737,14 @@ public sealed class OpenApiRoundTripTests
         Assert.DoesNotContain("optionalRef", required);
         Assert.DoesNotContain("deletedAt", required);
 
-        // Nullable fields should still have nullable: true
-        Assert.True(props.GetProperty("bio").GetProperty("nullable").GetBoolean());
-        Assert.True(props.GetProperty("score").GetProperty("nullable").GetBoolean());
-        Assert.True(props.GetProperty("optionalRef").GetProperty("nullable").GetBoolean());
-        Assert.True(props.GetProperty("deletedAt").GetProperty("nullable").GetBoolean());
+        // Nullable fields carry the 3.1 type array with a "null" member
+        static string[] Types(JsonElement prop) =>
+            prop.GetProperty("type").EnumerateArray().Select(t => t.GetString()!).ToArray();
+
+        Assert.Equal(["string", "null"], Types(props.GetProperty("bio")));
+        Assert.Equal(["integer", "null"], Types(props.GetProperty("score")));
+        Assert.Equal(["string", "null"], Types(props.GetProperty("optionalRef")));
+        Assert.Equal(["string", "null"], Types(props.GetProperty("deletedAt")));
     }
 
     /// <summary>
@@ -3291,8 +3302,8 @@ public sealed class OpenApiRoundTripTests
         Assert.Equal("en", props.GetProperty("locale").GetProperty("default").GetString());
         Assert.Equal(25, props.GetProperty("pageSize").GetProperty("default").GetInt32());
 
-        // example survives
-        Assert.Equal("Hello world", props.GetProperty("greeting").GetProperty("example").GetString());
+        // example survives (re-emitted as the 3.1 / 2020-12 `examples` array)
+        Assert.Equal("Hello world", props.GetProperty("greeting").GetProperty("examples")[0].GetString());
     }
 
     // ========== GAP-2: readOnly/writeOnly round-trip through import ==========

@@ -537,30 +537,11 @@ internal sealed class SchemaMapper
     {
         result = "";
 
-        // oneOf with null (nullable ref in 3.1)
-        if (schema.OneOf is { Count: 2 })
+        // oneOf/anyOf with an explicit null branch (nullable ref/composite in 3.1)
+        if (TryResolveTwoBranchNullable(schema.OneOf, context, out result)
+            || TryResolveTwoBranchNullable(schema.AnyOf, context, out result))
         {
-            IOpenApiSchema? refPart = null;
-            var hasNull = false;
-
-            foreach (var item in schema.OneOf)
-            {
-                if (item.Type.HasValue && item.Type.Value == JsonSchemaType.Null)
-                {
-                    hasNull = true;
-                }
-                else
-                {
-                    refPart = item;
-                }
-            }
-
-            if (hasNull && refPart is not null)
-            {
-                var resolved = ResolveCSharpType(refPart, context);
-                result = resolved.EndsWith("?") ? resolved : resolved + "?";
-                return true;
-            }
+            return true;
         }
 
         // anyOf with single element (OpenAPI 3.0 nullable pattern)
@@ -571,6 +552,46 @@ internal sealed class SchemaMapper
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Resolves the 3.1 nullable composition: exactly two branches, one of which is the
+    /// explicit <c>{"type": "null"}</c> schema. The emitter uses oneOf for $ref inners
+    /// and anyOf for typeless composites (where an untyped branch would also match null
+    /// and make oneOf ambiguous).
+    /// </summary>
+    private bool TryResolveTwoBranchNullable(IList<IOpenApiSchema>? branches, string? context, out string result)
+    {
+        result = "";
+
+        if (branches is not { Count: 2 })
+        {
+            return false;
+        }
+
+        IOpenApiSchema? valuePart = null;
+        var hasNull = false;
+
+        foreach (var item in branches)
+        {
+            if (item.Type.HasValue && item.Type.Value == JsonSchemaType.Null)
+            {
+                hasNull = true;
+            }
+            else
+            {
+                valuePart = item;
+            }
+        }
+
+        if (!hasNull || valuePart is null)
+        {
+            return false;
+        }
+
+        var resolved = ResolveCSharpType(valuePart, context);
+        result = resolved.EndsWith("?") ? resolved : resolved + "?";
+        return true;
     }
 
     private bool TryResolveComposition(IOpenApiSchema schema, string? context, out string result)

@@ -36,14 +36,20 @@ internal static class SchemaEnricher
 
         if (prop.Example is not null)
         {
+            // OpenAPI 3.1 / JSON Schema 2020-12: schema-level `example` is replaced by
+            // the `examples` keyword (an array of example values).
+            object exampleValue;
             try
             {
-                propSchema["example"] = JsonSerializer.Deserialize<object>(prop.Example)!;
+                exampleValue = JsonSerializer.Deserialize<object>(prop.Example)!;
             }
             catch (JsonException)
             {
-                propSchema["example"] = prop.Example;
+                // Invalid JSON literal — emit as raw string rather than crashing
+                exampleValue = prop.Example;
             }
+
+            propSchema["examples"] = new List<object> { exampleValue };
         }
 
         if (prop.IsReadOnly)

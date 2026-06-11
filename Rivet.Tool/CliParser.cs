@@ -131,7 +131,7 @@ internal static class CliParser
         Console.Error.WriteLine("  -p, --project <path>       Path to .csproj file");
         Console.Error.WriteLine("  -o, --output <dir>         Output directory (omit for stdout preview)");
         Console.Error.WriteLine("  --compile                  Emit Zod validators (fromJSONSchema, requires zod in consumer project)");
-        Console.Error.WriteLine("  --openapi [file]           Emit OpenAPI 3.0 JSON spec (default: openapi.json)");
+        Console.Error.WriteLine("  --openapi [file]           Emit OpenAPI 3.1 JSON spec (default: openapi.json)");
         Console.Error.WriteLine("  --security <spec>          Default security scheme (bearer, bearer:jwt, cookie:name, apikey:in:name)");
         Console.Error.WriteLine("  --from <contract.json>     Emit TypeScript from a Rivet contract JSON file");
         Console.Error.WriteLine("  --from-openapi <spec.json> Import OpenAPI spec → C# contracts + DTOs");
