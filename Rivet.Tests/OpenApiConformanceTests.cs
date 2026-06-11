@@ -64,6 +64,11 @@ public sealed class OpenApiConformanceTests : IDisposable
         "contract-sample-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-sample.json")),
         "contract-tagged-union-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-tagged-union.json")),
         "php-golden-contract-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("php-golden-contract.json")),
+        // TS-lowerer-shaped contract JSON: brands appear only as inline kind:"brand"
+        // nodes, and multipart inputs are decomposed into params with an inputTypeName
+        // that has NO matching entry in types[] (mirrors rivet-ts output; BUG-1/BUG-2).
+        "contract-ts-brands-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-ts-brands.json")),
+        "contract-ts-multipart-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-ts-multipart.json")),
         _ => throw new ArgumentException($"Unknown conformance fixture '{fixtureName}'"),
     };
 
@@ -147,6 +152,8 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("contract-sample-json")]
     [InlineData("contract-tagged-union-json")]
     [InlineData("php-golden-contract-json")]
+    [InlineData("contract-ts-brands-json")]
+    [InlineData("contract-ts-multipart-json")]
     public void Spectral_Lint_Has_Zero_Errors(string fixtureName)
     {
         var specPath = WriteSpec(fixtureName);
@@ -198,6 +205,8 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("contract-sample-json")]
     [InlineData("contract-tagged-union-json")]
     [InlineData("php-golden-contract-json")]
+    [InlineData("contract-ts-brands-json")]
+    [InlineData("contract-ts-multipart-json")]
     public void OpenApiTypescript_Output_Compiles_Under_TscStrict(string fixtureName)
     {
         var specPath = WriteSpec(fixtureName);

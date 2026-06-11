@@ -5194,4 +5194,182 @@ public sealed class OpenApiImporterTests
         Assert.True(errors.Count == 0,
             $"List<IFormFile> scaffold has compile errors:\n{string.Join("\n", errors.Take(5).Select(e => e.ToString()))}");
     }
+
+    // ========== I14/I15: params on body-carrying ops + unsupported methods ==========
+
+    [Fact]
+    public void Params_On_Op_With_Body_Merge_Into_Input_Record()
+    {
+        // I14 (FABLE_GAPS §2): ResolveParamInputType only ran when there was no body,
+        // so any op with a requestBody lost ALL path+query params silently (262 Stripe
+        // GETs). Path/query params must merge with the body-derived input record.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "PdfOptions": {
+                    "type": "object",
+                    "properties": {
+                        "expand": { "type": "string" }
+                    }
+                }
+                """,
+            paths: """
+                "/v1/quotes/{quote}/pdf": {
+                    "get": {
+                        "operationId": "getQuotePdf",
+                        "tags": ["Quotes"],
+                        "parameters": [
+                            { "name": "quote", "in": "path", "required": true, "schema": { "type": "string" } },
+                            { "name": "version", "in": "query", "required": false, "schema": { "type": "integer" } }
+                        ],
+                        "requestBody": {
+                            "content": {
+                                "application/x-www-form-urlencoded": {
+                                    "schema": { "$ref": "#/components/schemas/PdfOptions" }
+                                }
+                            }
+                        },
+                        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "string" } } } } } } }
+                    }
+                }
+                """);
+
+        var result = CompilationHelper.Import(spec);
+
+        // The endpoint's input is the merged synthesized record, not the bare body type
+        var contract = CompilationHelper.FindFile(result, "QuotesContract.cs");
+        Assert.Contains("GetQuotePdfInput", contract);
+
+        // ...containing the path param, the query param AND the body's properties
+        var input = CompilationHelper.FindFile(result, "GetQuotePdfInput.cs");
+        Assert.Contains("string Quote", input);
+        Assert.Contains("long? Version", input);
+        Assert.Contains("Expand", input);
+
+        // The merge is faithful — no dropped-param markers
+        Assert.DoesNotContain("reason=dropped-unmergeable-body", contract);
+    }
+
+    [Fact]
+    public void Query_Param_On_Post_With_Body_Merges_With_Erasure_Marker()
+    {
+        // On body-carrying methods the single TInput re-emits as the JSON body, so a
+        // merged query param's location is erased — diagnosed per param, never silent.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "UpdatePet": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                }
+                """,
+            paths: """
+                "/pets/{petId}": {
+                    "post": {
+                        "operationId": "updatePet",
+                        "tags": ["Pets"],
+                        "parameters": [
+                            { "name": "petId", "in": "path", "required": true, "schema": { "type": "string" } },
+                            { "name": "notify", "in": "query", "required": false, "schema": { "type": "boolean" } }
+                        ],
+                        "requestBody": {
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/UpdatePet" }
+                                }
+                            }
+                        },
+                        "responses": { "204": { "description": "No Content" } }
+                    }
+                }
+                """);
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "PetsContract.cs");
+
+        // Params survive into the merged input record...
+        Assert.Contains("UpdatePetInput", contract);
+        var input = CompilationHelper.FindFile(result, "UpdatePetInput.cs");
+        Assert.Contains("string PetId", input);
+        Assert.Contains("bool? Notify", input);
+        Assert.Contains("string Name", input);
+
+        // ...and the query param's location erasure is marked loudly.
+        Assert.Contains("// [rivet:unsupported param name=notify in=query reason=location-erased-to-body]", contract);
+    }
+
+    [Fact]
+    public void Params_With_Unmergeable_Body_Are_Dropped_With_Named_Marker()
+    {
+        // A body that is not a plain record (here: an array) cannot merge with params —
+        // each param is dropped LOUDLY via a named marker instead of silently.
+        var spec = CompilationHelper.BuildSpec(paths: """
+            "/batch/{groupId}": {
+                "post": {
+                    "operationId": "batchUpdate",
+                    "tags": ["Batch"],
+                    "parameters": [
+                        { "name": "groupId", "in": "path", "required": true, "schema": { "type": "string" } }
+                    ],
+                    "requestBody": {
+                        "content": {
+                            "application/json": {
+                                "schema": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "BatchContract.cs");
+
+        // The input stays the body type (no merged record was synthesized)...
+        Assert.Contains("List<string>", contract);
+        Assert.DoesNotContain("BatchUpdateInput", contract);
+
+        // ...and the absence of the param is paired with a named diagnostic.
+        Assert.Contains("// [rivet:unsupported param name=groupId in=path reason=dropped-unmergeable-body body-type=List<string>]", contract);
+    }
+
+    [Fact]
+    public void Head_Options_Trace_Ops_Are_Skipped_With_Named_Warning()
+    {
+        // I15: HEAD/OPTIONS/TRACE have no contract representation; the ops used to be
+        // skipped with zero diagnostics. Their absence must pair with a named warning.
+        var spec = CompilationHelper.BuildSpec(paths: """
+            "/health": {
+                "get": {
+                    "operationId": "getHealth",
+                    "tags": ["Health"],
+                    "responses": { "204": { "description": "No Content" } }
+                },
+                "head": {
+                    "operationId": "headHealth",
+                    "tags": ["Health"],
+                    "responses": { "204": { "description": "No Content" } }
+                },
+                "options": {
+                    "operationId": "optionsHealth",
+                    "tags": ["Health"],
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "HealthContract.cs");
+
+        // The unsupported-method ops are absent from the scaffold...
+        Assert.Contains("GetHealth", contract);
+        Assert.DoesNotContain("HeadHealth", contract);
+        Assert.DoesNotContain("OptionsHealth", contract);
+
+        // ...and each absence is a named warning (ratcheted category: operation-method-dropped).
+        Assert.Contains(result.Warnings, w =>
+            w.StartsWith("Operation dropped: HEAD /health", StringComparison.Ordinal));
+        Assert.Contains(result.Warnings, w =>
+            w.StartsWith("Operation dropped: OPTIONS /health", StringComparison.Ordinal));
+    }
 }

@@ -108,6 +108,21 @@ internal sealed class SchemaMapper
     }
 
     /// <summary>
+    /// Finds an already-mapped record (component or synthesized extra) by its C# name.
+    /// Used by ContractBuilder to merge path/query parameters into a body-derived input
+    /// record (I14) — null when the name does not resolve to a plain record.
+    /// </summary>
+    public GeneratedRecord? FindRecordByName(string name)
+    {
+        if (_ctx.MappedComponentRecords.TryGetValue(name, out var record))
+        {
+            return record;
+        }
+
+        return _ctx.ExtraRecords.FirstOrDefault(r => r.Name == name);
+    }
+
+    /// <summary>
     /// Walk #/components/schemas and return C# type representations.
     /// </summary>
     public SchemaMapResult MapSchemas(IDictionary<string, IOpenApiSchema> schemas)

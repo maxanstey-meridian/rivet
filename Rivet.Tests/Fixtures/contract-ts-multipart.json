@@ -1,0 +1,36 @@
+{
+    "types": [
+        {
+            "name": "UploadResult",
+            "typeParameters": [],
+            "properties": [
+                { "name": "url", "type": { "kind": "primitive", "type": "string" }, "optional": false }
+            ]
+        }
+    ],
+    "enums": [],
+    "endpoints": [
+        {
+            "name": "uploadAvatar",
+            "httpMethod": "POST",
+            "routeTemplate": "/api/users/{id}/avatar",
+            "controllerName": "users",
+            "params": [
+                { "name": "id", "type": { "kind": "primitive", "type": "string" }, "source": "route" },
+                { "name": "file", "type": { "kind": "primitive", "type": "File" }, "source": "file" },
+                { "name": "title", "type": { "kind": "primitive", "type": "string" }, "source": "formField" },
+                {
+                    "name": "caption",
+                    "type": { "kind": "primitive", "type": "string" },
+                    "source": "formField",
+                    "isOptional": true
+                }
+            ],
+            "returnType": { "kind": "ref", "name": "UploadResult" },
+            "responses": [
+                { "statusCode": 201, "dataType": { "kind": "ref", "name": "UploadResult" } }
+            ],
+            "inputTypeName": "UploadAvatarInput"
+        }
+    ]
+}

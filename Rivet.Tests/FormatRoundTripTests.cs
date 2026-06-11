@@ -209,6 +209,121 @@ public sealed class FormatRoundTripTests
     }
 
     [Fact]
+    public void ByteArray_Property_Emits_Base64_String_Schema()
+    {
+        // FABLE_GAPS spec/wire divergence: System.Text.Json serializes byte[] as a
+        // base64 STRING on the wire, never as an integer array. The schema must say
+        // type: string + contentEncoding: base64 (OpenAPI 3.1 idiom) — exact shape.
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record BlobDto(byte[] Payload, byte[]? Thumbnail);
+            """;
+
+        var props = EmitSchemaFor(source, "BlobDto").GetProperty("properties");
+
+        var payload = props.GetProperty("payload");
+        Assert.Equal(3, payload.EnumerateObject().Count());
+        Assert.Equal("string", payload.GetProperty("type").GetString());
+        Assert.Equal("base64", payload.GetProperty("contentEncoding").GetString());
+        Assert.Equal("byte[]", payload.GetProperty("x-rivet-csharp-type").GetString());
+        Assert.False(payload.TryGetProperty("format", out _));
+        Assert.False(payload.TryGetProperty("items", out _));
+
+        // Nullable byte[] — 3.1 type array, contentEncoding intact
+        var thumbnail = props.GetProperty("thumbnail");
+        Assert.Equal(3, thumbnail.EnumerateObject().Count());
+        var typeArray = thumbnail.GetProperty("type").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Equal(new[] { "string", "null" }, typeArray);
+        Assert.Equal("base64", thumbnail.GetProperty("contentEncoding").GetString());
+        Assert.Equal("byte[]", thumbnail.GetProperty("x-rivet-csharp-type").GetString());
+    }
+
+    [Fact]
+    public void ByteArray_From_Contract_Json_Emits_Base64_String_Schema()
+    {
+        // The TS-lowered contract JSON path (JsonContractReader) must produce the same
+        // schema as the Roslyn path — the primitive node round-trips through the
+        // kind:"primitive" converter.
+        var contractJson = """
+            {
+                "types": [
+                    {
+                        "name": "BlobDto",
+                        "typeParameters": [],
+                        "properties": [
+                            {
+                                "name": "payload",
+                                "type": { "kind": "primitive", "type": "string", "format": "base64", "csharpType": "byte[]" },
+                                "optional": false
+                            }
+                        ]
+                    }
+                ],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "getBlob",
+                        "httpMethod": "GET",
+                        "routeTemplate": "/api/blobs/{id}",
+                        "controllerName": "blobs",
+                        "params": [
+                            { "name": "id", "type": { "kind": "primitive", "type": "string" }, "source": "route" }
+                        ],
+                        "returnType": { "kind": "ref", "name": "BlobDto" },
+                        "responses": [
+                            { "statusCode": 200, "dataType": { "kind": "ref", "name": "BlobDto" } }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        var openApi = CompilationHelper.EmitOpenApiFromJson(contractJson);
+        var payload = JsonDocument.Parse(openApi).RootElement
+            .GetProperty("components").GetProperty("schemas").GetProperty("BlobDto")
+            .GetProperty("properties").GetProperty("payload");
+
+        Assert.Equal(3, payload.EnumerateObject().Count());
+        Assert.Equal("string", payload.GetProperty("type").GetString());
+        Assert.Equal("base64", payload.GetProperty("contentEncoding").GetString());
+        Assert.Equal("byte[]", payload.GetProperty("x-rivet-csharp-type").GetString());
+    }
+
+    [Fact]
+    public void ByteArray_Survives_OpenApi_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record BlobDto(byte[] Payload);
+
+            [RivetContract]
+            public static class BlobContract
+            {
+                public static readonly RouteDefinition<BlobDto> Get =
+                    Define.Get<BlobDto>("/api/blobs/{id}");
+            }
+            """;
+
+        var (_, _, openApiJson) = ForwardAndEmit(source);
+        var (_, walker) = ImportAndWalk(openApiJson);
+
+        var def = walker.Definitions.Values.First(d => d.Name == "BlobDto");
+        var payload = def.Properties.First(p => p.Name == "payload");
+        var prim = Assert.IsType<TsType.Primitive>(payload.Type);
+        Assert.Equal("string", prim.Name);
+        Assert.Equal("base64", prim.Format);
+        Assert.Equal("byte[]", prim.CSharpType);
+    }
+
+    [Fact]
     public void Short_Property_Has_Int16_Range_In_Schema()
     {
         var source = """

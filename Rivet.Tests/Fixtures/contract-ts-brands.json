@@ -1,0 +1,56 @@
+{
+    "types": [
+        {
+            "name": "UserDto",
+            "typeParameters": [],
+            "properties": [
+                { "name": "id", "type": { "kind": "primitive", "type": "string" }, "optional": false },
+                {
+                    "name": "email",
+                    "type": {
+                        "kind": "brand",
+                        "name": "Email",
+                        "underlying": { "kind": "primitive", "type": "string" }
+                    },
+                    "optional": false
+                },
+                {
+                    "name": "referrer",
+                    "type": {
+                        "kind": "nullable",
+                        "inner": {
+                            "kind": "brand",
+                            "name": "UserId",
+                            "underlying": { "kind": "primitive", "type": "string" }
+                        }
+                    },
+                    "optional": true
+                }
+            ]
+        }
+    ],
+    "enums": [],
+    "endpoints": [
+        {
+            "name": "getUser",
+            "httpMethod": "GET",
+            "routeTemplate": "/api/users/{id}",
+            "controllerName": "users",
+            "params": [
+                {
+                    "name": "id",
+                    "type": {
+                        "kind": "brand",
+                        "name": "UserId",
+                        "underlying": { "kind": "primitive", "type": "string" }
+                    },
+                    "source": "route"
+                }
+            ],
+            "returnType": { "kind": "ref", "name": "UserDto" },
+            "responses": [
+                { "statusCode": 200, "dataType": { "kind": "ref", "name": "UserDto" } }
+            ]
+        }
+    ]
+}

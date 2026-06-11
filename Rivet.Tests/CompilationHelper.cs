@@ -257,9 +257,8 @@ public static class CompilationHelper
 
     public static string EmitOpenApiFromJson(string json)
     {
-        var (types, enums, endpoints) = JsonContractReader.Read(json);
+        var (types, enums, endpoints, brands) = JsonContractReader.Read(json);
         var definitions = types.ToDictionary(t => t.Name);
-        var brands = new Dictionary<string, TsType.Brand>();
         return OpenApiEmitter.Emit(endpoints, definitions, brands, enums, security: null);
     }
 

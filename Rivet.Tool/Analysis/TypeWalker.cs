@@ -469,6 +469,17 @@ public sealed class TypeWalker
         // Array T[]
         if (symbol is IArrayTypeSymbol arrayType)
         {
+            // byte[] (FABLE_GAPS spec/wire divergence): System.Text.Json serializes
+            // byte[] as a base64 STRING on the wire, never as an integer array — the
+            // spec must match the wire. Lowered as a string primitive with format
+            // "base64" (emitted as contentEncoding: base64, the OpenAPI 3.1 idiom);
+            // CSharpType pins the exact type for import round-trips. File-endpoint
+            // byte[] outputs never reach here — ContractWalker intercepts them.
+            if (arrayType.ElementType.SpecialType == SpecialType.System_Byte)
+            {
+                return new TsType.Primitive("string", "base64", "byte[]");
+            }
+
             return new TsType.Array(MapTypeCore(arrayType.ElementType));
         }
 

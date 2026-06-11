@@ -62,7 +62,7 @@ public static class OpenApiEmitter
         IReadOnlyDictionary<string, TsType> enums,
         SecurityConfig? security)
     {
-        var paths = BuildPaths(endpoints, security);
+        var paths = BuildPaths(endpoints, definitions, security);
         var schemas = BuildSchemas(endpoints, definitions, brands, enums);
         var examples = BuildComponentExamples(endpoints);
 
@@ -171,6 +171,7 @@ public static class OpenApiEmitter
 
     private static Dictionary<string, object> BuildPaths(
         IReadOnlyList<TsEndpointDefinition> endpoints,
+        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         SecurityConfig? security)
     {
         var paths = new Dictionary<string, object>();
@@ -191,7 +192,7 @@ public static class OpenApiEmitter
             {
                 Console.Error.WriteLine($"warning: duplicate endpoint {ep.HttpMethod} {pathKey} — later definition wins");
             }
-            var operation = BuildOperation(ep, security);
+            var operation = BuildOperation(ep, definitions, security);
             pathItem[methodKey] = operation;
         }
 
@@ -200,6 +201,7 @@ public static class OpenApiEmitter
 
     private static Dictionary<string, object> BuildOperation(
         TsEndpointDefinition ep,
+        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         SecurityConfig? security)
     {
         var operation = new Dictionary<string, object>
@@ -292,7 +294,7 @@ public static class OpenApiEmitter
         {
             Dictionary<string, object> multipartSchema;
 
-            if (ep.InputTypeName is not null)
+            if (ep.InputTypeName is not null && definitions.ContainsKey(ep.InputTypeName))
             {
                 // Named input type — emit as $ref so the schema appears once in components
                 multipartSchema = new Dictionary<string, object>
@@ -302,6 +304,18 @@ public static class OpenApiEmitter
             }
             else
             {
+                // BUG-2 (mirrors the E6 generic fallback): the TS lowerer decomposes the
+                // multipart input into params and never ships the input type definition, so
+                // a $ref to ep.InputTypeName would dangle — every consumer rejects that.
+                // Build the multipart request schema inline from the endpoint's params instead.
+                if (ep.InputTypeName is not null)
+                {
+                    Console.Error.WriteLine(
+                        $"warning: multipart input type '{ep.InputTypeName}' on endpoint '{ep.ControllerName}.{ep.Name}' " +
+                        "is not present in the contract's type definitions — building the multipart request schema " +
+                        "inline from the endpoint's params; fix the upstream producer to include the input type definition");
+                }
+
                 // Anonymous file upload — inline the schema
                 var multipartProps = new Dictionary<string, object>();
                 foreach (var fp in fileParams)
@@ -321,11 +335,15 @@ public static class OpenApiEmitter
                 var requiredFields = new List<string>();
                 foreach (var fp in fileParams)
                 {
-                    requiredFields.Add(fp.Name);
+                    // N1/E8: honour explicit optionality (rivet-ts `file?: Blob`)
+                    if (!fp.IsOptional)
+                    {
+                        requiredFields.Add(fp.Name);
+                    }
                 }
                 foreach (var ff in formFieldParams)
                 {
-                    if (ff.Type is not TsType.Nullable)
+                    if (ff.Type is not TsType.Nullable && !ff.IsOptional)
                     {
                         requiredFields.Add(ff.Name);
                     }
@@ -345,7 +363,8 @@ public static class OpenApiEmitter
                 // WP-1.1: pin the record name the importer synthesizes for this inline
                 // body — without the extension it falls back to the operationId-derived
                 // {fieldName}Request convention, which breaks under hand-edited ids.
-                multipartSchema["x-rivet-input-type"] = SynthesizedInputTypeName(ep);
+                // A declared-but-undefined input type name (TS lowerer) takes precedence.
+                multipartSchema["x-rivet-input-type"] = ep.InputTypeName ?? SynthesizedInputTypeName(ep);
             }
 
             operation["requestBody"] = new Dictionary<string, object>
@@ -796,6 +815,25 @@ public static class OpenApiEmitter
                 unknownSchema["x-rivet-csharp-type"] = p.CSharpType;
             }
             return unknownSchema;
+        }
+
+        // byte[] (FABLE_GAPS spec/wire divergence): System.Text.Json serializes byte[]
+        // as a base64 string on the wire, so the schema is type: string with
+        // contentEncoding: base64 — the OpenAPI 3.1 idiom (`format: byte` is the
+        // deprecated 3.0 spelling). x-rivet-csharp-type carries the exact C# type
+        // for lossless import round-trips.
+        if (p is { Name: "string", Format: "base64" })
+        {
+            var base64Schema = new Dictionary<string, object>
+            {
+                ["type"] = "string",
+                ["contentEncoding"] = "base64",
+            };
+            if (p.CSharpType is not null)
+            {
+                base64Schema["x-rivet-csharp-type"] = p.CSharpType;
+            }
+            return base64Schema;
         }
 
         // OpenAPI uses "integer" for all integer formats, not "number"

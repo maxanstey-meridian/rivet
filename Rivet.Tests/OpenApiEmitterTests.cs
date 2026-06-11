@@ -3304,4 +3304,86 @@ public sealed class OpenApiEmitterTests
             .GetProperty("components").GetProperty("schemas").GetProperty("Collection_ProductDto");
         Assert.Equal("object", fallback.GetProperty("type").GetString());
     }
+
+    [Fact]
+    public void FromContract_Inline_Brands_Land_In_Component_Schemas()
+    {
+        // BUG-1 (FABLE_GAPS §3): the contract JSON carries brands only as inline
+        // kind:"brand" nodes (the TS lowerer emits them that way); the --from path
+        // dropped them while MapTsTypeToJsonSchema still $ref'd each brand by name —
+        // a dangling reference every consumer rejects.
+        var json = File.ReadAllText(
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "contract-ts-brands.json"));
+        var spec = CompilationHelper.EmitOpenApiFromJson(json);
+        using var doc = JsonDocument.Parse(spec);
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+
+        // Brand component schemas exist with the x-rivet-brand extension
+        var email = schemas.GetProperty("Email");
+        Assert.Equal("string", email.GetProperty("type").GetString());
+        Assert.Equal("Email", email.GetProperty("x-rivet-brand").GetString());
+
+        var userId = schemas.GetProperty("UserId");
+        Assert.Equal("string", userId.GetProperty("type").GetString());
+        Assert.Equal("UserId", userId.GetProperty("x-rivet-brand").GetString());
+
+        // The property and param $refs point at those components
+        Assert.Equal("#/components/schemas/Email",
+            schemas.GetProperty("UserDto").GetProperty("properties").GetProperty("email")
+                .GetProperty("$ref").GetString());
+
+        var routeParamSchema = doc.RootElement
+            .GetProperty("paths").GetProperty("/api/users/{id}").GetProperty("get")
+            .GetProperty("parameters")[0].GetProperty("schema");
+        Assert.Equal("#/components/schemas/UserId", routeParamSchema.GetProperty("$ref").GetString());
+    }
+
+    [Fact]
+    public void FromContract_Multipart_With_Undefined_InputType_Builds_Inline_Schema_And_Diagnostic()
+    {
+        // BUG-2 (FABLE_GAPS §3): the TS lowerer decomposes the multipart input into
+        // params and never ships the input type definition, but the emitter $ref'd
+        // ep.InputTypeName with no existence check — a schema nobody defines. The fix
+        // mirrors the E6 generic fallback: warn loudly and build the multipart request
+        // schema inline from the endpoint's params.
+        var json = File.ReadAllText(
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "contract-ts-multipart.json"));
+
+        var spec = string.Empty;
+        var stderr = CompilationHelper.CaptureStdErr(
+            () => spec = CompilationHelper.EmitOpenApiFromJson(json));
+
+        // 1. Loud, named diagnostic — never a silent dangling $ref.
+        Assert.Contains("multipart input type 'UploadAvatarInput'", stderr);
+        Assert.Contains("users.uploadAvatar", stderr);
+
+        using var doc = JsonDocument.Parse(spec);
+        var schema = doc.RootElement
+            .GetProperty("paths").GetProperty("/api/users/{id}/avatar").GetProperty("post")
+            .GetProperty("requestBody").GetProperty("content")
+            .GetProperty("multipart/form-data").GetProperty("schema");
+
+        // 2. No $ref — the schema is built inline from the endpoint params.
+        Assert.False(schema.TryGetProperty("$ref", out _),
+            "Undefined multipart input type must not emit a dangling $ref");
+        Assert.Equal("object", schema.GetProperty("type").GetString());
+
+        // 3. Resolved schema properties: file part → string/binary, scalar parts → mapped schemas.
+        var props = schema.GetProperty("properties");
+        var file = props.GetProperty("file");
+        Assert.Equal("string", file.GetProperty("type").GetString());
+        Assert.Equal("binary", file.GetProperty("format").GetString());
+        Assert.True(file.GetProperty("x-rivet-file").GetBoolean());
+        Assert.Equal("string", props.GetProperty("title").GetProperty("type").GetString());
+        Assert.Equal("string", props.GetProperty("caption").GetProperty("type").GetString());
+
+        // 4. required honours isOptional: caption (isOptional: true) is excluded.
+        var required = schema.GetProperty("required").EnumerateArray()
+            .Select(e => e.GetString()).ToList();
+        Assert.Equal(["file", "title"], required.OrderBy(x => x).ToList());
+
+        // 5. The declared input-type name survives for the importer.
+        Assert.Equal("UploadAvatarInput", schema.GetProperty("x-rivet-input-type").GetString());
+    }
 }

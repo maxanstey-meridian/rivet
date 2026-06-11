@@ -121,16 +121,16 @@ static async Task<int> RunFromContract(RivetOptions options)
     }
 
     var json = await File.ReadAllTextAsync(contractPath);
-    var (types, enums, endpoints) = JsonContractReader.Read(json);
+    var (types, enums, endpoints, brands) = JsonContractReader.Read(json);
 
     var emitInput = new EmitPipeline.EmitInput(
         types.ToList(),
-        [],
+        brands.Values.ToList(),
         enums,
         endpoints,
         new Dictionary<string, string?>(),
         types.ToDictionary(t => t.Name),
-        new Dictionary<string, TsType.Brand>());
+        brands);
 
     return await EmitPipeline.RunAsync(emitInput, options);
 }

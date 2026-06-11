@@ -65,6 +65,10 @@ public sealed class ImportMetricTests
         // Added with Phase 4 / I12: multi-scheme document security collapses to the first
         // scheme — previously silent, now a named warning.
         _ when warning.StartsWith("Security schemes dropped", StringComparison.Ordinal) => "security-schemes-dropped",
+        // Added with I15 (FABLE_GAPS §2): HEAD/OPTIONS/TRACE operations have no contract
+        // representation and used to be skipped with ZERO diagnostics — now each dropped
+        // op emits a named warning.
+        _ when warning.StartsWith("Operation dropped", StringComparison.Ordinal) => "operation-method-dropped",
         _ => $"UNCATEGORIZED: {warning}",
     };
 
@@ -191,7 +195,12 @@ public sealed class ImportMetricTests
         Assert.True(UnsupportedBody(r) <= 26, $"Expected ≤26 unsupported bodies (ratchet, was 26), got {UnsupportedBody(r)}");
         Assert.Equal(0, UnsupportedError(r));
         // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
-        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items");
+        // "operation-method-dropped" added deliberately with I15 (FABLE_GAPS §2): the
+        // kubernetes spec declares 6 HEAD + 6 OPTIONS operations that have no contract
+        // representation — previously skipped with zero diagnostics, now each emits a
+        // named warning. Exact count pinned below against the corpus.
+        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items", "operation-method-dropped");
+        Assert.Equal(12, r.Warnings.Count(w => w.StartsWith("Operation dropped", StringComparison.Ordinal)));
     }
 
     // ========== Cloudflare — largest contract count, hyphenated schema names ==========

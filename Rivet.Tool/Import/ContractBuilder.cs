@@ -19,7 +19,8 @@ internal static class ContractBuilder
     public static IReadOnlyList<GeneratedContract> BuildContracts(
         OpenApiPaths paths,
         SchemaMapper mapper,
-        string? globalSecurityScheme)
+        string? globalSecurityScheme,
+        List<string> warnings)
     {
         var groups = new Dictionary<string, List<GeneratedEndpointField>>();
 
@@ -29,6 +30,10 @@ internal static class ContractBuilder
             {
                 if (!SupportedMethods.Contains(method))
                 {
+                    // I15: HEAD/OPTIONS/TRACE used to be skipped with zero diagnostics —
+                    // "nothing is dropped silently" demands a named warning per dropped op.
+                    warnings.Add(
+                        $"Operation dropped: {method.Method.ToUpperInvariant()} {route} — HTTP method has no contract representation.");
                     continue;
                 }
 
@@ -87,10 +92,22 @@ internal static class ContractBuilder
         // Resolve input type (requestBody — $ref resolved by library)
         var (inputType, isFormEncoded) = ResolveInputType(operation, mapper, fieldName, unsupported);
 
-        // If no body input, synthesize an input record from path/query parameters
+        // I14: parameters must be resolved regardless of body presence — they used to be
+        // silently discarded whenever the operation had a request body (262 Stripe GETs
+        // lost every path+query param). Path/query params merge with the body-derived
+        // input record; when a true merge is structurally impossible (opaque body type)
+        // each param is dropped LOUDLY via a named marker — never silently.
+        var paramProperties = CollectParamProperties(
+            operation, mapper, fieldName, unsupported, queryAuthParameterName);
+
         if (inputType is null)
         {
-            inputType = ResolveParamInputType(operation, mapper, fieldName, unsupported, queryAuthParameterName);
+            inputType = SynthesizeParamInputType(paramProperties, mapper, fieldName);
+        }
+        else if (paramProperties.Count > 0)
+        {
+            inputType = MergeParamsIntoInputType(
+                httpMethod, inputType, paramProperties, mapper, fieldName, unsupported);
         }
 
         // Resolve output type (lowest 2xx response with JSON content)
@@ -189,15 +206,21 @@ internal static class ContractBuilder
         return (null, false);
     }
 
-    private static string? ResolveParamInputType(
+    /// <summary>
+    /// A path/query/header/cookie parameter resolved to a record property, keeping the
+    /// original spec name and location for diagnostics.
+    /// </summary>
+    private sealed record ParamProperty(RecordProperty Property, string OriginalName, string Location);
+
+    private static List<ParamProperty> CollectParamProperties(
         OpenApiOperation operation, SchemaMapper mapper, string fieldName, List<string> unsupported, string? queryAuthParameterName = null)
     {
         if (operation.Parameters is null or { Count: 0 })
         {
-            return null;
+            return [];
         }
 
-        var properties = new List<RecordProperty>();
+        var properties = new List<ParamProperty>();
         var metadataDropped = new List<string>();
 
         foreach (var param in operation.Parameters)
@@ -221,11 +244,18 @@ internal static class ContractBuilder
                 continue;
             }
 
+            var location = param.In switch
+            {
+                ParameterLocation.Path => "path",
+                ParameterLocation.Query => "query",
+                ParameterLocation.Header => "header",
+                _ => "cookie",
+            };
+
             // I13: the synthesized input record erases the in-location — header/cookie
             // params re-emit as query params. Loud per-param marker.
             if (param.In is ParameterLocation.Header or ParameterLocation.Cookie)
             {
-                var location = param.In is ParameterLocation.Header ? "header" : "cookie";
                 unsupported.Add($"param name={param.Name} in={location} reason=location-erased-to-query");
             }
 
@@ -244,10 +274,13 @@ internal static class ContractBuilder
                 csharpType += "?";
             }
 
-            properties.Add(new RecordProperty(
-                Naming.ToPascalCaseFromSegments(param.Name),
-                csharpType,
-                param.Required));
+            properties.Add(new ParamProperty(
+                new RecordProperty(
+                    Naming.ToPascalCaseFromSegments(param.Name),
+                    csharpType,
+                    param.Required),
+                param.Name,
+                location));
         }
 
         if (metadataDropped.Count > 0)
@@ -255,6 +288,20 @@ internal static class ContractBuilder
             unsupported.Add($"param-metadata params={string.Join(", ", metadataDropped)} reason=metadata-dropped");
         }
 
+        return properties;
+    }
+
+    private static string? SynthesizeParamInputType(
+        List<ParamProperty> paramProperties, SchemaMapper mapper, string fieldName)
+    {
+        return paramProperties.Count == 0
+            ? null
+            : SynthesizeInputRecord(paramProperties.Select(p => p.Property).ToList(), mapper, fieldName);
+    }
+
+    private static string? SynthesizeInputRecord(
+        List<RecordProperty> properties, SchemaMapper mapper, string fieldName)
+    {
         if (properties.Count == 0)
         {
             return null;
@@ -286,6 +333,73 @@ internal static class ContractBuilder
         // (e.g. two tags both synthesizing GetByIdInput, or a name-only collision with a
         // component schema) gets a disambiguated name.
         return mapper.AddExtraRecord(new GeneratedRecord(recordName, deduped));
+    }
+
+    /// <summary>
+    /// I14: an operation with BOTH a request body and path/query parameters. The contract
+    /// model has a single TInput, so the parameters merge with the body-derived record
+    /// into a synthesized {Field}Input. When the body type is not a plain record (primitive,
+    /// collection, generic, union wrapper, JsonElement, …) a merge is structurally
+    /// impossible — each parameter is then dropped with a loud named marker, never silently.
+    /// </summary>
+    private static string MergeParamsIntoInputType(
+        string httpMethod,
+        string bodyInputType,
+        List<ParamProperty> paramProperties,
+        SchemaMapper mapper,
+        string fieldName,
+        List<string> unsupported)
+    {
+        var bodyRecord = mapper.FindRecordByName(bodyInputType);
+
+        if (bodyRecord is null || bodyRecord.TypeParameters is { Count: > 0 })
+        {
+            foreach (var p in paramProperties)
+            {
+                unsupported.Add(
+                    $"param name={p.OriginalName} in={p.Location} reason=dropped-unmergeable-body body-type={bodyInputType}");
+            }
+
+            return bodyInputType;
+        }
+
+        var merged = paramProperties.Select(p => p.Property).ToList();
+        var paramsByName = paramProperties.ToDictionary(p => p.Property.Name, StringComparer.Ordinal);
+
+        foreach (var bodyProp in bodyRecord.Properties)
+        {
+            if (paramsByName.TryGetValue(bodyProp.Name, out var shadowing))
+            {
+                // Identical name+type collapses (params win — required for emit∘import
+                // stability: a previously merged path param re-merges onto itself).
+                // A differing body property is shadowed LOUDLY.
+                if (shadowing.Property.CSharpType != bodyProp.CSharpType)
+                {
+                    unsupported.Add(
+                        $"param name={shadowing.OriginalName} in={shadowing.Location} reason=body-property-shadowed-by-param body-type={bodyProp.CSharpType}");
+                }
+
+                continue;
+            }
+
+            merged.Add(bodyProp);
+        }
+
+        // On body-carrying methods the single TInput re-emits as the JSON body, so a
+        // merged query param's location is erased to body — marked per param (the
+        // path params keep working via the route template, which carries their names).
+        if (httpMethod is "post" or "put" or "patch")
+        {
+            foreach (var p in paramProperties)
+            {
+                if (p.Location is "query")
+                {
+                    unsupported.Add($"param name={p.OriginalName} in=query reason=location-erased-to-body");
+                }
+            }
+        }
+
+        return SynthesizeInputRecord(merged, mapper, fieldName) ?? bodyInputType;
     }
 
     /// <summary>
