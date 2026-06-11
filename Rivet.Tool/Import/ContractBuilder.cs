@@ -34,13 +34,21 @@ internal static class ContractBuilder
 
                 var httpMethod = method.Method.ToLowerInvariant();
                 var tag = ExtractTag(operation) ?? "Default";
+
+                // WP-1.1: prefer the explicit x-rivet-contract extension — the tag
+                // convention is lossy for unusual casing (underscores, acronyms) and
+                // breaks under hand-edits. Convention stays as the fallback.
+                var contractKey = GetOperationExtensionString(operation, "x-rivet-contract") is { } contractExt
+                    ? Naming.StripInvalidIdentifierChars(contractExt)
+                    : tag;
+
                 var field = BuildEndpointField(
                     httpMethod, route, operation, tag, globalSecurityScheme, mapper);
 
-                if (!groups.TryGetValue(tag, out var list))
+                if (!groups.TryGetValue(contractKey, out var list))
                 {
                     list = [];
-                    groups[tag] = list;
+                    groups[contractKey] = list;
                 }
 
                 list.Add(field);
@@ -62,7 +70,12 @@ internal static class ContractBuilder
         SchemaMapper mapper)
     {
         var operationId = operation.OperationId;
-        var fieldName = DeriveFieldName(operationId, httpMethod, route, tag);
+
+        // WP-1.1: prefer the explicit x-rivet-endpoint extension over the
+        // operationId/tag-prefix convention (lossy for unusual casing).
+        var fieldName = GetOperationExtensionString(operation, "x-rivet-endpoint") is { } endpointExt
+            ? Naming.StripInvalidIdentifierChars(endpointExt)
+            : DeriveFieldName(operationId, httpMethod, route, tag);
         var method = Naming.ToPascalCaseFromSegments(httpMethod);
         var summary = string.IsNullOrEmpty(operation.Summary) ? null : operation.Summary;
         var description = string.IsNullOrEmpty(operation.Description) ? null : operation.Description;
@@ -152,8 +165,12 @@ internal static class ContractBuilder
 
         if (schema is not null)
         {
-            // x-rivet-input-type preserves the original record name through round-trips
-            var context = GetExtensionString(schema, "x-rivet-input-type") ?? $"{fieldName}Request";
+            // x-rivet-input-type preserves the original record name through round-trips.
+            // The convention fallback is segment-pascalized: underscores in a component
+            // name are treated as delimiters on the next import, so a synthesized name
+            // containing them would mutate every loop.
+            var context = GetExtensionString(schema, "x-rivet-input-type")
+                ?? $"{Naming.ToPascalCaseFromSegments(fieldName)}Request";
             return (mapper.ResolveCSharpType(schema, context), isFormEncoded);
         }
 
@@ -221,7 +238,9 @@ internal static class ContractBuilder
             return null;
         }
 
-        var recordName = $"{fieldName}Input";
+        // Segment-pascalize: a synthesized component name containing underscores would be
+        // segment-split on the next import, mutating the name every emit∘import loop.
+        var recordName = $"{Naming.ToPascalCaseFromSegments(fieldName)}Input";
         var deduped = SchemaClassifier.DeduplicateProperties(properties);
 
         // Reuse a components/schemas record only when its SHAPE matches the synthesized input —
@@ -229,6 +248,16 @@ internal static class ContractBuilder
         if (mapper.HasMappedSchemaWithShape(recordName, deduped))
         {
             return recordName;
+        }
+
+        // GAP-2 (emit∘import idempotency): a previous import loop may already have
+        // disambiguated this synthesized input to a numbered variant (e.g. StreamInput2).
+        // Reuse the identically-shaped numbered component instead of minting a fresh
+        // suffix (StreamInput3, StreamInput4, …) on every loop.
+        var numberedVariant = mapper.FindNumberedSchemaWithShape(recordName, deduped);
+        if (numberedVariant is not null)
+        {
+            return numberedVariant;
         }
 
         // Dedup-with-shape-check (I3): a same-named synthetic input with a different shape
@@ -775,6 +804,21 @@ internal static class ContractBuilder
             && obj.TryGetPropertyValue("parameterName", out var nameNode))
         {
             return nameNode?.GetValue<string>();
+        }
+
+        return null;
+    }
+
+    private static string? GetOperationExtensionString(OpenApiOperation operation, string key)
+    {
+        if (operation.Extensions is null || !operation.Extensions.TryGetValue(key, out var ext))
+        {
+            return null;
+        }
+
+        if (ext is JsonNodeExtension jsonExt)
+        {
+            return jsonExt.Node?.GetValue<string>();
         }
 
         return null;

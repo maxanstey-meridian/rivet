@@ -449,6 +449,81 @@ public sealed class ControllerEndpointTests
     }
 
     [Fact]
+    public void Controller_Bare_ActionResultOfT_Implies_200_Success_Response()
+    {
+        // W2 (A-section silent-drop): ActionResult<T> with NO [ProducesResponseType] on a
+        // [RivetClient] controller used to produce zero responses — the emitter's void
+        // default then emitted 204 No Content and T was dropped entirely.
+        // ActionResult<T> implies a 200/T success unless an attribute says otherwise.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDetailDto(Guid Id, string Title, List<string> Labels);
+
+            [RivetClient]
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet("{id:guid}")]
+                public Task<ActionResult<TaskDetailDto>> Get(Guid id, CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        Assert.True(endpoint.ReturnType is TsType.TypeRef { Name: "TaskDetailDto" });
+
+        var response = Assert.Single(endpoint.Responses);
+        Assert.Equal(200, response.StatusCode);
+        Assert.True(response.DataType is TsType.TypeRef { Name: "TaskDetailDto" });
+    }
+
+    [Fact]
+    public void Controller_Bare_ActionResultOfT_With_Explicit_Produces_Keeps_Attribute_Status()
+    {
+        // The implied 200 must never override an explicit [ProducesResponseType] success.
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(Guid Id, string Name);
+
+            [RivetClient]
+            [Route("api/items")]
+            public sealed class ItemsController : ControllerBase
+            {
+                [HttpPost]
+                [ProducesResponseType(typeof(ItemDto), 201)]
+                public Task<ActionResult<ItemDto>> Create(CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var endpoint = Assert.Single(endpoints);
+        var response = Assert.Single(endpoint.Responses);
+        Assert.Equal(201, response.StatusCode);
+        Assert.True(response.DataType is TsType.TypeRef { Name: "ItemDto" });
+    }
+
+    [Fact]
     public void Controller_ResponseExampleAttribute_Without_Declared_Response_Is_Ignored()
     {
         var source = """

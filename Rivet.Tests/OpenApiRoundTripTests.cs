@@ -3406,4 +3406,140 @@ public sealed class OpenApiRoundTripTests
             op1.GetProperty("description").GetString(),
             op2.GetProperty("description").GetString());
     }
+
+    // ========== WP-1.1: x-rivet-contract / x-rivet-endpoint name fidelity ==========
+
+    /// <summary>
+    /// WP-1.1: a contract whose name/casing does NOT survive the operationId/tag
+    /// convention (underscores in both the contract and field names would be
+    /// segment-split by ToPascalCaseFromSegments) round-trips losslessly via the
+    /// explicit x-rivet-contract / x-rivet-endpoint operation extensions, asserted
+    /// through the self-loop.
+    /// </summary>
+    [Fact]
+    public void UnconventionalCasing_RoundTrips_Losslessly_Via_XRivet_Extensions()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Id, string Name);
+
+            [RivetContract]
+            public static class Legacy_ItemsContract
+            {
+                public static readonly Define by_id =
+                    Define.Get<ItemDto>("/api/legacy-items/{id}");
+            }
+            """;
+
+        // Step 0: original C# → OpenAPI
+        var comp0 = CompilationHelper.CreateCompilation(source);
+        var (disc0, wlk0) = CompilationHelper.DiscoverAndWalk(comp0);
+        var eps0 = CompilationHelper.WalkContracts(comp0, disc0, wlk0);
+        var json0 = OpenApiEmitter.Emit(eps0, wlk0.Definitions, wlk0.Brands, wlk0.Enums, null);
+
+        // The emitted operation carries the explicit identity extensions
+        var doc0 = JsonSerializer.Deserialize<JsonElement>(json0);
+        var op0 = doc0.GetProperty("paths").GetProperty("/api/legacy-items/{id}").GetProperty("get");
+        Assert.Equal("legacy_Items", op0.GetProperty("x-rivet-contract").GetString());
+        Assert.Equal("by_id", op0.GetProperty("x-rivet-endpoint").GetString());
+
+        // Round 1: import → compile → walk → emit
+        var result1 = CompilationHelper.Import(json0);
+        var comp1 = CompilationHelper.CompileImportResult(result1);
+        var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
+        var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
+        var json1 = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, null);
+
+        // The generated contract preserves the original class name and field casing —
+        // the convention alone would have produced LegacyItemsContract / ById.
+        Assert.Contains(result1.Files, f => f.FileName.EndsWith("Legacy_ItemsContract.cs"));
+        var contractContent = CompilationHelper.FindFile(result1, "Legacy_ItemsContract.cs");
+        Assert.Contains("By_id", contractContent);
+        Assert.DoesNotContain("LegacyItemsContract", contractContent);
+
+        // The walked model is identical to the original walk
+        var ep1 = Assert.Single(eps1);
+        Assert.Equal("legacy_Items", ep1.ControllerName);
+        Assert.Equal("by_id", ep1.Name);
+
+        // Round 2: the loop is a fixed point including the extensions
+        var result2 = CompilationHelper.Import(json1);
+        var comp2 = CompilationHelper.CompileImportResult(result2);
+        var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(comp2);
+        var eps2 = CompilationHelper.WalkContracts(comp2, disc2, wlk2);
+        var json2 = OpenApiEmitter.Emit(eps2, wlk2.Definitions, wlk2.Brands, wlk2.Enums, null);
+
+        Assert.True(
+            JsonNode.DeepEquals(JsonNode.Parse(json1), JsonNode.Parse(json2)),
+            $"emit∘import is not a fixed point.\n--- json1 ---\n{json1}\n--- json2 ---\n{json2}");
+
+        // And the identity survives both loops verbatim
+        var doc2 = JsonSerializer.Deserialize<JsonElement>(json2);
+        var op2 = doc2.GetProperty("paths").GetProperty("/api/legacy-items/{id}").GetProperty("get");
+        Assert.Equal("legacy_Items", op2.GetProperty("x-rivet-contract").GetString());
+        Assert.Equal("by_id", op2.GetProperty("x-rivet-endpoint").GetString());
+        Assert.Equal("legacy_Items_by_id", op2.GetProperty("operationId").GetString());
+    }
+
+    /// <summary>
+    /// WP-1.1 (input records): an inline multipart request-body schema carries
+    /// x-rivet-input-type, and the importer prefers it over the {fieldName}Request
+    /// naming convention — even when the operationId has been hand-edited.
+    /// </summary>
+    [Fact]
+    public void Inline_Multipart_Body_Pins_Input_Record_Name_Via_XRivet_InputType()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadResult(Guid Id);
+
+            [RivetClient]
+            [Route("api/files")]
+            public sealed class FilesController : ControllerBase
+            {
+                [HttpPost]
+                [ProducesResponseType(typeof(UploadResult), 201)]
+                public Task<IActionResult> Attach(IFormFile file, CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var comp0 = CompilationHelper.CreateCompilation(source);
+        var (disc0, wlk0) = CompilationHelper.DiscoverAndWalk(comp0);
+        var eps0 = CompilationHelper.WalkEndpoints(comp0, disc0, wlk0);
+        var json0 = OpenApiEmitter.Emit(eps0, wlk0.Definitions, wlk0.Brands, wlk0.Enums, null);
+
+        // The anonymous multipart schema is stamped with the input-record name
+        var doc0 = JsonSerializer.Deserialize<JsonElement>(json0);
+        var schema0 = doc0.GetProperty("paths").GetProperty("/api/files").GetProperty("post")
+            .GetProperty("requestBody").GetProperty("content")
+            .GetProperty("multipart/form-data").GetProperty("schema");
+        Assert.Equal("AttachRequest", schema0.GetProperty("x-rivet-input-type").GetString());
+
+        // Hand-edit the operationId — the convention-derived name would now change,
+        // but the extension pins the synthesized record name.
+        var mutated = JsonNode.Parse(json0)!.AsObject();
+        var op = mutated["paths"]!["/api/files"]!["post"]!.AsObject();
+        op["operationId"] = "files_uploadSomething";
+        op.Remove("x-rivet-endpoint");
+
+        var result = CompilationHelper.Import(mutated.ToJsonString());
+
+        Assert.Contains(result.Files, f => f.FileName.EndsWith("Types/AttachRequest.cs"));
+        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("UploadSomethingRequest"));
+        CompilationHelper.CompileImportResult(result);
+    }
 }

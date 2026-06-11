@@ -23,9 +23,9 @@ namespace Rivet.Tests;
 /// Tooling is vendored in Rivet.Tests/js (see its README) — runs offline once
 /// <c>npm install</c> has been done there.
 ///
-/// Phase 0 reality: rows that fail against the current emitter are marked
-/// <c>Skip="CONFORMANCE-GAP: …"</c> and catalogued in FABLE_PHASE0.md — the
-/// Phase 1 worklist. Un-skip a row to reproduce its gap.
+/// Phase 0 marked failing rows <c>Skip="CONFORMANCE-GAP: …"</c> (catalogued in
+/// FABLE_PHASE0.md). As of Phase 1 (WP-1.1) all gaps are fixed and every row runs
+/// un-skipped — any future failure here is a regression, not a known gap.
 /// </summary>
 public sealed class OpenApiConformanceTests : IDisposable
 {
@@ -146,8 +146,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("contractapi-sample")]
     [InlineData("contract-sample-json")]
     [InlineData("contract-tagged-union-json")]
-    [InlineData("php-golden-contract-json",
-        Skip = "CONFORMANCE-GAP: dangling $ref Collection_ProductDto — generic instantiation whose template type is absent from definitions emits a $ref but no component (see FABLE_PHASE0.md)")]
+    [InlineData("php-golden-contract-json")]
     public void Spectral_Lint_Has_Zero_Errors(string fixtureName)
     {
         var specPath = WriteSpec(fixtureName);
@@ -198,8 +197,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("contractapi-sample")]
     [InlineData("contract-sample-json")]
     [InlineData("contract-tagged-union-json")]
-    [InlineData("php-golden-contract-json",
-        Skip = "CONFORMANCE-GAP: openapi-typescript cannot bundle — same dangling Collection_ProductDto $ref as the spectral row (see FABLE_PHASE0.md)")]
+    [InlineData("php-golden-contract-json")]
     public void OpenApiTypescript_Output_Compiles_Under_TscStrict(string fixtureName)
     {
         var specPath = WriteSpec(fixtureName);
@@ -237,8 +235,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("controller-annotations")]
     [InlineData("typed-results")]
     [InlineData("mixed-contracts-controllers")]
-    [InlineData("file-endpoints-query-auth",
-        Skip = "CONFORMANCE-GAP: synthesized param-input records mint a fresh numeric suffix every import loop (StreamInput2 -> StreamInput3) — I3 shape-mismatch dedup never reuses an identically-shaped numbered schema (see FABLE_PHASE0.md)")]
+    [InlineData("file-endpoints-query-auth")]
     [InlineData("validation-metadata")]
     [InlineData("contractapi-sample")]
     public void SelfLoop_Emit_Import_Emit_Is_Stable(string fixtureName)

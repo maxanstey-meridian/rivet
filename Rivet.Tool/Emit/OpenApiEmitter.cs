@@ -87,8 +87,24 @@ public static class OpenApiEmitter
                 ["title"] = "API",
                 ["version"] = "1.0.0",
             },
-            ["paths"] = paths,
         };
+
+        // W4: operations carry tags — declare them in the global tags array
+        // (operation-tag-defined; docs-UI consumers use it for grouping/ordering).
+        var tags = endpoints
+            .Select(ep => UpperFirst(ep.ControllerName))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(tag => tag, StringComparer.Ordinal)
+            .ToList();
+
+        if (tags.Count > 0)
+        {
+            doc["tags"] = tags
+                .Select(object (tag) => new Dictionary<string, object> { ["name"] = tag })
+                .ToList();
+        }
+
+        doc["paths"] = paths;
 
         var components = new Dictionary<string, object>();
 
@@ -102,17 +118,47 @@ public static class OpenApiEmitter
             components["examples"] = examples;
         }
 
+        var securitySchemes = new Dictionary<string, object>();
+
         if (security is not null)
         {
-            components["securitySchemes"] = new Dictionary<string, object>
-            {
-                [security.SchemeName] = security.SchemeDefinition,
-            };
+            securitySchemes[security.SchemeName] = security.SchemeDefinition;
 
             doc["security"] = new List<object>
             {
                 new Dictionary<string, object> { [security.SchemeName] = Array.Empty<string>() },
             };
+        }
+
+        // W1: every scheme referenced by an endpoint-level .Secure(name) override must have a
+        // matching securitySchemes component — a security requirement naming an undefined
+        // scheme is rejected by consumers (oas3-operation-security-defined).
+        var endpointSchemes = endpoints
+            .Select(ep => ep.Security?.Scheme)
+            .Where(scheme => scheme is not null)
+            .Distinct()
+            .OrderBy(scheme => scheme, StringComparer.Ordinal);
+
+        foreach (var scheme in endpointSchemes)
+        {
+            if (securitySchemes.ContainsKey(scheme!))
+            {
+                continue;
+            }
+
+            Console.Error.WriteLine(
+                $"warning: security scheme '{scheme}' is referenced by an endpoint's .Secure(\"{scheme}\") but has no definition — emitting a default bearer securityScheme component");
+
+            securitySchemes[scheme!] = new Dictionary<string, object>
+            {
+                ["type"] = "http",
+                ["scheme"] = "bearer",
+            };
+        }
+
+        if (securitySchemes.Count > 0)
+        {
+            components["securitySchemes"] = securitySchemes;
         }
 
         if (components.Count > 0)
@@ -160,6 +206,11 @@ public static class OpenApiEmitter
         {
             ["operationId"] = $"{ep.ControllerName}_{ep.Name}",
             ["tags"] = new List<string> { UpperFirst(ep.ControllerName) },
+            // WP-1.1: carry contract/endpoint identity explicitly — the operationId/tag
+            // convention is lossy for unusual casing (and breaks under hand-edits). The
+            // importer prefers these extensions, with the convention as fallback.
+            ["x-rivet-contract"] = ep.ControllerName,
+            ["x-rivet-endpoint"] = ep.Name,
         };
 
         if (ep.Summary is not null)
@@ -290,6 +341,11 @@ public static class OpenApiEmitter
                 {
                     multipartSchema["required"] = requiredFields;
                 }
+
+                // WP-1.1: pin the record name the importer synthesizes for this inline
+                // body — without the extension it falls back to the operationId-derived
+                // {fieldName}Request convention, which breaks under hand-edited ids.
+                multipartSchema["x-rivet-input-type"] = SynthesizedInputTypeName(ep);
             }
 
             operation["requestBody"] = new Dictionary<string, object>
@@ -319,7 +375,7 @@ public static class OpenApiEmitter
                     {
                         [bodyContentType] = new Dictionary<string, object>
                         {
-                            ["schema"] = MapTsTypeToJsonSchema(bodyParam.Type),
+                            ["schema"] = BuildBodySchema(bodyParam.Type, ep),
                         },
                     },
                     ep.RequestExamples)
@@ -338,7 +394,7 @@ public static class OpenApiEmitter
                     {
                         [requestTypeContentType] = new Dictionary<string, object>
                         {
-                            ["schema"] = MapTsTypeToJsonSchema(ep.RequestType),
+                            ["schema"] = BuildBodySchema(ep.RequestType, ep),
                         },
                     },
                     ep.RequestExamples)
@@ -427,6 +483,31 @@ public static class OpenApiEmitter
         }
 
         return operation;
+    }
+
+    /// <summary>
+    /// WP-1.1: the record name the importer should synthesize for an inline request-body
+    /// schema (emitted as <c>x-rivet-input-type</c>). Mirrors the importer's
+    /// <c>{fieldName}Request</c> convention but pins it explicitly, so the name survives
+    /// operationId/tag hand-edits.
+    /// </summary>
+    private static string SynthesizedInputTypeName(TsEndpointDefinition ep)
+        => ep.InputTypeName ?? Naming.ToPascalCaseFromSegments(ep.Name) + "Request";
+
+    /// <summary>
+    /// Maps a request-body type to its schema; inline object bodies get
+    /// <c>x-rivet-input-type</c> so the importer synthesizes the same record name
+    /// every loop ($ref bodies carry their name in the reference itself).
+    /// </summary>
+    private static Dictionary<string, object> BuildBodySchema(TsType bodyType, TsEndpointDefinition ep)
+    {
+        var schema = MapTsTypeToJsonSchema(bodyType);
+        if (bodyType is TsType.InlineObject && !schema.ContainsKey("$ref"))
+        {
+            schema["x-rivet-input-type"] = SynthesizedInputTypeName(ep);
+        }
+
+        return schema;
     }
 
     private static Dictionary<string, object> BuildComponentExamples(IReadOnlyList<TsEndpointDefinition> endpoints)
@@ -937,6 +1018,19 @@ public static class OpenApiEmitter
         {
             if (!definitions.TryGetValue(generic.Name, out var genericDef))
             {
+                // E6: a generic instantiation whose template is absent from definitions used
+                // to emit a $ref with no matching component — a dangling reference every
+                // consumer rejects (GAP-1). Never emit a dangling $ref: warn loudly and
+                // synthesize a valid free-form fallback component under the $ref'd name.
+                Console.Error.WriteLine(
+                    $"warning: generic template '{generic.Name}' (instantiated as '{monoName}') is not present in the contract's type definitions — emitting a free-form object schema; fix the upstream producer to include the template definition");
+
+                schemas[monoName] = new Dictionary<string, object>
+                {
+                    ["type"] = "object",
+                    ["description"] =
+                        $"Unresolved generic instantiation of '{generic.Name}' — template definition missing from source contract",
+                };
                 continue;
             }
 

@@ -71,6 +71,35 @@ internal sealed class SchemaMapper
     }
 
     /// <summary>
+    /// Finds an existing numbered components/schemas variant (<c>{baseName}2</c>,
+    /// <c>{baseName}3</c>, …) whose shape matches exactly, lowest suffix first.
+    /// A prior emit∘import loop may already have disambiguated a synthesized input to a
+    /// numbered name — reusing it (instead of minting a fresh suffix every loop) keeps
+    /// emit∘import a fixed point (GAP-2, I3 residual). Null when nothing matches.
+    /// </summary>
+    public string? FindNumberedSchemaWithShape(string baseName, IReadOnlyList<RecordProperty> properties)
+    {
+        return _ctx.MappedComponentRecords.Keys
+            .Select(name => (Name: name, Suffix: ParseNumberedSuffix(name, baseName)))
+            .Where(entry => entry.Suffix is not null)
+            .OrderBy(entry => entry.Suffix!.Value)
+            .Where(entry => HasMappedSchemaWithShape(entry.Name, properties))
+            .Select(entry => entry.Name)
+            .FirstOrDefault();
+    }
+
+    private static int? ParseNumberedSuffix(string name, string baseName)
+    {
+        if (name.Length <= baseName.Length
+            || !name.StartsWith(baseName, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return int.TryParse(name.AsSpan(baseName.Length), out var suffix) ? suffix : null;
+    }
+
+    /// <summary>
     /// Walk #/components/schemas and return C# type representations.
     /// </summary>
     public SchemaMapResult MapSchemas(IDictionary<string, IOpenApiSchema> schemas)

@@ -3009,6 +3009,80 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Param_Input_Record_Reuses_Identically_Shaped_Numbered_Variant()
+    {
+        // GAP-2 (I3 residual): the spec a previous emit∘import loop produced already
+        // contains both the colliding component (ListItemsInput {page, limit}) and the
+        // disambiguated synthesized input (ListItemsInput2 {page}). Re-importing must
+        // reuse ListItemsInput2 — minting ListItemsInput3 every loop makes emit∘import
+        // grow a fresh numbered record unboundedly.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ListItemsInput": {
+                    "type": "object",
+                    "properties": {
+                        "page": { "type": "integer" },
+                        "limit": { "type": "integer" }
+                    },
+                    "required": ["page", "limit"]
+                },
+                "ListItemsInput2": {
+                    "type": "object",
+                    "properties": {
+                        "page": { "type": "integer" }
+                    },
+                    "required": ["page"]
+                },
+                "ItemDto": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" }
+                    },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "ListItems",
+                        "parameters": [
+                            {
+                                "name": "page",
+                                "in": "query",
+                                "required": true,
+                                "schema": { "type": "integer" }
+                            }
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "array",
+                                            "items": { "$ref": "#/components/schemas/ItemDto" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // No third variant is minted — the identically-shaped numbered component is reused.
+        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("ListItemsInput3"));
+
+        var contractContent = CompilationHelper.FindFile(result, "DefaultContract.cs");
+        Assert.Contains("ListItemsInput2", contractContent);
+
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
     public void Two_Tags_Synthesizing_Same_Input_Name_With_Different_Shapes_Get_Distinct_Types()
     {
         // I3 main case: members_getById (string memberId) and orders_getById (long orderNumber)

@@ -1503,6 +1503,95 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void Security_PerEndpoint_Secure_Emits_SecurityScheme_Component()
+    {
+        // W1: a .Secure("admin") override references the scheme by name — without a matching
+        // components.securitySchemes entry the requirement is rejected by consumers
+        // (oas3-operation-security-defined). No definition is available for endpoint-level
+        // names, so a default bearer scheme is synthesized with a loud diagnostic.
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class AdminContract
+            {
+                public static readonly Define DeleteAll =
+                    Define.Delete("/api/admin/tasks")
+                        .Status(204)
+                        .Secure("admin");
+            }
+            """;
+
+        var security = new SecurityConfig("bearer", new Dictionary<string, object>
+        {
+            ["type"] = "http",
+            ["scheme"] = "bearer",
+        });
+
+        JsonDocument? doc = null;
+        var stderr = CompilationHelper.CaptureStdErr(() => doc = EmitOpenApi(source, security));
+        using var docGuard = doc;
+
+        Assert.Contains("security scheme 'admin'", stderr);
+
+        var schemes = doc!.RootElement
+            .GetProperty("components").GetProperty("securitySchemes");
+
+        // The CLI-level scheme is still present...
+        Assert.True(schemes.TryGetProperty("bearer", out _));
+
+        // ...and the endpoint-level scheme now has a definition.
+        var admin = schemes.GetProperty("admin");
+        Assert.Equal("http", admin.GetProperty("type").GetString());
+        Assert.Equal("bearer", admin.GetProperty("scheme").GetString());
+    }
+
+    [Fact]
+    public void Security_PerEndpoint_Secure_Matching_Cli_Scheme_Is_Not_Duplicated()
+    {
+        // .Secure("bearer") referencing the CLI-defined scheme must reuse the CLI
+        // definition — no synthesis, no diagnostic.
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class AdminContract
+            {
+                public static readonly Define DeleteAll =
+                    Define.Delete("/api/admin/tasks")
+                        .Status(204)
+                        .Secure("bearer");
+            }
+            """;
+
+        var security = new SecurityConfig("bearer", new Dictionary<string, object>
+        {
+            ["type"] = "http",
+            ["scheme"] = "bearer",
+        });
+
+        JsonDocument? doc = null;
+        var stderr = CompilationHelper.CaptureStdErr(() => doc = EmitOpenApi(source, security));
+        using var docGuard = doc;
+
+        // (CaptureStdErr may see unrelated warnings from parallel tests — assert only
+        // that no synthesis happened for THIS scheme.)
+        Assert.DoesNotContain("security scheme 'bearer'", stderr);
+
+        var schemes = doc!.RootElement
+            .GetProperty("components").GetProperty("securitySchemes");
+        Assert.Single(schemes.EnumerateObject());
+        Assert.True(schemes.TryGetProperty("bearer", out _));
+    }
+
+    [Fact]
     public void No_Security_Flag_No_Security_Anywhere()
     {
         var source = """
@@ -3050,5 +3139,114 @@ public sealed class OpenApiEmitterTests
         var mapping = discriminator.GetProperty("mapping");
         Assert.Equal("#/components/schemas/DisplayState_Hidden", mapping.GetProperty("hidden").GetString());
         Assert.Equal("#/components/schemas/DisplayState_Shown", mapping.GetProperty("shown").GetString());
+    }
+
+    [Fact]
+    public void Global_Tags_Array_Declares_All_Operation_Tags()
+    {
+        // W4: operations reference tags — the global tags array must declare them
+        // (operation-tag-defined; docs-UI consumers group/order by it).
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}");
+            }
+
+            [RivetContract]
+            public static class AdminContract
+            {
+                public static readonly Define Purge =
+                    Define.Delete("/api/admin/cache").Status(204);
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var tags = doc.RootElement.GetProperty("tags");
+
+        var names = tags.EnumerateArray()
+            .Select(t => t.GetProperty("name").GetString())
+            .ToList();
+
+        Assert.Equal(["Admin", "Tasks"], names);
+    }
+
+    [Fact]
+    public void Generic_Instance_With_Missing_Template_Emits_Fallback_Component_And_Diagnostic()
+    {
+        // GAP-1 / E6 family: a generic instantiation whose template is absent from the
+        // contract's type definitions (the rivet-php golden shape) used to emit
+        // $ref: #/components/schemas/Collection_ProductDto with no matching component
+        // and no diagnostic — a dangling reference every consumer rejects.
+        const string contractJson = """
+            {
+                "types": [
+                    {
+                        "name": "ProductDto",
+                        "typeParameters": [],
+                        "properties": [
+                            { "name": "id", "type": { "kind": "primitive", "type": "number", "format": "int32" }, "optional": false }
+                        ]
+                    }
+                ],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "paginated",
+                        "httpMethod": "GET",
+                        "routeTemplate": "/products/paginated",
+                        "controllerName": "product",
+                        "params": [],
+                        "returnType": {
+                            "kind": "generic",
+                            "name": "Collection",
+                            "typeArgs": [ { "kind": "ref", "name": "ProductDto" } ]
+                        },
+                        "responses": [
+                            {
+                                "statusCode": 200,
+                                "dataType": {
+                                    "kind": "generic",
+                                    "name": "Collection",
+                                    "typeArgs": [ { "kind": "ref", "name": "ProductDto" } ]
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        var spec = string.Empty;
+        var stderr = CompilationHelper.CaptureStdErr(
+            () => spec = CompilationHelper.EmitOpenApiFromJson(contractJson));
+
+        // 1. Loud, named diagnostic — never a silent drop.
+        Assert.Contains("generic template 'Collection'", stderr);
+        Assert.Contains("Collection_ProductDto", stderr);
+
+        using var doc = JsonDocument.Parse(spec);
+
+        // 2. The operation still references the instantiation by name...
+        var responseSchema = doc.RootElement
+            .GetProperty("paths").GetProperty("/products/paginated").GetProperty("get")
+            .GetProperty("responses").GetProperty("200")
+            .GetProperty("content").GetProperty("application/json").GetProperty("schema");
+        Assert.Equal(
+            "#/components/schemas/Collection_ProductDto",
+            responseSchema.GetProperty("$ref").GetString());
+
+        // 3. ...and the $ref target exists as a valid (free-form object) fallback component.
+        var fallback = doc.RootElement
+            .GetProperty("components").GetProperty("schemas").GetProperty("Collection_ProductDto");
+        Assert.Equal("object", fallback.GetProperty("type").GetString());
     }
 }

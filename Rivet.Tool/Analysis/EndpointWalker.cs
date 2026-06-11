@@ -675,6 +675,17 @@ public static class EndpointWalker
                         : null;
                     responses.Add(new TsResponseType(mapping.StatusCode, tsType));
                 }
+
+                // W2: a bare ActionResult<T> (no [ProducesResponseType], not a typed result)
+                // implies a 200/T success response. Producing no response here used to let
+                // the emitter's void default kick in — 204 No Content, with T silently dropped.
+                if (responses.Count == 0
+                    && SymbolEqualityComparer.Default.Equals(
+                        namedType.OriginalDefinition, wkt.ActionResultOfT))
+                {
+                    responses.Add(new TsResponseType(
+                        200, typeWalker.MapType(namedType.TypeArguments[0])));
+                }
             }
         }
 

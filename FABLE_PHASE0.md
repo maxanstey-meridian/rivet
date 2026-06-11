@@ -46,18 +46,21 @@ self-loop's first emit is already the same code path).
 | controller-annotations | P | P | P |
 | typed-results | P | P | P |
 | mixed-contracts-controllers | P | P | P |
-| file-endpoints-query-auth | P | P | **F** (GAP-2) |
+| file-endpoints-query-auth | P | P | ~~**F** (GAP-2)~~ P |
 | validation-metadata | P | P | P |
 | contractapi-sample | P | P | P |
 | contract-sample-json | P | P | – |
 | contract-tagged-union-json | P | P | – |
-| php-golden-contract-json | **F** (GAP-1) | **F** (GAP-1) | – |
+| php-golden-contract-json | ~~**F** (GAP-1)~~ P | ~~**F** (GAP-1)~~ P | – |
 
-**Counts:** lint 9/10, consume 9/10, self-loop 6/7 (+3 n/a). 24 passing rows, 3
-skipped gap rows. Headline: the emitter is much closer to conformance-green than
-feared — the maximal contract, the sample project, controllers, typed results,
-validation metadata and tagged unions all pass every applicable check today. Both
-hard failures cluster in two code paths.
+**Counts (original, 2026-06-11 a.m.):** lint 9/10, consume 9/10, self-loop 6/7
+(+3 n/a). 24 passing rows, 3 skipped gap rows. Headline: the emitter is much closer
+to conformance-green than feared — the maximal contract, the sample project,
+controllers, typed results, validation metadata and tagged unions all pass every
+applicable check today. Both hard failures cluster in two code paths.
+
+**Counts (after Phase 1 WP-1.1 fixes, 2026-06-11):** lint 10/10, consume 10/10,
+self-loop 7/7 (+3 n/a). 27/27 rows pass; zero `CONFORMANCE-GAP` skips remain.
 
 ## GAP-1 — dangling `$ref` for generic instantiation with missing template (php-golden, checks 1+2)
 
@@ -92,6 +95,13 @@ synthesis walks `definitions` — no template, no component, no diagnostic.
 - **Size:** small (≤ half-day incl. test): one guard in the generic-mono-instance
   path + a stderr/diagnostic assertion. Fixing the PHP reflector itself is separate
   (PHP-section, open question 1 in FABLE_REWRITE).
+- **Resolution (2026-06-11):** fixed in `OpenApiEmitter.BuildSchemas` (the
+  generic-instance loop): a missing template now emits a loud named stderr
+  diagnostic and synthesizes a valid free-form object fallback component under the
+  $ref'd name — never a dangling `$ref`. Test:
+  `OpenApiEmitterTests.Generic_Instance_With_Missing_Template_Emits_Fallback_Component_And_Diagnostic`.
+  Both `php-golden-contract-json` rows un-skipped and green. The PHP golden fixture
+  was intentionally left malformed — it now exercises the guard.
 
 ## GAP-2 — emit∘import not a fixed point: synthesized input-record suffix grows every loop (file-endpoints-query-auth, check 3)
 
@@ -118,6 +128,16 @@ unboundedly.
   (`StreamingStreamInput`). Must keep the I.A-14 collision test green.
 - **Size:** small-medium (~half-day): localized to importer naming/reuse, plus
   un-skip the self-loop row.
+- **Resolution (2026-06-11):** fixed in `ContractBuilder.ResolveParamInputType` +
+  new `SchemaMapper.FindNumberedSchemaWithShape`: before minting a fresh suffix,
+  the importer now scans existing numbered component variants
+  (`{base}2`, `{base}3`, …) and reuses the lowest-suffixed one whose shape matches
+  exactly. Additionally, synthesized record names are segment-pascalized
+  (`Naming.ToPascalCaseFromSegments`) so names containing underscores don't mutate
+  on the next loop. Tests:
+  `OpenApiImporterTests.Param_Input_Record_Reuses_Identically_Shaped_Numbered_Variant`
+  (I.A-14 collision tests stay green); `file-endpoints-query-auth` self-loop row
+  un-skipped and green.
 
 ## Non-gate findings (spectral warnings + spec inspection)
 
@@ -132,6 +152,13 @@ Reported by the gate but not failing it; each is a candidate Phase 1 line item.
   `SecurityMetadata.Scheme`. Fix: synthesize a scheme entry per distinct
   `.Secure(...)` name (size: small). This is one warning away from being a GAP —
   recommend promoting to error in Phase 1.
+  - **Resolution (2026-06-11):** fixed in `OpenApiEmitter.EmitCore`: every scheme
+    referenced by an endpoint-level `.Secure(name)` without a definition now gets a
+    synthesized default bearer `securitySchemes` component plus a loud stderr
+    diagnostic (no definition source exists for endpoint-level names). Tests:
+    `OpenApiEmitterTests.Security_PerEndpoint_Secure_Emits_SecurityScheme_Component`,
+    `…_Matching_Cli_Scheme_Is_Not_Duplicated`. Zero
+    `oas3-operation-security-defined` findings remain across the corpus.
 - **W2 — `ActionResult<T>` without `[ProducesResponseType]` on a `[RivetClient]`
   controller loses `T` entirely.** Surfaced via `oas3-unused-component
   TaskDetailDto` on `controller-annotations`: `GET /api/tasks/{id}` (returns
@@ -140,12 +167,25 @@ Reported by the gate but not failing it; each is a candidate Phase 1 line item.
   is present (ControllerEndpointTests:1011) — the no-attribute path drops the
   success type, then the void default kicks in. A-section silent-drop class (A8/A11
   adjacent). Fix in `EndpointWalker` response synthesis (size: small-medium).
+  - **Resolution (2026-06-11):** fixed in `EndpointWalker.ExtractAllResponseTypes`:
+    a bare `ActionResult<T>` (no attributes, not a typed result) now implies a
+    200/T success response; explicit `[ProducesResponseType]` still wins. Tests
+    (test-first):
+    `ControllerEndpointTests.Controller_Bare_ActionResultOfT_Implies_200_Success_Response`,
+    `…_With_Explicit_Produces_Keeps_Attribute_Status`. The
+    `oas3-unused-component TaskDetailDto` warning on `controller-annotations` is gone.
 - **W3 — GET-input record components left unused.** `oas3-unused-component` on
   `SearchInput` (maximal) and `StreamInput` (file-endpoints): GET inputs are
   flattened into query parameters (correct), but the input record is still emitted
   as a component. Cosmetic bloat; fix = don't emit components only referenced as
   flattened inputs, or reference them via `x-rivet-input` (size: small; interacts
   with the Phase 1 `x-rivet-*` design).
+  - **Resolution (2026-06-11): accepted as-is.** Still exactly the same two
+    warnings (`SearchInput` on maximal, `StreamInput` on file-endpoints). The input
+    record component is what makes the synthesized-input reuse (GAP-2 fix) and the
+    typed client surface work through the self-loop — suppressing it would trade a
+    cosmetic warning for real round-trip loss. Revisit with the 3.1 migration
+    (WP-1.4) if at all.
 - **W4 — style-tier warnings** (every fixture): `info-contact`, `info-description`,
   `oas3-api-servers`, `operation-description` (where authors omitted
   `.Description`), `operation-tag-defined` (tags used but no global `tags` array —
@@ -153,6 +193,25 @@ Reported by the gate but not failing it; each is a candidate Phase 1 line item.
   worth doing for docs-UI consumers). Counts across the corpus:
   `operation-tag-defined` 54, `operation-description` 42, `oas3-api-servers` 11,
   `info-description` 11, `info-contact` 11.
+  - **Resolution (2026-06-11):** `operation-tag-defined` fixed —
+    `OpenApiEmitter.EmitCore` now emits the global `tags` array from the distinct
+    operation tags (test: `OpenApiEmitterTests.Global_Tags_Array_Declares_All_Operation_Tags`);
+    0 findings remain. The rest are accepted style-tier findings: `operation-description`
+    (36) is author-omitted `.Description`, and `info-contact`/`info-description`/
+    `oas3-api-servers` (10 each) reflect the fixed info block / no servers list —
+    candidates for CLI flags later, not emitter defects.
+
+## Phase 1 re-run (2026-06-11, after the fixes above)
+
+Full corpus spectral findings: **0 errors**; warnings reduced to
+`operation-description` 36, `info-contact` 10, `info-description` 10,
+`oas3-api-servers` 10, `oas3-unused-component` 2 (the accepted W3 pair).
+`operation-tag-defined` and `oas3-operation-security-defined` are gone.
+Alongside the gap fixes, WP-1.1's `x-rivet-input-type` emission and
+`x-rivet-contract`/`x-rivet-endpoint` operation extensions landed (importer prefers
+the extensions, convention stays as fallback; round-trip pinned by
+`OpenApiRoundTripTests.UnconventionalCasing_RoundTrips_Losslessly_Via_XRivet_Extensions`
+and `…Inline_Multipart_Body_Pins_Input_Record_Name_Via_XRivet_InputType`).
 
 ## Where the Phase 1 worklist points first
 
@@ -169,6 +228,10 @@ Reported by the gate but not failing it; each is a candidate Phase 1 line item.
 
 ## Suite status
 
-`OpenApiConformanceTests`: 27 rows — 24 pass, 3 skipped with
-`Skip="CONFORMANCE-GAP: …"` (individually un-skippable repros for GAP-1 ×2 and
+Original (2026-06-11 a.m.): `OpenApiConformanceTests`: 27 rows — 24 pass, 3 skipped
+with `Skip="CONFORMANCE-GAP: …"` (individually un-skippable repros for GAP-1 ×2 and
 GAP-2 ×1). Full suite green.
+
+**After Phase 1 WP-1.1 fixes (2026-06-11):** all 27 conformance rows pass, zero
+skips. Full suite: 1215 tests, 100% green (9 new tests covering GAP-1, GAP-2, W1,
+W2, W4 and the WP-1.1 extensions).
