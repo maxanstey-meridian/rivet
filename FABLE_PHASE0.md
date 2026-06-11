@@ -309,3 +309,126 @@ Score so far: (a) hurts mildly (mechanical, greppable), (b) does not hurt on the
 sample, (c) hurts for queryAuth/file/brand consumers. Per the plan's "≥2 of
 (a)–(c)" bar, the wrapper question hinges on whether WP-2.3's real app uses
 queryAuth/file endpoints and multi-error-status operations in anger.
+
+## Golden migration (WP-2.3)
+
+2026-06-11. `~/Sites/golden` migrated from the generated-client pipeline to
+v2 (`openapi.json` → `openapi-typescript` → `openapi-fetch`) on branch
+`rivet-v2`, uncommitted, for review. `apps/api-ts` does not consume
+`@golden/contracts`; the UI is the only consumer.
+
+**Shape:** `task generate` now runs the v2 tool (local-checkout `dotnet run`,
+marked TEMPORARY in the Taskfile until v2 publishes) then
+`openapi-typescript → generated/schema.d.ts`. Old `generated/{client,types,rivet.ts}`
+(6 files, ~390 lines) deleted; replaced by `generated/{openapi.json,schema.d.ts}`
+plus a 34-line hand-written facade at `packages/contracts/src/index.ts`
+(mirrors rivet-ts's client-package-emitter: `paths`/`components` re-export,
+`components["schemas"]` DTO aliases for `NoteDto` et al., `createClient` +
+`configureRivet`/`client` pair). Package exports collapsed from
+`./client|./rivet|./types` to a single `"."`. `openapi-fetch` dep +
+`openapi-typescript`/`typescript` devDeps live on `@golden/contracts`.
+
+**Call sites:** 2 awaited client calls (both in
+`apps/ui/app/pages/index/composables/useRivetNotes.ts`), plus 2 type-only
+import sites and 1 plugin bootstrap. UI-layer diff: **3 files, +15/−25
+(net −10 lines)**.
+
+Representative pairs:
+
+```ts
+// load() — before
+try {
+    const result = await notesClient.list({ unwrap: false });
+    if (result.isOk()) { notes.value = [...result.data.notes]; return; }
+    errorMessage.value = "Unable to load notes.";
+} catch { errorMessage.value = "Unable to load notes."; }
+finally { isLoading.value = false; }
+// load() — after
+const result = await client.GET("/api/notes").catch(() => null);
+if (result?.data) { notes.value = [...result.data.notes]; }
+else { errorMessage.value = "Unable to load notes."; }
+isLoading.value = false;
+```
+
+```ts
+// create() — before
+const result = await notesClient.create({ body: { title, body } }, { unwrap: false });
+if (result.status === 201) { await load(); return true; }
+errorMessage.value = errorMessageFrom(result.data) ?? "Unable to create the note.";
+// create() — after
+const result = await client.POST("/api/notes", { body: { title, body } }).catch(() => null);
+if (result?.data) { await load(); return true; }
+errorMessage.value = errorMessageFrom(result?.error) ?? "Unable to create the note.";
+```
+
+```ts
+// bootstrap — before / after (unchanged but for the import)
+import { configureRivet } from "@golden/contracts/rivet";   // before
+import { configureRivet } from "@golden/contracts";          // after (facade preserves the configure-once seam)
+```
+
+**Narrowing analysis.** The watched case — 409 vs 422 on create — did not
+break, and typing *improved*: the old `CreateResult` union carried an
+`Exclude<number, 201|409|422> → data: unknown` catch-all arm, so the error
+path was `ErrorResponse | unknown` ⇒ `unknown` (hence golden's
+`errorMessageFrom(data: unknown)` duck-typing). openapi-fetch types `error`
+as `ErrorResponse` exactly (409 and 422 share the envelope). Lost: the
+status-literal discrimination itself (`result.status === 201` narrowing
+`data`; `response.status` is now an unlinked `number`) and the `.isOk()`
+helper family — golden branched on neither beyond success/failure. The loss
+only bites when one operation declares ≥2 *distinct* error body types, which
+Meridian's single-`ErrorResponse`-envelope doctrine rules out by
+construction. Behavioral note from WP-2.2 (empty-body `undefined` vs `{}`)
+is moot here — no 204s.
+
+**Gates.**
+- `task test`: all three suites green — dotnet 3/3, api-ts 5/5 (incl. `tsc
+  --noEmit`), ui 3/3.
+- `task plumb`: `0 error, 6 warn, 0 info` — byte-identical to the
+  pre-migration baseline. All 6 are pre-existing TO-pack tooling warns
+  (MER-TO-002 ×2, -005, -012 ×2, -014: missing oxlint/oxfmt/eslint-vue/
+  editorconfig/analyzers/CSharpier), unrelated to contracts; the README's
+  "0/0/0" claim did not hold *before* the migration either.
+  **Migration-introduced findings: zero.**
+- Extra evidence (UI has no tsc gate): facade + call shapes pass
+  `tsc --strict` standalone; runtime smoke through the committed facade
+  against the booted API: GET 200, POST 201, dup POST 409, invalid POST 422.
+  `task generate` re-run is byte-idempotent.
+
+**Doctrine-rule friction (recorded, plumb untouched):**
+- `MER-FE-006` (rivet.md#frontend-result-handling) genuinely pins the old
+  convention: it flags any *awaited* `@*/contracts` client call inside a
+  `try` block lacking literal `unwrap: false`. With openapi-fetch the
+  textual remedy is unsatisfiable, so try/catch around client calls is
+  effectively banned. Golden adapted (reasonably: openapi-fetch's design is
+  "no throw on HTTP error") via `.catch(() => null)` for transport failure —
+  rule does not fire — but the rule's message/remedy needs rewording for v2.
+- `MER-FE-003` (components-no-client) greps the import specifiers
+  `generated/rivet/client|contracts/client`; the v2 bare `@golden/contracts`
+  specifier no longer matches, so the rule is a silent false-negative for
+  v2-shaped repos (did not fire here either way — no component imports the
+  client). Needs a pattern update.
+- `MER-RV-020/021/024/025` survive intact: facade lives in `src/` (not
+  `generated/`), `schema.d.ts` is `.d.ts`-exempt and header-carrying,
+  `configureRivet` stays once-in-a-plugin (the facade deliberately keeps
+  that seam), and RV-024's `rivet ... --output` Taskfile sniffing still
+  matches the v2 invocation.
+
+**Wrapper verdict (per the Phase 2 criteria):**
+- (a) *ergonomics*: no hurt — net −10 lines; the path-literal-in-call-site
+  cost is real but at golden's scale (1 path, 2 verbs) negligible, and
+  dropping the throw/Result dual mode *simplified* the composable (no
+  try/catch/finally scaffolding, one exit shape).
+- (b) *per-status discrimination*: no hurt — strictly better typing on the
+  multi-error-status operation, because the doctrine's uniform error
+  envelope makes the per-status split typewise redundant. (b) can only hurt
+  apps that violate the envelope rule.
+- (c) *rivet-specific semantics*: **no evidence either way** — golden has no
+  queryAuth, file endpoints, or brands. The WP-2.2 findings (no URL
+  builders, per-call `parseAs: "blob"`, brand erasure) stand unrebutted but
+  unweighed by a real app.
+
+Score on the real app: 0 of (a)/(b) hurt, (c) untested. Under the plan's
+"≥2 of (a)–(c)" bar the named-method wrapper is **not justified** by
+WP-2.3's evidence; the only remaining case for it is queryAuth/file/brand
+consumers, which would need a different exemplar to demonstrate.

@@ -96,7 +96,7 @@ This is mostly deletion; the new code is small (extension emission, conformance 
 ## Open questions — resolutions (2026-06-11, executed on `v2`; see FABLE_REWRITE_PLAN.md for rationale)
 
 1. **rivet-php: keeps producing the internal IR.** `rivet:reflect` → contract JSON → `rivet --from` → OpenAPI. One emitter to harden. Its round-trip tests were re-pointed at OpenAPI output in Phase 3.
-2. **Named-method client wrapper: deferred to WP-2.3 (real-app migration — user task).** Phase 2 evidence is recorded in FABLE_PHASE0.md "Phase 2 notes": per-status narrowing lost nothing on the sample; queryAuth URL-building, blob endpoints, and brand erasure are the concrete pain points. Decide after living with openapi-fetch in a real app.
+2. **Named-method client wrapper: not justified** (WP-2.3 executed against ~/Sites/golden, see FABLE_PHASE0.md "Golden migration"). Ergonomics improved (net −10 lines in the UI layer), error typing improved (exact `ErrorResponse` instead of an `unknown` catch-all arm), per-status discrimination redundant under the single-envelope doctrine. Residual wrapper case: queryAuth/file/brand consumers only — revisit if such an app migrates and hurts.
 3. **Zod: dropped.** Server-side enforcement is `TypedResultValidator` + the Hono adapter's runtime coercion/400s; client-side validation, if ever wanted, is `openapi-zod-client` over the emitted spec (documented in both repos).
 4. **Contract JSON: internal IR.** It crosses exactly one boundary (rivet-ts/rivet-php → the version-pinned .NET binary), is schema-validated in tests, and maps 1:1 onto the Hono runtime's needs. `rivet-contract-schema.json` stays versioned but documented as internal; OpenAPI 3.1 is the sole public format.
 
