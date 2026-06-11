@@ -60,6 +60,7 @@ public static class Diagnostics
     public const string ImportArrayMissingItems = "RIV3011";
     public const string ImportEnumConstraintDropped = "RIV3012";
     public const string ImportDeclaredPropertiesDropped = "RIV3013";
+    public const string ImportDictionaryKeyDropped = "RIV3014";
 
     // ----- RIV4xxx: coverage -----
     public const string CoverageMissingImplementation = "RIV4001";
@@ -85,7 +86,7 @@ public static class Diagnostics
         [UnsupportedBigInteger] = "BigInteger has no schema mapping — emitted as an untyped (empty) schema.",
         [UnsupportedChar] = "char has no schema mapping — emitted as an untyped (empty) schema.",
         [UnsupportedObject] = "object has no schema mapping — emitted as an untyped (empty) schema.",
-        [DictionaryKeyTypeDropped] = "Dictionary key type has no contract representation — keys are emitted as unconstrained strings (a key enum's schema is not emitted).",
+        [DictionaryKeyTypeDropped] = "Dictionary key type has no contract representation (supported: string, enums, string-backed brands, string-serializable primitives) — keys are emitted as unconstrained strings.",
         [TaggedUnionComponentCollision] = "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
         [UndefinedSecurityScheme] = "Endpoint references a security scheme with no definition — a default bearer securityScheme component is emitted.",
         [DuplicateEndpoint] = "Two endpoints share an HTTP method + path — the later definition wins.",
@@ -107,6 +108,7 @@ public static class Diagnostics
         [ImportArrayMissingItems] = "Array schema without 'items' — mapped to List<JsonElement>.",
         [ImportEnumConstraintDropped] = "Enum constraint that cannot become a C# enum (single-value, mixed/float, out-of-int32-range) — degraded to a primitive.",
         [ImportDeclaredPropertiesDropped] = "Inline schema declares both 'properties' and 'additionalProperties' — imported as a dictionary; the declared properties are not represented.",
+        [ImportDictionaryKeyDropped] = "Dictionary 'propertyNames' schema has no C# dictionary-key representation — imported with string keys.",
         [CoverageMissingImplementation] = "Contract endpoint has no matching implementation.",
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",

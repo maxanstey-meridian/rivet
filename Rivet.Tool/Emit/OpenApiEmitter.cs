@@ -330,16 +330,15 @@ public static class OpenApiEmitter
                         "inline from the endpoint's params; fix the upstream producer to include the input type definition");
                 }
 
-                // Anonymous file upload — inline the schema
+                // Anonymous file upload — inline the schema. Single files emit the
+                // binary File schema; collection-of-file params (List<IFormFile>,
+                // FABLE_GAPS §7 item 12) emit array-of-binary — both via the File
+                // primitive mapping.
                 var multipartProps = new Dictionary<string, object>();
                 foreach (var fp in fileParams)
                 {
-                    multipartProps[fp.Name] = new Dictionary<string, object>
-                    {
-                        ["type"] = "string",
-                        ["format"] = "binary",
-                        ["x-rivet-file"] = true,
-                    };
+                    multipartProps[fp.Name] = MapTsTypeToJsonSchema(
+                        fp.Type, $"file param '{fp.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'");
                 }
                 foreach (var ff in formFieldParams)
                 {
@@ -998,7 +997,10 @@ public static class OpenApiEmitter
                     break;
                 case TsType.Array a: Walk(a.Element); break;
                 case TsType.Nullable n: Walk(n.Inner); break;
-                case TsType.Dictionary d: Walk(d.Value); break;
+                case TsType.Dictionary d:
+                    Walk(d.Value);
+                    if (d.Key is not null) Walk(d.Key);
+                    break;
                 case TsType.Brand b: Walk(b.Inner); break;
                 case TsType.InlineObject obj:
                     foreach (var (_, fieldType) in obj.Fields) Walk(fieldType);
@@ -1280,6 +1282,15 @@ public static class OpenApiEmitter
             ["additionalProperties"] = MapTsTypeToJsonSchema(d.Value, context),
         };
 
+        // Non-string key types constrain the keys via propertyNames (OpenAPI 3.1 /
+        // JSON Schema 2020-12): enum/brand keys $ref their component schema; primitive
+        // keys stay string-typed with the original format, x-rivet-csharp-type pinning
+        // the exact C# key type for import round-trips.
+        if (d.Key is not null)
+        {
+            schema["propertyNames"] = BuildDictionaryKeySchema(d.Key, context);
+        }
+
         // Propagate CSharpType from inner unknown (JsonObject) to parent schema
         if (d.Value is TsType.Primitive { Name: "unknown", CSharpType: not null } p)
         {
@@ -1287,6 +1298,29 @@ public static class OpenApiEmitter
         }
 
         return schema;
+    }
+
+    private static Dictionary<string, object> BuildDictionaryKeySchema(TsType key, string? context)
+    {
+        // Primitive keys are built inline rather than via MapPrimitive: property names
+        // are always strings, but a numeric format (int32, …) would flip MapPrimitive's
+        // emitted type to integer — invalid under propertyNames.
+        if (key is TsType.Primitive p)
+        {
+            var schema = new Dictionary<string, object> { ["type"] = "string" };
+            if (p.Format is not null)
+            {
+                schema["format"] = p.Format;
+            }
+            if (p.CSharpType is not null)
+            {
+                schema["x-rivet-csharp-type"] = p.CSharpType;
+            }
+            return schema;
+        }
+
+        // TypeRef (enum) / Brand → $ref to the named component schema
+        return MapTsTypeToJsonSchema(key, context);
     }
 
     private static Dictionary<string, object> BuildMonomorphisedSchema(
@@ -1401,6 +1435,10 @@ public static class OpenApiEmitter
                 break;
             case TsType.Dictionary d:
                 CollectGenericsFromType(d.Value, instances);
+                if (d.Key is not null)
+                {
+                    CollectGenericsFromType(d.Key, instances);
+                }
                 break;
             case TsType.InlineObject obj:
                 foreach (var (_, fieldType) in obj.Fields)

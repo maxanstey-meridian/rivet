@@ -344,6 +344,182 @@ public sealed class FormFileTests
                 .GetProperty("schema").GetProperty("$ref").GetString());
     }
 
+    private static void AssertBinaryFileArrayProperty(JsonElement schema, string name)
+    {
+        var prop = schema.GetProperty("properties").GetProperty(name);
+        Assert.Equal("array", prop.GetProperty("type").GetString());
+        var items = prop.GetProperty("items");
+        Assert.Equal("string", items.GetProperty("type").GetString());
+        Assert.Equal("binary", items.GetProperty("format").GetString());
+        Assert.True(items.GetProperty("x-rivet-file").GetBoolean());
+    }
+
+    /// <summary>
+    /// FABLE_GAPS §7 item 12: a record whose ONLY files are List&lt;IFormFile&gt; used to
+    /// emit as application/json with format:binary strings — an unimplementable spec
+    /// with zero diagnostics. Collections of IFormFile are multipart array-of-binary.
+    /// </summary>
+    [Fact]
+    public void Contract_FormFileCollection_OnlyFiles_EmitsMultipartArrayOfBinary()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record BatchUploadRequest(List<IFormFile> Files, string Album);
+
+            [RivetType]
+            public sealed record BatchUploadResult(int Count);
+
+            [RivetContract]
+            public static class PhotosContract
+            {
+                public static readonly RouteDefinition<BatchUploadRequest, BatchUploadResult> Upload =
+                    Define.Post<BatchUploadRequest, BatchUploadResult>("/api/photos");
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkContract(source);
+
+        // Walker classification: collection-of-file → File param with Array(File) type
+        var ep = Assert.Single(endpoints);
+        var filesParam = Assert.Single(ep.Params, p => p.Name == "files");
+        Assert.Equal(ParamSource.File, filesParam.Source);
+        Assert.True(filesParam.Type is TsType.Array { Element: TsType.Primitive { Name: "File" } },
+            $"Expected Array(File) but got {filesParam.Type}");
+        var albumParam = Assert.Single(ep.Params, p => p.Name == "album");
+        Assert.Equal(ParamSource.FormField, albumParam.Source);
+
+        // OpenAPI: multipart/form-data (NOT application/json), array-of-binary part
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var operation = GetOperation(doc, "/api/photos", "post");
+        var schema = GetMultipartSchema(operation);
+        Assert.Equal("#/components/schemas/BatchUploadRequest", schema.GetProperty("$ref").GetString());
+
+        var component = doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("BatchUploadRequest");
+        AssertBinaryFileArrayProperty(component, "files");
+    }
+
+    [Theory]
+    [InlineData("IFormFile[]")]
+    [InlineData("IReadOnlyList<IFormFile>")]
+    [InlineData("IEnumerable<IFormFile>")]
+    public void Contract_FormFileCollectionVariants_ClassifyAsFileParams(string propertyType)
+    {
+        var source = $$"""
+            using System;
+            using System.Collections.Generic;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadRequest({{propertyType}} Files);
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly Define Upload =
+                    Define.Post<UploadRequest, string>("/api/files");
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkContract(source);
+
+        var ep = Assert.Single(endpoints);
+        var filesParam = Assert.Single(ep.Params, p => p.Name == "files");
+        Assert.Equal(ParamSource.File, filesParam.Source);
+        Assert.True(filesParam.Type is TsType.Array { Element: TsType.Primitive { Name: "File" } },
+            $"Expected Array(File) for {propertyType} but got {filesParam.Type}");
+    }
+
+    [Fact]
+    public void Controller_FormFileCollection_OnlyFiles_EmitsMultipartArrayOfBinary()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/photos")]
+            public sealed class PhotosController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(200)]
+                public Task<IActionResult> Upload(
+                    List<IFormFile> photos,
+                    string album,
+                    CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
+
+        // Walker classification: collection param → File source with Array(File) type,
+        // sibling params become form fields (the pre-scan sees the collection)
+        var ep = Assert.Single(endpoints);
+        var photosParam = Assert.Single(ep.Params, p => p.Name == "photos");
+        Assert.Equal(ParamSource.File, photosParam.Source);
+        Assert.True(photosParam.Type is TsType.Array { Element: TsType.Primitive { Name: "File" } },
+            $"Expected Array(File) but got {photosParam.Type}");
+        var albumParam = Assert.Single(ep.Params, p => p.Name == "album");
+        Assert.Equal(ParamSource.FormField, albumParam.Source);
+
+        // OpenAPI: inline multipart schema with the array-of-binary part
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var operation = GetOperation(doc, "/api/photos", "post");
+        var schema = GetMultipartSchema(operation);
+        AssertBinaryFileArrayProperty(schema, "photos");
+        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("photos", required);
+        Assert.Contains("album", required);
+    }
+
+    [Fact]
+    public void FormFileCollection_Survives_Import_As_ListOfIFormFile()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record BatchUploadRequest(List<IFormFile> Files, string Album);
+
+            [RivetContract]
+            public static class PhotosContract
+            {
+                public static readonly Define Upload =
+                    Define.Post<BatchUploadRequest, string>("/api/photos");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var result = CompilationHelper.Import(doc.RootElement.GetRawText());
+
+        // Array-of-binary parts come back as List<IFormFile>, not strings
+        var request = CompilationHelper.FindFile(result, "BatchUploadRequest.cs");
+        Assert.Contains("List<IFormFile> Files", request);
+        CompilationHelper.CompileImportResult(result);
+    }
+
     [Fact]
     public void Contract_BareIFormFile_AsTInput_EmitsFormData()
     {

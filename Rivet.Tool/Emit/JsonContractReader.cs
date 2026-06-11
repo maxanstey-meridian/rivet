@@ -119,6 +119,10 @@ public static class JsonContractReader
                 break;
             case TsType.Dictionary d:
                 WalkForBrands(d.Value, brands);
+                if (d.Key is not null)
+                {
+                    WalkForBrands(d.Key, brands);
+                }
                 break;
             case TsType.Generic g:
                 foreach (var arg in g.TypeArguments)

@@ -29,7 +29,13 @@ How C# types lower into OpenAPI 3.1 schemas. Property names camelCase by default
 - **Nullable members** (`string?`, `int?`) → 3.1 type arrays
   (`"type": ["string", "null"]`); nullable `$ref`s use a null branch.
 - **Collections** (`List<T>`, `IReadOnlyList<T>`, arrays) → `array` with `items`.
-- **Dictionaries** → `object` with `additionalProperties`.
+- **Dictionaries** → `object` with `additionalProperties`. Non-string keys add a
+  `propertyNames` schema: enum keys `$ref` the enum schema (which is emitted —
+  `Dictionary<Color, int>` registers `Color`), string-backed brand keys `$ref` the
+  brand schema, and string-serializable primitive keys (`Guid`, `DateTime`/`DateOnly`/
+  `TimeOnly`, `Uri`, numerics) emit `type: string` with the original `format` plus
+  `x-rivet-csharp-type` where the format alone is ambiguous. Unsupported key types
+  degrade to unconstrained string keys with diagnostic `RIV1013`.
 - **Generics** are monomorphised: `PagedResult<MemberDto>` becomes a
   `PagedResult_MemberDto` component carrying `x-rivet-generic`.
 - **Value-object brands**: a record with exactly one property named `Value`

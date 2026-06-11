@@ -32,8 +32,12 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
             "array" => new TsType.Array(
                 DeserializeInner(root, "element", options)),
 
+            // "key" is optional — the TS lowerer's contract JSON never emits it
             "dictionary" => new TsType.Dictionary(
-                DeserializeInner(root, "value", options)),
+                DeserializeInner(root, "value", options),
+                root.TryGetProperty("key", out var k)
+                    ? JsonSerializer.Deserialize<TsType>(k.GetRawText(), options)
+                    : null),
 
             "stringUnion" => new TsType.StringUnion(
                 root.GetProperty("values").EnumerateArray()
@@ -108,6 +112,11 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 writer.WriteString("kind", "dictionary");
                 writer.WritePropertyName("value");
                 JsonSerializer.Serialize(writer, d.Value, options);
+                if (d.Key is not null)
+                {
+                    writer.WritePropertyName("key");
+                    JsonSerializer.Serialize(writer, d.Key, options);
+                }
                 break;
 
             case TsType.StringUnion su:

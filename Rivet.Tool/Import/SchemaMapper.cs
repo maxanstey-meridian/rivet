@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 
 namespace Rivet.Tool.Import;
@@ -889,7 +890,8 @@ internal sealed class SchemaMapper
             }
 
             var valueType = ResolveCSharpType(schema.AdditionalProperties, context);
-            return $"Dictionary<string, {valueType}>";
+            var keyType = ResolveDictionaryKeyType(schema, context);
+            return $"Dictionary<{keyType}, {valueType}>";
         }
 
         // Inline object with properties
@@ -910,5 +912,109 @@ internal sealed class SchemaMapper
 
         // Bare object with no properties or additionalProperties → untyped map
         return "Dictionary<string, System.Text.Json.JsonElement>";
+    }
+
+    /// <summary>
+    /// Resolves a dictionary schema's key type from its <c>propertyNames</c> schema
+    /// (Microsoft.OpenApi surfaces the keyword via UnrecognizedKeywords). Mirrors the
+    /// emitter's key support: a $ref to a string enum or string-backed brand component,
+    /// or an inline string schema whose format / x-rivet-csharp-type pins the C# key
+    /// type. Unsupported shapes degrade to string keys with a named warning (RIV3014).
+    /// </summary>
+    private string ResolveDictionaryKeyType(IOpenApiSchema schema, string? context)
+    {
+        if (schema.UnrecognizedKeywords is null
+            || !schema.UnrecognizedKeywords.TryGetValue("propertyNames", out var node)
+            || node is null)
+        {
+            return "string";
+        }
+
+        if (node is JsonObject obj)
+        {
+            // $ref → enum or string-backed brand component
+            if (GetStringMember(obj, "$ref") is { } refValue)
+            {
+                const string prefix = "#/components/schemas/";
+                if (refValue.StartsWith(prefix, StringComparison.Ordinal)
+                    && TryResolveComponentKeyType(refValue[prefix.Length..], out var keyName))
+                {
+                    return keyName;
+                }
+            }
+            else
+            {
+                // x-rivet-csharp-type pins the exact key type (numeric-keyed dictionaries etc.)
+                if (GetStringMember(obj, "x-rivet-csharp-type") is { } csharpType)
+                {
+                    return csharpType;
+                }
+
+                if (GetStringMember(obj, "type") == "string")
+                {
+                    return GetStringMember(obj, "format") switch
+                    {
+                        "date-time" => "DateTime",
+                        "date" => "DateOnly",
+                        "time" => "TimeOnly",
+                        "guid" or "uuid" => "Guid",
+                        "uri" => "Uri",
+                        "int32" => "int",
+                        "int64" => "long",
+                        "int16" => "short",
+                        "uint16" => "ushort",
+                        "uint8" => "byte",
+                        "int8" => "sbyte",
+                        "uint32" => "uint",
+                        "uint64" => "ulong",
+                        "float" => "float",
+                        "double" => "double",
+                        "decimal" => "decimal",
+                        // No/unknown format on string keys — still plain string keys
+                        _ => "string",
+                    };
+                }
+            }
+        }
+
+        var where = context is not null ? $" at '{context}'" : "";
+        _ctx.Warnings.Add(Diagnostics.Prefix(
+            Diagnostics.ImportDictionaryKeyDropped,
+            $"propertyNames key schema{where} has no C# dictionary-key representation — imported with string keys."));
+        return "string";
+    }
+
+    private static string? GetStringMember(JsonObject obj, string name)
+        => obj.TryGetPropertyValue(name, out var node) && node is JsonValue value
+            && value.TryGetValue<string>(out var text)
+            ? text
+            : null;
+
+    /// <summary>
+    /// True when the referenced component (alias-chased) is representable as a C#
+    /// dictionary key: a string enum or a string-backed brand. Anything else (records,
+    /// int enums, non-string brands) is not a valid key target — the caller degrades.
+    /// </summary>
+    private bool TryResolveComponentKeyType(string refId, out string keyName)
+    {
+        keyName = "";
+
+        var finalId = _aliasTargets.TryGetValue(refId, out var target) ? target : refId;
+        if (_componentSchemas is null
+            || !_componentSchemas.TryGetValue(finalId, out var componentSchema)
+            || !_ctx.SchemaNameMap.TryGetValue(finalId, out var mapped))
+        {
+            return false;
+        }
+
+        if (SchemaClassifier.IsStringEnum(componentSchema)
+            || (SchemaClassifier.IsBrand(componentSchema)
+                && componentSchema.Type?.HasFlag(JsonSchemaType.String) == true))
+        {
+            keyName = mapped;
+            return true;
+        }
+
+        return false;
     }
 }

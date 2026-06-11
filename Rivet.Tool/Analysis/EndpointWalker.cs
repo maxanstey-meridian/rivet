@@ -391,9 +391,11 @@ public static class EndpointWalker
 
         var parameters = new List<TsEndpointParam>();
 
-        // Pre-scan: if any parameter is IFormFile, non-route/non-file params become FormField
+        // Pre-scan: if any parameter is IFormFile (or a collection of IFormFile,
+        // FABLE_GAPS §7 item 12), non-route/non-file params become FormField
         var hasFileParam = wkt.IFormFile is not null
-            && method.Parameters.Any(p => SymbolEqualityComparer.Default.Equals(p.Type, wkt.IFormFile));
+            && method.Parameters.Any(p => SymbolEqualityComparer.Default.Equals(p.Type, wkt.IFormFile)
+                || typeWalker.IsCollectionOf(p.Type, wkt.IFormFile));
 
         foreach (var param in method.Parameters)
         {
@@ -415,7 +417,7 @@ public static class EndpointWalker
                 continue;
             }
 
-            var source = ClassifyParam(wkt, param, routeParamNames);
+            var source = ClassifyParam(wkt, typeWalker, param, routeParamNames);
             if (source is null)
             {
                 // Skip infrastructure types (CancellationToken, DI services, etc.)
@@ -437,9 +439,12 @@ public static class EndpointWalker
                 continue;
             }
 
-            // IFormFile maps to the Web API File type — don't walk it through Roslyn
+            // IFormFile maps to the Web API File type — don't walk it through Roslyn.
+            // Collection-of-IFormFile params emit array-of-binary (FABLE_GAPS §7 item 12).
             var tsType = source == ParamSource.File
-                ? new TsType.Primitive("File")
+                ? typeWalker.IsCollectionOf(param.Type, wkt.IFormFile)
+                    ? new TsType.Array(new TsType.Primitive("File"))
+                    : (TsType)new TsType.Primitive("File")
                 : typeWalker.MapType(param.Type);
             // E8: a C# default value makes the param optional on the wire
             parameters.Add(new TsEndpointParam(param.Name, tsType, source.Value, IsOptional: param.HasExplicitDefaultValue));
@@ -465,10 +470,12 @@ public static class EndpointWalker
             && !SymbolEqualityComparer.Default.Equals(type, wkt.IFormFile);
     }
 
-    private static ParamSource? ClassifyParam(WellKnownTypes wkt, IParameterSymbol param, HashSet<string> routeParamNames)
+    private static ParamSource? ClassifyParam(WellKnownTypes wkt, TypeWalker typeWalker, IParameterSymbol param, HashSet<string> routeParamNames)
     {
-        // IFormFile parameter → File source (before attribute check — IFormFile is the signal)
-        if (SymbolEqualityComparer.Default.Equals(param.Type, wkt.IFormFile))
+        // IFormFile parameter (single or collection, FABLE_GAPS §7 item 12) → File
+        // source (before attribute check — IFormFile is the signal)
+        if (SymbolEqualityComparer.Default.Equals(param.Type, wkt.IFormFile)
+            || typeWalker.IsCollectionOf(param.Type, wkt.IFormFile))
         {
             return ParamSource.File;
         }

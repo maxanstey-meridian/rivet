@@ -74,6 +74,10 @@ public sealed class ImportMetricTests
         // representation and used to be skipped with ZERO diagnostics — now each dropped
         // op emits a named warning.
         Diagnostics.ImportOperationMethodDropped => "operation-method-dropped",
+        // Added with P2 wave 3 (dictionary key types): a propertyNames key schema the
+        // importer cannot represent as a C# dictionary key degrades to string keys
+        // WITH a named warning.
+        Diagnostics.ImportDictionaryKeyDropped => "dictionary-key-dropped",
         _ => $"UNCATEGORIZED: {warning}",
     };
 

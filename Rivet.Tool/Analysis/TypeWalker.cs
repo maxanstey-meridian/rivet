@@ -517,24 +517,26 @@ public sealed class TypeWalker
                 return new TsType.Array(MapTypeCore(namedType.TypeArguments[0], context));
             }
 
-            // Dictionary<string, T>
+            // Dictionary<K, V>
             if (IsDictionaryType(namedType) && namedType.TypeArguments.Length == 2)
             {
-                // FABLE_GAPS §7 item 12: the key type argument has no contract
-                // representation — keys are emitted as unconstrained strings, and a
-                // key enum's schema never reaches the spec. Diagnose, don't change
-                // the wire: the value-keyed Dictionary node is emitted as before.
-                var keyType = namedType.TypeArguments[0];
-                if (keyType.SpecialType != SpecialType.System_String)
+                // FABLE_GAPS §7 item 12: non-string keys carry their contract
+                // representation on the Dictionary node (emitted as propertyNames):
+                // enums (registering the previously-vanishing key-enum schema),
+                // string-backed brands, and primitives System.Text.Json serializes
+                // as string keys. Genuinely unsupported keys still degrade to
+                // unconstrained strings — loudly, never silently.
+                var keySymbol = namedType.TypeArguments[0];
+                var key = MapDictionaryKey(keySymbol, context, out var keySupported);
+                if (!keySupported)
                 {
                     Diagnostics.Warn(
                         Diagnostics.DictionaryKeyTypeDropped,
-                        $"dictionary key type '{keyType.ToDisplayString()}'{AtContext(context)} has no contract representation — " +
-                        "keys are emitted as unconstrained strings" +
-                        (keyType.TypeKind == TypeKind.Enum ? " and the key enum's schema is not emitted" : ""));
+                        $"dictionary key type '{keySymbol.ToDisplayString()}'{AtContext(context)} has no contract representation — " +
+                        "keys are emitted as unconstrained strings");
                 }
 
-                return new TsType.Dictionary(MapTypeCore(namedType.TypeArguments[1], context));
+                return new TsType.Dictionary(MapTypeCore(namedType.TypeArguments[1], context), key);
             }
 
             // Enum → named string union type
@@ -635,6 +637,97 @@ public sealed class TypeWalker
 
     private static string AtContext(string? context)
         => context is null ? "" : $" on '{context}'";
+
+    /// <summary>
+    /// FABLE_GAPS §7 item 12 (P2 wave 3): maps a dictionary key type to its contract
+    /// representation, or null for plain string keys (the propertyNames-less default).
+    /// Supported: string, enums (mapping registers the key enum's schema — the
+    /// "vanishing key-enum" fix), string-backed value-object brands, and primitives
+    /// System.Text.Json serializes as string dictionary keys (Guid, dates/times, Uri,
+    /// numerics). Numeric keys become string-typed primitives keeping the numeric
+    /// format, with CSharpType pinning the exact key type for import round-trips.
+    /// Anything else sets <paramref name="supported"/> false — the caller diagnoses
+    /// (RIV1013) and falls back to unconstrained string keys.
+    /// </summary>
+    private TsType? MapDictionaryKey(ITypeSymbol keySymbol, string? context, out bool supported)
+    {
+        supported = true;
+
+        if (keySymbol.SpecialType == SpecialType.System_String)
+        {
+            return null;
+        }
+
+        if (keySymbol.TypeKind == TypeKind.Enum)
+        {
+            return MapTypeCore(keySymbol, context);
+        }
+
+        if (keySymbol is INamedTypeSymbol named)
+        {
+            // String-backed value-object brand → $ref to the brand schema.
+            // Shape-checked BEFORE mapping so an unsupported (non-string) brand key
+            // never registers a brand schema as a side effect of the probe.
+            if (named.TypeKind is TypeKind.Class or TypeKind.Struct
+                && !named.IsGenericType
+                && _walkableAssemblies.Contains(named.ContainingAssembly)
+                && TryGetValueObjectInner(named) is { SpecialType: SpecialType.System_String })
+            {
+                return MapTypeCore(named, context);
+            }
+
+            if (MapPrimitive(named) is { } primitive)
+            {
+                // Guid/DateTime/DateTimeOffset/DateOnly/TimeOnly/Uri — already
+                // string-typed with the right format (and CSharpType where needed)
+                if (primitive.Name == "string")
+                {
+                    return primitive;
+                }
+
+                // Numeric keys are written as strings on the wire — keep the numeric
+                // format but flip the type, and always record the exact C# key type
+                // (string + int32 alone would not survive an import round-trip)
+                if (primitive.Name == "number")
+                {
+                    return new TsType.Primitive("string", primitive.Format, primitive.CSharpType ?? primitive.Format switch
+                    {
+                        "int32" => "int",
+                        "int64" => "long",
+                        "float" => "float",
+                        "double" => "double",
+                        "decimal" => "decimal",
+                        _ => null,
+                    });
+                }
+            }
+        }
+
+        supported = false;
+        return null;
+    }
+
+    /// <summary>
+    /// True when the symbol is a supported collection (List/IList/ICollection/
+    /// IEnumerable/IReadOnlyList/IReadOnlyCollection, or an array) whose element is
+    /// the given type. Used by walkers to detect collection-of-IFormFile multipart
+    /// parts (FABLE_GAPS §7 item 12).
+    /// </summary>
+    public bool IsCollectionOf(ITypeSymbol symbol, INamedTypeSymbol? element)
+    {
+        if (element is null)
+        {
+            return false;
+        }
+
+        return symbol switch
+        {
+            IArrayTypeSymbol array => SymbolEqualityComparer.Default.Equals(array.ElementType, element),
+            INamedTypeSymbol { TypeArguments.Length: 1 } named when IsCollectionType(named)
+                => SymbolEqualityComparer.Default.Equals(named.TypeArguments[0], element),
+            _ => false,
+        };
+    }
 
     private TsType.Primitive? MapPrimitive(INamedTypeSymbol symbol)
     {

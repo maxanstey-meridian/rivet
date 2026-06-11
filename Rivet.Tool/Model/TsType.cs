@@ -21,8 +21,10 @@ public abstract record TsType
     /// <summary>T[].</summary>
     public sealed record Array(TsType Element) : TsType;
 
-    /// <summary>Record&lt;string, T&gt;.</summary>
-    public sealed record Dictionary(TsType Value) : TsType;
+    /// <summary>Record&lt;string, T&gt;. Key is null for plain string keys; otherwise the
+    /// key's contract representation (enum ref, string-backed brand, or a string-typed
+    /// primitive carrying the original format/CSharpType) — emitted as propertyNames.</summary>
+    public sealed record Dictionary(TsType Value, TsType? Key = null) : TsType;
 
     /// <summary>"A" | "B" | "C" — string enum rendered as union.</summary>
     public sealed record StringUnion(IReadOnlyList<string> Members) : TsType;
@@ -100,7 +102,9 @@ public abstract record TsType
             TypeParam tp when map.TryGetValue(tp.Name, out var resolved) => resolved,
             Array a => new Array(ResolveTypeParams(a.Element, map)),
             Nullable n => new Nullable(ResolveTypeParams(n.Inner, map)),
-            Dictionary d => new Dictionary(ResolveTypeParams(d.Value, map)),
+            Dictionary d => new Dictionary(
+                ResolveTypeParams(d.Value, map),
+                d.Key is null ? null : ResolveTypeParams(d.Key, map)),
             Generic g => new Generic(g.Name, g.TypeArguments.Select(a => ResolveTypeParams(a, map)).ToList()),
             InlineObject obj => new InlineObject(obj.Fields.Select(f => (f.Name, ResolveTypeParams(f.Type, map))).ToList()),
             TaggedUnion tu => new TaggedUnion(
@@ -128,6 +132,10 @@ public abstract record TsType
                 break;
             case Dictionary d:
                 CollectTypeRefs(d.Value, names);
+                if (d.Key is not null)
+                {
+                    CollectTypeRefs(d.Key, names);
+                }
                 break;
             case Generic g:
                 names.Add(g.Name);

@@ -18,7 +18,10 @@ public static class InlineTypeExtractor
             TsType.Primitive p => p.Format is not null ? $"P:{p.Name}:{p.Format}" : $"P:{p.Name}",
             TsType.Nullable n => $"N:{CanonicalHash(n.Inner)}",
             TsType.Array a => $"A:{CanonicalHash(a.Element)}",
-            TsType.Dictionary d => $"D:{CanonicalHash(d.Value)}",
+            // Keyless dictionaries keep the historical hash so existing names stay stable
+            TsType.Dictionary d => d.Key is null
+                ? $"D:{CanonicalHash(d.Value)}"
+                : $"D[{CanonicalHash(d.Key)}]:{CanonicalHash(d.Value)}",
             TsType.StringUnion su => "SU:" + string.Join(",", su.Members.OrderBy(m => m)),
             TsType.IntUnion iu => "IU:" + string.Join(",", iu.Members.OrderBy(m => m)),
             TsType.TypeRef r => $"R:{r.Name}",
@@ -418,7 +421,7 @@ public static class InlineTypeExtractor
                 return new TsType.Nullable(ReplaceInType(n.Inner, replacements));
 
             case TsType.Dictionary d:
-                return new TsType.Dictionary(ReplaceInType(d.Value, replacements));
+                return new TsType.Dictionary(ReplaceInType(d.Value, replacements), d.Key);
 
             case TsType.Generic g:
                 var replacedArgs = g.TypeArguments.Select(a => ReplaceInType(a, replacements)).ToList();

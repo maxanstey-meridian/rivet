@@ -385,6 +385,7 @@ public sealed class OpenApiConformanceTests : IDisposable
             List<int> Scores,
             Dictionary<string, string> Metadata,
             Dictionary<string, int> Counts,
+            Dictionary<Priority, int> PriorityTallies,
             List<Guid> IdList,
             Email AuthorEmail,
             Quantity ItemQuantity,

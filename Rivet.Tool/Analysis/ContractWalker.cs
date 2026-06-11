@@ -549,6 +549,15 @@ public static class ContractWalker
                                 new TsType.Primitive("File"),
                                 ParamSource.File));
                         }
+                        else if (typeWalker.IsCollectionOf(prop.Type, wkt.IFormFile))
+                        {
+                            // FABLE_GAPS §7 item 12: List<IFormFile>/IFormFile[] →
+                            // multipart array-of-binary part, consistent with single files
+                            parameters.Add(new TsEndpointParam(
+                                tsName,
+                                new TsType.Array(new TsType.Primitive("File")),
+                                ParamSource.File));
+                        }
                         else
                         {
                             // Non-file properties on a mixed upload record → form fields
@@ -652,9 +661,11 @@ public static class ContractWalker
         SymbolEqualityComparer.Default.Equals(type, wkt.IFormFile);
 
     private static bool HasFormFileProperty(WellKnownTypes wkt, TypeWalker typeWalker, ITypeSymbol type) =>
-        // A3: consider inherited properties too
+        // A3: consider inherited properties too. Collections of IFormFile count —
+        // a record whose ONLY files were List<IFormFile> used to emit as JSON with
+        // format:binary strings, an unimplementable spec (FABLE_GAPS §7 item 12).
         typeWalker.GetEffectiveProperties(type)
-            .Any(p => IsFormFileType(wkt, p.Type));
+            .Any(p => IsFormFileType(wkt, p.Type) || typeWalker.IsCollectionOf(p.Type, wkt.IFormFile));
 
     /// <summary>
     /// Checks if the return type is a known file/stream type that should be treated

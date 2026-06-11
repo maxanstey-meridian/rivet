@@ -47,7 +47,7 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1010` | Warning | `BigInteger` has no schema mapping — emitted as an untyped (empty) schema. | Expose the value as a supported type (e.g. `string`, or `long` when the range allows). |
 | `RIV1011` | Warning | `char` has no schema mapping — emitted as an untyped (empty) schema. | Use `string` instead of `char`. |
 | `RIV1012` | Warning | `object` has no schema mapping — emitted as an untyped (empty) schema. | Use a concrete type, or `JsonElement` to state "untyped" deliberately. |
-| `RIV1013` | Warning | Dictionary key type has no contract representation — keys are emitted as unconstrained strings (a key enum's schema is not emitted). | Use `string` dictionary keys; model enum-keyed maps as records or string-keyed dictionaries. |
+| `RIV1013` | Warning | Dictionary key type has no contract representation (supported: `string`, enums, string-backed brands, string-serializable primitives like `Guid`/`DateTime`/numerics) — keys are emitted as unconstrained strings. | Use a supported key type, or accept the unconstrained string keys. |
 
 ## RIV2xxx — emission
 
@@ -84,6 +84,7 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV3011` | Warning | Array schema without `items` — mapped to `List<JsonElement>`. | Add `items` to the source spec, or type the list element after scaffolding. |
 | `RIV3012` | Warning | Enum constraint that cannot become a C# enum (single-value, mixed/float, out-of-int32-range) — degraded to a primitive. | Accept the primitive, or hand-model the constraint in the scaffolded C#. |
 | `RIV3013` | Warning | Inline schema declares both `properties` and `additionalProperties` — imported as a dictionary; the declared properties are not represented. | Pick one side in the scaffolded C# (dictionary vs record) and adjust by hand. |
+| `RIV3014` | Warning | Dictionary `propertyNames` schema has no C# dictionary-key representation — imported with `string` keys. | Reference a string enum / string-backed brand or use a string key schema in the source spec, or type the dictionary key by hand after scaffolding. |
 
 ## RIV4xxx — coverage (`--check`)
 

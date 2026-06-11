@@ -10,7 +10,7 @@ other consumer can ignore them.
 | `x-rivet-endpoint` | operation | The endpoint (field/method) name within that contract. |
 | `x-rivet-brand` | schema | This schema is a branded value object (e.g. `record Email(string Value)`); value is the brand name. |
 | `x-rivet-generic` | schema | This component is a monomorphised generic (e.g. `PagedResult_MemberDto`); records the open generic and its type arguments. |
-| `x-rivet-csharp-type` | property schema | The exact C# type when the JSON Schema alone is ambiguous (`DateTimeOffset` vs `DateTime`, `ulong`, `byte[]`, unrepresentable types). |
+| `x-rivet-csharp-type` | property schema, dictionary `propertyNames` schema | The exact C# type when the JSON Schema alone is ambiguous (`DateTimeOffset` vs `DateTime`, `ulong`, `byte[]`, unrepresentable types; on `propertyNames`, numeric dictionary key types like `int`). |
 | `x-rivet-file` | schema/media type | Binary file content (uploads and downloads). |
 | `x-rivet-input-type` | request body schema | Name of the C# input record behind a multipart/synthesized body. |
 | `x-rivet-query-auth` | operation | Endpoint authenticates via a query parameter: `{ "parameterName": "token" }`. |

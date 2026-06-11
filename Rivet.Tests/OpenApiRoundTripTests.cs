@@ -352,11 +352,15 @@ public sealed class OpenApiRoundTripTests
             [RivetType]
             public sealed record LabelDto(string Name);
 
+            public enum Color { Red, Green }
+
             [RivetType]
             public sealed record TaskDto(
                 List<string> Tags,
                 List<LabelDto> Labels,
-                Dictionary<string, string> Metadata);
+                Dictionary<string, string> Metadata,
+                Dictionary<Color, int> ColorCounts,
+                Dictionary<int, string> YearNotes);
 
             [RivetContract]
             public static class TasksContract
@@ -376,7 +380,69 @@ public sealed class OpenApiRoundTripTests
         Assert.True(labels.Type is TsType.Array { Element: TsType.TypeRef { Name: "LabelDto" } });
 
         var metadata = task.Properties.First(p => p.Name == "metadata");
-        Assert.True(metadata.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "string" } });
+        Assert.True(metadata.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "string" }, Key: null });
+
+        // Non-string keys survive via propertyNames (P2 wave 3)
+        var colorCounts = task.Properties.First(p => p.Name == "colorCounts");
+        Assert.True(colorCounts.Type is TsType.Dictionary
+        {
+            Value: TsType.Primitive { Name: "number" },
+            Key: TsType.TypeRef { Name: "Color" },
+        }, $"Expected enum-keyed dictionary but got {colorCounts.Type}");
+        Assert.True(walker.Enums.ContainsKey("Color"));
+
+        var yearNotes = task.Properties.First(p => p.Name == "yearNotes");
+        Assert.True(yearNotes.Type is TsType.Dictionary
+        {
+            Value: TsType.Primitive { Name: "string" },
+            Key: TsType.Primitive { Name: "string", Format: "int32", CSharpType: "int" },
+        }, $"Expected int-keyed dictionary but got {yearNotes.Type}");
+    }
+
+    /// <summary>
+    /// Headline pin for FABLE_GAPS §7 item 12 (P2 wave 3): an enum used ONLY as a
+    /// dictionary key used to vanish — its schema never reached the spec and the
+    /// import side saw unconstrained string keys. The key must survive the full
+    /// C# → OpenAPI → C# → walk loop as an enum-keyed dictionary.
+    /// </summary>
+    [Fact]
+    public void Enum_Keyed_Dictionary_Survives_RoundTrip()
+    {
+        var source = """
+            using System.Collections.Generic;
+            using Rivet;
+
+            namespace Test;
+
+            // Used ONLY as a dictionary key — previously vanished from the spec
+            public enum Severity { Low, High }
+
+            [RivetType]
+            public sealed record ReportDto(Dictionary<Severity, int> Tallies);
+
+            [RivetContract]
+            public static class ReportsContract
+            {
+                public static readonly Define Get =
+                    Define.Get<ReportDto>("/api/reports/current");
+            }
+            """;
+
+        var (_, walker) = RoundTrip(source);
+
+        // The key enum survived as a named schema with its members
+        Assert.True(walker.Enums.ContainsKey("Severity"),
+            $"Severity enum vanished. Enums: [{string.Join(", ", walker.Enums.Keys)}]");
+        var severity = Assert.IsType<TsType.StringUnion>(walker.Enums["Severity"]);
+        Assert.Equal(["low", "high"], severity.Members);
+
+        // …and the dictionary still references it as its key
+        var tallies = Assert.Single(walker.Definitions["ReportDto"].Properties);
+        Assert.True(tallies.Type is TsType.Dictionary
+        {
+            Value: TsType.Primitive { Name: "number" },
+            Key: TsType.TypeRef { Name: "Severity" },
+        }, $"Expected Severity-keyed dictionary but got {tallies.Type}");
     }
 
     [Fact]
@@ -1972,6 +2038,7 @@ public sealed class OpenApiRoundTripTests
                 List<int> Scores,
                 Dictionary<string, string> Metadata,
                 Dictionary<string, int> Counts,
+                Dictionary<Priority, int> PriorityTallies,
                 List<Guid> IdList,
                 // Brand + enum refs
                 Email AuthorEmail,
@@ -2245,6 +2312,14 @@ public sealed class OpenApiRoundTripTests
 
         var counts = sink.Properties.First(p => p.Name == "counts");
         Assert.True(counts.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "number" } });
+
+        // Enum-keyed dictionary (P2 wave 3): the key survives via propertyNames
+        var prioTallies = sink.Properties.First(p => p.Name == "priorityTallies");
+        Assert.True(prioTallies.Type is TsType.Dictionary
+        {
+            Value: TsType.Primitive { Name: "number" },
+            Key: TsType.TypeRef { Name: "Priority" },
+        }, $"Expected Priority-keyed dictionary but got {prioTallies.Type}");
 
         // Brand references
         var emailRef = sink.Properties.First(p => p.Name == "authorEmail");
