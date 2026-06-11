@@ -14,20 +14,11 @@ public sealed class MetadataAttributeTests
 {
     // ========== Helpers ==========
 
-    private static JsonDocument EmitOpenApi(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
-        return JsonDocument.Parse(json);
-    }
+    private static JsonDocument EmitOpenApi(string source) => CompilationHelper.EmitOpenApi(source);
 
     private static (TypeWalker Walker, IReadOnlyList<TsEndpointDefinition> Endpoints) WalkSource(string source)
     {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var (endpoints, walker) = CompilationHelper.WalkContract(source);
         return (walker, endpoints);
     }
 

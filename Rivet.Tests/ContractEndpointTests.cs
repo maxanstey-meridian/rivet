@@ -42,7 +42,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var (endpoints, _) = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -68,9 +68,6 @@ public sealed class ContractEndpointTests
         Assert.True(ep.ReturnType is TsType.TypeRef { Name: "TaskDto" });
         Assert.Equal(200, ep.Responses[0].StatusCode);
         Assert.True(ep.Responses[0].DataType is TsType.TypeRef { Name: "TaskDto" });
-
-        Assert.Contains("Promise<TaskDto>", client);
-        Assert.Contains("`/api/tasks/${encodeURIComponent(String(input.params.id))}`", client);
     }
 
     [Fact]
@@ -95,7 +92,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var (endpoints, _) = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -111,8 +108,6 @@ public sealed class ContractEndpointTests
         Assert.True(bodyParam.Type is TsType.TypeRef { Name: "CreateCommentInput" });
 
         Assert.True(ep.ReturnType is TsType.TypeRef { Name: "CommentDto" });
-
-        Assert.Contains("body: input.body", client);
     }
 
     [Fact]
@@ -136,7 +131,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var (endpoints, _) = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -151,9 +146,7 @@ public sealed class ContractEndpointTests
         Assert.Equal("body", bodyParam.Name);
         Assert.True(bodyParam.Type is TsType.TypeRef { Name: "ItemRequest" });
 
-        // Client should interpolate {id} and pass body
-        Assert.Contains("`/api/collections/${encodeURIComponent(String(input.params.id))}/items`", client);
-        Assert.Contains("body: input.body", client);
+        Assert.Equal("/api/collections/{id}/items", ep.RouteTemplate);
     }
 
     [Fact]
@@ -176,7 +169,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var (endpoints, _) = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -190,9 +183,7 @@ public sealed class ContractEndpointTests
         var queryParam = ep.Params.First(p => p.Source == ParamSource.Query);
         Assert.Equal("path", queryParam.Name);
 
-        // Client should interpolate {id} and pass query params
-        Assert.Contains("`/api/collections/${encodeURIComponent(String(input.params.id))}/items`", client);
-        Assert.Contains("query: input.query", client);
+        Assert.Equal("/api/collections/{id}/items", ep.RouteTemplate);
     }
 
     [Fact]
@@ -1424,14 +1415,13 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var (endpoints, _) = Generate(source);
 
         Assert.Single(endpoints);
         Assert.Equal("/api/tasks/{id}", endpoints[0].RouteTemplate);
         Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "TaskDto" });
         Assert.Single(endpoints[0].Params);
         Assert.True(endpoints[0].Params[0].Type is TsType.Primitive { Name: "string" });
-        Assert.DoesNotContain(":guid", client);
     }
 
     [Fact]
@@ -1568,17 +1558,8 @@ public sealed class ContractEndpointTests
         var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var annotationEndpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
 
-        // Merge: contract wins on collision (same as Program.cs)
-        var seen = new HashSet<(string, string)>(
-            contractEndpoints.Select(e => (e.ControllerName, e.Name)));
-        var merged = new List<TsEndpointDefinition>(contractEndpoints);
-        foreach (var ep in annotationEndpoints)
-        {
-            if (seen.Add((ep.ControllerName, ep.Name)))
-            {
-                merged.Add(ep);
-            }
-        }
+        // Merge via the production EndpointMerger (contract wins on collision) — same code as Program.cs
+        var merged = EndpointMerger.Merge(contractEndpoints, annotationEndpoints);
 
         var definitions = walker.Definitions.Values.ToList();
         var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
@@ -1613,7 +1594,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var (endpoints, _) = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1621,7 +1602,7 @@ public sealed class ContractEndpointTests
         Assert.Equal("GET", ep.HttpMethod);
         Assert.Equal("/api/tasks", ep.RouteTemplate);
         Assert.Equal("tasks", ep.ControllerName);
-        Assert.Contains("Promise<TaskDto>", client);
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "TaskDto" });
     }
 
     [Fact]
@@ -1655,7 +1636,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var (endpoints, _) = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -2478,7 +2459,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var (endpoints, _) = Generate(source);
         var ep = Assert.Single(endpoints);
         Assert.True(ep.IsFormEncoded);
     }

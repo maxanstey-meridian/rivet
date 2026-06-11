@@ -110,6 +110,44 @@ public static class CompilationHelper
         return CoverageChecker.Check(compilation, wkt, contractEndpoints);
     }
 
+    // --- Canonical walk/emit helpers (survive the Phase 3 pivot) ---
+
+    /// <summary>
+    /// Compiles source and runs the contract walker — the canonical analysis-side oracle.
+    /// </summary>
+    public static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker) WalkContract(string source)
+    {
+        var compilation = CreateCompilation(source);
+        var (discovered, walker) = DiscoverAndWalk(compilation);
+        var endpoints = WalkContracts(compilation, discovered, walker);
+        return (endpoints, walker);
+    }
+
+    /// <summary>
+    /// Compiles source, runs both walkers, and merges via the production EndpointMerger —
+    /// the same pipeline as Program.cs.
+    /// </summary>
+    public static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker) WalkMerged(string source)
+    {
+        var compilation = CreateCompilation(source);
+        var (discovered, walker) = DiscoverAndWalk(compilation);
+        var contractEndpoints = WalkContracts(compilation, discovered, walker);
+        var annotationEndpoints = WalkEndpoints(compilation, discovered, walker);
+        var merged = EndpointMerger.Merge(contractEndpoints, annotationEndpoints);
+        return (merged, walker);
+    }
+
+    /// <summary>
+    /// Compiles source, walks both walkers (merged like Program.cs), and emits OpenAPI
+    /// as a parsed JSON document — the canonical emission-side oracle post-pivot.
+    /// </summary>
+    public static System.Text.Json.JsonDocument EmitOpenApi(string source)
+    {
+        var (endpoints, walker) = WalkMerged(source);
+        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        return System.Text.Json.JsonDocument.Parse(json);
+    }
+
     private static readonly object StdErrLock = new();
 
     /// <summary>
@@ -144,19 +182,40 @@ public static class CompilationHelper
     /// </summary>
     public static Compilation CreateCompilationWithProjectReference(string mainSource, string domainSource)
     {
-        var domainTree = CSharpSyntaxTree.ParseText(domainSource);
+        var domainTree = CSharpSyntaxTree.ParseText(domainSource, new CSharpParseOptions(LanguageVersion.Latest));
         var domainCompilation = CSharpCompilation.Create(
             "DomainAssembly",
             [domainTree],
             CoreReferences,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        ThrowOnErrors(domainCompilation, "Domain test source");
 
-        var mainTree = CSharpSyntaxTree.ParseText(mainSource);
-        return CSharpCompilation.Create(
+        var mainTree = CSharpSyntaxTree.ParseText(mainSource, new CSharpParseOptions(LanguageVersion.Latest));
+        var mainCompilation = CSharpCompilation.Create(
             "TestAssembly",
             [mainTree],
             [.. CoreReferences, domainCompilation.ToMetadataReference()],
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        ThrowOnErrors(mainCompilation, "Main test source");
+
+        return mainCompilation;
+    }
+
+    private static void ThrowOnErrors(Compilation compilation, string label)
+    {
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        if (errors.Count > 0)
+        {
+            var messages = string.Join("\n", errors.Select(e => e.ToString()));
+            throw new InvalidOperationException($"{label} has compilation errors:\n{messages}");
+        }
     }
 
     // --- Import pipeline helpers ---

@@ -1,5 +1,3 @@
-using Rivet.Tool.Analysis;
-using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -11,20 +9,6 @@ public sealed class ControllerEndpointTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         return CompilationHelper.WalkEndpoints(compilation, discovered, walker);
-    }
-
-    private static string GenerateClient(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
-        var definitions = walker.Definitions.Values.ToList();
-        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
-        var typeFileMap = typeGrouping.BuildTypeFileMap();
-        var controllerGroups = ClientEmitter.GroupByController(endpoints);
-        // Emit all controller groups and concatenate for assertion convenience
-        return string.Join("\n", controllerGroups.Select(g =>
-            ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
     }
 
     [Fact]
@@ -53,11 +37,13 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var client = GenerateClient(source);
+        var endpoints = WalkEndpoints(source);
 
-        Assert.Contains("export function get(", client);
-        Assert.Contains("Promise<ItemDto>", client);
-        Assert.Contains("\"GET\", `/api/items/${encodeURIComponent(String(input.params.id))}`", client);
+        var ep = Assert.Single(endpoints);
+        Assert.Equal("get", ep.Name);
+        Assert.Equal("GET", ep.HttpMethod);
+        Assert.Equal("/api/items/{id}", ep.RouteTemplate);
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "ItemDto" });
     }
 
     [Fact]
@@ -94,12 +80,15 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var client = GenerateClient(source);
+        var endpoints = WalkEndpoints(source);
 
-        // GET combines route + method segment, strips :guid constraint
-        Assert.Contains("""`/api/case-statuses/${encodeURIComponent(String(input.params.id))}`""", client);
+        Assert.Equal(2, endpoints.Count);
+        // GET combines controller route + method segment, strips :guid constraint
+        var get = Assert.Single(endpoints, e => e.Name == "get");
+        Assert.Equal("/api/case-statuses/{id}", get.RouteTemplate);
         // POST uses controller route only
-        Assert.Contains("""`/api/case-statuses`""", client);
+        var create = Assert.Single(endpoints, e => e.Name == "create");
+        Assert.Equal("/api/case-statuses", create.RouteTemplate);
     }
 
     [Fact]
@@ -128,11 +117,13 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var client = GenerateClient(source);
+        var endpoints = WalkEndpoints(source);
 
-        // {id:guid} should become ${encodeURIComponent(String(input.params.id))}, not ${id:guid}
-        Assert.Contains("${encodeURIComponent(String(input.params.id))}", client);
-        Assert.DoesNotContain(":guid", client);
+        // {id:guid} should become {id} in the route template — constraint stripped
+        var ep = Assert.Single(endpoints);
+        Assert.Equal("/api/things/{id}", ep.RouteTemplate);
+        var idParam = Assert.Single(ep.Params, p => p.Name == "id");
+        Assert.Equal(ParamSource.Route, idParam.Source);
     }
 
     [Fact]
@@ -161,10 +152,11 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var client = GenerateClient(source);
+        var endpoints = WalkEndpoints(source);
 
-        Assert.Contains("""`/api/health`""", client);
-        Assert.DoesNotContain("things", client);
+        var ep = Assert.Single(endpoints);
+        Assert.Equal("/api/health", ep.RouteTemplate);
+        Assert.DoesNotContain("things", ep.RouteTemplate);
     }
 
     [Fact]
@@ -190,10 +182,11 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var client = GenerateClient(source);
+        var endpoints = WalkEndpoints(source);
 
         // Falls back to Task<ItemDto> return type
-        Assert.Contains("Promise<ItemDto>", client);
+        var ep = Assert.Single(endpoints);
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "ItemDto" });
     }
 
     [Fact]
@@ -219,9 +212,10 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var client = GenerateClient(source);
+        var endpoints = WalkEndpoints(source);
 
-        Assert.Contains("Promise<void>", client);
+        var ep = Assert.Single(endpoints);
+        Assert.Null(ep.ReturnType);
     }
 
     [Fact]
@@ -254,13 +248,14 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var client = GenerateClient(source);
+        var endpoints = WalkEndpoints(source);
 
-        Assert.Contains("input: { body: CreateItemRequest; }", client);
-        Assert.Contains("Promise<CreateItemResponse>", client);
-        Assert.Contains("body: input.body", client);
-        // CancellationToken should be skipped
-        Assert.DoesNotContain("ct;", client);
+        var ep = Assert.Single(endpoints);
+        // Exactly one param — the CancellationToken is skipped
+        var body = Assert.Single(ep.Params);
+        Assert.Equal(ParamSource.Body, body.Source);
+        Assert.True(body.Type is TsType.TypeRef { Name: "CreateItemRequest" });
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "CreateItemResponse" });
     }
 
     [Fact]
@@ -762,14 +757,15 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var client = GenerateClient(source);
+        var endpoints = WalkEndpoints(source);
 
         // All three HTTP methods discovered without [RivetEndpoint]
-        Assert.Contains("export function get(", client);
-        Assert.Contains("export function create(", client);
-        Assert.Contains("export function remove(", client);
+        Assert.Equal(3, endpoints.Count);
+        Assert.Contains(endpoints, e => e.Name == "get" && e.HttpMethod == "GET");
+        Assert.Contains(endpoints, e => e.Name == "create" && e.HttpMethod == "POST");
+        Assert.Contains(endpoints, e => e.Name == "delete" && e.HttpMethod == "DELETE");
         // Helper method not included
-        Assert.DoesNotContain("helperMethod", client);
+        Assert.DoesNotContain(endpoints, e => e.Name == "helperMethod");
     }
 
     [Fact]
@@ -804,35 +800,6 @@ public sealed class ControllerEndpointTests
         // Discovered exactly once even though it matches both [RivetClient] and [RivetEndpoint]
         var endpoint = Assert.Single(endpoints);
         Assert.Equal("get", endpoint.Name);
-    }
-
-    [Fact]
-    public void Results_Ok_NotFound_ExtractsSuccessType()
-    {
-        var source = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Http.HttpResults;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
-
-            namespace Test;
-
-            [RivetType]
-            public sealed record ItemDto(Guid Id, string Name);
-
-            public static class Endpoints
-            {
-                [RivetEndpoint]
-                [HttpGet("/api/items/{id}")]
-                public static Task<Results<Ok<ItemDto>, NotFound>> Get([FromRoute] Guid id)
-                    => throw new NotImplementedException();
-            }
-            """;
-
-        var client = GenerateClient(source);
-
-        Assert.Contains("Promise<ItemDto>", client);
     }
 
     [Fact]
@@ -940,9 +907,13 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var client = GenerateClient(source);
+        var endpoints = WalkEndpoints(source);
 
-        Assert.Contains("Promise<ItemDto>", client);
+        var ep = Assert.Single(endpoints);
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "ItemDto" });
+        var response = Assert.Single(ep.Responses);
+        Assert.Equal(200, response.StatusCode);
+        Assert.True(response.DataType is TsType.TypeRef { Name: "ItemDto" });
     }
 
     [Fact]
@@ -1078,8 +1049,9 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        var client = GenerateClient(source);
+        var endpoints = WalkEndpoints(source);
 
-        Assert.Contains("Promise<ItemDto>", client);
+        var ep = Assert.Single(endpoints);
+        Assert.True(ep.ReturnType is TsType.TypeRef { Name: "ItemDto" });
     }
 }

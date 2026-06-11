@@ -1,5 +1,4 @@
-using Rivet.Tool.Analysis;
-using Rivet.Tool.Emit;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -43,22 +42,28 @@ public sealed class TransitiveEndpointTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
-        var definitions = walker.Definitions.Values.ToList();
-        var brands = walker.Brands.Values.ToList();
-        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
-        var types = string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
-        var typeFileMap = grouping.BuildTypeFileMap();
-        var client = ClientEmitter.EmitControllerClient("items", endpoints, typeFileMap);
 
         // Types should be discovered transitively via endpoint params/return types
-        Assert.Contains("export type CreateItemRequest = {", types);
-        Assert.Contains("export type ItemDto = {", types);
-        Assert.Contains("name: string;", types);
-        Assert.Contains("quantity: number;", types);
+        Assert.True(walker.Definitions.ContainsKey("CreateItemRequest"),
+            $"CreateItemRequest not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
+        Assert.True(walker.Definitions.ContainsKey("ItemDto"),
+            $"ItemDto not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
 
-        // Client should reference them
-        Assert.Contains("input: { body: CreateItemRequest; }", client);
-        Assert.Contains("Promise<ItemDto>", client);
+        var request = walker.Definitions["CreateItemRequest"];
+        var nameProp = Assert.Single(request.Properties, p => p.Name == "name");
+        Assert.Equal("string", Assert.IsType<TsType.Primitive>(nameProp.Type).Name);
+        var quantityProp = Assert.Single(request.Properties, p => p.Name == "quantity");
+        Assert.Equal("number", Assert.IsType<TsType.Primitive>(quantityProp.Type).Name);
+
+        // Endpoints should reference the discovered types
+        Assert.Equal(2, endpoints.Count);
+        var create = Assert.Single(endpoints, e => e.Name == "create");
+        var bodyParam = Assert.Single(create.Params, p => p.Source == ParamSource.Body);
+        Assert.Equal("CreateItemRequest", Assert.IsType<TsType.TypeRef>(bodyParam.Type).Name);
+        Assert.Equal("ItemDto", Assert.IsType<TsType.TypeRef>(create.ReturnType).Name);
+
+        var get = Assert.Single(endpoints, e => e.Name == "get");
+        Assert.Equal("ItemDto", Assert.IsType<TsType.TypeRef>(get.ReturnType).Name);
     }
 
     [Fact]
@@ -95,19 +100,31 @@ public sealed class TransitiveEndpointTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
-        var definitions = walker.Definitions.Values.ToList();
-        var brands = walker.Brands.Values.ToList();
-        var grouping = TypeGrouper.Group(definitions, brands, walker.Enums, walker.TypeNamespaces);
-        var types = string.Concat(grouping.Groups.Select(TypeEmitter.EmitGroupFile));
 
         // PostDto discovered via endpoint
-        Assert.Contains("export type PostDto = {", types);
+        var ep = Assert.Single(endpoints);
+        Assert.Equal("PostDto", Assert.IsType<TsType.TypeRef>(ep.ReturnType).Name);
+        Assert.True(walker.Definitions.ContainsKey("PostDto"),
+            $"PostDto not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
+
         // AuthorInfo discovered transitively via PostDto
-        Assert.Contains("export type AuthorInfo = {", types);
+        Assert.True(walker.Definitions.ContainsKey("AuthorInfo"),
+            $"AuthorInfo not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
+        var postDto = walker.Definitions["PostDto"];
+        var authorProp = Assert.Single(postDto.Properties, p => p.Name == "author");
+        Assert.Equal("AuthorInfo", Assert.IsType<TsType.TypeRef>(authorProp.Type).Name);
+
         // Email discovered as branded VO via AuthorInfo
-        Assert.Contains("""export type Email = string & { readonly __brand: "Email" };""", types);
+        var emailBrand = Assert.Contains("Email", walker.Brands);
+        Assert.Equal("string", Assert.IsType<TsType.Primitive>(emailBrand.Inner).Name);
+        var authorInfo = walker.Definitions["AuthorInfo"];
+        var emailProp = Assert.Single(authorInfo.Properties, p => p.Name == "email");
+        Assert.Equal("Email", Assert.IsType<TsType.Brand>(emailProp.Type).Name);
+
         // Priority discovered as named enum type via PostDto
-        Assert.Contains("""export type Priority = "low" | "medium" | "high";""", types);
+        var priority = Assert.Contains("Priority", walker.Enums);
+        var union = Assert.IsType<TsType.StringUnion>(priority);
+        Assert.Equal(["low", "medium", "high"], union.Members);
     }
 
     [Fact]

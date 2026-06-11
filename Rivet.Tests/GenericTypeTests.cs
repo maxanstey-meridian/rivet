@@ -22,11 +22,20 @@ public sealed class GenericTypeTests
                 int PageSize);
             """;
 
-        var result = CompilationHelper.EmitTypes(source);
+        var (_, walker) = CompilationHelper.WalkContract(source);
 
-        Assert.Contains("export type PagedResult<T> = {", result);
-        Assert.Contains("items: T[];", result);
-        Assert.Contains("totalCount: number;", result);
+        // The open generic definition carries its type parameter
+        var pagedResult = walker.Definitions["PagedResult"];
+        Assert.Equal(["T"], pagedResult.TypeParameters);
+
+        // items: T[] — array of the unresolved type parameter
+        var itemsProp = Assert.Single(pagedResult.Properties, p => p.Name == "items");
+        var array = Assert.IsType<TsType.Array>(itemsProp.Type);
+        Assert.Equal("T", Assert.IsType<TsType.TypeParam>(array.Element).Name);
+
+        // totalCount: number
+        var totalCountProp = Assert.Single(pagedResult.Properties, p => p.Name == "totalCount");
+        Assert.Equal("number", Assert.IsType<TsType.Primitive>(totalCountProp.Type).Name);
     }
 
     [Fact]
@@ -157,9 +166,12 @@ public sealed class GenericTypeTests
             public sealed record FlexibleDto(string Name, JsonElement Payload);
             """;
 
-        var result = CompilationHelper.EmitTypes(source);
+        var (_, walker) = CompilationHelper.WalkContract(source);
 
-        Assert.Contains("payload: unknown;", result);
+        // JsonElement → unknown
+        var dto = walker.Definitions["FlexibleDto"];
+        var payloadProp = Assert.Single(dto.Properties, p => p.Name == "payload");
+        Assert.Equal("unknown", Assert.IsType<TsType.Primitive>(payloadProp.Type).Name);
     }
 
     [Fact]
@@ -175,9 +187,16 @@ public sealed class GenericTypeTests
             public sealed record DynamicDto(string Name, JsonNode? Data);
             """;
 
-        var result = CompilationHelper.EmitTypes(source);
+        var (_, walker) = CompilationHelper.WalkContract(source);
 
-        Assert.Contains("data?: unknown | null;", result);
+        // JsonNode? → (unknown | null), optional; CSharpType preserved for round-tripping
+        var dto = walker.Definitions["DynamicDto"];
+        var dataProp = Assert.Single(dto.Properties, p => p.Name == "data");
+        var nullable = Assert.IsType<TsType.Nullable>(dataProp.Type);
+        var inner = Assert.IsType<TsType.Primitive>(nullable.Inner);
+        Assert.Equal("unknown", inner.Name);
+        Assert.Equal("JsonNode", inner.CSharpType);
+        Assert.True(dataProp.IsOptional);
     }
 
     [Fact]
@@ -193,9 +212,15 @@ public sealed class GenericTypeTests
             public sealed record BranchCase(string Label, JsonObject Condition);
             """;
 
-        var result = CompilationHelper.EmitTypes(source);
+        var (_, walker) = CompilationHelper.WalkContract(source);
 
-        Assert.Contains("condition: Record<string, unknown>;", result);
+        // JsonObject → Record<string, unknown>
+        var dto = walker.Definitions["BranchCase"];
+        var conditionProp = Assert.Single(dto.Properties, p => p.Name == "condition");
+        var dict = Assert.IsType<TsType.Dictionary>(conditionProp.Type);
+        var value = Assert.IsType<TsType.Primitive>(dict.Value);
+        Assert.Equal("unknown", value.Name);
+        Assert.Equal("JsonObject", value.CSharpType);
     }
 
     [Fact]
@@ -211,8 +236,14 @@ public sealed class GenericTypeTests
             public sealed record BatchRequest(string Name, JsonArray Items);
             """;
 
-        var result = CompilationHelper.EmitTypes(source);
+        var (_, walker) = CompilationHelper.WalkContract(source);
 
-        Assert.Contains("items: unknown[];", result);
+        // JsonArray → unknown[]
+        var dto = walker.Definitions["BatchRequest"];
+        var itemsProp = Assert.Single(dto.Properties, p => p.Name == "items");
+        var array = Assert.IsType<TsType.Array>(itemsProp.Type);
+        var element = Assert.IsType<TsType.Primitive>(array.Element);
+        Assert.Equal("unknown", element.Name);
+        Assert.Equal("JsonArray", element.CSharpType);
     }
 }

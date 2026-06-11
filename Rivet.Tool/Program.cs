@@ -98,17 +98,7 @@ static async Task<int> Run(string[] args)
     }
 
     // Merge: contract endpoints win on (ControllerName, Name) collision
-    var seen = new HashSet<(string, string)>(
-        contractEndpoints.Select(e => (e.ControllerName, e.Name)));
-    var merged = new List<TsEndpointDefinition>(contractEndpoints);
-    foreach (var ep in endpoints)
-    {
-        if (seen.Add((ep.ControllerName, ep.Name)))
-        {
-            merged.Add(ep);
-        }
-    }
-
+    var merged = EndpointMerger.Merge(contractEndpoints, endpoints);
     endpoints = merged;
 
     if (options.Routes)

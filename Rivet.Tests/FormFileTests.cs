@@ -1,32 +1,32 @@
-using Rivet.Tool.Analysis;
-using Rivet.Tool.Emit;
+using System.Text.Json;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
+/// <summary>
+/// File-upload classification is walker behavior — asserted on the endpoint model
+/// (ParamSource, Primitive("File")) and on the emitted OpenAPI multipart request body.
+/// </summary>
 public sealed class FormFileTests
 {
-    private static string GenerateContractClient(string source)
+    private static JsonElement GetOperation(JsonDocument doc, string path, string method)
+        => doc.RootElement.GetProperty("paths").GetProperty(path).GetProperty(method);
+
+    private static JsonElement GetMultipartSchema(JsonElement operation)
     {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var typeFileMap = CompilationHelper.BuildTypeFileMap(walker);
-        var controllerGroups = ClientEmitter.GroupByController(endpoints);
-        return string.Join("\n", controllerGroups.Select(g =>
-            ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
+        var requestBody = operation.GetProperty("requestBody");
+        Assert.True(requestBody.GetProperty("required").GetBoolean());
+        return requestBody.GetProperty("content").GetProperty("multipart/form-data").GetProperty("schema");
     }
 
-    private static (string Client, IReadOnlyList<TsEndpointDefinition> Endpoints) GenerateContractClientWithEndpoints(string source)
+    private static void AssertBinaryFileProperty(JsonElement schema, string name)
     {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var typeFileMap = CompilationHelper.BuildTypeFileMap(walker);
-        var controllerGroups = ClientEmitter.GroupByController(endpoints);
-        var client = string.Join("\n", controllerGroups.Select(g =>
-            ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
-        return (client, endpoints);
+        var prop = schema.GetProperty("properties").GetProperty(name);
+        Assert.Equal("string", prop.GetProperty("type").GetString());
+        Assert.Equal("binary", prop.GetProperty("format").GetString());
+        Assert.True(prop.GetProperty("x-rivet-file").GetBoolean());
+        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains(name, required);
     }
 
     [Fact]
@@ -58,11 +58,7 @@ public sealed class FormFileTests
             }
             """;
 
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
-        var typeFileMap = CompilationHelper.BuildTypeFileMap(walker);
-        var client = ClientEmitter.EmitControllerClient("files", endpoints, typeFileMap);
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
 
         // Validate endpoint param types
         var ep = Assert.Single(endpoints);
@@ -71,15 +67,18 @@ public sealed class FormFileTests
         Assert.IsType<TsType.Primitive>(fileParam.Type);
         Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
-        // Function signature takes transport-shaped input
-        Assert.Contains("input: { body: { file: File; }; }", client);
-        // FormData construction
-        Assert.Contains("const fd = new FormData();", client);
-        Assert.Contains("fd.append(\"file\", input.body.file);", client);
-        // Body is fd
-        Assert.Contains("body: fd", client);
-        // Return type is correct
-        Assert.Contains("Promise<FileUploadResult>", client);
+        // OpenAPI: multipart/form-data request body with an inline binary file property
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var operation = GetOperation(doc, "/api/files", "post");
+        var schema = GetMultipartSchema(operation);
+        AssertBinaryFileProperty(schema, "file");
+
+        // Response type is correct
+        Assert.Equal(
+            "#/components/schemas/FileUploadResult",
+            operation.GetProperty("responses").GetProperty("201")
+                .GetProperty("content").GetProperty("application/json")
+                .GetProperty("schema").GetProperty("$ref").GetString());
     }
 
     [Fact]
@@ -112,11 +111,7 @@ public sealed class FormFileTests
             }
             """;
 
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
-        var typeFileMap = CompilationHelper.BuildTypeFileMap(walker);
-        var client = ClientEmitter.EmitControllerClient("tasks", endpoints, typeFileMap);
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
 
         // Validate endpoint param types
         var ep = Assert.Single(endpoints);
@@ -127,11 +122,17 @@ public sealed class FormFileTests
         Assert.IsType<TsType.Primitive>(fileParam.Type);
         Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
-        // Both route param and file param
-        Assert.Contains("input: { params: { id: string; }; body: { file: File; }; }", client);
-        Assert.Contains("const fd = new FormData();", client);
-        Assert.Contains("fd.append(\"file\", input.body.file);", client);
-        Assert.Contains("${encodeURIComponent(String(input.params.id))}", client);
+        // OpenAPI: both the path parameter and the multipart file property
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var operation = GetOperation(doc, "/api/tasks/{id}/attachments", "post");
+        var idParam = Assert.Single(
+            operation.GetProperty("parameters").EnumerateArray(),
+            p => p.GetProperty("name").GetString() == "id");
+        Assert.Equal("path", idParam.GetProperty("in").GetString());
+        Assert.True(idParam.GetProperty("required").GetBoolean());
+
+        var schema = GetMultipartSchema(operation);
+        AssertBinaryFileProperty(schema, "file");
     }
 
     [Fact]
@@ -160,11 +161,7 @@ public sealed class FormFileTests
             }
             """;
 
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
-        var typeFileMap = CompilationHelper.BuildTypeFileMap(walker);
-        var client = ClientEmitter.EmitControllerClient("avatars", endpoints, typeFileMap);
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
 
         // Validate endpoint param types
         var ep = Assert.Single(endpoints);
@@ -174,9 +171,14 @@ public sealed class FormFileTests
         Assert.Equal("File", ((TsType.Primitive)avatarParam.Type).Name);
         Assert.Null(ep.ReturnType);
 
-        Assert.Contains("input: { body: { avatar: File; }; }", client);
-        Assert.Contains("fd.append(\"avatar\", input.body.avatar);", client);
-        Assert.Contains("Promise<void>", client);
+        // OpenAPI: multipart body, and the 200 response carries no schema (void)
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var operation = GetOperation(doc, "/api/avatars", "post");
+        var schema = GetMultipartSchema(operation);
+        AssertBinaryFileProperty(schema, "avatar");
+
+        var response = operation.GetProperty("responses").GetProperty("200");
+        Assert.False(response.TryGetProperty("content", out _));
     }
 
     [Fact]
@@ -209,11 +211,7 @@ public sealed class FormFileTests
             }
             """;
 
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
-        var typeFileMap = CompilationHelper.BuildTypeFileMap(walker);
-        var client = ClientEmitter.EmitControllerClient("documents", endpoints, typeFileMap);
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
 
         // Validate endpoint param types and sources
         var ep = Assert.Single(endpoints);
@@ -226,11 +224,17 @@ public sealed class FormFileTests
         Assert.IsType<TsType.Primitive>(titleParam.Type);
         Assert.Equal("string", ((TsType.Primitive)titleParam.Type).Name);
 
-        // file param is File, title is a FormField appended to FormData
-        Assert.Contains("input: { body: { file: File; title: string; }; }", client);
-        Assert.Contains("const fd = new FormData();", client);
-        Assert.Contains("fd.append(\"file\", input.body.file);", client);
-        Assert.Contains("fd.append(\"title\", input.body.title);", client);
+        // OpenAPI: file is binary, title is a plain string form field, both required
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var operation = GetOperation(doc, "/api/documents", "post");
+        var schema = GetMultipartSchema(operation);
+        AssertBinaryFileProperty(schema, "file");
+
+        var titleProp = schema.GetProperty("properties").GetProperty("title");
+        Assert.Equal("string", titleProp.GetProperty("type").GetString());
+        Assert.False(titleProp.TryGetProperty("format", out _));
+        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("title", required);
     }
 
     [Fact]
@@ -257,7 +261,7 @@ public sealed class FormFileTests
             }
             """;
 
-        var (client, endpoints) = GenerateContractClientWithEndpoints(source);
+        var (endpoints, _) = CompilationHelper.WalkContract(source);
 
         // Validate endpoint param types
         var ep = Assert.Single(endpoints);
@@ -266,12 +270,21 @@ public sealed class FormFileTests
         Assert.IsType<TsType.Primitive>(fileParam.Type);
         Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
-        // Should detect IFormFile in TInput and emit File param + FormData
-        Assert.Contains("input: { body: { file: File; }; }", client);
-        Assert.Contains("const fd = new FormData();", client);
-        Assert.Contains("fd.append(\"file\", input.body.file);", client);
-        Assert.Contains("body: fd", client);
-        Assert.Contains("Promise<FileUploadResult>", client);
+        // OpenAPI: named input type — multipart schema is a $ref into components,
+        // and the component carries the binary file property
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var operation = GetOperation(doc, "/api/files", "post");
+        var schema = GetMultipartSchema(operation);
+        Assert.Equal("#/components/schemas/FileUploadRequest", schema.GetProperty("$ref").GetString());
+
+        var component = doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("FileUploadRequest");
+        AssertBinaryFileProperty(component, "file");
+
+        Assert.Equal(
+            "#/components/schemas/FileUploadResult",
+            operation.GetProperty("responses").GetProperty("201")
+                .GetProperty("content").GetProperty("application/json")
+                .GetProperty("schema").GetProperty("$ref").GetString());
     }
 
     [Fact]
@@ -298,7 +311,7 @@ public sealed class FormFileTests
             }
             """;
 
-        var (client, endpoints) = GenerateContractClientWithEndpoints(source);
+        var (endpoints, _) = CompilationHelper.WalkContract(source);
 
         // Validate endpoint param types
         var ep = Assert.Single(endpoints);
@@ -309,12 +322,26 @@ public sealed class FormFileTests
         Assert.IsType<TsType.Primitive>(fileParam.Type);
         Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
-        // Route param + file param
-        Assert.Contains("input: { params: { id: string; }; body: { file: File; }; }", client);
-        Assert.Contains("const fd = new FormData();", client);
-        Assert.Contains("fd.append(\"file\", input.body.file);", client);
-        Assert.Contains("${encodeURIComponent(String(input.params.id))}", client);
-        Assert.Contains("Promise<AttachmentResult>", client);
+        // OpenAPI: path param + multipart $ref body
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var operation = GetOperation(doc, "/api/tasks/{id}/attachments", "post");
+        var idParam = Assert.Single(
+            operation.GetProperty("parameters").EnumerateArray(),
+            p => p.GetProperty("name").GetString() == "id");
+        Assert.Equal("path", idParam.GetProperty("in").GetString());
+        Assert.True(idParam.GetProperty("required").GetBoolean());
+
+        var schema = GetMultipartSchema(operation);
+        Assert.Equal("#/components/schemas/AttachRequest", schema.GetProperty("$ref").GetString());
+
+        var component = doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("AttachRequest");
+        AssertBinaryFileProperty(component, "file");
+
+        Assert.Equal(
+            "#/components/schemas/AttachmentResult",
+            operation.GetProperty("responses").GetProperty("201")
+                .GetProperty("content").GetProperty("application/json")
+                .GetProperty("schema").GetProperty("$ref").GetString());
     }
 
     [Fact]
@@ -338,7 +365,7 @@ public sealed class FormFileTests
             }
             """;
 
-        var (client, endpoints) = GenerateContractClientWithEndpoints(source);
+        var (endpoints, _) = CompilationHelper.WalkContract(source);
 
         // Validate endpoint param types
         var ep = Assert.Single(endpoints);
@@ -347,9 +374,16 @@ public sealed class FormFileTests
         Assert.IsType<TsType.Primitive>(fileParam.Type);
         Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
 
-        // Direct IFormFile as TInput — emits File param
-        Assert.Contains("input: { body: { file: File; }; }", client);
-        Assert.Contains("const fd = new FormData();", client);
-        Assert.Contains("Promise<AvatarResult>", client);
+        // OpenAPI: bare IFormFile input — inline multipart schema with binary file property
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var operation = GetOperation(doc, "/api/avatars", "post");
+        var schema = GetMultipartSchema(operation);
+        AssertBinaryFileProperty(schema, "file");
+
+        Assert.Equal(
+            "#/components/schemas/AvatarResult",
+            operation.GetProperty("responses").GetProperty("201")
+                .GetProperty("content").GetProperty("application/json")
+                .GetProperty("schema").GetProperty("$ref").GetString());
     }
 }
