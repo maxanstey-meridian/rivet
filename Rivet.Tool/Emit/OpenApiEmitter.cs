@@ -75,8 +75,9 @@ public static class OpenApiEmitter
             {
                 if (!schemas.TryAdd(name, schema))
                 {
-                    Console.Error.WriteLine(
-                        $"warning: tagged-union variant component '{name}' collides with an existing schema — existing schema wins");
+                    Diagnostics.Warn(
+                        Diagnostics.TaggedUnionComponentCollision,
+                        $"tagged-union variant component '{name}' collides with an existing schema — existing schema wins");
                 }
             }
         }
@@ -155,8 +156,9 @@ public static class OpenApiEmitter
                 continue;
             }
 
-            Console.Error.WriteLine(
-                $"warning: security scheme '{scheme}' is referenced by an endpoint's .Secure(\"{scheme}\") but has no definition — emitting a default bearer securityScheme component");
+            Diagnostics.Warn(
+                Diagnostics.UndefinedSecurityScheme,
+                $"security scheme '{scheme}' is referenced by an endpoint's .Secure(\"{scheme}\") but has no definition — emitting a default bearer securityScheme component");
 
             securitySchemes[scheme!] = new Dictionary<string, object>
             {
@@ -199,7 +201,9 @@ public static class OpenApiEmitter
             var methodKey = ep.HttpMethod.ToLowerInvariant();
             if (pathItem.ContainsKey(methodKey))
             {
-                Console.Error.WriteLine($"warning: duplicate endpoint {ep.HttpMethod} {pathKey} — later definition wins");
+                Diagnostics.Warn(
+                    Diagnostics.DuplicateEndpoint,
+                    $"duplicate endpoint {ep.HttpMethod} {pathKey} — later definition wins");
             }
             var operation = BuildOperation(ep, definitions, security);
             pathItem[methodKey] = operation;
@@ -250,7 +254,7 @@ public static class OpenApiEmitter
                         ["name"] = param.Name,
                         ["in"] = "path",
                         ["required"] = true,
-                        ["schema"] = MapTsTypeToJsonSchema(param.Type),
+                        ["schema"] = MapTsTypeToJsonSchema(param.Type, $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"),
                     });
                     break;
 
@@ -262,7 +266,7 @@ public static class OpenApiEmitter
                         // N1: honour explicit optionality (e.g. C# default values, rivet-ts
                         // isOptional) as well as type-level nullability.
                         ["required"] = param.Type is not TsType.Nullable && !param.IsOptional,
-                        ["schema"] = MapTsTypeToJsonSchema(param.Type),
+                        ["schema"] = MapTsTypeToJsonSchema(param.Type, $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"),
                     };
                     parameters.Add(queryParam);
                     break;
@@ -319,8 +323,9 @@ public static class OpenApiEmitter
                 // Build the multipart request schema inline from the endpoint's params instead.
                 if (ep.InputTypeName is not null)
                 {
-                    Console.Error.WriteLine(
-                        $"warning: multipart input type '{ep.InputTypeName}' on endpoint '{ep.ControllerName}.{ep.Name}' " +
+                    Diagnostics.Warn(
+                        Diagnostics.MultipartInputTypeMissing,
+                        $"multipart input type '{ep.InputTypeName}' on endpoint '{ep.ControllerName}.{ep.Name}' " +
                         "is not present in the contract's type definitions — building the multipart request schema " +
                         "inline from the endpoint's params; fix the upstream producer to include the input type definition");
                 }
@@ -338,7 +343,7 @@ public static class OpenApiEmitter
                 }
                 foreach (var ff in formFieldParams)
                 {
-                    multipartProps[ff.Name] = MapTsTypeToJsonSchema(ff.Type);
+                    multipartProps[ff.Name] = MapTsTypeToJsonSchema(ff.Type, $"form field '{ff.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'");
                 }
 
                 var requiredFields = new List<string>();
@@ -447,7 +452,7 @@ public static class OpenApiEmitter
                     {
                         ["application/json"] = new Dictionary<string, object>
                         {
-                            ["schema"] = MapTsTypeToJsonSchema(resp.DataType),
+                            ["schema"] = MapTsTypeToJsonSchema(resp.DataType, $"response {resp.StatusCode} on endpoint '{ep.ControllerName}.{ep.Name}'"),
                         },
                     },
                     resp.Examples);
@@ -531,7 +536,7 @@ public static class OpenApiEmitter
     /// </summary>
     private static Dictionary<string, object> BuildBodySchema(TsType bodyType, TsEndpointDefinition ep)
     {
-        var schema = MapTsTypeToJsonSchema(bodyType);
+        var schema = MapTsTypeToJsonSchema(bodyType, $"request body on endpoint '{ep.ControllerName}.{ep.Name}'");
         if (bodyType is TsType.InlineObject && !schema.ContainsKey("$ref"))
         {
             schema["x-rivet-input-type"] = SynthesizedInputTypeName(ep);
@@ -677,17 +682,17 @@ public static class OpenApiEmitter
         JsonSerializer.Deserialize<object>(json)
         ?? throw new InvalidOperationException("Expected example JSON to deserialize.");
 
-    public static Dictionary<string, object> MapTsTypeToJsonSchema(TsType type)
+    public static Dictionary<string, object> MapTsTypeToJsonSchema(TsType type, string? context = null)
     {
         return type switch
         {
-            TsType.Primitive p => MapPrimitive(p),
+            TsType.Primitive p => MapPrimitive(p, context),
 
-            TsType.Nullable n => MapNullable(n),
+            TsType.Nullable n => MapNullable(n, context),
 
-            TsType.Array a => BuildArraySchema(a),
+            TsType.Array a => BuildArraySchema(a, context),
 
-            TsType.Dictionary d => BuildDictionarySchema(d),
+            TsType.Dictionary d => BuildDictionarySchema(d, context),
 
             TsType.StringUnion su => new Dictionary<string, object>
             {
@@ -716,24 +721,24 @@ public static class OpenApiEmitter
                 ["$ref"] = $"#/components/schemas/{b.Name}",
             },
 
-            TsType.TypeParam tp => FallbackTypeParam(tp),
+            TsType.TypeParam tp => FallbackTypeParam(tp, context),
 
-            TsType.InlineObject obj => BuildInlineObjectSchema(obj),
+            TsType.InlineObject obj => BuildInlineObjectSchema(obj, context),
 
-            TsType.TaggedUnion tu => BuildTaggedUnionSchema(tu),
+            TsType.TaggedUnion tu => BuildTaggedUnionSchema(tu, context),
 
             _ => new Dictionary<string, object> { ["type"] = "object" },
         };
     }
 
-    private static Dictionary<string, object> BuildInlineObjectSchema(TsType.InlineObject obj)
+    private static Dictionary<string, object> BuildInlineObjectSchema(TsType.InlineObject obj, string? context = null)
     {
         var properties = new Dictionary<string, object>();
         var required = new List<string>();
 
         foreach (var (name, fieldType) in obj.Fields)
         {
-            properties[name] = MapTsTypeToJsonSchema(fieldType);
+            properties[name] = MapTsTypeToJsonSchema(fieldType, context);
             if (fieldType is not TsType.Nullable)
             {
                 required.Add(name);
@@ -754,7 +759,7 @@ public static class OpenApiEmitter
         return schema;
     }
 
-    private static Dictionary<string, object> BuildTaggedUnionSchema(TsType.TaggedUnion tu)
+    private static Dictionary<string, object> BuildTaggedUnionSchema(TsType.TaggedUnion tu, string? context = null)
     {
         // OpenAPI `discriminator` is only meaningful on a oneOf of $ref'd named schemas with
         // a tag→$ref mapping — consumers reject or ignore a discriminator over inline schemas
@@ -767,7 +772,7 @@ public static class OpenApiEmitter
 
         foreach (var variant in tu.Variants)
         {
-            var variantSchema = MapTsTypeToJsonSchema(variant.Type);
+            var variantSchema = MapTsTypeToJsonSchema(variant.Type, context);
 
             string refPath;
             if (variantSchema.Count == 1 && variantSchema.TryGetValue("$ref", out var existingRef))
@@ -797,7 +802,7 @@ public static class OpenApiEmitter
         };
     }
 
-    private static Dictionary<string, object> MapPrimitive(TsType.Primitive p)
+    private static Dictionary<string, object> MapPrimitive(TsType.Primitive p, string? context = null)
     {
         if (p.Name == "File")
         {
@@ -813,7 +818,11 @@ public static class OpenApiEmitter
         {
             if (p.CSharpType is null)
             {
-                Console.Error.WriteLine("warning: 'unknown' type (JsonElement/JsonNode) in OpenAPI schema — emitting as untyped");
+                // The catch-all used to name no symbol at all (FABLE_GAPS §7 item 12) —
+                // context threads the offending type/property or endpoint site through.
+                Diagnostics.Warn(
+                    Diagnostics.UnknownTypeUntypedSchema,
+                    $"'unknown' type (JsonElement/JsonNode or an unmapped C# type) in OpenAPI schema{AtContext(context)} — emitting as untyped");
             }
 
             var unknownSchema = new Dictionary<string, object>();
@@ -889,9 +898,9 @@ public static class OpenApiEmitter
         return schema;
     }
 
-    private static Dictionary<string, object> MapNullable(TsType.Nullable n)
+    private static Dictionary<string, object> MapNullable(TsType.Nullable n, string? context = null)
     {
-        var inner = MapTsTypeToJsonSchema(n.Inner);
+        var inner = MapTsTypeToJsonSchema(n.Inner, context);
 
         // OpenAPI 3.1 / JSON Schema 2020-12: null is a type. Schemas with a single
         // type become a type array; everything else gets an explicit null branch.
@@ -934,11 +943,16 @@ public static class OpenApiEmitter
         };
     }
 
-    private static Dictionary<string, object> FallbackTypeParam(TsType.TypeParam tp)
+    private static Dictionary<string, object> FallbackTypeParam(TsType.TypeParam tp, string? context = null)
     {
-        Console.Error.WriteLine($"warning: unresolved type parameter '{tp.Name}' in OpenAPI schema — emitting as object");
+        Diagnostics.Warn(
+            Diagnostics.UnresolvedTypeParameter,
+            $"unresolved type parameter '{tp.Name}' in OpenAPI schema{AtContext(context)} — emitting as object");
         return new Dictionary<string, object> { ["type"] = "object" };
     }
+
+    private static string AtContext(string? context)
+        => context is null ? "" : $" at {context}";
 
     private static string MonomorphisedName(TsType.Generic g)
     {
@@ -1130,8 +1144,9 @@ public static class OpenApiEmitter
                 // to emit a $ref with no matching component — a dangling reference every
                 // consumer rejects (GAP-1). Never emit a dangling $ref: warn loudly and
                 // synthesize a valid free-form fallback component under the $ref'd name.
-                Console.Error.WriteLine(
-                    $"warning: generic template '{generic.Name}' (instantiated as '{monoName}') is not present in the contract's type definitions — emitting a free-form object schema; fix the upstream producer to include the template definition");
+                Diagnostics.Warn(
+                    Diagnostics.GenericTemplateMissing,
+                    $"generic template '{generic.Name}' (instantiated as '{monoName}') is not present in the contract's type definitions — emitting a free-form object schema; fix the upstream producer to include the template definition");
 
                 schemas[monoName] = new Dictionary<string, object>
                 {
@@ -1164,7 +1179,7 @@ public static class OpenApiEmitter
         // Brands as schemas with x-rivet-brand extension
         foreach (var (name, brand) in brands)
         {
-            var brandSchema = MapTsTypeToJsonSchema(brand.Inner);
+            var brandSchema = MapTsTypeToJsonSchema(brand.Inner, $"brand '{name}'");
             brandSchema["x-rivet-brand"] = name;
             schemas[name] = brandSchema;
         }
@@ -1172,7 +1187,7 @@ public static class OpenApiEmitter
         // Enums as schemas
         foreach (var (name, enumType) in enums)
         {
-            schemas[name] = MapTsTypeToJsonSchema(enumType);
+            schemas[name] = MapTsTypeToJsonSchema(enumType, $"enum '{name}'");
         }
 
         return schemas;
@@ -1182,7 +1197,7 @@ public static class OpenApiEmitter
     {
         if (def.Type is not null)
         {
-            var schema = MapTsTypeToJsonSchema(def.Type);
+            var schema = MapTsTypeToJsonSchema(def.Type, $"type '{def.Name}'");
             if (def.Description is not null)
             {
                 schema["description"] = def.Description;
@@ -1191,19 +1206,22 @@ public static class OpenApiEmitter
             return schema;
         }
 
-        return BuildObjectSchema(def.Properties, def.Description);
+        return BuildObjectSchema(def.Properties, def.Description, def.Name);
     }
 
     private static Dictionary<string, object> BuildObjectSchema(
         IReadOnlyList<TsPropertyDefinition> propertiesDefinition,
-        string? description = null)
+        string? description = null,
+        string? typeName = null)
     {
         var properties = new Dictionary<string, object>();
         var required = new List<string>();
 
         foreach (var prop in propertiesDefinition)
         {
-            var propSchema = MapTsTypeToJsonSchema(prop.Type);
+            var propSchema = MapTsTypeToJsonSchema(
+                prop.Type,
+                typeName is null ? $"property '{prop.Name}'" : $"property '{typeName}.{prop.Name}'");
             SchemaEnricher.EnrichPropertySchema(propSchema, prop);
             properties[prop.Name] = propSchema;
 
@@ -1237,12 +1255,12 @@ public static class OpenApiEmitter
         return schema;
     }
 
-    private static Dictionary<string, object> BuildArraySchema(TsType.Array a)
+    private static Dictionary<string, object> BuildArraySchema(TsType.Array a, string? context = null)
     {
         var schema = new Dictionary<string, object>
         {
             ["type"] = "array",
-            ["items"] = MapTsTypeToJsonSchema(a.Element),
+            ["items"] = MapTsTypeToJsonSchema(a.Element, context),
         };
 
         // Propagate CSharpType from inner unknown (JsonArray) to parent schema
@@ -1254,12 +1272,12 @@ public static class OpenApiEmitter
         return schema;
     }
 
-    private static Dictionary<string, object> BuildDictionarySchema(TsType.Dictionary d)
+    private static Dictionary<string, object> BuildDictionarySchema(TsType.Dictionary d, string? context = null)
     {
         var schema = new Dictionary<string, object>
         {
             ["type"] = "object",
-            ["additionalProperties"] = MapTsTypeToJsonSchema(d.Value),
+            ["additionalProperties"] = MapTsTypeToJsonSchema(d.Value, context),
         };
 
         // Propagate CSharpType from inner unknown (JsonObject) to parent schema
@@ -1280,13 +1298,13 @@ public static class OpenApiEmitter
 
         if (genericDef.Type is not null)
         {
-            return MapTsTypeToJsonSchema(ResolveTypeParams(genericDef.Type, typeParamMap));
+            return MapTsTypeToJsonSchema(ResolveTypeParams(genericDef.Type, typeParamMap), $"type '{genericDef.Name}'");
         }
 
         foreach (var prop in genericDef.Properties)
         {
             var resolvedType = ResolveTypeParams(prop.Type, typeParamMap);
-            var propSchema = MapTsTypeToJsonSchema(resolvedType);
+            var propSchema = MapTsTypeToJsonSchema(resolvedType, $"property '{genericDef.Name}.{prop.Name}'");
             SchemaEnricher.EnrichPropertySchema(propSchema, prop);
             properties[prop.Name] = propSchema;
 

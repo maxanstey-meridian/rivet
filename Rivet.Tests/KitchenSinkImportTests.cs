@@ -409,7 +409,7 @@ public sealed class KitchenSinkImportTests
         // The discriminator's polymorphic dispatch semantics are dropped — never silently
         // (I.A-17): the import surfaces a named warning.
         Assert.Contains(result.Warnings, w =>
-            w.StartsWith("Discriminator dropped on 'DiscriminatedShape'") && w.Contains("'kind'"));
+            w.StartsWith("RIV3005: Discriminator dropped on 'DiscriminatedShape'") && w.Contains("'kind'"));
     }
 
     // ========== File upload ==========

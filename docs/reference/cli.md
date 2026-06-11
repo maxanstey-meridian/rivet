@@ -66,6 +66,13 @@ mismatches — see [Contract Coverage](/guides/contract-coverage)); without
 endpoint (method, route, handler) and exits. `-q`/`--quiet` suppresses generation
 output (useful with `--check` in CI).
 
+## Diagnostics
+
+Every warning the tool writes to stderr carries a stable `RIV`-prefixed ID in
+the canonical format `warning RIV1001: <message>` — grep or baseline by ID,
+never by message text. See the [Diagnostics Reference](/reference/diagnostics)
+for the full table of IDs, triggers, and remediations.
+
 ## Import (onboarding scaffold)
 
 One-shot scaffold for adopting Rivet on an existing API — the generated C#

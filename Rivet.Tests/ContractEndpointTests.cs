@@ -309,7 +309,7 @@ public sealed class ContractEndpointTests
 
         // The silent drop must be loud: a warning naming the status and the endpoint.
         Assert.Contains(
-            "warning: ignoring response example for undeclared status 422 on contract endpoint 'getTask'",
+            "warning RIV1002: ignoring response example for undeclared status 422 on contract endpoint 'getTask'",
             stderr);
     }
 

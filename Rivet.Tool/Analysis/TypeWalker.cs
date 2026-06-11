@@ -29,6 +29,8 @@ public sealed class TypeWalker
     // JSON container types that map to non-Primitive TsTypes (special-cased in MapTypeCore)
     private readonly INamedTypeSymbol? _jsonObjectType;
     private readonly INamedTypeSymbol? _jsonArrayType;
+    private readonly INamedTypeSymbol? _timeSpanType;
+    private readonly INamedTypeSymbol? _bigIntegerType;
 
     // Generic collection/dictionary type sets for membership checks
     private readonly ImmutableHashSet<INamedTypeSymbol> _collectionTypes;
@@ -67,6 +69,11 @@ public sealed class TypeWalker
 
         _jsonObjectType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonObject");
         _jsonArrayType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonArray");
+
+        // Diagnosed-unsupported scalars (FABLE_GAPS §7 item 12) — resolved up front
+        // so the fallback path can name them instead of failing silently.
+        _timeSpanType = compilation.GetTypeByMetadataName("System.TimeSpan");
+        _bigIntegerType = compilation.GetTypeByMetadataName("System.Numerics.BigInteger");
 
         _collectionTypes = ResolveTypeSet(compilation,
             "System.Collections.Generic.List`1",
@@ -139,7 +146,7 @@ public sealed class TypeWalker
     /// Maps a Roslyn type symbol to its TsType representation.
     /// Used by EndpointWalker for parameter and return types.
     /// </summary>
-    public TsType MapType(ITypeSymbol symbol) => MapTypeCore(symbol);
+    public TsType MapType(ITypeSymbol symbol, string? context = null) => MapTypeCore(symbol, context);
 
     /// <summary>
     /// Returns true if the property has [JsonIgnore].
@@ -294,7 +301,7 @@ public sealed class TypeWalker
             }
 
             var tsName = jsonPropertyName ?? Naming.ToCamelCase(member.Name);
-            var tsType = MapTypeCore(member.Type);
+            var tsType = MapTypeCore(member.Type, $"{name}.{member.Name}");
             var isOptional = IsOptionalProperty(member);
             var isDeprecated = _obsoleteType is not null
                 && member.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _obsoleteType));
@@ -432,8 +439,9 @@ public sealed class TypeWalker
             }
             while (!_claimedNames.Add(name));
 
-            Console.Error.WriteLine(
-                $"warning: type name collision — '{pure}' ({key}) collides with a previously walked type of the same name; " +
+            Diagnostics.Warn(
+                Diagnostics.TypeNameCollision,
+                $"type name collision — '{pure}' ({key}) collides with a previously walked type of the same name; " +
                 $"emitting it as '{name}'. Use distinct type names to keep schema names stable.");
         }
 
@@ -441,12 +449,12 @@ public sealed class TypeWalker
         return name;
     }
 
-    private TsType MapTypeCore(ITypeSymbol symbol)
+    private TsType MapTypeCore(ITypeSymbol symbol, string? context = null)
     {
         // Nullable value type: int? → Nullable<int>
         if (symbol is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
         {
-            var inner = MapTypeCore(nullable.TypeArguments[0]);
+            var inner = MapTypeCore(nullable.TypeArguments[0], context);
             return new TsType.Nullable(inner);
         }
 
@@ -456,7 +464,7 @@ public sealed class TypeWalker
         if (symbol.NullableAnnotation == NullableAnnotation.Annotated
             && symbol is not INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T })
         {
-            var inner = MapTypeCore(symbol.WithNullableAnnotation(NullableAnnotation.NotAnnotated));
+            var inner = MapTypeCore(symbol.WithNullableAnnotation(NullableAnnotation.NotAnnotated), context);
             return new TsType.Nullable(inner);
         }
 
@@ -480,7 +488,7 @@ public sealed class TypeWalker
                 return new TsType.Primitive("string", "base64", "byte[]");
             }
 
-            return new TsType.Array(MapTypeCore(arrayType.ElementType));
+            return new TsType.Array(MapTypeCore(arrayType.ElementType, context));
         }
 
         if (symbol is INamedTypeSymbol namedType)
@@ -506,13 +514,27 @@ public sealed class TypeWalker
             // Collections: List<T>, IEnumerable<T>, IReadOnlyList<T>, IList<T>, ICollection<T>, IReadOnlyCollection<T>
             if (IsCollectionType(namedType) && namedType.TypeArguments.Length == 1)
             {
-                return new TsType.Array(MapTypeCore(namedType.TypeArguments[0]));
+                return new TsType.Array(MapTypeCore(namedType.TypeArguments[0], context));
             }
 
             // Dictionary<string, T>
             if (IsDictionaryType(namedType) && namedType.TypeArguments.Length == 2)
             {
-                return new TsType.Dictionary(MapTypeCore(namedType.TypeArguments[1]));
+                // FABLE_GAPS §7 item 12: the key type argument has no contract
+                // representation — keys are emitted as unconstrained strings, and a
+                // key enum's schema never reaches the spec. Diagnose, don't change
+                // the wire: the value-keyed Dictionary node is emitted as before.
+                var keyType = namedType.TypeArguments[0];
+                if (keyType.SpecialType != SpecialType.System_String)
+                {
+                    Diagnostics.Warn(
+                        Diagnostics.DictionaryKeyTypeDropped,
+                        $"dictionary key type '{keyType.ToDisplayString()}'{AtContext(context)} has no contract representation — " +
+                        "keys are emitted as unconstrained strings" +
+                        (keyType.TypeKind == TypeKind.Enum ? " and the key enum's schema is not emitted" : ""));
+                }
+
+                return new TsType.Dictionary(MapTypeCore(namedType.TypeArguments[1], context));
             }
 
             // Enum → named string union type
@@ -558,7 +580,7 @@ public sealed class TypeWalker
                 {
                     // A5: brands used to be keyed by simple name with first-wins TryAdd
                     var brandName = GetEmittedName(namedType);
-                    var brand = new TsType.Brand(brandName, MapTypeCore(voInner));
+                    var brand = new TsType.Brand(brandName, MapTypeCore(voInner, context));
                     _brands.TryAdd(brandName, brand);
                     _typeNamespaces.TryAdd(brandName, GetNamespaceGroup(namedType));
                     return brand;
@@ -570,7 +592,7 @@ public sealed class TypeWalker
                 // Closed generic (e.g. PagedResult<MessageDto>) → Generic node
                 if (namedType.IsGenericType && !namedType.IsUnboundGenericType)
                 {
-                    var tsArgs = namedType.TypeArguments.Select(MapTypeCore).ToList();
+                    var tsArgs = namedType.TypeArguments.Select(a => MapTypeCore(a, context)).ToList();
                     return new TsType.Generic(emittedName, tsArgs);
                 }
 
@@ -582,14 +604,37 @@ public sealed class TypeWalker
         if (symbol is INamedTypeSymbol { IsTupleType: true } tupleType)
         {
             var fields = tupleType.TupleElements
-                .Select(e => (Naming.ToCamelCase(e.Name), MapTypeCore(e.Type)))
+                .Select(e => (Naming.ToCamelCase(e.Name), MapTypeCore(e.Type, context)))
                 .ToList();
             return new TsType.InlineObject(fields);
+        }
+
+        // Diagnosed-unsupported scalars (FABLE_GAPS §7 item 12): TimeSpan, BigInteger,
+        // char and object used to fall through to the empty {} fallback schema with no
+        // diagnostic naming the cause (the emitter's catch-all blamed JsonElement).
+        // Diagnose, don't change the wire: the fallback schema is emitted as before.
+        var unsupportedId = symbol.SpecialType switch
+        {
+            SpecialType.System_Char => Diagnostics.UnsupportedChar,
+            SpecialType.System_Object => Diagnostics.UnsupportedObject,
+            _ when SymbolEqualityComparer.Default.Equals(symbol, _timeSpanType) => Diagnostics.UnsupportedTimeSpan,
+            _ when SymbolEqualityComparer.Default.Equals(symbol, _bigIntegerType) => Diagnostics.UnsupportedBigInteger,
+            _ => null,
+        };
+
+        if (unsupportedId is not null)
+        {
+            Diagnostics.Warn(
+                unsupportedId,
+                $"unsupported type '{symbol.ToDisplayString()}'{AtContext(context)} has no schema mapping — emitting an untyped (empty) schema");
         }
 
         // Fallback
         return new TsType.Primitive("unknown");
     }
+
+    private static string AtContext(string? context)
+        => context is null ? "" : $" on '{context}'";
 
     private TsType.Primitive? MapPrimitive(INamedTypeSymbol symbol)
     {
@@ -709,8 +754,9 @@ public sealed class TypeWalker
                     if (!TryConvertRangeBound(minArg, out var rangeMin)
                         || !TryConvertRangeBound(maxArg, out var rangeMax))
                     {
-                        Console.Error.WriteLine(
-                            $"warning: unparseable [Range] bound ('{minArg}', '{maxArg}') — skipping the range constraint");
+                        Diagnostics.Warn(
+                            Diagnostics.UnparseableRangeBound,
+                            $"unparseable [Range] bound ('{minArg}', '{maxArg}') — skipping the range constraint");
                         break;
                     }
 

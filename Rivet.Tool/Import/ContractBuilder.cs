@@ -32,8 +32,9 @@ internal static class ContractBuilder
                 {
                     // I15: HEAD/OPTIONS/TRACE used to be skipped with zero diagnostics —
                     // "nothing is dropped silently" demands a named warning per dropped op.
-                    warnings.Add(
-                        $"Operation dropped: {method.Method.ToUpperInvariant()} {route} — HTTP method has no contract representation.");
+                    warnings.Add(Diagnostics.Prefix(
+                        Diagnostics.ImportOperationMethodDropped,
+                        $"Operation dropped: {method.Method.ToUpperInvariant()} {route} — HTTP method has no contract representation."));
                     continue;
                 }
 

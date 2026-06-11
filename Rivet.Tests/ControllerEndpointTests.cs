@@ -559,7 +559,7 @@ public sealed class ControllerEndpointTests
 
         // The silent drop must be loud: a warning naming the status and the endpoint.
         Assert.Contains(
-            "warning: ignoring response example for undeclared status 422 on controller endpoint 'get'",
+            "warning RIV1004: ignoring response example for undeclared status 422 on controller endpoint 'get'",
             stderr);
     }
 

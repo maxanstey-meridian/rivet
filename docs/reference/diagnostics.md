@@ -1,0 +1,94 @@
+# Diagnostics Reference
+
+Every diagnostic Rivet writes to stderr carries a stable ID in the canonical,
+machine-parseable format:
+
+```
+warning RIV1001: <message>
+```
+
+IDs are stable across releases — grep, baseline, or suppress by ID, never by
+message text. Every diagnostic is a **warning**: IDs are observability, not
+severity reform, and the exit-code policy is unchanged (`--check` without
+`--output` still exits `1` on any coverage warning; everything else warns and
+continues).
+
+The ID ranges follow the pipeline stages:
+
+| Range | Stage |
+|---|---|
+| `RIV1xxx` | Extraction (Roslyn walkers) |
+| `RIV2xxx` | Emission (OpenAPI emitter, contract JSON reader) |
+| `RIV3xxx` | Import (`--from-openapi` scaffold) |
+| `RIV4xxx` | Coverage (`--check`) |
+
+**Markers are not diagnostics.** The `// [rivet:unsupported …]` marker comments
+that `--from-openapi` writes into scaffolded source are part of the generated
+code, not stderr diagnostics — they have their own grammar and carry no RIV ID.
+See the [Import Profile](/reference/import-profile) marker table.
+
+The registry (`Rivet.Tool/Diagnostics.cs`) and this page are cross-checked in
+both directions by the test suite (`DiagnosticsTests`) — every registered ID
+must have a row here, and every row here must be a registered ID.
+
+## RIV1xxx — extraction
+
+| ID | Severity | Trigger | Remediation |
+|---|---|---|---|
+| `RIV1001` | Warning | Contract endpoint field is not `static readonly` — it may not be read correctly at generation time. | Declare the `Define` field as `public static readonly`. |
+| `RIV1002` | Warning | Response example targets a status code the contract endpoint does not declare — the example is ignored. | Declare the status on the endpoint (`.Status(...)` / `.Error<...>(...)`) or fix the example's status code. |
+| `RIV1003` | Warning | `[JsonPropertyName]` on a route-bound property is ignored for route interpolation — the contract param keeps the route name. | Align the route token and the property name, or accept that the route name wins for path params. |
+| `RIV1004` | Warning | Response example targets a status code the controller endpoint does not declare — the example is ignored. | Declare the response status on the action (e.g. `[ProducesResponseType]`) or fix the example's status code. |
+| `RIV1005` | Warning | `[FromHeader]` parameter has no header parameter source in the contract model — excluded from the generated contract. | Move the value to a route/query parameter or the body, or accept its exclusion from the contract. |
+| `RIV1006` | Warning | Unmapped typed result branch in `Results<...>` — the response branch is omitted from the contract. | Use a supported typed result for the branch so the response surface stays complete. |
+| `RIV1007` | Warning | Two walked types share a simple name — the later type is emitted under a disambiguated name (`Name2`, …). | Rename one of the colliding types to keep schema names stable. |
+| `RIV1008` | Warning | A `[Range]` bound could not be parsed — the range constraint is skipped. | Use numeric `[Range]` bounds the walker can evaluate. |
+| `RIV1009` | Warning | `TimeSpan` has no schema mapping — emitted as an untyped (empty) schema. | Expose the value as a supported type (e.g. ISO 8601 `string`, or seconds as a number). |
+| `RIV1010` | Warning | `BigInteger` has no schema mapping — emitted as an untyped (empty) schema. | Expose the value as a supported type (e.g. `string`, or `long` when the range allows). |
+| `RIV1011` | Warning | `char` has no schema mapping — emitted as an untyped (empty) schema. | Use `string` instead of `char`. |
+| `RIV1012` | Warning | `object` has no schema mapping — emitted as an untyped (empty) schema. | Use a concrete type, or `JsonElement` to state "untyped" deliberately. |
+| `RIV1013` | Warning | Dictionary key type has no contract representation — keys are emitted as unconstrained strings (a key enum's schema is not emitted). | Use `string` dictionary keys; model enum-keyed maps as records or string-keyed dictionaries. |
+
+## RIV2xxx — emission
+
+| ID | Severity | Trigger | Remediation |
+|---|---|---|---|
+| `RIV2001` | Warning | Synthesized tagged-union variant component collides with an existing schema — the existing schema wins. | Rename the colliding type or the union variant so component names stay distinct. |
+| `RIV2002` | Warning | Endpoint references a security scheme with no definition — a default bearer `securityScheme` component is emitted. | Define the scheme via `--security`, or fix the `.Secure("...")` name. |
+| `RIV2003` | Warning | Two endpoints share an HTTP method + path — the later definition wins. | Remove or re-route the duplicate endpoint. |
+| `RIV2004` | Warning | Multipart input type is absent from the contract's type definitions — the request schema is built inline from the endpoint's params. | Fix the upstream producer (rivet-ts/rivet-php lowerer) to include the input type definition. |
+| `RIV2005` | Warning | `unknown` type (`JsonElement`/`JsonNode` or an unmapped C# type) in the OpenAPI schema — emitted as untyped. The message names the offending type/property or endpoint site. | Replace the named property/param type with a concrete supported type, or accept the untyped schema. |
+| `RIV2006` | Warning | Unresolved generic type parameter in the OpenAPI schema — emitted as `object`. | Expose a closed generic instantiation; open type parameters cannot be emitted. |
+| `RIV2007` | Warning | Generic template is absent from the contract's type definitions — a free-form object schema is emitted for the instantiation. | Fix the upstream producer to include the generic template definition. |
+| `RIV2008` | Warning | Brand declared with conflicting underlying types — the first declaration wins. | Align every declaration of the brand on one underlying type. |
+
+## RIV3xxx — import
+
+Import warnings are also surfaced programmatically on
+`ImportResult.Warnings`, where each entry carries its ID as a `RIV3001: `
+prefix. The test-suite ratchet categories these map to are listed in the
+[Import Profile](/reference/import-profile#warnings-stderr-importresult-warnings).
+
+| ID | Severity | Trigger | Remediation |
+|---|---|---|---|
+| `RIV3001` | Warning | Alias schema is part of a `$ref` cycle — replaced with an empty schema; consumers resolve to an untyped object. | Break the cycle in the source spec, or type the affected members after scaffolding. |
+| `RIV3002` | Warning | Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented. | Review the scaffold's `.Secure(...)` calls; multi-scheme semantics are out of scope. |
+| `RIV3003` | Warning | HEAD/OPTIONS/TRACE operation dropped — the HTTP method has no contract representation. | No action; these methods are out of scope for the contract model. |
+| `RIV3004` | Warning | Named schema declares both `properties` and `additionalProperties` — imported as a record; extra members are not represented. | Pick one side in the scaffolded C# (record vs dictionary) and adjust by hand. |
+| `RIV3005` | Warning | `discriminator` on a plain object schema (no `oneOf` union) — imported as a regular record; dispatch semantics dropped. | Model the polymorphism as a `oneOf` union upstream, or accept the plain record. |
+| `RIV3006` | Warning | Alias schema references a missing schema — consumers fall back to `JsonElement`. | Fix the dangling `$ref` in the source spec, or type the member after scaffolding. |
+| `RIV3007` | Warning | Alias schema is part of a `$ref` cycle — consumers fall back to `JsonElement`. | Break the cycle in the source spec, or type the member after scaffolding. |
+| `RIV3008` | Warning | Reference to an unresolvable alias schema (cycle or missing target) — using `JsonElement`. | Fix the alias it references (see `RIV3006`/`RIV3007`). |
+| `RIV3009` | Warning | Schema could not be resolved to a C# type — mapped to `JsonElement`. | Type the member by hand in the scaffolded C#. |
+| `RIV3010` | Warning | Unhandled JSON Schema `type` — mapped to `JsonElement`. | Type the member by hand in the scaffolded C#. |
+| `RIV3011` | Warning | Array schema without `items` — mapped to `List<JsonElement>`. | Add `items` to the source spec, or type the list element after scaffolding. |
+| `RIV3012` | Warning | Enum constraint that cannot become a C# enum (single-value, mixed/float, out-of-int32-range) — degraded to a primitive. | Accept the primitive, or hand-model the constraint in the scaffolded C#. |
+| `RIV3013` | Warning | Inline schema declares both `properties` and `additionalProperties` — imported as a dictionary; the declared properties are not represented. | Pick one side in the scaffolded C# (dictionary vs record) and adjust by hand. |
+
+## RIV4xxx — coverage (`--check`)
+
+| ID | Severity | Trigger | Remediation |
+|---|---|---|---|
+| `RIV4001` | Warning | Contract endpoint has no matching implementation. | Implement the endpoint, or remove it from the contract. |
+| `RIV4002` | Warning | Implementation HTTP method differs from the contract's. | Align the implementation's HTTP method with the contract. |
+| `RIV4003` | Warning | Implementation route differs from the contract's. | Align the implementation's route with the contract. |

@@ -73,8 +73,9 @@ public static class ContractWalker
 
                 if (!field.IsStatic || !field.IsReadOnly)
                 {
-                    Console.Error.WriteLine(
-                        $"warning: {type.Name}.{field.Name} should be 'static readonly' — it may not be read correctly at generation time");
+                    Diagnostics.Warn(
+                        Diagnostics.EndpointFieldNotStaticReadonly,
+                        $"{type.Name}.{field.Name} should be 'static readonly' — it may not be read correctly at generation time");
                 }
 
                 var endpoint = BuildEndpointFromField(field, controllerName, compilation, wkt, typeWalker);
@@ -468,8 +469,9 @@ public static class ContractWalker
                 continue;
             }
 
-            Console.Error.WriteLine(
-                $"warning: ignoring response example for undeclared status {group.Key} on contract endpoint '{endpointName}'");
+            Diagnostics.Warn(
+                Diagnostics.ContractExampleUndeclaredStatus,
+                $"ignoring response example for undeclared status {group.Key} on contract endpoint '{endpointName}'");
         }
 
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
@@ -605,8 +607,9 @@ public static class ContractWalker
                         // would leave the {token} uninterpolated in every client.
                         if (jsonName is not null && jsonName != routeName)
                         {
-                            Console.Error.WriteLine(
-                                $"warning: [JsonPropertyName(\"{jsonName}\")] on route-bound property '{prop.Name}' " +
+                            Diagnostics.Warn(
+                                Diagnostics.RouteBoundJsonPropertyNameIgnored,
+                                $"[JsonPropertyName(\"{jsonName}\")] on route-bound property '{prop.Name}' " +
                                 $"is ignored for route interpolation — the contract param keeps the route name '{routeName}'.");
                         }
 

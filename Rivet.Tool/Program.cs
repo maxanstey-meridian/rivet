@@ -68,7 +68,14 @@ static async Task<int> Run(string[] args)
         var coverageWarnings = CoverageChecker.Check(compilation, wkt, contractEndpoints);
         foreach (var w in coverageWarnings)
         {
-            Console.Error.WriteLine($"warning: [{w.Kind}] {w.ContractName}.{w.FieldName}: expected {w.Expected}, got {w.Actual}");
+            var id = w.Kind switch
+            {
+                CoverageWarningKind.MissingImplementation => Diagnostics.CoverageMissingImplementation,
+                CoverageWarningKind.HttpMethodMismatch => Diagnostics.CoverageHttpMethodMismatch,
+                CoverageWarningKind.RouteMismatch => Diagnostics.CoverageRouteMismatch,
+                _ => throw new InvalidOperationException($"Unmapped coverage warning kind: {w.Kind}"),
+            };
+            Diagnostics.Warn(id, $"[{w.Kind}] {w.ContractName}.{w.FieldName}: expected {w.Expected}, got {w.Actual}");
         }
 
         var totalFields = contractEndpoints.Count;
@@ -149,9 +156,11 @@ static int RunImport(RivetOptions options)
         options.DefaultSecurity);
     var result = OpenApiImporter.Import(json, importOptions);
 
+    // Import warnings carry their RIV3xxx ID as a "RIV3001: " prefix (Diagnostics.Prefix),
+    // so "warning {warning}" yields the canonical "warning RIV3001: <message>" line.
     foreach (var warning in result.Warnings)
     {
-        Console.Error.WriteLine($"warning: {warning}");
+        Console.Error.WriteLine($"warning {warning}");
     }
 
     if (options.OutputDir is not null)

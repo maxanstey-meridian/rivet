@@ -1,3 +1,4 @@
+using Rivet.Tool;
 using Rivet.Tool.Import;
 
 namespace Rivet.Tests;
@@ -40,37 +41,48 @@ public sealed class ImportMetricTests
     }
 
     // ===== Warning ratchet =====
-    // Warnings are allowed but must belong to a known category. New warning categories
-    // (e.g. when a silent skip is converted into a diagnostic) must be consciously added
-    // here and to the per-corpus allowed sets — never silently absorbed.
-    private static string CategorizeWarning(string warning) => warning switch
+    // Warnings are allowed but must belong to a known category, keyed by their stable
+    // RIV3xxx diagnostic ID (every import warning carries an "RIV3001: " prefix via
+    // Diagnostics.Prefix). New warning categories (e.g. when a silent skip is converted
+    // into a diagnostic) must be consciously added here and to the per-corpus allowed
+    // sets — never silently absorbed. ID-less or unknown-ID warnings are UNCATEGORIZED.
+    private static string CategorizeWarning(string warning) => DiagnosticId(warning) switch
     {
-        _ when warning.StartsWith("Schema could not be resolved", StringComparison.Ordinal) => "unresolved-schema",
-        _ when warning.StartsWith("Unsupported JSON Schema type", StringComparison.Ordinal) => "unsupported-schema-type",
-        _ when warning.StartsWith("Array schema missing 'items'", StringComparison.Ordinal) => "array-missing-items",
+        Diagnostics.ImportUnresolvedSchema => "unresolved-schema",
+        Diagnostics.ImportUnsupportedSchemaType => "unsupported-schema-type",
+        Diagnostics.ImportArrayMissingItems => "array-missing-items",
         // Added with I.A-15: enum constraints that can't become a C# enum (single-value,
         // mixed/float, out-of-int32-range) degrade to a primitive WITH a named warning.
-        _ when warning.StartsWith("Enum constraint dropped", StringComparison.Ordinal) => "enum-constraint-dropped",
+        Diagnostics.ImportEnumConstraintDropped => "enum-constraint-dropped",
         // Added with I.A-17: discriminator on a plain object record — dispatch semantics dropped.
-        _ when warning.StartsWith("Discriminator dropped", StringComparison.Ordinal) => "discriminator-dropped",
+        Diagnostics.ImportDiscriminatorDropped => "discriminator-dropped",
         // Added with WP-1.2 I1: component $ref aliases that cannot resolve (cycle or
         // missing target) — consumers fall back to an untyped object, loudly.
-        _ when warning.StartsWith("Alias schema", StringComparison.Ordinal) => "alias-unresolvable",
-        _ when warning.StartsWith("Reference to unresolvable alias schema", StringComparison.Ordinal) => "alias-unresolvable",
+        Diagnostics.ImportAliasCycleBroken => "alias-unresolvable",
+        Diagnostics.ImportAliasTargetMissing => "alias-unresolvable",
+        Diagnostics.ImportAliasRefCycle => "alias-unresolvable",
+        Diagnostics.ImportUnresolvableAliasReference => "alias-unresolvable",
         // Added with Phase 4 / I5: a schema declaring BOTH `properties` and
         // `additionalProperties` keeps one side and drops the other — previously silent
         // in both directions, now each drop emits a named warning.
-        _ when warning.StartsWith("Declared properties dropped", StringComparison.Ordinal) => "properties-dropped",
-        _ when warning.StartsWith("additionalProperties dropped", StringComparison.Ordinal) => "additional-properties-dropped",
+        Diagnostics.ImportDeclaredPropertiesDropped => "properties-dropped",
+        Diagnostics.ImportAdditionalPropertiesDropped => "additional-properties-dropped",
         // Added with Phase 4 / I12: multi-scheme document security collapses to the first
         // scheme — previously silent, now a named warning.
-        _ when warning.StartsWith("Security schemes dropped", StringComparison.Ordinal) => "security-schemes-dropped",
+        Diagnostics.ImportSecuritySchemesDropped => "security-schemes-dropped",
         // Added with I15 (FABLE_GAPS §2): HEAD/OPTIONS/TRACE operations have no contract
         // representation and used to be skipped with ZERO diagnostics — now each dropped
         // op emits a named warning.
-        _ when warning.StartsWith("Operation dropped", StringComparison.Ordinal) => "operation-method-dropped",
+        Diagnostics.ImportOperationMethodDropped => "operation-method-dropped",
         _ => $"UNCATEGORIZED: {warning}",
     };
+
+    /// <summary>Extracts the leading "RIVnnnn" ID from a prefixed warning, or "" if absent.</summary>
+    private static string DiagnosticId(string warning)
+    {
+        var colon = warning.IndexOf(':');
+        return colon > 0 ? warning[..colon] : "";
+    }
 
     /// <summary>
     /// Ratchet: every warning must fall into one of the explicitly allowed categories.
@@ -200,7 +212,7 @@ public sealed class ImportMetricTests
         // representation — previously skipped with zero diagnostics, now each emits a
         // named warning. Exact count pinned below against the corpus.
         AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items", "operation-method-dropped");
-        Assert.Equal(12, r.Warnings.Count(w => w.StartsWith("Operation dropped", StringComparison.Ordinal)));
+        Assert.Equal(12, r.Warnings.Count(w => DiagnosticId(w) == Diagnostics.ImportOperationMethodDropped));
     }
 
     // ========== Cloudflare — largest contract count, hyphenated schema names ==========

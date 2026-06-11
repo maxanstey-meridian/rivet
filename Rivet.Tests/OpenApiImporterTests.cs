@@ -3787,7 +3787,7 @@ public sealed class OpenApiImporterTests
 
         // Never silently: the dropped enum constraint emits a named warning (I.A-15)
         Assert.Contains(result.Warnings, w =>
-            w.StartsWith("Enum constraint dropped") && w.Contains("[42]") && w.Contains("'long'"));
+            w.StartsWith("RIV3012: Enum constraint dropped") && w.Contains("[42]") && w.Contains("'long'"));
     }
 
     [Fact]
@@ -3817,7 +3817,7 @@ public sealed class OpenApiImporterTests
 
         // Never silently: the dropped enum constraint emits a named warning (I.A-15)
         Assert.Contains(result.Warnings, w =>
-            w.StartsWith("Enum constraint dropped") && w.Contains("[42]") && w.Contains("'string'"));
+            w.StartsWith("RIV3012: Enum constraint dropped") && w.Contains("[42]") && w.Contains("'string'"));
     }
 
     [Fact]
@@ -3848,7 +3848,7 @@ public sealed class OpenApiImporterTests
 
         // Never silently: the dropped enum constraint emits a named warning (I.A-15)
         Assert.Contains(result.Warnings, w =>
-            w.StartsWith("Enum constraint dropped") && w.Contains("3.5") && w.Contains("'long'"));
+            w.StartsWith("RIV3012: Enum constraint dropped") && w.Contains("3.5") && w.Contains("'long'"));
     }
 
     [Fact]
@@ -3905,7 +3905,7 @@ public sealed class OpenApiImporterTests
 
         // Never silently: the dropped enum constraint emits a named warning (I.A-15)
         Assert.Contains(result.Warnings, w =>
-            w.StartsWith("Enum constraint dropped") && w.Contains("2147483648") && w.Contains("'long'"));
+            w.StartsWith("RIV3012: Enum constraint dropped") && w.Contains("2147483648") && w.Contains("'long'"));
     }
 
     [Fact]
@@ -4940,7 +4940,7 @@ public sealed class OpenApiImporterTests
         var contract = CompilationHelper.FindFile(result, "ThingsContract.cs");
 
         Assert.Contains("Dictionary<string, string>", contract);
-        Assert.Contains(result.Warnings, w => w.StartsWith("Declared properties dropped", StringComparison.Ordinal));
+        Assert.Contains(result.Warnings, w => w.StartsWith("RIV3013: Declared properties dropped", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -4961,7 +4961,7 @@ public sealed class OpenApiImporterTests
         var mixed = CompilationHelper.FindFile(result, "Mixed.cs");
 
         Assert.Contains("string Alpha", mixed);
-        Assert.Contains(result.Warnings, w => w.StartsWith("additionalProperties dropped", StringComparison.Ordinal));
+        Assert.Contains(result.Warnings, w => w.StartsWith("RIV3004: additionalProperties dropped", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -5062,7 +5062,7 @@ public sealed class OpenApiImporterTests
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
         Assert.Contains(".Secure(\"alpha\")", contract);
-        Assert.Contains(result.Warnings, w => w.StartsWith("Security schemes dropped", StringComparison.Ordinal));
+        Assert.Contains(result.Warnings, w => w.StartsWith("RIV3002: Security schemes dropped", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -5368,8 +5368,8 @@ public sealed class OpenApiImporterTests
 
         // ...and each absence is a named warning (ratcheted category: operation-method-dropped).
         Assert.Contains(result.Warnings, w =>
-            w.StartsWith("Operation dropped: HEAD /health", StringComparison.Ordinal));
+            w.StartsWith("RIV3003: Operation dropped: HEAD /health", StringComparison.Ordinal));
         Assert.Contains(result.Warnings, w =>
-            w.StartsWith("Operation dropped: OPTIONS /health", StringComparison.Ordinal));
+            w.StartsWith("RIV3003: Operation dropped: OPTIONS /health", StringComparison.Ordinal));
     }
 }

@@ -19,7 +19,7 @@ the scheme *name* survives the import (see Security below).
   `x-rivet-contract`/`x-rivet-endpoint` extensions when present); summaries,
   descriptions, deprecation. HEAD/OPTIONS/TRACE operations have no contract
   representation and are dropped — each one with a named warning
-  (`operation-method-dropped`, see below).
+  (`RIV3003` / `operation-method-dropped`, see below).
 - **Bodies**: `application/json` (typed records), `application/x-www-form-urlencoded`
   (form-encoded inputs), `multipart/form-data` (incl. `IFormFile` /
   `List<IFormFile>`), binary content types (file endpoints / `ProducesFile`),
@@ -75,22 +75,25 @@ the scheme *name* survives the import (see Security below).
 
 ### Warnings (stderr / `ImportResult.Warnings`)
 
-Each warning belongs to a named category, ratcheted by the test suite
-(`ImportMetricTests.CategorizeWarning`) — new categories are added consciously,
-never absorbed:
+Each warning carries a stable `RIV3xxx` diagnostic ID (printed as
+`warning RIV3001: <message>` on stderr, and as a `RIV3001: ` prefix on
+`ImportResult.Warnings` — see the
+[Diagnostics Reference](/reference/diagnostics)) and belongs to a named
+category, ratcheted by the test suite (`ImportMetricTests.CategorizeWarning`,
+keyed by ID) — new categories are added consciously, never absorbed:
 
-| Category | Trigger |
-|---|---|
-| `unresolved-schema` | Schema could not be resolved to a C# type → `JsonElement`. |
-| `unsupported-schema-type` | Unhandled JSON Schema `type` → `JsonElement`. |
-| `array-missing-items` | Array schema without `items` → `List<JsonElement>`. |
-| `enum-constraint-dropped` | Enum that can't be a C# enum (single-value, mixed, out-of-range) degrades to a primitive. |
-| `discriminator-dropped` | `discriminator` on a plain object (no `oneOf`) — dispatch semantics dropped. |
-| `alias-unresolvable` | Cyclic / dangling `$ref` alias chains broken with placeholders. |
-| `properties-dropped` | Schema declares both `properties` and `additionalProperties`; the dictionary side won (inline objects). |
-| `additional-properties-dropped` | Same conflict on a named schema; the record side won. |
-| `security-schemes-dropped` | Document-level `security` declares multiple schemes; only the first imported. |
-| `operation-method-dropped` | HEAD/OPTIONS/TRACE operation dropped — the HTTP method has no contract representation. |
+| ID | Category | Trigger |
+|---|---|---|
+| `RIV3009` | `unresolved-schema` | Schema could not be resolved to a C# type → `JsonElement`. |
+| `RIV3010` | `unsupported-schema-type` | Unhandled JSON Schema `type` → `JsonElement`. |
+| `RIV3011` | `array-missing-items` | Array schema without `items` → `List<JsonElement>`. |
+| `RIV3012` | `enum-constraint-dropped` | Enum that can't be a C# enum (single-value, mixed, out-of-range) degrades to a primitive. |
+| `RIV3005` | `discriminator-dropped` | `discriminator` on a plain object (no `oneOf`) — dispatch semantics dropped. |
+| `RIV3001`, `RIV3006`, `RIV3007`, `RIV3008` | `alias-unresolvable` | Cyclic / dangling `$ref` alias chains broken with placeholders. |
+| `RIV3013` | `properties-dropped` | Schema declares both `properties` and `additionalProperties`; the dictionary side won (inline objects). |
+| `RIV3004` | `additional-properties-dropped` | Same conflict on a named schema; the record side won. |
+| `RIV3002` | `security-schemes-dropped` | Document-level `security` declares multiple schemes; only the first imported. |
+| `RIV3003` | `operation-method-dropped` | HEAD/OPTIONS/TRACE operation dropped — the HTTP method has no contract representation. |
 
 ## Out of scope
 

@@ -227,8 +227,9 @@ public static class EndpointWalker
             var responseIndex = responses.FindIndex(response => response.StatusCode == group.Key);
             if (responseIndex < 0)
             {
-                Console.Error.WriteLine(
-                    $"warning: ignoring response example for undeclared status {group.Key} on controller endpoint '{endpointName}'");
+                Diagnostics.Warn(
+                    Diagnostics.ControllerExampleUndeclaredStatus,
+                    $"ignoring response example for undeclared status {group.Key} on controller endpoint '{endpointName}'");
                 continue;
             }
 
@@ -407,8 +408,9 @@ public static class EndpointWalker
 
             if (HasAttribute(param, wkt.FromHeader))
             {
-                Console.Error.WriteLine(
-                    $"warning: [FromHeader] parameter '{param.Name}' on '{method.Name}' has no header parameter source " +
+                Diagnostics.Warn(
+                    Diagnostics.FromHeaderParameterExcluded,
+                    $"[FromHeader] parameter '{param.Name}' on '{method.Name}' has no header parameter source " +
                     "in the contract model — excluded from the generated contract.");
                 continue;
             }
@@ -582,8 +584,9 @@ public static class EndpointWalker
                     {
                         // A8: an unmapped Results<> branch must never vanish silently —
                         // the contract would advertise fewer responses than the handler returns
-                        Console.Error.WriteLine(
-                            $"warning: unmapped typed result '{resultArg.Name}' in Results<...> on '{warnContext}' — " +
+                        Diagnostics.Warn(
+                            Diagnostics.UnmappedTypedResult,
+                            $"unmapped typed result '{resultArg.Name}' in Results<...> on '{warnContext}' — " +
                             "this response branch is omitted from the contract. Add a mapping or use a supported typed result.");
                     }
                 }

@@ -45,6 +45,7 @@ export default defineConfig({
         text: "Reference",
         items: [
           { text: "CLI", link: "/reference/cli" },
+          { text: "Diagnostics", link: "/reference/diagnostics" },
           { text: "Attributes", link: "/reference/attributes" },
           { text: "Route Definition API", link: "/reference/endpoint-builder" },
           { text: "Type Mapping", link: "/reference/type-mapping" },

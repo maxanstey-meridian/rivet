@@ -99,8 +99,9 @@ public static class JsonContractReader
                 {
                     if (existing != b)
                     {
-                        Console.Error.WriteLine(
-                            $"warning: brand '{b.Name}' declared with conflicting underlying types — first declaration wins");
+                        Diagnostics.Warn(
+                            Diagnostics.BrandConflictingUnderlyingTypes,
+                            $"brand '{b.Name}' declared with conflicting underlying types — first declaration wins");
                     }
                 }
                 else

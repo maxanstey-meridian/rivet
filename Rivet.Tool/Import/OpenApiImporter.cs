@@ -148,8 +148,9 @@ public static class OpenApiImporter
 
         foreach (var key in cyclic.OrderBy(k => k, StringComparer.Ordinal))
         {
-            warnings.Add(
-                $"Alias schema '{key}' is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object.");
+            warnings.Add(Diagnostics.Prefix(
+                Diagnostics.ImportAliasCycleBroken,
+                $"Alias schema '{key}' is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object."));
             schemas[key] = new System.Text.Json.Nodes.JsonObject
             {
                 ["description"] = "[rivet:unsupported] cyclic $ref alias",
@@ -177,8 +178,9 @@ public static class OpenApiImporter
 
         if (schemeIds.Count > 1)
         {
-            warnings.Add(
-                $"Security schemes dropped: document declares [{string.Join(", ", schemeIds)}] — only the first scheme '{schemeIds[0]}' is imported; alternatives and scopes are not represented.");
+            warnings.Add(Diagnostics.Prefix(
+                Diagnostics.ImportSecuritySchemesDropped,
+                $"Security schemes dropped: document declares [{string.Join(", ", schemeIds)}] — only the first scheme '{schemeIds[0]}' is imported; alternatives and scopes are not represented."));
         }
 
         return schemeIds.FirstOrDefault();

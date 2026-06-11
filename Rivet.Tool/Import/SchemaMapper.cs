@@ -314,8 +314,9 @@ internal sealed class SchemaMapper
                 // `properties`, so an `additionalProperties` declared alongside is dropped.
                 if (schema.AdditionalProperties is not null)
                 {
-                    _ctx.Warnings.Add(
-                        $"additionalProperties dropped on '{name}': schema has both 'properties' and 'additionalProperties' — imported as a record; extra members are not represented.");
+                    _ctx.Warnings.Add(Diagnostics.Prefix(
+                        Diagnostics.ImportAdditionalPropertiesDropped,
+                        $"additionalProperties dropped on '{name}': schema has both 'properties' and 'additionalProperties' — imported as a record; extra members are not represented."));
                 }
 
                 // Named diagnostic (I.A-17): a discriminator on a plain object schema (no oneOf
@@ -323,8 +324,9 @@ internal sealed class SchemaMapper
                 // generated but the polymorphic dispatch semantics are dropped.
                 if (schema.Discriminator?.PropertyName is { } discriminatorProperty)
                 {
-                    _ctx.Warnings.Add(
-                        $"Discriminator dropped on '{name}': property '{discriminatorProperty}' has no oneOf union — imported as a regular record.");
+                    _ctx.Warnings.Add(Diagnostics.Prefix(
+                        Diagnostics.ImportDiscriminatorDropped,
+                        $"Discriminator dropped on '{name}': property '{discriminatorProperty}' has no oneOf union — imported as a regular record."));
                 }
 
                 records.Add(_synth.MapRecord(name, schema));
@@ -426,16 +428,18 @@ internal sealed class SchemaMapper
                 var targetId = reference.Reference.Id;
                 if (targetId is null || !schemas.ContainsKey(targetId))
                 {
-                    _ctx.Warnings.Add(
-                        $"Alias schema '{key}' references missing schema '{targetId ?? "(null)"}' — consumers fall back to JsonElement.");
+                    _ctx.Warnings.Add(Diagnostics.Prefix(
+                        Diagnostics.ImportAliasTargetMissing,
+                        $"Alias schema '{key}' references missing schema '{targetId ?? "(null)"}' — consumers fall back to JsonElement."));
                     _unresolvableAliases.Add(key);
                     break;
                 }
 
                 if (!visited.Add(targetId))
                 {
-                    _ctx.Warnings.Add(
-                        $"Alias schema '{key}' is part of a $ref cycle ({string.Join(" -> ", visited)}) — consumers fall back to JsonElement.");
+                    _ctx.Warnings.Add(Diagnostics.Prefix(
+                        Diagnostics.ImportAliasRefCycle,
+                        $"Alias schema '{key}' is part of a $ref cycle ({string.Join(" -> ", visited)}) — consumers fall back to JsonElement."));
                     _unresolvableAliases.Add(key);
                     break;
                 }
@@ -455,8 +459,9 @@ internal sealed class SchemaMapper
         // and never touch the proxy (a cyclic chain overflows the stack)
         if (refId is not null && _unresolvableAliases.Contains(refId))
         {
-            _ctx.Warnings.Add(
-                $"Reference to unresolvable alias schema '{refId}'{(context is null ? "" : $" (in '{context}')")} — using JsonElement.");
+            _ctx.Warnings.Add(Diagnostics.Prefix(
+                Diagnostics.ImportUnresolvableAliasReference,
+                $"Reference to unresolvable alias schema '{refId}'{(context is null ? "" : $" (in '{context}')")} — using JsonElement."));
             result = "System.Text.Json.JsonElement";
             return true;
         }
@@ -704,7 +709,7 @@ internal sealed class SchemaMapper
         // Final fallback — only warn if the schema had structural properties we should have handled
         if (SchemaClassifier.HasResolvableProperties(schema))
         {
-            return WarnAndFallback("Schema could not be resolved to a C# type");
+            return WarnAndFallback(Diagnostics.ImportUnresolvedSchema, "Schema could not be resolved to a C# type");
         }
 
         return "System.Text.Json.JsonElement";
@@ -793,7 +798,7 @@ internal sealed class SchemaMapper
             return ResolveObjectType(schema, context);
         }
 
-        return WarnAndFallback($"Unsupported JSON Schema type '{type}'");
+        return WarnAndFallback(Diagnostics.ImportUnsupportedSchemaType, $"Unsupported JSON Schema type '{type}'");
     }
 
     private string SanitizeName(string name)
@@ -806,9 +811,9 @@ internal sealed class SchemaMapper
         return Naming.ToPascalCaseFromSegments(name);
     }
 
-    private string WarnAndFallback(string reason)
+    private string WarnAndFallback(string diagnosticId, string reason)
     {
-        _ctx.Warnings.Add($"{reason} — mapped to 'JsonElement'.");
+        _ctx.Warnings.Add(Diagnostics.Prefix(diagnosticId, $"{reason} — mapped to 'JsonElement'."));
         return "System.Text.Json.JsonElement";
     }
 
@@ -821,7 +826,9 @@ internal sealed class SchemaMapper
     {
         var values = string.Join(", ", schema.Enum!.Select(v => v?.ToJsonString() ?? "null"));
         var where = context is not null ? $" at '{context}'" : "";
-        _ctx.Warnings.Add($"Enum constraint dropped{where}: values [{values}] degraded to '{degradedTo}'.");
+        _ctx.Warnings.Add(Diagnostics.Prefix(
+            Diagnostics.ImportEnumConstraintDropped,
+            $"Enum constraint dropped{where}: values [{values}] degraded to '{degradedTo}'."));
     }
 
     private string ResolveArrayType(IOpenApiSchema schema, string? context)
@@ -832,7 +839,7 @@ internal sealed class SchemaMapper
             return $"List<{itemType}>";
         }
 
-        return $"List<{WarnAndFallback("Array schema missing 'items'")}>";
+        return $"List<{WarnAndFallback(Diagnostics.ImportArrayMissingItems, "Array schema missing 'items'")}>";
     }
 
     private string SynthesizeInlineEnum(IOpenApiSchema schema, string? context)
@@ -876,8 +883,9 @@ internal sealed class SchemaMapper
             {
                 var dropped = string.Join(", ", schema.Properties.Keys);
                 var where = context is not null ? $" at '{context}'" : "";
-                _ctx.Warnings.Add(
-                    $"Declared properties dropped{where}: schema has both 'properties' and 'additionalProperties' — imported as a dictionary; properties [{dropped}] are not represented.");
+                _ctx.Warnings.Add(Diagnostics.Prefix(
+                    Diagnostics.ImportDeclaredPropertiesDropped,
+                    $"Declared properties dropped{where}: schema has both 'properties' and 'additionalProperties' — imported as a dictionary; properties [{dropped}] are not represented."));
             }
 
             var valueType = ResolveCSharpType(schema.AdditionalProperties, context);
