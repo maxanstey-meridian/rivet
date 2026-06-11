@@ -90,7 +90,7 @@ internal static class ContractBuilder
         // If no body input, synthesize an input record from path/query parameters
         if (inputType is null)
         {
-            inputType = ResolveParamInputType(operation, mapper, fieldName, queryAuthParameterName);
+            inputType = ResolveParamInputType(operation, mapper, fieldName, unsupported, queryAuthParameterName);
         }
 
         // Resolve output type (lowest 2xx response with JSON content)
@@ -112,7 +112,7 @@ internal static class ContractBuilder
             responseExamples);
 
         // Security
-        var (isAnonymous, securityScheme) = ResolveSecurity(operation, globalSecurityScheme);
+        var (isAnonymous, securityScheme) = ResolveSecurity(operation, globalSecurityScheme, unsupported);
 
         return new GeneratedEndpointField(
             fieldName, method, route, inputType, outputType,
@@ -185,13 +185,12 @@ internal static class ContractBuilder
         }
 
         // Request body exists but uses unsupported content type(s)
-        var contentTypes = string.Join(", ", content.Keys);
-        unsupported.Add($"body content-type={contentTypes}");
+        unsupported.Add($"body {DescribeUnsupportedContent(content)}");
         return (null, false);
     }
 
     private static string? ResolveParamInputType(
-        OpenApiOperation operation, SchemaMapper mapper, string fieldName, string? queryAuthParameterName = null)
+        OpenApiOperation operation, SchemaMapper mapper, string fieldName, List<string> unsupported, string? queryAuthParameterName = null)
     {
         if (operation.Parameters is null or { Count: 0 })
         {
@@ -199,6 +198,7 @@ internal static class ContractBuilder
         }
 
         var properties = new List<RecordProperty>();
+        var metadataDropped = new List<string>();
 
         foreach (var param in operation.Parameters)
         {
@@ -221,6 +221,23 @@ internal static class ContractBuilder
                 continue;
             }
 
+            // I13: the synthesized input record erases the in-location — header/cookie
+            // params re-emit as query params. Loud per-param marker.
+            if (param.In is ParameterLocation.Header or ParameterLocation.Cookie)
+            {
+                var location = param.In is ParameterLocation.Header ? "header" : "cookie";
+                unsupported.Add($"param name={param.Name} in={location} reason=location-erased-to-query");
+            }
+
+            // I13: description/deprecated/constraints don't survive into the synthesized
+            // input record — aggregated marker below names the affected params.
+            if (!string.IsNullOrEmpty(param.Description)
+                || param.Deprecated
+                || HasParamConstraints(param.Schema))
+            {
+                metadataDropped.Add(param.Name);
+            }
+
             var csharpType = mapper.ResolveCSharpType(param.Schema, $"{fieldName}{Naming.ToPascalCaseFromSegments(param.Name)}");
             if (!param.Required && !csharpType.EndsWith("?"))
             {
@@ -231,6 +248,11 @@ internal static class ContractBuilder
                 Naming.ToPascalCaseFromSegments(param.Name),
                 csharpType,
                 param.Required));
+        }
+
+        if (metadataDropped.Count > 0)
+        {
+            unsupported.Add($"param-metadata params={string.Join(", ", metadataDropped)} reason=metadata-dropped");
         }
 
         if (properties.Count == 0)
@@ -265,6 +287,17 @@ internal static class ContractBuilder
         // component schema) gets a disambiguated name.
         return mapper.AddExtraRecord(new GeneratedRecord(recordName, deduped));
     }
+
+    /// <summary>
+    /// I13: does the parameter schema carry validation constraints that the synthesized
+    /// input record drops?
+    /// </summary>
+    private static bool HasParamConstraints(IOpenApiSchema schema) =>
+        schema.MinLength.HasValue || schema.MaxLength.HasValue || schema.Pattern is not null
+        || schema.Minimum is not null || schema.Maximum is not null
+        || schema.ExclusiveMinimum is not null || schema.ExclusiveMaximum is not null
+        || schema.MultipleOf is not null || schema.MinItems.HasValue || schema.MaxItems.HasValue
+        || schema.UniqueItems == true;
 
     private static readonly HashSet<string> BinaryContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -333,6 +366,12 @@ internal static class ContractBuilder
 
             successCode = code;
 
+            // I7: a lower 2xx supersedes everything a higher one resolved — including a
+            // binary branch's fileContentType, which previously leaked through and produced
+            // a typed JSON output AND ProducesFile on the same endpoint.
+            outputType = null;
+            fileContentType = null;
+
             if (response.Content is { Count: > 0 })
             {
                 if (TryGetSchemaForContentType(response.Content, "application/json", out var schema)
@@ -361,8 +400,7 @@ internal static class ContractBuilder
                         }
                         else
                         {
-                            var contentTypes = string.Join(", ", response.Content.Keys);
-                            unsupported.Add($"response status={code} content-type={contentTypes}");
+                            unsupported.Add($"response status={code} {DescribeUnsupportedContent(response.Content)}");
                             outputType = null;
                         }
                     }
@@ -428,8 +466,7 @@ internal static class ContractBuilder
                 else
                 {
                     // Error response has content but no supported schema
-                    var contentTypes = string.Join(", ", response.Content.Keys);
-                    unsupported.Add($"error status={code} content-type={contentTypes}");
+                    unsupported.Add($"error status={code} {DescribeUnsupportedContent(response.Content)}");
                 }
             }
             else if (!errors.Any(e => e.StatusCode == code))
@@ -680,6 +717,19 @@ internal static class ContractBuilder
         return int.TryParse(statusStr, out var code) ? code : null;
     }
 
+    /// <summary>
+    /// I10: content-type matching is an exact dictionary lookup, so media-type parameters
+    /// (e.g. <c>application/json; charset=utf-8</c>) defeat it. The resulting unsupported
+    /// marker names the cause explicitly instead of looking like an exotic content type.
+    /// </summary>
+    private static string DescribeUnsupportedContent(IDictionary<string, OpenApiMediaType> content)
+    {
+        var contentTypes = string.Join(", ", content.Keys);
+        return content.Keys.Any(k => k.Contains(';'))
+            ? $"content-type={contentTypes} reason=media-type-parameters"
+            : $"content-type={contentTypes}";
+    }
+
     private static bool TryGetSchemaForContentType(
         IDictionary<string, OpenApiMediaType> content,
         string contentType,
@@ -697,7 +747,8 @@ internal static class ContractBuilder
 
     private static (bool IsAnonymous, string? Scheme) ResolveSecurity(
         OpenApiOperation operation,
-        string? globalSecurityScheme)
+        string? globalSecurityScheme,
+        List<string> unsupported)
     {
         if (operation.Security is null)
         {
@@ -713,16 +764,22 @@ internal static class ContractBuilder
             return (true, null);
         }
 
-        // First security requirement object
-        foreach (var req in operation.Security)
+        // I12: the contract model carries a single scheme, so OR alternatives, AND
+        // combinations and scopes collapse to the first resolvable scheme — with a loud
+        // marker instead of a silent drop.
+        var schemeIds = operation.Security
+            .SelectMany(req => req.Keys)
+            .Select(scheme => scheme.Reference?.Id)
+            .Where(id => id is not null)
+            .Select(id => id!)
+            .ToList();
+
+        if (schemeIds.Count > 1)
         {
-            foreach (var (scheme, _) in req)
-            {
-                return (false, scheme.Reference?.Id);
-            }
+            unsupported.Add($"security schemes={string.Join(", ", schemeIds)} reason=multi-scheme-first-only");
         }
 
-        return (false, null);
+        return (false, schemeIds.FirstOrDefault());
     }
 
     private static IReadOnlyList<GeneratedEndpointField> DeduplicateFields(

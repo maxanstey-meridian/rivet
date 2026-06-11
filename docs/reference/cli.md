@@ -29,7 +29,12 @@ dotnet rivet --project path/to/Api.csproj --check
 dotnet rivet --project path/to/Api.csproj --routes
 ```
 
-## Import
+## Import (onboarding scaffold)
+
+One-shot scaffold for adopting Rivet on an existing API — the generated C#
+becomes the source of truth afterwards. See the
+[Import Profile](/reference/import-profile) for what imports cleanly, every
+diagnostic category, and what is out of scope.
 
 ```bash
 dotnet rivet --from-openapi spec.json --namespace MyApp.Contracts --output ./src/

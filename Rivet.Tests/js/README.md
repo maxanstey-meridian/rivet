@@ -9,3 +9,6 @@ everything the tests shell out to is then local and offline-deterministic
   conformance gate (`OpenApiConformanceTests.cs`): spectral lint (ruleset:
   `.spectral.yaml`, `spectral:oas`) and openapi-typescript → `tsc --strict`
   over every emitted spec.
+- `openapi-fetch` — the Phase 2 parallel-run consumer
+  (`SampleProjectOpenApiFetchTests.cs`): the hand-written `createClient<paths>`
+  consumer type-checked and dual-run against the generated rivet.ts client.

@@ -11,7 +11,8 @@ internal sealed class RecordSynthesizer(
     ResolutionContext ctx,
     Func<IOpenApiSchema, string?, string> resolveType)
 {
-    public GeneratedRecord ResolveAllOfRecord(string name, IList<IOpenApiSchema> allOfList, HashSet<string>? visited = null)
+    public GeneratedRecord ResolveAllOfRecord(
+        string name, IList<IOpenApiSchema> allOfList, HashSet<string>? visited = null, ISet<string>? inheritedRequired = null)
     {
         if (!ctx.Resolving.Add(name))
         {
@@ -37,20 +38,24 @@ internal sealed class RecordSynthesizer(
                     continue;
                 }
 
-                // If the ref target itself has allOf, recurse
+                // If the ref target itself has allOf, recurse — and merge the target's own
+                // sibling properties too (I4: middle inheritance layers contribute their
+                // declared properties, not just their composed bases).
                 if (element.AllOf is { Count: > 0 })
                 {
-                    var nested = ResolveAllOfRecord(refName, element.AllOf, visited);
+                    var childRequired = UnionRequired(element.Required, inheritedRequired);
+                    var nested = ResolveAllOfRecord(refName, element.AllOf, visited, childRequired);
+                    nested = MergeWithSiblingProperties(nested, element, refName, inheritedRequired);
                     props = nested.Properties.ToList();
                 }
                 else
                 {
-                    props = ExtractProperties(element, name);
+                    props = ExtractProperties(element, name, inheritedRequired);
                 }
             }
             else
             {
-                props = ExtractProperties(element, name);
+                props = ExtractProperties(element, name, inheritedRequired);
             }
 
             foreach (var prop in props)
@@ -100,10 +105,14 @@ internal sealed class RecordSynthesizer(
         return new GeneratedRecord(name, SchemaClassifier.DeduplicateProperties(properties));
     }
 
-    public List<RecordProperty> ExtractProperties(IOpenApiSchema schema, string context)
+    public List<RecordProperty> ExtractProperties(IOpenApiSchema schema, string context, ISet<string>? inheritedRequired = null)
     {
         var properties = new List<RecordProperty>();
-        var requiredSet = schema.Required ?? (ISet<string>)new HashSet<string>();
+        // I8: a composing schema's top-level `required` applies to the whole composed
+        // instance — union it with the element's own `required` so requiredness is
+        // decided before the "?" suffix is appended.
+        var requiredSet = UnionRequired(schema.Required, inheritedRequired)
+            ?? (ISet<string>)new HashSet<string>();
 
         if (schema.Properties is not null)
         {
@@ -169,15 +178,32 @@ internal sealed class RecordSynthesizer(
         return SchemaClassifier.DeduplicateProperties(properties);
     }
 
+    private static ISet<string>? UnionRequired(ISet<string>? own, ISet<string>? inherited)
+    {
+        if (inherited is not { Count: > 0 })
+        {
+            return own;
+        }
+
+        if (own is not { Count: > 0 })
+        {
+            return inherited;
+        }
+
+        var union = new HashSet<string>(own);
+        union.UnionWith(inherited);
+        return union;
+    }
+
     public GeneratedRecord MergeWithSiblingProperties(
-        GeneratedRecord record, IOpenApiSchema schema, string name)
+        GeneratedRecord record, IOpenApiSchema schema, string name, ISet<string>? inheritedRequired = null)
     {
         if (schema.Properties is not { Count: > 0 })
         {
             return record;
         }
 
-        var siblingProps = ExtractProperties(schema, name);
+        var siblingProps = ExtractProperties(schema, name, inheritedRequired);
         var merged = record.Properties.ToList();
         var seen = new HashSet<string>(merged.Select(p => p.Name));
         foreach (var prop in siblingProps)

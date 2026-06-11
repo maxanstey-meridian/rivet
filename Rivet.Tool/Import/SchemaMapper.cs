@@ -243,7 +243,7 @@ internal sealed class SchemaMapper
 
             if (schema.AllOf is { Count: > 0 })
             {
-                var record = _synth.ResolveAllOfRecord(name, schema.AllOf);
+                var record = _synth.ResolveAllOfRecord(name, schema.AllOf, inheritedRequired: schema.Required);
                 record = _synth.MergeWithSiblingProperties(record, schema, name);
 
                 // Skip empty allOf records — resolved inline via $ref
@@ -293,6 +293,14 @@ internal sealed class SchemaMapper
                         records.Add(new GeneratedRecord(name, []));
                     }
                     continue;
+                }
+
+                // Named diagnostic (I5, named-schema side): a record is generated from
+                // `properties`, so an `additionalProperties` declared alongside is dropped.
+                if (schema.AdditionalProperties is not null)
+                {
+                    _ctx.Warnings.Add(
+                        $"additionalProperties dropped on '{name}': schema has both 'properties' and 'additionalProperties' — imported as a record; extra members are not represented.");
                 }
 
                 // Named diagnostic (I.A-17): a discriminator on a plain object schema (no oneOf
@@ -512,7 +520,7 @@ internal sealed class SchemaMapper
             if (schema.AllOf is { Count: > 0 })
             {
                 var allOfName = context ?? _ctx.NextSyntheticName("Composed");
-                var record = _synth.ResolveAllOfRecord(allOfName, schema.AllOf);
+                var record = _synth.ResolveAllOfRecord(allOfName, schema.AllOf, inheritedRequired: schema.Required);
                 record = _synth.MergeWithSiblingProperties(record, schema, allOfName);
                 result = _ctx.AddOrReuseExtraRecord(record) + "?";
                 return true;
@@ -613,7 +621,7 @@ internal sealed class SchemaMapper
             }
 
             var allOfName = context ?? _ctx.NextSyntheticName("Composed");
-            var record = _synth.ResolveAllOfRecord(allOfName, schema.AllOf);
+            var record = _synth.ResolveAllOfRecord(allOfName, schema.AllOf, inheritedRequired: schema.Required);
             record = _synth.MergeWithSiblingProperties(record, schema, allOfName);
             result = _ctx.AddOrReuseExtraRecord(record);
             return true;
@@ -846,6 +854,17 @@ internal sealed class SchemaMapper
     {
         if (schema.AdditionalProperties is not null)
         {
+            // Named diagnostic (I5): an inline object declaring BOTH `properties` and
+            // `additionalProperties` maps to a dictionary — the declared properties are
+            // dropped, never silently.
+            if (schema.Properties is { Count: > 0 })
+            {
+                var dropped = string.Join(", ", schema.Properties.Keys);
+                var where = context is not null ? $" at '{context}'" : "";
+                _ctx.Warnings.Add(
+                    $"Declared properties dropped{where}: schema has both 'properties' and 'additionalProperties' — imported as a dictionary; properties [{dropped}] are not represented.");
+            }
+
             var valueType = ResolveCSharpType(schema.AdditionalProperties, context);
             return $"Dictionary<string, {valueType}>";
         }

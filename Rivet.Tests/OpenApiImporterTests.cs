@@ -4817,4 +4817,381 @@ public sealed class OpenApiImporterTests
         Assert.Contains("[property: RangeAttribute(double.MinValue, 100)]", content);
         Assert.DoesNotContain("RivetConstraints(Maximum", content);
     }
+
+    // ══════════ Phase 4 importer demotion (FABLE_REVIEW I4/I5/I7/I8/I10/I12/I13) ══════════
+
+    [Fact]
+    public void AllOf_Middle_Layer_Sibling_Properties_Inherited() // I4 — fix
+    {
+        // Base ← Mid (allOf[Base] + own sibling props) ← Leaf (allOf[Mid] + own sibling props).
+        // The middle layer's OWN properties must reach the descendant.
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Base": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "Mid": {
+                "allOf": [ { "$ref": "#/components/schemas/Base" } ],
+                "properties": { "midProp": { "type": "string" } },
+                "required": ["midProp"]
+            },
+            "Leaf": {
+                "allOf": [ { "$ref": "#/components/schemas/Mid" } ],
+                "properties": { "leafProp": { "type": "string" } },
+                "required": ["leafProp"]
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var leaf = CompilationHelper.FindFile(result, "Leaf.cs");
+
+        Assert.Contains("string Id", leaf);
+        Assert.Contains("string MidProp", leaf); // was silently dropped (I4)
+        Assert.Contains("string LeafProp", leaf);
+
+        var errors = CompilationHelper.CompileImportResult(result).GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void AllOf_TopLevel_Required_Tightens_Inherited_Properties() // I8 — fix
+    {
+        // The standard "inherit and tighten" pattern: required declared on the composing
+        // schema, the property declared on the referenced base.
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Base": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" }
+                }
+            },
+            "Derived": {
+                "allOf": [ { "$ref": "#/components/schemas/Base" } ],
+                "required": ["id"]
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var derived = CompilationHelper.FindFile(result, "Derived.cs");
+
+        Assert.Contains("string Id", derived);
+        Assert.DoesNotContain("string? Id", derived); // was wrongly optional (I8)
+        Assert.Contains("string? Name", derived);     // untouched props stay optional
+    }
+
+    [Fact]
+    public void AllOf_TopLevel_Required_Reaches_Nested_Layers() // I8 × I4 interaction
+    {
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Base": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } }
+            },
+            "Mid": {
+                "allOf": [ { "$ref": "#/components/schemas/Base" } ],
+                "properties": { "midProp": { "type": "string" } }
+            },
+            "Leaf": {
+                "allOf": [ { "$ref": "#/components/schemas/Mid" } ],
+                "required": ["id", "midProp"]
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var leaf = CompilationHelper.FindFile(result, "Leaf.cs");
+
+        Assert.Contains("string Id", leaf);
+        Assert.DoesNotContain("string? Id", leaf);
+        Assert.Contains("string MidProp", leaf);
+        Assert.DoesNotContain("string? MidProp", leaf);
+    }
+
+    [Fact]
+    public void Inline_Properties_With_AdditionalProperties_Warns_Loudly() // I5 — marker
+    {
+        // Inline object declaring BOTH properties and additionalProperties: the dictionary
+        // side wins, the declared properties are dropped — must not be silent.
+        var spec = CompilationHelper.BuildSpec(paths: """
+            "/api/things": {
+                "post": {
+                    "operationId": "things_create",
+                    "tags": ["Things"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": { "alpha": { "type": "string" } },
+                                    "additionalProperties": { "type": "string" }
+                                }
+                            }
+                        }
+                    },
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "ThingsContract.cs");
+
+        Assert.Contains("Dictionary<string, string>", contract);
+        Assert.Contains(result.Warnings, w => w.StartsWith("Declared properties dropped", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Named_Schema_Properties_With_AdditionalProperties_Warns_Loudly() // I5 — marker (named side)
+    {
+        // Named schemas take the opposite branch: the record wins, additionalProperties
+        // is dropped — equally loud.
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "Mixed": {
+                "type": "object",
+                "properties": { "alpha": { "type": "string" } },
+                "additionalProperties": { "type": "string" },
+                "required": ["alpha"]
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var mixed = CompilationHelper.FindFile(result, "Mixed.cs");
+
+        Assert.Contains("string Alpha", mixed);
+        Assert.Contains(result.Warnings, w => w.StartsWith("additionalProperties dropped", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Lower_Json_Success_Supersedes_Binary_Without_Stale_FileContentType() // I7 — fix
+    {
+        // 202 → application/pdf (binary) declared BEFORE 200 → application/json: the JSON
+        // 200 wins, and the binary branch's fileContentType must be cleared with it.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ReportDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/reports": {
+                    "post": {
+                        "operationId": "reports_create",
+                        "tags": ["Reports"],
+                        "responses": {
+                            "202": {
+                                "description": "Accepted",
+                                "content": { "application/pdf": { "schema": { "type": "string", "format": "binary" } } }
+                            },
+                            "200": {
+                                "description": "OK",
+                                "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReportDto" } } }
+                            }
+                        }
+                    }
+                }
+                """);
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "ReportsContract.cs");
+
+        Assert.Contains("Define.Post<ReportDto>", contract);
+        Assert.DoesNotContain("ProducesFile", contract); // was stale (I7)
+    }
+
+    [Fact]
+    public void MediaType_Parameters_Get_Named_Marker() // I10 — marker
+    {
+        // `application/json; charset=utf-8` defeats the exact content-type match; the
+        // existing unsupported marker gains an explicit reason naming the cause.
+        var spec = CompilationHelper.BuildSpec(paths: """
+            "/api/items": {
+                "post": {
+                    "operationId": "items_create",
+                    "tags": ["Items"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json; charset=utf-8": {
+                                "schema": { "type": "object", "properties": { "a": { "type": "string" } } }
+                            }
+                        }
+                    },
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
+
+        Assert.Contains("[rivet:unsupported body content-type=application/json; charset=utf-8 reason=media-type-parameters", contract);
+    }
+
+    [Fact]
+    public void MultiScheme_Global_Security_Warns_And_Imports_First() // I12 — marker (document level)
+    {
+        var spec = """
+            {
+                "openapi": "3.1.0",
+                "info": { "title": "API", "version": "1.0.0" },
+                "components": {
+                    "securitySchemes": {
+                        "alpha": { "type": "http", "scheme": "bearer" },
+                        "beta": { "type": "apiKey", "name": "X-Key", "in": "header" }
+                    }
+                },
+                "security": [ { "alpha": [] }, { "beta": [] } ],
+                "paths": {
+                    "/api/items": {
+                        "get": {
+                            "operationId": "items_list",
+                            "tags": ["Items"],
+                            "responses": { "204": { "description": "No Content" } }
+                        }
+                    }
+                }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
+
+        Assert.Contains(".Secure(\"alpha\")", contract);
+        Assert.Contains(result.Warnings, w => w.StartsWith("Security schemes dropped", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MultiScheme_Operation_Security_Gets_Marker() // I12 — marker (operation level)
+    {
+        var spec = """
+            {
+                "openapi": "3.1.0",
+                "info": { "title": "API", "version": "1.0.0" },
+                "components": {
+                    "securitySchemes": {
+                        "alpha": { "type": "http", "scheme": "bearer" },
+                        "beta": { "type": "apiKey", "name": "X-Key", "in": "header" }
+                    }
+                },
+                "paths": {
+                    "/api/items": {
+                        "get": {
+                            "operationId": "items_list",
+                            "tags": ["Items"],
+                            "security": [ { "alpha": [] }, { "beta": [] } ],
+                            "responses": { "204": { "description": "No Content" } }
+                        }
+                    }
+                }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
+
+        Assert.Contains(".Secure(\"alpha\")", contract);
+        Assert.Contains("[rivet:unsupported security schemes=alpha, beta reason=multi-scheme-first-only]", contract);
+    }
+
+    [Fact]
+    public void Header_And_Cookie_Params_Get_Location_Erasure_Marker() // I13 — marker
+    {
+        // Header/cookie params fold into the synthesized input record, which re-emits
+        // them as query params — the location erasure must be loud.
+        var spec = CompilationHelper.BuildSpec(paths: """
+            "/api/items/{id}": {
+                "get": {
+                    "operationId": "items_get",
+                    "tags": ["Items"],
+                    "parameters": [
+                        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+                        { "name": "x-trace", "in": "header", "schema": { "type": "string" } },
+                        { "name": "session", "in": "cookie", "schema": { "type": "string" } }
+                    ],
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
+
+        Assert.Contains("[rivet:unsupported param name=x-trace in=header reason=location-erased-to-query]", contract);
+        Assert.Contains("[rivet:unsupported param name=session in=cookie reason=location-erased-to-query]", contract);
+        // path params keep their semantics — no marker
+        Assert.DoesNotContain("param name=id", contract);
+    }
+
+    [Fact]
+    public void Param_Metadata_Drop_Gets_Aggregated_Marker() // I13 — marker
+    {
+        // description/deprecated/constraints on parameters don't survive into the
+        // synthesized input record — one aggregated marker per endpoint names the params.
+        var spec = CompilationHelper.BuildSpec(paths: """
+            "/api/search": {
+                "get": {
+                    "operationId": "search_run",
+                    "tags": ["Search"],
+                    "parameters": [
+                        { "name": "q", "in": "query", "required": true, "description": "Search query", "schema": { "type": "string", "maxLength": 100 } },
+                        { "name": "page", "in": "query", "schema": { "type": "integer" } }
+                    ],
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "SearchContract.cs");
+
+        Assert.Contains("[rivet:unsupported param-metadata params=q reason=metadata-dropped]", contract);
+        Assert.DoesNotContain("params=page", contract); // bare params don't trigger it
+    }
+
+    [Fact]
+    public void Multipart_Array_Of_Files_Gets_Http_Using() // I6 — fix (surfaced by check #4 compile coverage)
+    {
+        // List<IFormFile> previously missed the Microsoft.AspNetCore.Http using
+        // (exact-match check) — CS0246 in the scaffold.
+        var spec = CompilationHelper.BuildSpec(paths: """
+            "/api/uploads": {
+                "post": {
+                    "operationId": "uploads_create",
+                    "tags": ["Uploads"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "files": {
+                                            "type": "array",
+                                            "items": { "type": "string", "format": "binary" }
+                                        }
+                                    },
+                                    "required": ["files"]
+                                }
+                            }
+                        }
+                    },
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var filesRecord = result.Files.First(f =>
+            f.Content.Contains("List<IFormFile>", StringComparison.Ordinal));
+        Assert.Contains("using Microsoft.AspNetCore.Http;", filesRecord.Content);
+
+        var errors = RealWorldImportTests.GetCompilationErrors(result);
+        Assert.True(errors.Count == 0,
+            $"List<IFormFile> scaffold has compile errors:\n{string.Join("\n", errors.Take(5).Select(e => e.ToString()))}");
+    }
 }

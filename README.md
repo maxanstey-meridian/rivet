@@ -181,7 +181,7 @@ Rivet also supports:
 
 - contract-driven APIs with [`[RivetContract]`](https://maxanstey-meridian.github.io/rivet/guides/contracts)
 - minimal API hosts
-- [OpenAPI emission](https://maxanstey-meridian.github.io/rivet/guides/openapi-emission) and [OpenAPI import](https://maxanstey-meridian.github.io/rivet/guides/openapi-import)
+- [OpenAPI emission](https://maxanstey-meridian.github.io/rivet/guides/openapi-emission) and [OpenAPI import](https://maxanstey-meridian.github.io/rivet/guides/openapi-import) — import is a one-shot onboarding scaffold for existing APIs: it generates C# contracts once, with loud diagnostics for anything it can't represent ([supported profile](https://maxanstey-meridian.github.io/rivet/reference/import-profile)); the C# then becomes the source of truth
 - the TypeScript-first sibling project [rivet-ts](https://github.com/maxanstey-meridian/rivet-ts)
 
 ## Documentation
@@ -193,7 +193,7 @@ Start with:
 - [Runtime Validation](https://maxanstey-meridian.github.io/rivet/guides/runtime-validation)
 - [Contracts](https://maxanstey-meridian.github.io/rivet/guides/contracts)
 - [OpenAPI Emission](https://maxanstey-meridian.github.io/rivet/guides/openapi-emission)
-- [OpenAPI Import](https://maxanstey-meridian.github.io/rivet/guides/openapi-import)
+- [OpenAPI Import](https://maxanstey-meridian.github.io/rivet/guides/openapi-import) (onboarding scaffold) and the [Import Profile](https://maxanstey-meridian.github.io/rivet/reference/import-profile)
 
 ## License
 

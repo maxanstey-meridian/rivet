@@ -30,7 +30,8 @@ public sealed class RealWorldImportTests
         }
         """;
 
-    private static List<Diagnostic> GetCompilationErrors(ImportResult result)
+    // Shared with ImportMetricTests' "scaffolded C# compiles" theory (conformance check #4).
+    internal static List<Diagnostic> GetCompilationErrors(ImportResult result)
     {
         // Identical-content duplicates are tolerated (importer may emit the same shared schema
         // twice); same-name-different-content duplicates are the I3 corruption shape and fail loudly.
@@ -62,8 +63,11 @@ public sealed class RealWorldImportTests
                 Path.Combine(runtimeDir, "System.Runtime.dll"),
                 Path.Combine(runtimeDir, "System.Collections.dll"),
                 Path.Combine(runtimeDir, "System.Text.Json.dll"),
+                Path.Combine(runtimeDir, "System.Memory.dll"),
                 Path.Combine(runtimeDir, "netstandard.dll"),
+                Path.Combine(runtimeDir, "System.Private.Uri.dll"),
                 typeof(RivetTypeAttribute).Assembly.Location,
+                typeof(System.ComponentModel.DataAnnotations.RequiredAttribute).Assembly.Location,
             };
             // Add System.Linq and System.Console for generated code that uses them
             var extraRefs = new[] { "System.Linq.dll", "System.Console.dll" };

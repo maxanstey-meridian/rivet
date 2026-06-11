@@ -30,7 +30,7 @@ public static class OpenApiImporter
             : new SchemaMapResult([], [], []);
 
         // Detect global security scheme from spec
-        var globalSecurityScheme = options.SecurityScheme ?? DetectGlobalSecurity(doc);
+        var globalSecurityScheme = options.SecurityScheme ?? DetectGlobalSecurity(doc, warnings);
 
         // Parse paths → contracts
         var contracts = doc.Paths is { Count: > 0 }
@@ -159,22 +159,29 @@ public static class OpenApiImporter
         return root.ToJsonString();
     }
 
-    private static string? DetectGlobalSecurity(OpenApiDocument doc)
+    private static string? DetectGlobalSecurity(OpenApiDocument doc, List<string> warnings)
     {
         if (doc.Security is null || doc.Security.Count == 0)
         {
             return null;
         }
 
-        foreach (var req in doc.Security)
+        // I12: the contract model carries a single global scheme — OR alternatives, AND
+        // combinations and scopes collapse to the first resolvable scheme, loudly.
+        var schemeIds = doc.Security
+            .SelectMany(req => req.Keys)
+            .Select(scheme => scheme.Reference?.Id)
+            .Where(id => id is not null)
+            .Select(id => id!)
+            .ToList();
+
+        if (schemeIds.Count > 1)
         {
-            foreach (var (scheme, _) in req)
-            {
-                return scheme.Reference?.Id;
-            }
+            warnings.Add(
+                $"Security schemes dropped: document declares [{string.Join(", ", schemeIds)}] — only the first scheme '{schemeIds[0]}' is imported; alternatives and scopes are not represented.");
         }
 
-        return null;
+        return schemeIds.FirstOrDefault();
     }
 }
 

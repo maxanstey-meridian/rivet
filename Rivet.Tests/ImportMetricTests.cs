@@ -57,6 +57,14 @@ public sealed class ImportMetricTests
         // missing target) — consumers fall back to an untyped object, loudly.
         _ when warning.StartsWith("Alias schema", StringComparison.Ordinal) => "alias-unresolvable",
         _ when warning.StartsWith("Reference to unresolvable alias schema", StringComparison.Ordinal) => "alias-unresolvable",
+        // Added with Phase 4 / I5: a schema declaring BOTH `properties` and
+        // `additionalProperties` keeps one side and drops the other — previously silent
+        // in both directions, now each drop emits a named warning.
+        _ when warning.StartsWith("Declared properties dropped", StringComparison.Ordinal) => "properties-dropped",
+        _ when warning.StartsWith("additionalProperties dropped", StringComparison.Ordinal) => "additional-properties-dropped",
+        // Added with Phase 4 / I12: multi-scheme document security collapses to the first
+        // scheme — previously silent, now a named warning.
+        _ when warning.StartsWith("Security schemes dropped", StringComparison.Ordinal) => "security-schemes-dropped",
         _ => $"UNCATEGORIZED: {warning}",
     };
 
@@ -103,6 +111,30 @@ public sealed class ImportMetricTests
         return count;
     }
 
+    // ===== Conformance check #4: scaffolded C# compiles =====
+    // Every corpus entry exercised by this class must also prove the import's primary
+    // promise — the scaffolded C# compiles. (Importer stability metrics alone would let
+    // a compile-breaking regression through.) Uses RealWorldImportTests' compile helper
+    // (identical-content dedupe + ASP.NET stubs).
+
+    [Theory]
+    [InlineData("stripe")]
+    [InlineData("github")]
+    [InlineData("kubernetes")]
+    [InlineData("cloudflare")]
+    [InlineData("docusign")]
+    [InlineData("jira")]
+    [InlineData("docker")]
+    [InlineData("slack")]
+    public void Scaffolded_CSharp_Compiles(string name)
+    {
+        var r = Import(name);
+        var errors = RealWorldImportTests.GetCompilationErrors(r);
+        Assert.True(errors.Count == 0,
+            $"{name}: scaffolded C# has {errors.Count} compile error(s):\n"
+            + string.Join("\n", errors.Take(10).Select(e => e.ToString())));
+    }
+
     // ========== Stripe — largest spec, form-encoded heavy ==========
 
     [Fact]
@@ -118,7 +150,10 @@ public sealed class ImportMetricTests
         // "enum-constraint-dropped" added deliberately with I.A-15: Stripe's `object:
         // {"enum": ["account"]}` discriminator constants are single-value enums that degrade
         // to string — previously silent, now each emits a named warning.
-        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items", "enum-constraint-dropped");
+        // "security-schemes-dropped" added deliberately with Phase 4 / I12: Stripe declares
+        // two global schemes (basic + bearer); only the first is imported — previously
+        // silent, now a named warning.
+        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items", "enum-constraint-dropped", "security-schemes-dropped");
     }
 
     // ========== GitHub — large, well-structured, many tags ==========
@@ -136,7 +171,10 @@ public sealed class ImportMetricTests
         // "enum-constraint-dropped" added deliberately with I.A-15: GitHub's single-value
         // permission enums ({"enum": ["read"]} etc.) degrade to string — previously silent,
         // now each emits a named warning.
-        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items", "enum-constraint-dropped");
+        // "properties-dropped" added deliberately with Phase 4 / I5: GitHub declares inline
+        // objects with both `properties` and a typed `additionalProperties`; the dictionary
+        // side wins and the declared properties are dropped — previously silent, now named.
+        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items", "enum-constraint-dropped", "properties-dropped");
     }
 
     // ========== Kubernetes — */* content type, PATCH-heavy ==========
@@ -240,8 +278,12 @@ public sealed class ImportMetricTests
         Assert.True(TypeFiles(r) >= 220, $"Expected ≥220 types, got {TypeFiles(r)}");
         Assert.True(ContractFiles(r) >= 50, $"Expected ≥50 contracts, got {ContractFiles(r)}");
 
-        // Slack has genuinely untyped schemas — warnings are expected
-        Assert.True(r.Warnings.Count <= 25, $"Expected ≤25 warnings, got {r.Warnings.Count}");
+        // Slack has genuinely untyped schemas — warnings are expected.
+        // Raised 25 → 26 deliberately with Phase 4 / I5: Slack's `test`/`getPresence`
+        // response schemas declare both `properties` and a typed `additionalProperties`;
+        // the previously-silent property drop now emits 3 named "Declared properties
+        // dropped" warnings (23 pre-existing + 3 new = 26).
+        Assert.True(r.Warnings.Count <= 26, $"Expected ≤26 warnings, got {r.Warnings.Count}");
         Assert.True(r.Warnings.Count > 0, "Slack should have some warnings for untyped schemas");
     }
 }

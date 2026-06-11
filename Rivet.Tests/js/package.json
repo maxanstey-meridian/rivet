@@ -5,6 +5,7 @@
   },
   "devDependencies": {
     "@stoplight/spectral-cli": "^6.16.0",
+    "openapi-fetch": "^0.17.0",
     "openapi-typescript": "^7.13.0",
     "typescript": "^5.9.3"
   }

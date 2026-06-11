@@ -37,6 +37,7 @@ export default defineConfig({
         text: "Reference",
         items: [
           { text: "CLI", link: "/reference/cli" },
+          { text: "Import Profile", link: "/reference/import-profile" },
         ],
       },
     ],

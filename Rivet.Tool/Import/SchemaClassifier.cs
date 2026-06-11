@@ -185,11 +185,13 @@ internal static class SchemaClassifier
             return true; // pathological nesting — assume a record is generated
         }
 
-        // ResolveAllOfRecord recurses into a REF element's allOf when present (ignoring its
-        // sibling properties — I4); all other elements contribute their own properties only.
+        // ResolveAllOfRecord recurses into a REF element's allOf when present AND merges the
+        // target's own sibling properties (I4 fix); all other elements contribute their own
+        // properties only.
         if (element is OpenApiSchemaReference && element.AllOf is { Count: > 0 })
         {
-            return element.AllOf.Any(nested => AllOfElementContributes(nested, depth + 1));
+            return element.Properties is { Count: > 0 }
+                || element.AllOf.Any(nested => AllOfElementContributes(nested, depth + 1));
         }
 
         return element.Properties is { Count: > 0 };

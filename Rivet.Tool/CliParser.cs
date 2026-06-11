@@ -134,7 +134,9 @@ internal static class CliParser
         Console.Error.WriteLine("  --openapi [file]           Emit OpenAPI 3.1 JSON spec (default: openapi.json)");
         Console.Error.WriteLine("  --security <spec>          Default security scheme (bearer, bearer:jwt, cookie:name, apikey:in:name)");
         Console.Error.WriteLine("  --from <contract.json>     Emit TypeScript from a Rivet contract JSON file");
-        Console.Error.WriteLine("  --from-openapi <spec.json> Import OpenAPI spec → C# contracts + DTOs");
+        Console.Error.WriteLine("  --from-openapi <spec.json> Onboarding scaffold: one-shot import of an OpenAPI spec");
+        Console.Error.WriteLine("                             → C# contracts + DTOs; the C# becomes the source of");
+        Console.Error.WriteLine("                             truth (see docs/reference/import-profile)");
         Console.Error.WriteLine("  --namespace <ns>           Namespace for generated C# files (default: Generated)");
         Console.Error.WriteLine("  --jsonschema               Emit standalone JSON Schema definitions (schemas.ts)");
         Console.Error.WriteLine("  --check                    Verify contract coverage (missing impls, route/method mismatches)");

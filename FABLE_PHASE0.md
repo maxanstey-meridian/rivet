@@ -235,3 +235,77 @@ GAP-2 ×1). Full suite green.
 **After Phase 1 WP-1.1 fixes (2026-06-11):** all 27 conformance rows pass, zero
 skips. Full suite: 1215 tests, 100% green (9 new tests covering GAP-1, GAP-2, W1,
 W2, W4 and the WP-1.1 extensions).
+
+## Phase 2 notes (2026-06-11) — wrapper-decision evidence (WP-2.1/WP-2.2)
+
+Recorded per FABLE_REWRITE_PLAN.md Phase 2 ("Named-method-wrapper decision
+criteria"). Evidence only — the decision waits on WP-2.3 (real-app migration,
+user task). Source: `SampleProjectOpenApiFetchTests.cs` (the openapi-fetch
+consumer + the dual-run against the booted ContractApi sample). `openapi-fetch`
+0.17.0 added to `Rivet.Tests/js` devDependencies.
+
+**Dual-run result:** zero behavioral divergences. Seven scenarios (GET 200 JSON,
+POST 201, DELETE-with-route-param 204, DELETE 404 error path, PUT 204, GET void
+health, queryAuth avatar URL) produce identical statuses and bodies through the
+generated rivet.ts client and the openapi-fetch consumer. Only representational
+difference: "empty body" surfaces as `undefined` from the rivet client vs
+`{}`/`""` from openapi-fetch (parse-failure fallback on empty error bodies) —
+normalized in the comparison, but real apps that branch on falsiness will notice.
+
+### (a) Call-site ergonomics
+
+Same endpoint (invite, POST 201 + 422), both styles:
+
+```ts
+// rivet.ts generated client
+const invited = await members.invite({ body });        // Promise<InviteMemberResponse>, throws RivetError
+// openapi-fetch
+const { data, error, response } = await api.POST("/api/members", { body });
+if (error) { /* handle */ }                            // data: InviteMemberResponse | undefined
+```
+
+Diff noise per call: the path string + HTTP verb move into every call site
+(`api.POST("/api/members/{id}/role", { params: { path: { id } }, body })` vs
+`members.updateRole({ params: { id }, body })`), route params gain one nesting
+level (`params.path.id` vs `params.id`), and the happy path costs an explicit
+`if (error)`/`data!` dance where the rivet client throws. Endpoint renames become
+find-and-replace on path literals instead of symbol renames; conversely the
+openapi-fetch style has no generated function surface to maintain at all.
+
+### (b) Per-status result discrimination
+
+The rivet client's `{ unwrap: false }` returns a status-discriminated union —
+`InviteResult = { status: 201; data: InviteMemberResponse } | { status: 422;
+data: ValidationErrorDto } | …` — so `result.status === 422` narrows `data`.
+openapi-fetch collapses to `data` (union of 2xx bodies) vs `error` (union of
+non-2xx bodies), with `response.status` as a separate, unlinked `number`.
+
+**Concretely from the sample: nothing is lost.** Every ContractApi operation has
+at most one typed success body and one typed error body, so `error !== undefined`
+narrows exactly as well as `status === 422`. The loss only materializes when one
+operation declares ≥2 distinct error (or success) body types — then openapi-fetch
+gives an undiscriminated union that `response.status` cannot narrow at the type
+level. None of the sample's endpoints hit this; check the real app in WP-2.3.
+
+### (c) Rivet-specific semantics
+
+- **queryAuth** (avatar): the spec marks `token` a required query param, so
+  openapi-fetch demands `params: { query: { token } }` on *every* call; injection
+  once via config needs a hand-written `onRequest` middleware (supported, but
+  it's bring-your-own and type-blind). The rivet client emits `avatarPath`/
+  `avatarUrl` builders — typed token, usable directly in `<img src>`/media
+  players without fetching. openapi-fetch has **no URL-builder equivalent at
+  all**; producing a media URL means hand-assembling the string, untyped.
+- **File endpoints**: rivet client returns `Blob` (`blob: true` baked in);
+  openapi-fetch needs `parseAs: "blob"` per call, and openapi-typescript types
+  the `image/jpeg` binary response as `string`, not `Blob`.
+- **Brands**: erased, as predicted — `Email` (`x-rivet-brand`) becomes plain
+  `string` in `schema.d.ts`; the rivet client emits `string & { __brand: "Email" }`.
+  (Wire-format note, orthogonal to the client choice: the sample's `Email` lacks
+  a JSON converter, so the *server* round-trips it as `{ value: … }` while both
+  client type surfaces say `string` — both clients mistype it identically.)
+
+Score so far: (a) hurts mildly (mechanical, greppable), (b) does not hurt on the
+sample, (c) hurts for queryAuth/file/brand consumers. Per the plan's "≥2 of
+(a)–(c)" bar, the wrapper question hinges on whether WP-2.3's real app uses
+queryAuth/file endpoints and multi-error-status operations in anger.
