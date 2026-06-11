@@ -1,25 +1,39 @@
 # CLI Reference
 
-The docs are being rewritten, but these are the current core commands:
+## Forward Generation (OpenAPI)
 
-## Forward Generation
+OpenAPI 3.1 is the tool's output. `--output <dir>` writes `<dir>/openapi.json`;
+omit it to preview the spec on stdout.
 
 ```bash
 dotnet rivet --project path/to/Api.csproj --output ./generated
+dotnet rivet Contracts.cs Types.cs --output ./generated
 ```
 
-## Runtime Validation
+### Explicit spec path
+
+`--openapi <path>` overrides where the spec is written (relative paths resolve
+against `--output`). When given, it is the sole writer.
 
 ```bash
-dotnet rivet --project path/to/Api.csproj --output ./generated --compile
-dotnet rivet --project path/to/Api.csproj --output ./generated --jsonschema
+dotnet rivet --project path/to/Api.csproj --output ./generated --openapi ../spec/openapi.json
 ```
 
-## OpenAPI
+### Security
 
 ```bash
-dotnet rivet --project path/to/Api.csproj --output ./generated --openapi
-dotnet rivet --project path/to/Api.csproj --output ./generated --openapi --security bearer
+dotnet rivet --project path/to/Api.csproj --output ./generated --security bearer
+```
+
+Accepted forms: `bearer`, `bearer:jwt`, `cookie:<name>`, `apikey:<in>:<name>`.
+
+## From Contract JSON
+
+`--from` consumes a Rivet contract JSON document (produced by rivet-ts or rivet-php)
+and emits the same OpenAPI spec:
+
+```bash
+dotnet rivet --from contract.json --output ./generated
 ```
 
 ## Checks And Listing
@@ -41,3 +55,12 @@ dotnet rivet --from-openapi spec.json --namespace MyApp.Contracts --output ./src
 ```
 
 Omit `--output` to preview generated output to stdout.
+
+## Removed in v2
+
+`--compile` and `--jsonschema` (TypeScript/Zod generation) were removed in v2: TS/Zod
+generation moved to the OpenAPI ecosystem. Generate types with
+[openapi-typescript](https://github.com/openapi-ts/openapi-typescript), a client with
+[openapi-fetch](https://github.com/openapi-ts/openapi-typescript/tree/main/packages/openapi-fetch),
+and Zod schemas with [openapi-zod-client](https://github.com/astahmer/openapi-zod-client).
+Invoking either flag exits with an error explaining the replacement.

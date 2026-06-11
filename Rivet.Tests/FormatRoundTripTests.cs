@@ -9,21 +9,32 @@ namespace Rivet.Tests;
 /// <summary>
 /// Tests that format-level type information (uuid, date-time, integer ranges, etc.)
 /// survives round-trips in both directions:
-///   1. C# → JSON Schema (forward: format flows into schema)
+///   1. C# → OpenAPI (forward: format flows into the component schema)
 ///   2. OpenAPI → Import → Compile → Walk → OpenAPI (import round-trip: format preserved)
 /// </summary>
 public sealed class FormatRoundTripTests
 {
     // ─── Helpers ────────────────────────────────────────────────
 
-    private static JsonElement ParseDefs(string output)
+    /// <summary>
+    /// Wraps a [RivetType] record source in a synthetic contract, emits the OpenAPI
+    /// spec, and returns the named component schema.
+    /// </summary>
+    private static JsonElement EmitSchemaFor(string recordSource, string typeName)
     {
-        const string marker = "= ";
-        var lineStart = output.IndexOf("const $defs", StringComparison.Ordinal);
-        var start = output.IndexOf(marker, lineStart, StringComparison.Ordinal) + marker.Length;
-        var end = output.IndexOf(";\n", start, StringComparison.Ordinal);
-        var json = output[start..end];
-        return JsonDocument.Parse(json).RootElement;
+        var source = recordSource + $$"""
+
+            [Rivet.RivetContract]
+            public static class FormatRoundTripContract
+            {
+                public static readonly Rivet.Define Get =
+                    Rivet.Define.Get<Test.{{typeName}}>("/api/format-roundtrip");
+            }
+            """;
+        var (endpoints, walker) = CompilationHelper.WalkContract(source);
+        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        return JsonDocument.Parse(json).RootElement
+            .GetProperty("components").GetProperty("schemas").GetProperty(typeName);
     }
 
     private static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker, string EmittedJson)
@@ -48,7 +59,7 @@ public sealed class FormatRoundTripTests
         return (endpoints, walker);
     }
 
-    // ─── Forward: C# → JSON Schema format ──────────────────────
+    // ─── Forward: C# → OpenAPI schema format ───────────────────
 
     [Fact]
     public void Guid_Property_Has_Uuid_Format_In_Schema()
@@ -63,8 +74,7 @@ public sealed class FormatRoundTripTests
             public sealed record IdDto(Guid Id);
             """;
 
-        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
-        var prop = defs.GetProperty("IdDto").GetProperty("properties").GetProperty("id");
+        var prop = EmitSchemaFor(source, "IdDto").GetProperty("properties").GetProperty("id");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("uuid", prop.GetProperty("format").GetString());
     }
@@ -82,8 +92,7 @@ public sealed class FormatRoundTripTests
             public sealed record TimedDto(DateTime CreatedAt);
             """;
 
-        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
-        var prop = defs.GetProperty("TimedDto").GetProperty("properties").GetProperty("createdAt");
+        var prop = EmitSchemaFor(source, "TimedDto").GetProperty("properties").GetProperty("createdAt");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("date-time", prop.GetProperty("format").GetString());
     }
@@ -101,8 +110,7 @@ public sealed class FormatRoundTripTests
             public sealed record DayDto(DateOnly Day);
             """;
 
-        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
-        var prop = defs.GetProperty("DayDto").GetProperty("properties").GetProperty("day");
+        var prop = EmitSchemaFor(source, "DayDto").GetProperty("properties").GetProperty("day");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("date", prop.GetProperty("format").GetString());
     }
@@ -120,8 +128,7 @@ public sealed class FormatRoundTripTests
             public sealed record AlarmDto(TimeOnly RingAt);
             """;
 
-        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
-        var prop = defs.GetProperty("AlarmDto").GetProperty("properties").GetProperty("ringAt");
+        var prop = EmitSchemaFor(source, "AlarmDto").GetProperty("properties").GetProperty("ringAt");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("time", prop.GetProperty("format").GetString());
     }
@@ -139,8 +146,7 @@ public sealed class FormatRoundTripTests
             public sealed record LinkDto(Uri Href);
             """;
 
-        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
-        var prop = defs.GetProperty("LinkDto").GetProperty("properties").GetProperty("href");
+        var prop = EmitSchemaFor(source, "LinkDto").GetProperty("properties").GetProperty("href");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("uri", prop.GetProperty("format").GetString());
     }
@@ -157,8 +163,7 @@ public sealed class FormatRoundTripTests
             public sealed record CountDto(int Count);
             """;
 
-        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
-        var prop = defs.GetProperty("CountDto").GetProperty("properties").GetProperty("count");
+        var prop = EmitSchemaFor(source, "CountDto").GetProperty("properties").GetProperty("count");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("int32", prop.GetProperty("format").GetString());
         Assert.Equal(-2147483648, prop.GetProperty("minimum").GetInt64());
@@ -177,8 +182,7 @@ public sealed class FormatRoundTripTests
             public sealed record FlagDto(uint Flags);
             """;
 
-        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
-        var prop = defs.GetProperty("FlagDto").GetProperty("properties").GetProperty("flags");
+        var prop = EmitSchemaFor(source, "FlagDto").GetProperty("properties").GetProperty("flags");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("uint32", prop.GetProperty("format").GetString());
         Assert.Equal(0, prop.GetProperty("minimum").GetInt64());
@@ -197,8 +201,7 @@ public sealed class FormatRoundTripTests
             public sealed record PixelDto(byte R, byte G, byte B);
             """;
 
-        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
-        var prop = defs.GetProperty("PixelDto").GetProperty("properties").GetProperty("r");
+        var prop = EmitSchemaFor(source, "PixelDto").GetProperty("properties").GetProperty("r");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("uint8", prop.GetProperty("format").GetString());
         Assert.Equal(0, prop.GetProperty("minimum").GetInt64());
@@ -217,8 +220,7 @@ public sealed class FormatRoundTripTests
             public sealed record LevelDto(short Level);
             """;
 
-        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
-        var prop = defs.GetProperty("LevelDto").GetProperty("properties").GetProperty("level");
+        var prop = EmitSchemaFor(source, "LevelDto").GetProperty("properties").GetProperty("level");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("int16", prop.GetProperty("format").GetString());
         Assert.Equal(-32768, prop.GetProperty("minimum").GetInt64());
@@ -237,8 +239,7 @@ public sealed class FormatRoundTripTests
             public sealed record BigDto(long BigNumber);
             """;
 
-        var defs = ParseDefs(CompilationHelper.EmitSchemas(source));
-        var prop = defs.GetProperty("BigDto").GetProperty("properties").GetProperty("bigNumber");
+        var prop = EmitSchemaFor(source, "BigDto").GetProperty("properties").GetProperty("bigNumber");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("int64", prop.GetProperty("format").GetString());
         // int64 exceeds JS safe integer — no minimum/maximum

@@ -3553,4 +3553,102 @@ public sealed class OpenApiRoundTripTests
         Assert.DoesNotContain(result.Files, f => f.FileName.Contains("UploadSomethingRequest"));
         CompilationHelper.CompileImportResult(result);
     }
+
+    // ── Rescued from the deleted TypeScriptCompilationTests: file endpoints with
+    // typed input + QueryAuth survive C# → OpenAPI → import → re-walk ──
+
+    [Fact]
+    public void FileEndpoint_WithInputAndQueryAuth_Survives_RoundTrip()
+    {
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace MyApp.Contracts
+            {
+                [RivetType]
+                public sealed record StreamInput(string Id, string Quality);
+
+                public sealed record ErrorDto(string Code, string Message);
+            }
+
+            namespace MyApp.Api
+            {
+                using MyApp.Contracts;
+
+                [RivetContract]
+                public static class MediaContract
+                {
+                    public static readonly FileRouteDefinition<StreamInput> Stream =
+                        Define.File<StreamInput>("/api/media/{id}/stream")
+                            .ContentType("video/mp4")
+                            .QueryAuth("secret")
+                            .Returns<ErrorDto>(404, "Not found")
+                            .Description("Stream a media file");
+                }
+            }
+            """;
+
+        // ── Stage 1: C# → walk ──
+        var (endpoints, walker) = CompilationHelper.WalkContract(source);
+
+        var ep = Assert.Single(endpoints);
+        Assert.Equal("stream", ep.Name);
+        Assert.Equal("GET", ep.HttpMethod);
+        Assert.Equal("/api/media/{id}/stream", ep.RouteTemplate);
+        Assert.True(ep.IsFileEndpoint);
+        Assert.Equal("video/mp4", ep.FileContentType);
+        Assert.NotNull(ep.QueryAuth);
+        Assert.Equal("secret", ep.QueryAuth!.ParameterName);
+        Assert.Equal("Stream a media file", ep.Description);
+
+        // Input type produces route + query params
+        Assert.Equal(2, ep.Params.Count);
+        var idParam = Assert.Single(ep.Params, p => p.Name == "id");
+        Assert.Equal(ParamSource.Route, idParam.Source);
+        var qualityParam = Assert.Single(ep.Params, p => p.Name == "quality");
+        Assert.Equal(ParamSource.Query, qualityParam.Source);
+
+        // ── Stage 2: walk → OpenAPI ──
+        var openApiJson = OpenApiEmitter.Emit(
+            endpoints.ToList(), walker.Definitions, walker.Brands, walker.Enums, security: null);
+        Assert.Contains("\"x-rivet-query-auth\"", openApiJson);
+        Assert.Contains("\"parameterName\": \"secret\"", openApiJson);
+        // Route param, query param, and auth param all present
+        Assert.Contains("\"name\": \"id\"", openApiJson);
+        Assert.Contains("\"name\": \"quality\"", openApiJson);
+        Assert.Contains("\"name\": \"secret\"", openApiJson);
+        // Binary response with correct content type
+        Assert.Contains("\"video/mp4\"", openApiJson);
+
+        // ── Stage 3: OpenAPI → import → C# ──
+        var importResult = CompilationHelper.Import(openApiJson);
+        var contractFile = CompilationHelper.FindFile(importResult, "MediaContract.cs");
+        Assert.Contains("Define.File<", contractFile);
+        Assert.Contains(".ContentType(\"video/mp4\")", contractFile);
+        Assert.Contains(".QueryAuth(\"secret\")", contractFile);
+        Assert.Contains("FileRouteDefinition<", contractFile);
+
+        // ── Stage 4: imported C# → compile → walk again ──
+        var importedCompilation = CompilationHelper.CompileImportResult(importResult);
+        var (importedDiscovered, importedWalker) = CompilationHelper.DiscoverAndWalk(importedCompilation);
+        var importedEndpoints = CompilationHelper.WalkContracts(
+            importedCompilation, importedDiscovered, importedWalker);
+
+        var importedEp = Assert.Single(importedEndpoints);
+        Assert.Equal("GET", importedEp.HttpMethod);
+        Assert.True(importedEp.IsFileEndpoint);
+        Assert.Equal("video/mp4", importedEp.FileContentType);
+        Assert.NotNull(importedEp.QueryAuth);
+        Assert.Equal("secret", importedEp.QueryAuth!.ParameterName);
+        // Input params survive the round-trip
+        var importedIdParam = Assert.Single(importedEp.Params, p => p.Name == "id");
+        Assert.Equal(ParamSource.Route, importedIdParam.Source);
+        var importedQualityParam = Assert.Single(importedEp.Params, p => p.Name == "quality");
+        Assert.Equal(ParamSource.Query, importedQualityParam.Source);
+    }
 }

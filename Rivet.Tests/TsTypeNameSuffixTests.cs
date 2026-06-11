@@ -86,4 +86,44 @@ public sealed class TsTypeNameSuffixTests
         Assert.Equal("Pair_String_Number", TsType.MonomorphisedName(new TsType.Generic("Pair",
             [new TsType.Primitive("string"), new TsType.Primitive("number")])));
     }
+
+    // ── CollectTypeRefs (rescued from the deleted TypeEmitter test file: the helper
+    // survives the pivot — OpenApiEmitter uses it to find referenced components) ──
+
+    [Fact]
+    public void CollectTypeRefs_StringUnion_DoesNotThrow()
+    {
+        // StringUnion should be handled explicitly (not fall through to default)
+        var names = new HashSet<string>();
+        var type = new TsType.StringUnion(["Active", "Archived"]);
+        TsType.CollectTypeRefs(type, names);
+
+        // StringUnion has no type refs to collect
+        Assert.Empty(names);
+    }
+
+    [Fact]
+    public void CollectTypeRefs_AllVariants_Exhaustive()
+    {
+        var names = new HashSet<string>();
+
+        // Ensure all TsType variants are handled without throwing
+        TsType.CollectTypeRefs(new TsType.Primitive("string"), names);
+        TsType.CollectTypeRefs(new TsType.TypeParam("T"), names);
+        TsType.CollectTypeRefs(new TsType.StringUnion(["A"]), names);
+        TsType.CollectTypeRefs(new TsType.Nullable(new TsType.TypeRef("Foo")), names);
+        TsType.CollectTypeRefs(new TsType.Array(new TsType.TypeRef("Bar")), names);
+        TsType.CollectTypeRefs(new TsType.Dictionary(new TsType.TypeRef("Baz")), names);
+        TsType.CollectTypeRefs(new TsType.Brand("Id", new TsType.Primitive("string")), names);
+        TsType.CollectTypeRefs(new TsType.InlineObject([("k", new TsType.TypeRef("Qux"))]), names);
+        TsType.CollectTypeRefs(new TsType.Generic("G", [new TsType.TypeRef("Arg")]), names);
+
+        Assert.Contains("Foo", names);
+        Assert.Contains("Bar", names);
+        Assert.Contains("Baz", names);
+        Assert.Contains("Id", names);
+        Assert.Contains("Qux", names);
+        Assert.Contains("G", names);
+        Assert.Contains("Arg", names);
+    }
 }

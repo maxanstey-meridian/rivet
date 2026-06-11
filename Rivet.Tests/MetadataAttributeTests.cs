@@ -22,21 +22,6 @@ public sealed class MetadataAttributeTests
         return (walker, endpoints);
     }
 
-    private static string EmitSchemas(string source) => CompilationHelper.EmitSchemas(source);
-
-    private static string EmitClient(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var definitions = walker.Definitions.Values.ToList();
-        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
-        var typeFileMap = typeGrouping.BuildTypeFileMap();
-        var controllerGroups = ClientEmitter.GroupByController(endpoints);
-        return string.Join("\n", controllerGroups.Select(g =>
-            ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
-    }
-
     // ========== [RivetOptional] ==========
 
     [Fact]
@@ -153,33 +138,6 @@ public sealed class MetadataAttributeTests
         Assert.Equal(0, score.GetProperty("minimum").GetDouble());
         Assert.Equal(999.5, score.GetProperty("maximum").GetDouble());
         Assert.Equal(0.5, score.GetProperty("multipleOf").GetDouble());
-    }
-
-    [Fact]
-    public void RivetConstraints_Emit_In_JsonSchema()
-    {
-        var source = """
-            using System.ComponentModel.DataAnnotations;
-            using Rivet;
-
-            [RivetType]
-            public sealed record ItemDto(
-                [property: StringLength(50, MinimumLength = 3)] string Name);
-
-            [RivetContract]
-            public static class ItemContract
-            {
-                public static readonly RouteDefinition<ItemDto> Get = Define.Get<ItemDto>("/api/items");
-            }
-            """;
-
-        var schemas = EmitSchemas(source);
-        var defsJson = ExtractDefsJson(schemas);
-        var defs = JsonDocument.Parse(defsJson).RootElement;
-
-        var name = defs.GetProperty("ItemDto").GetProperty("properties").GetProperty("name");
-        Assert.Equal(3, name.GetProperty("minLength").GetInt32());
-        Assert.Equal(50, name.GetProperty("maxLength").GetInt32());
     }
 
     // ========== [RivetDefault] ==========
@@ -455,63 +413,6 @@ public sealed class MetadataAttributeTests
             "Form-encoded endpoint should not use application/json");
     }
 
-    [Fact]
-    public void FormEncoded_Client_Emits_URLSearchParams()
-    {
-        var source = """
-            using Rivet;
-
-            [RivetType]
-            public sealed record LoginInput(string Username, string Password);
-
-            [RivetType]
-            public sealed record TokenDto(string Token);
-
-            [RivetContract]
-            public static class AuthContract
-            {
-                public static readonly RouteDefinition<LoginInput, TokenDto> Login =
-                    Define.Post<LoginInput, TokenDto>("/api/auth/login")
-                        .FormEncoded();
-            }
-            """;
-
-        var client = EmitClient(source);
-
-        Assert.Contains("URLSearchParams", client);
-        Assert.Contains("formEncoded: true", client);
-    }
-
-    // ========== IFormFile → File primitive ==========
-
-    [Fact]
-    public void IFormFile_Maps_To_Binary_In_JsonSchema()
-    {
-        var source = """
-            using Microsoft.AspNetCore.Http;
-            using Rivet;
-
-            [RivetType]
-            public sealed record UploadInput(IFormFile Document, string Title);
-
-            [RivetContract]
-            public static class UploadContract
-            {
-                public static readonly RouteDefinition<UploadInput> Upload =
-                    Define.Post<UploadInput>("/api/upload")
-                        .AcceptsFile();
-            }
-            """;
-
-        var schemas = EmitSchemas(source);
-        var defsJson = ExtractDefsJson(schemas);
-        var defs = JsonDocument.Parse(defsJson).RootElement;
-
-        var docProp = defs.GetProperty("UploadInput").GetProperty("properties").GetProperty("document");
-        Assert.Equal("string", docProp.GetProperty("type").GetString());
-        Assert.Equal("binary", docProp.GetProperty("format").GetString());
-    }
-
     // ========== Combined metadata round-trip ==========
 
     [Fact]
@@ -724,14 +625,4 @@ public sealed class MetadataAttributeTests
 
     // ========== Helpers ==========
 
-    private static string ExtractDefsJson(string tsOutput)
-    {
-        const string marker = "= ";
-        var lineStart = tsOutput.IndexOf("const $defs", StringComparison.Ordinal);
-        Assert.True(lineStart >= 0, "Could not find '$defs' in JSON Schema output");
-        var start = tsOutput.IndexOf(marker, lineStart, StringComparison.Ordinal) + marker.Length;
-        var end = tsOutput.IndexOf(";\n", start, StringComparison.Ordinal);
-        Assert.True(end >= 0, "Could not find end of $defs in JSON Schema output");
-        return tsOutput[start..end];
-    }
 }

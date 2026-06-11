@@ -4,9 +4,6 @@
     <ProjectReference Include="..\Rivet.Attributes\Rivet.Attributes.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="Templates/rivet.ts" />
-  </ItemGroup>
-  <ItemGroup>
     <InternalsVisibleTo Include="Rivet.Tests" />
   </ItemGroup>
   <ItemGroup>
@@ -41,8 +38,8 @@
     <PackageId>dotnet-rivet</PackageId>
     <Version>0.34.3</Version>
     <Authors>Max Anstey</Authors>
-    <Description>Roslyn-powered CLI for generating TypeScript types and clients from .NET applications.</Description>
-    <PackageTags>dotnet-tool;typescript;roslyn;codegen;aspnetcore</PackageTags>
+    <Description>Roslyn-powered CLI for generating OpenAPI 3.1 specifications from .NET applications.</Description>
+    <PackageTags>dotnet-tool;openapi;roslyn;codegen;aspnetcore</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/maxanstey-meridian/rivet</PackageProjectUrl>

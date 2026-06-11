@@ -67,11 +67,6 @@ public sealed class GenericTypeTests
         var secondType = Assert.IsType<TsType.TypeParam>(secondProp.Type);
         Assert.Equal("TSecond", secondType.Name);
 
-        var result = CompilationHelper.EmitTypes(source);
-
-        Assert.Contains("export type Pair<TFirst, TSecond> = {", result);
-        Assert.Contains("first: TFirst;", result);
-        Assert.Contains("second: TSecond;", result);
     }
 
     [Fact]
@@ -112,12 +107,6 @@ public sealed class GenericTypeTests
         Assert.Single(pagedResult.TypeParameters);
         Assert.Equal("T", pagedResult.TypeParameters[0]);
 
-        var result = CompilationHelper.EmitTypes(source);
-
-        // PagedResult should be emitted as a generic definition
-        Assert.Contains("export type PagedResult<T> = {", result);
-        // MessageListResult should reference the closed generic
-        Assert.Contains("messages: PagedResult<MessageDto>;", result);
     }
 
     [Fact]
@@ -147,10 +136,6 @@ public sealed class GenericTypeTests
         var typeArg = Assert.IsType<TsType.Primitive>(genericType.TypeArguments[0]);
         Assert.Equal("string", typeArg.Name);
 
-        var result = CompilationHelper.EmitTypes(source);
-
-        Assert.Contains("export type Wrapper<T> = {", result);
-        Assert.Contains("wrapped: Wrapper<string>;", result);
     }
 
     [Fact]

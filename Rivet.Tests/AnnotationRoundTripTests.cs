@@ -8,7 +8,7 @@ namespace Rivet.Tests;
 
 /// <summary>
 /// Tests that standard System.ComponentModel.DataAnnotations attributes
-/// flow through all four pipeline stages: TypeWalker → JSON Schema → OpenAPI → Import round-trip.
+/// flow through the pipeline stages: TypeWalker → OpenAPI → Import round-trip.
 /// </summary>
 public sealed class AnnotationRoundTripTests
 {
@@ -49,16 +49,6 @@ public sealed class AnnotationRoundTripTests
         }
         """;
 
-    private static JsonElement ParseDefs(string output)
-    {
-        const string prefix = "= ";
-        var lineStart = output.IndexOf("const $defs", StringComparison.Ordinal);
-        var start = output.IndexOf(prefix, lineStart, StringComparison.Ordinal) + prefix.Length;
-        var end = output.IndexOf(";\n", start, StringComparison.Ordinal);
-        var json = output[start..end];
-        return JsonDocument.Parse(json).RootElement;
-    }
-
     private const string NullabilityFixture = """
         #nullable enable
         using System.ComponentModel.DataAnnotations;
@@ -74,14 +64,21 @@ public sealed class AnnotationRoundTripTests
             string? NullableOptional,
 
             string NonNullableNoAttr);
+
+        [RivetContract]
+        public static class NullabilityContract
+        {
+            public static readonly Define GetNullability =
+                Define.Get<NullabilityRecord>("/api/nullability");
+        }
         """;
 
     [Fact]
     public void Required_Attribute_Overrides_Nullability()
     {
-        var output = CompilationHelper.EmitSchemas(NullabilityFixture);
-        var defs = ParseDefs(output);
-        var schema = defs.GetProperty("NullabilityRecord");
+        using var doc = CompilationHelper.EmitOpenApi(NullabilityFixture);
+        var schema = doc.RootElement
+            .GetProperty("components").GetProperty("schemas").GetProperty("NullabilityRecord");
 
         var requiredNames = new List<string>();
         foreach (var item in schema.GetProperty("required").EnumerateArray())
@@ -143,54 +140,6 @@ public sealed class AnnotationRoundTripTests
         var website = typeDef.Properties.First(p => p.Name == "website");
         Assert.Equal("uri", website.Format);
         Assert.Null(website.Constraints);
-    }
-
-    [Fact]
-    public void JsonSchema_Emits_Constraints()
-    {
-        var output = CompilationHelper.EmitSchemas(FixtureSource);
-        var defs = ParseDefs(output);
-        var schema = defs.GetProperty("ConstrainedRecord");
-        var props = schema.GetProperty("properties");
-
-        // Title constraints
-        var title = props.GetProperty("title");
-        Assert.Equal(1, title.GetProperty("minLength").GetInt32());
-        Assert.Equal(200, title.GetProperty("maxLength").GetInt32());
-
-        // Title is in required array
-        var required = schema.GetProperty("required");
-        var requiredNames = new List<string>();
-        foreach (var item in required.EnumerateArray())
-            requiredNames.Add(item.GetString()!);
-        Assert.Contains("title", requiredNames);
-
-        // Reference pattern
-        var reference = props.GetProperty("reference");
-        Assert.Equal(@"^REF-\d+$", reference.GetProperty("pattern").GetString());
-
-        // Priority range
-        var priority = props.GetProperty("priority");
-        Assert.Equal(1, priority.GetProperty("minimum").GetDouble());
-        Assert.Equal(100, priority.GetProperty("maximum").GetDouble());
-
-        // Description string length
-        var description = props.GetProperty("description");
-        Assert.Equal(10, description.GetProperty("minLength").GetInt32());
-        Assert.Equal(500, description.GetProperty("maxLength").GetInt32());
-
-        // Score exotic constraints
-        var score = props.GetProperty("score");
-        Assert.Equal(0.0, score.GetProperty("exclusiveMinimum").GetDouble());
-        Assert.Equal(0.5, score.GetProperty("multipleOf").GetDouble());
-
-        // Email: format = "email"
-        var email = props.GetProperty("email");
-        Assert.Equal("email", email.GetProperty("format").GetString());
-
-        // Website: format = "uri"
-        var website = props.GetProperty("website");
-        Assert.Equal("uri", website.GetProperty("format").GetString());
     }
 
     [Fact]

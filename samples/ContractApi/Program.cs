@@ -9,8 +9,10 @@ var app = builder.Build();
 
 app.MapControllers();
 
-// Minimal API example — .Route and .Method are available at runtime
-app.MapGet(MembersContract.Health.Route, async () =>
+// Minimal API example — .Route and .Method are available at runtime.
+// Mapped under /minimal to avoid colliding with the controller's /api/health
+// action (duplicate registration is an AmbiguousMatchException at runtime).
+app.MapGet("/minimal" + MembersContract.Health.Route, async () =>
     (await MembersContract.Health.Invoke(async () => { })).ToResult());
 
 app.Run();

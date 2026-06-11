@@ -115,8 +115,9 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
 
             Assert.True(exitCode == 0, $"--from --output failed (exit {exitCode}):\n{output}");
 
-            var tsFiles = Directory.GetFiles(outputDir, "*.ts", SearchOption.AllDirectories);
-            Assert.NotEmpty(tsFiles);
+            var specPath = Path.Combine(outputDir, "openapi.json");
+            Assert.True(File.Exists(specPath), $"expected OpenAPI spec at {specPath}");
+            Assert.Contains("\"openapi\": \"3.1.0\"", await File.ReadAllTextAsync(specPath));
             Assert.Contains("Generated", output);
         }
         finally

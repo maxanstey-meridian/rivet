@@ -13,10 +13,10 @@ namespace Rivet.Tests;
 /// small hand-written <c>openapi-fetch</c> consumer module (<c>createClient&lt;paths&gt;</c>)
 /// under <c>tsc --strict</c>.
 ///
-/// WP-2.2 — dual-run: boot the real ContractApi server and exercise a representative
-/// endpoint set through BOTH clients — the existing generated rivet.ts client (the
-/// comparison baseline that dies at Phase 3) and the new openapi-fetch consumer —
-/// asserting identical status codes and response bodies.
+/// Phase 3 (single-arm): boot the real ContractApi server and exercise a
+/// representative endpoint set through the openapi-fetch consumer, asserting
+/// statuses and bodies against expected literals. (The rivet.ts comparison arm
+/// died with the TS emitters at Phase 3.)
 ///
 /// Tooling is vendored in Rivet.Tests/js (openapi-fetch added as a devDependency
 /// for this suite); runs offline after one `npm install` there.
@@ -53,22 +53,20 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
             $"tsc --strict rejected the openapi-fetch consumer:\n{tscOut}\n{tscErr}");
     }
 
-    // ═════════ WP-2.2 — dual-run: rivet.ts client vs openapi-fetch consumer ═════════
+    // ═════════ Single-arm run: openapi-fetch consumer against the live server ═════════
     //
-    // Same booted ContractApi server, same requests through both clients, identical
-    // statuses and bodies. Covered: GET (200 JSON), POST with body (201), DELETE with
-    // route param (204 void), an error path (404), PUT with route param + body (204),
-    // a bare GET void (health), and the queryAuth file endpoint (avatar) — exercised
-    // via the same URL through both clients (the rivet client exposes queryAuth file
-    // endpoints as URL builders; openapi-fetch demands the token per call).
+    // Same booted ContractApi server, results asserted against expected literals.
+    // Covered: GET (200 JSON), POST with body (201), DELETE with route param (204
+    // void), an error path (404), PUT with route param + body (204), a bare GET void
+    // (health), and the queryAuth file endpoint (avatar — the spec marks the token a
+    // required query param, so openapi-fetch demands it per call).
 
     [Fact]
-    public async Task DualRun_RivetClient_And_OpenApiFetch_Produce_Identical_Responses()
+    public async Task OpenApiFetch_Consumer_Produces_Expected_Responses_Against_Live_Server()
     {
         Directory.CreateDirectory(_tempDir);
 
-        // 1. Generate both clients into one package
-        await GenerateRivetTsClient(_tempDir);
+        // 1. Generate the openapi-fetch consumer package
         await GenerateOpenApiFetchArtifacts(_tempDir);
         await WriteTsConfig(_tempDir);
         LinkNodeModules(_tempDir);
@@ -84,14 +82,14 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         await using var server = await StartSampleServer(url, cts.Token);
 
-        // 4. Dual-run script: same requests through both clients, compare
-        await File.WriteAllTextAsync(Path.Combine(_tempDir, "dual-run.mjs"), DualRunScript);
+        // 4. Run the consumer against the live server, assert expected literals
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "single-run.mjs"), SingleRunScript);
 
         var (nodeExit, nodeOutput) = await RunProcessAsync(
-            "node", $"\"{Path.Combine(_tempDir, "dual-run.mjs")}\" {url}",
+            "node", $"\"{Path.Combine(_tempDir, "single-run.mjs")}\" {url}",
             workingDir: _tempDir);
 
-        Assert.True(nodeExit == 0, $"Dual-run found divergences:\n{nodeOutput}");
+        Assert.True(nodeExit == 0, $"openapi-fetch run found mismatches:\n{nodeOutput}");
     }
 
     // ═══════════════════════════ Generation helpers ═══════════════════════════
@@ -119,54 +117,6 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
 
         // Hand-written consumer module (the WP-5a shape: createClient<paths>).
         await File.WriteAllTextAsync(Path.Combine(dir, "consumer.ts"), ConsumerModuleSource);
-    }
-
-    /// <summary>
-    /// The comparison baseline: the generated rivet.ts client, exactly as
-    /// SampleProjectTests tier 3 generates it. Dies at Phase 3.
-    /// </summary>
-    private static async Task GenerateRivetTsClient(string dir)
-    {
-        var sources = ReadSampleSources();
-        var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-
-        var definitions = walker.Definitions.Values.ToList();
-        var typeGrouping = TypeGrouper.Group(
-            definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
-        var typeFileMap = typeGrouping.BuildTypeFileMap();
-
-        var typesDir = Path.Combine(dir, "types");
-        Directory.CreateDirectory(typesDir);
-
-        foreach (var group in typeGrouping.Groups)
-        {
-            await File.WriteAllTextAsync(
-                Path.Combine(typesDir, $"{group.FileName}.ts"), TypeEmitter.EmitGroupFile(group));
-        }
-
-        var typeFileNames = typeGrouping.Groups.Select(g => g.FileName).ToList();
-        await File.WriteAllTextAsync(
-            Path.Combine(typesDir, "index.ts"), TypeEmitter.EmitNamespacedBarrel(typeFileNames));
-
-        await File.WriteAllTextAsync(Path.Combine(dir, "rivet.ts"), ClientEmitter.EmitRivetBase());
-
-        var clientDir = Path.Combine(dir, "client");
-        Directory.CreateDirectory(clientDir);
-
-        var controllerGroups = ClientEmitter.GroupByController(contractEndpoints);
-        var clientFileNames = new List<string>();
-        foreach (var (controllerName, groupEndpoints) in controllerGroups)
-        {
-            await File.WriteAllTextAsync(
-                Path.Combine(clientDir, $"{controllerName}.ts"),
-                ClientEmitter.EmitControllerClient(controllerName, groupEndpoints, typeFileMap));
-            clientFileNames.Add(controllerName);
-        }
-
-        await File.WriteAllTextAsync(
-            Path.Combine(clientDir, "index.ts"), TypeEmitter.EmitNamespacedBarrel(clientFileNames));
     }
 
     private static async Task WriteTsConfig(string dir)
@@ -270,50 +220,28 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         }
         """;
 
-    // ═══════════════════════════ The dual-run script ═══════════════════════════
+    // ═══════════════════════ The single-arm run script ═══════════════════════
     //
-    // Body comparison normalizes "no meaningful body" representations: the rivet
-    // client yields `undefined` for empty bodies; openapi-fetch yields `{}` or `""`
-    // depending on content-length/parse failure. Everything else must DeepEqual.
-    // invite's 201 body is compared structurally (the server mints a fresh Guid per
-    // request, so two calls can never return byte-identical ids).
+    // openapi-fetch results asserted against expected literals (the live server's
+    // known behavior): list → 200 {items:[],totalCount:0}; invite → 201 {id:uuid}
+    // (fresh Guid per request, so the id is shape-checked); remove(guid) → 204 void;
+    // remove(non-guid) → 404; updateRole → 204; health → 200 void; avatar → 404
+    // (declared in the contract, not implemented by the sample controller).
 
-    private const string DualRunScript = """
-        import { configureRivet } from "./dist/rivet.js";
-        import * as rivet from "./dist/client/members.js";
+    private const string SingleRunScript = """
         import { createApi, listMembers, inviteMember, removeMember, updateMemberRole, checkHealth, getAvatar } from "./dist/consumer.js";
 
         const baseUrl = process.argv[2];
-        configureRivet({ baseUrl });
         const api = createApi(baseUrl);
 
         const failures = [];
 
-        // Normalize "empty body": rivet → undefined; openapi-fetch → {} / "" / undefined.
+        // Normalize "empty body": openapi-fetch yields {} / "" / undefined depending
+        // on content-length/parse behavior.
         function norm(body) {
           if (body === undefined || body === null || body === "") return null;
           if (typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 0) return null;
           return body;
-        }
-
-        function compare(name, r, o, { structural = false } = {}) {
-          if (r.status !== o.status) {
-            failures.push(`${name}: status divergence — rivet=${r.status} openapi-fetch=${o.status}`);
-            return;
-          }
-          const rb = norm(r.body);
-          const ob = norm(o.body);
-          if (structural) {
-            const rk = rb === null ? null : Object.keys(rb).sort().join(",");
-            const ok = ob === null ? null : Object.keys(ob).sort().join(",");
-            if (rk !== ok) {
-              failures.push(`${name}: body shape divergence — rivet keys=[${rk}] openapi-fetch keys=[${ok}]`);
-            }
-            return;
-          }
-          if (JSON.stringify(rb) !== JSON.stringify(ob)) {
-            failures.push(`${name}: body divergence —\n  rivet:         ${JSON.stringify(rb)}\n  openapi-fetch: ${JSON.stringify(ob)}`);
-          }
         }
 
         function expectStatus(name, status, expected) {
@@ -322,108 +250,76 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
           }
         }
 
-        const isUuid = (s) => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-
-        // ── 1. GET /api/members → 200 + PagedResult ──
-        {
-          const r = await rivet.list({ unwrap: false });
-          const o = await listMembers(api);
-          expectStatus("list(rivet)", r.status, 200);
-          compare("list", { status: r.status, body: r.data }, { status: o.status, body: o.data ?? o.error });
+        function expectBody(name, body, expected) {
+          if (JSON.stringify(norm(body)) !== JSON.stringify(expected)) {
+            failures.push(`${name}: body mismatch — actual: ${JSON.stringify(norm(body))} expected: ${JSON.stringify(expected)}`);
+          }
         }
 
-        // ── 2. POST /api/members → 201 + { id } (fresh Guid per request → structural) ──
+        const isUuid = (s) => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
+        // ── 1. GET /api/members → 200 + empty PagedResult ──
+        {
+          const o = await listMembers(api);
+          expectStatus("list", o.status, 200);
+          expectBody("list", o.data, { items: [], totalCount: 0 });
+        }
+
+        // ── 2. POST /api/members → 201 + { id } (fresh Guid per request → shape) ──
         {
           // NB: wire shape matches the live server (Email round-trips as an object on
-          // the wire in this sample); both client type surfaces brand it as string,
-          // so both calls cast identically at the call site.
-          const body = { email: { value: "dual@example.com" }, role: "member", nickname: "dual" };
-          const r = await rivet.invite({ body }, { unwrap: false });
+          // the wire in this sample); the client type surface brands it as string, so
+          // the call site casts.
+          const body = { email: { value: "single@example.com" }, role: "member", nickname: "single" };
           const o = await inviteMember(api, body);
-          expectStatus("invite(rivet)", r.status, 201);
-          compare("invite", { status: r.status, body: r.data }, { status: o.status, body: o.data ?? o.error }, { structural: true });
-          if (r.status === 201 && !isUuid(r.data?.id)) failures.push("invite: rivet id is not a uuid");
-          if (o.status === 201 && !isUuid(o.data?.id)) failures.push("invite: openapi-fetch id is not a uuid");
+          expectStatus("invite", o.status, 201);
+          if (!isUuid(o.data?.id)) failures.push(`invite: id is not a uuid: ${JSON.stringify(o.data)}`);
         }
 
         // ── 3. DELETE /api/members/{id} (valid guid) → 204 void ──
         {
-          const id = "a1b2c3d4-e5f6-4a7b-8c9d-000000000001";
-          const r = await rivet.remove({ params: { id } }, { unwrap: false });
-          const o = await removeMember(api, id);
-          expectStatus("remove(rivet)", r.status, 204);
-          compare("remove", { status: r.status, body: r.data }, { status: o.status, body: o.data ?? o.error });
+          const o = await removeMember(api, "a1b2c3d4-e5f6-4a7b-8c9d-000000000001");
+          expectStatus("remove", o.status, 204);
+          expectBody("remove", o.data ?? o.error, null);
         }
 
         // ── 4. DELETE /api/members/{id} (non-guid) → 404 error path ──
         {
-          const id = "not-a-guid";
-          const r = await rivet.remove({ params: { id } }, { unwrap: false });
-          const o = await removeMember(api, id);
-          expectStatus("remove-404(rivet)", r.status, 404);
-          compare("remove-404", { status: r.status, body: r.data }, { status: o.status, body: o.data ?? o.error });
+          const o = await removeMember(api, "not-a-guid");
+          expectStatus("remove-404", o.status, 404);
         }
 
         // ── 5. PUT /api/members/{id}/role → 204 ──
         {
-          const id = "a1b2c3d4-e5f6-4a7b-8c9d-000000000001";
-          const r = await rivet.updateRole({ params: { id }, body: { role: "viewer" } }, { unwrap: false });
-          const o = await updateMemberRole(api, id, "viewer");
-          expectStatus("updateRole(rivet)", r.status, 204);
-          compare("updateRole", { status: r.status, body: r.data }, { status: o.status, body: o.data ?? o.error });
+          const o = await updateMemberRole(api, "a1b2c3d4-e5f6-4a7b-8c9d-000000000001", "viewer");
+          expectStatus("updateRole", o.status, 204);
+          expectBody("updateRole", o.data ?? o.error, null);
         }
 
-        // ── 6. GET /api/health → void ──
+        // ── 6. GET /api/health → 200 void ──
         {
-          const r = await rivet.health({ unwrap: false });
           const o = await checkHealth(api);
-          compare("health", { status: r.status, body: r.data }, { status: o.status, body: o.data ?? o.error });
+          expectStatus("health", o.status, 200);
+          expectBody("health", o.data ?? o.error, null);
         }
 
         // ── 7. GET /api/members/{id}/avatar?token=… (queryAuth file endpoint) ──
-        // The rivet client surfaces queryAuth file endpoints as URL builders
-        // (avatarUrl injects the token into the query); openapi-fetch types the token
-        // as a required query param per call. Same URL through both → same response.
+        // Declared in the contract but not implemented by the sample controller → 404.
         {
-          const id = "a1b2c3d4-e5f6-4a7b-8c9d-000000000001";
-          const url = rivet.avatarUrl({ params: { id }, query: { token: "tok-123" } });
-          if (!url.includes("token=tok-123")) {
-            failures.push(`avatar: rivet avatarUrl did not inject queryAuth token: ${url}`);
-          }
-          const rResp = await fetch(url);
-          const o = await getAvatar(api, id, "tok-123");
-          compare("avatar", { status: rResp.status, body: null }, { status: o.status, body: null });
+          const o = await getAvatar(api, "a1b2c3d4-e5f6-4a7b-8c9d-000000000001", "tok-123");
+          expectStatus("avatar", o.status, 404);
         }
 
         if (failures.length > 0) {
-          console.error(`DUAL-RUN DIVERGENCES (${failures.length}):`);
+          console.error(`OPENAPI-FETCH RUN MISMATCHES (${failures.length}):`);
           for (const f of failures) console.error(`  - ${f}`);
           process.exit(1);
         }
 
-        console.log("Dual-run: both clients produced identical statuses and bodies across all 7 scenarios");
+        console.log("Single-arm run: openapi-fetch produced the expected statuses and bodies across all 7 scenarios");
         """;
 
     // ═══════════════════════════ Process plumbing ═══════════════════════════
-
-    private static string[] ReadSampleSources()
-    {
-        const string implicitUsings = """
-            using System;
-            using System.Collections.Generic;
-            using System.Threading;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Mvc;
-
-            """;
-
-        return
-        [
-            implicitUsings + File.ReadAllText(Path.Combine(SampleDir, "Domain", "ValueObjects.cs")),
-            implicitUsings + File.ReadAllText(Path.Combine(SampleDir, "Models", "MemberModels.cs")),
-            implicitUsings + File.ReadAllText(Path.Combine(SampleDir, "Contracts", "MembersContract.cs")),
-        ];
-    }
 
     private static string FindRepoRoot()
     {

@@ -2,111 +2,139 @@ using System.Text.Json;
 
 namespace Rivet.Tests;
 
+/// <summary>
+/// Pins the .NET side of the rivet-php pipeline against the hand-copied PHP8 golden
+/// contract fixture: contract JSON → OpenAPI 3.1 (the tool's only output post-Phase-3).
+/// </summary>
 public sealed class PhpLaravelE2ETests
 {
     private static readonly string GoldenJson = File.ReadAllText(
         Path.Combine("..", "..", "..", "Fixtures", "php-golden-contract.json"));
 
-    private static readonly string Ts = CompilationHelper.EmitTypesFromJson(GoldenJson);
+    private static readonly JsonElement Schemas = JsonDocument.Parse(
+        CompilationHelper.EmitOpenApiFromJson(GoldenJson)).RootElement
+        .GetProperty("components").GetProperty("schemas");
+
+    private static JsonElement Prop(string type, string prop)
+        => Schemas.GetProperty(type).GetProperty("properties").GetProperty(prop);
+
+    private static void AssertNullable(JsonElement prop, string expectedType)
+    {
+        var types = prop.GetProperty("type").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains(expectedType, types);
+        Assert.Contains("null", types);
+    }
 
     [Fact]
     public void ProductDto_Scalars()
     {
-        Assert.Contains("export type ProductDto = {", Ts);
-        Assert.Contains("  title: string;", Ts);
-        Assert.Contains("  id: number;", Ts);
-        Assert.Contains("  price: number;", Ts);
-        Assert.Contains("  active: boolean;", Ts);
+        Assert.True(Schemas.TryGetProperty("ProductDto", out _));
+        Assert.Equal("string", Prop("ProductDto", "title").GetProperty("type").GetString());
+        Assert.Equal("integer", Prop("ProductDto", "id").GetProperty("type").GetString());
+        Assert.Equal("number", Prop("ProductDto", "price").GetProperty("type").GetString());
+        Assert.Equal("boolean", Prop("ProductDto", "active").GetProperty("type").GetString());
     }
 
     [Fact]
     public void ProductDto_Nullable()
     {
-        Assert.Contains("  description: string | null;", Ts);
+        AssertNullable(Prop("ProductDto", "description"), "string");
     }
 
     [Fact]
     public void ProductDto_EnumRefs()
     {
-        Assert.Contains("  status: ProductStatus;", Ts);
-        Assert.Contains("  priority: Priority;", Ts);
+        Assert.Equal("#/components/schemas/ProductStatus", Prop("ProductDto", "status").GetProperty("$ref").GetString());
+        Assert.Equal("#/components/schemas/Priority", Prop("ProductDto", "priority").GetProperty("$ref").GetString());
     }
 
     [Fact]
     public void ProductDto_NestedRef()
     {
-        Assert.Contains("  author: UserDto;", Ts);
+        Assert.Equal("#/components/schemas/UserDto", Prop("ProductDto", "author").GetProperty("$ref").GetString());
     }
 
     [Fact]
     public void ProductDto_Array()
     {
-        Assert.Contains("  tags: string[];", Ts);
+        var tags = Prop("ProductDto", "tags");
+        Assert.Equal("array", tags.GetProperty("type").GetString());
+        Assert.Equal("string", tags.GetProperty("items").GetProperty("type").GetString());
     }
 
     [Fact]
     public void ProductDto_Dictionary()
     {
-        Assert.Contains("  metadata: Record<string, number>;", Ts);
+        var metadata = Prop("ProductDto", "metadata");
+        Assert.Equal("object", metadata.GetProperty("type").GetString());
+        Assert.Equal("integer", metadata.GetProperty("additionalProperties").GetProperty("type").GetString());
     }
 
     [Fact]
     public void ProductDto_InlineObject()
     {
-        Assert.Contains("dimensions: { width: number; height: number; };", Ts);
+        var dimensions = Prop("ProductDto", "dimensions");
+        Assert.Equal("object", dimensions.GetProperty("type").GetString());
+        // fixture declares width/height as int32 → OpenAPI "integer"
+        Assert.Equal("integer", dimensions.GetProperty("properties").GetProperty("width").GetProperty("type").GetString());
+        Assert.Equal("integer", dimensions.GetProperty("properties").GetProperty("height").GetProperty("type").GetString());
     }
 
     [Fact]
     public void ProductDto_StringUnion()
     {
-        Assert.Contains("  size: \"small\" | \"medium\" | \"large\";", Ts);
+        Assert.Equal(new[] { "small", "medium", "large" },
+            Prop("ProductDto", "size").GetProperty("enum").EnumerateArray().Select(e => e.GetString()).ToArray());
     }
 
     [Fact]
     public void ProductDto_IntUnion()
     {
-        Assert.Contains("  rating: 1 | 2 | 3;", Ts);
+        Assert.Equal(new[] { 1, 2, 3 },
+            Prop("ProductDto", "rating").GetProperty("enum").EnumerateArray().Select(e => e.GetInt32()).ToArray());
     }
 
     [Fact]
-    public void StringEnum_Emits_Union()
+    public void StringEnum_Emits_Enum_Component()
     {
-        Assert.Contains("export type ProductStatus = \"active\" | \"draft\" | \"archived\";", Ts);
+        Assert.Equal(new[] { "active", "draft", "archived" },
+            Schemas.GetProperty("ProductStatus").GetProperty("enum").EnumerateArray().Select(e => e.GetString()).ToArray());
     }
 
     [Fact]
-    public void IntEnum_Emits_Union()
+    public void IntEnum_Emits_Enum_Component()
     {
-        Assert.Contains("export type Priority = 1 | 2 | 3;", Ts);
+        Assert.Equal(new[] { 1, 2, 3 },
+            Schemas.GetProperty("Priority").GetProperty("enum").EnumerateArray().Select(e => e.GetInt32()).ToArray());
     }
 
     [Fact]
     public void UserDto_Emits()
     {
-        Assert.Contains("export type UserDto = {", Ts);
-        Assert.Contains("  name: string;", Ts);
-        Assert.Contains("  email: string | null;", Ts);
-        Assert.Contains("  address: AddressDto;", Ts);
+        Assert.Equal("string", Prop("UserDto", "name").GetProperty("type").GetString());
+        AssertNullable(Prop("UserDto", "email"), "string");
+        Assert.Equal("#/components/schemas/AddressDto", Prop("UserDto", "address").GetProperty("$ref").GetString());
     }
 
     [Fact]
     public void AddressDto_Emits()
     {
-        Assert.Contains("export type AddressDto = {", Ts);
-        Assert.Contains("  street: string;", Ts);
-        Assert.Contains("  city: string;", Ts);
+        Assert.Equal("string", Prop("AddressDto", "street").GetProperty("type").GetString());
+        Assert.Equal("string", Prop("AddressDto", "city").GetProperty("type").GetString());
     }
 
     [Fact]
     public void ProductFilterDto_Emits()
     {
-        Assert.Contains("export type ProductFilterDto = {", Ts);
+        Assert.True(Schemas.TryGetProperty("ProductFilterDto", out _));
     }
 
     [Fact]
     public void ProductFilterDto_ArrayOfEnum_Emits()
     {
-        Assert.Contains("  priorities: Priority[];", Ts);
+        var priorities = Prop("ProductFilterDto", "priorities");
+        Assert.Equal("array", priorities.GetProperty("type").GetString());
+        Assert.Equal("#/components/schemas/Priority", priorities.GetProperty("items").GetProperty("$ref").GetString());
     }
 
     [Fact]

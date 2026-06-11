@@ -30,13 +30,7 @@ static async Task<int> Run(string[] args)
     }
 
     var sw = Stopwatch.StartNew();
-    var (projectPath, outputDir, mode, files) = (options.ProjectPath, options.OutputDir, options.Mode, options.Files);
-
-    if (mode == "compile" && outputDir is null)
-    {
-        Console.Error.WriteLine("Error: --compile requires --output <dir>.");
-        return 1;
-    }
+    var (projectPath, outputDir) = (options.ProjectPath, options.OutputDir);
 
     Microsoft.CodeAnalysis.Compilation? compilation;
 

@@ -28,27 +28,49 @@ public sealed class CliParserTests
         Assert.Null(options.OutputDir);
     }
 
-    [Fact]
-    public void ParseArgs_FromFlag_WithCompile_SetsCompileMode()
+    // ========== Removed-in-v2 flags: loud error, not "unknown flag" ==========
+
+    [Theory]
+    [InlineData("--compile")]
+    [InlineData("--jsonschema")]
+    public void ParseArgs_RemovedFlag_Fails_With_RemovedInV2_Error(string flag)
     {
-        var args = new[] { "--from", "contracts.json", "--output", "./out", "--compile" };
+        var originalError = Console.Error;
+        try
+        {
+            using var sw = new StringWriter();
+            Console.SetError(sw);
 
-        var options = CliParser.ParseArgs(args);
+            var options = CliParser.ParseArgs(["--from", "contracts.json", "--output", "./out", flag]);
 
-        Assert.NotNull(options);
-        Assert.Equal("contracts.json", options!.FromContractPath);
-        Assert.Equal("compile", options.Mode);
+            Assert.Null(options);
+            var stderr = sw.ToString();
+            Assert.Contains($"'{flag}' was removed in v2", stderr);
+            Assert.Contains("openapi-typescript", stderr);
+            Assert.DoesNotContain("unknown flag", stderr);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
     }
 
     [Fact]
-    public void ParseArgs_FromFlag_ForwardsJsonSchemaFlag()
+    public void ParseArgs_OpenApiFlag_WithoutValue_DefaultsFileName()
     {
-        var args = new[] { "--from", "contracts.json", "--output", "./out", "--jsonschema" };
-
-        var options = CliParser.ParseArgs(args);
+        var options = CliParser.ParseArgs(["--from", "contracts.json", "--output", "./out", "--openapi"]);
 
         Assert.NotNull(options);
-        Assert.True(options!.JsonSchema, "--jsonschema should be forwarded when using --from");
+        Assert.Equal("openapi.json", options!.OpenApiPath);
+    }
+
+    [Fact]
+    public void ParseArgs_OpenApiFlag_WithExplicitPath_SetsOverride()
+    {
+        var options = CliParser.ParseArgs(["--from", "contracts.json", "--output", "./out", "--openapi", "../spec/openapi.json"]);
+
+        Assert.NotNull(options);
+        Assert.Equal("../spec/openapi.json", options!.OpenApiPath);
     }
 
     [Fact]

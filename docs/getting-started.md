@@ -1,6 +1,6 @@
 # Getting Started
 
-Rivet reads your C# types and endpoints and generates TypeScript from them.
+Rivet reads your C# types and endpoints with Roslyn and emits an OpenAPI 3.1 spec.
 
 ## Install
 
@@ -15,25 +15,34 @@ dotnet tool install --global dotnet-rivet
 dotnet rivet --project path/to/Api.csproj --output ./generated
 ```
 
-By default this gives you:
+This writes `./generated/openapi.json`. Omit `--output` to preview the spec on stdout.
 
-- `types/` for generated TypeScript types
-- `client/` for generated client modules
-- `rivet.ts` for runtime configuration and fetch helpers
+## Consume the Spec
 
-## Optional Runtime Validation
+Generate TypeScript types and a typed client from the spec with the standard OpenAPI
+tooling:
 
 ```bash
-dotnet rivet --project path/to/Api.csproj --output ./generated --compile
+npx openapi-typescript ./generated/openapi.json -o ./src/api/schema.d.ts
+npm install openapi-fetch
 ```
 
-This also emits:
+```ts
+import createClient from "openapi-fetch";
+import type { paths } from "./api/schema";
 
-- `schemas.ts`
-- `validators.ts`
+const api = createClient<paths>({ baseUrl: "https://api.example.com" });
+
+const { data, error } = await api.GET("/api/tasks/{id}", {
+  params: { path: { id: taskId } },
+});
+```
+
+Want runtime validation? Generate Zod schemas from the same spec with
+[openapi-zod-client](https://github.com/astahmer/openapi-zod-client).
 
 ## Next
 
 - Follow the [Tutorial](/guides/tutorial)
 - Check the [CLI Reference](/reference/cli)
-- See the docs site as a work in progress while the rewrite lands
+- See [OpenAPI Emission](/guides/openapi-emission) for what flows into the spec

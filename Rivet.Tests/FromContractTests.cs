@@ -1,9 +1,14 @@
 namespace Rivet.Tests;
 
+/// <summary>
+/// Process-level harness for the `rivet --from &lt;contract.json&gt;` pipeline — the
+/// invocation shape the rivet-ts vite plugin and rivet-php use. Post-Phase-3 the
+/// pipeline's only output is the OpenAPI 3.1 spec.
+/// </summary>
 public sealed class FromContractTests
 {
     [Fact]
-    public async Task FromContract_PreviewToStdout_EmitsTypeScript()
+    public async Task FromContract_PreviewToStdout_EmitsOpenApi()
     {
         var repoRoot = PublishFixture.FindRepoRoot();
         var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
@@ -15,13 +20,14 @@ public sealed class FromContractTests
             repoRoot);
 
         Assert.True(exitCode == 0, $"--from failed (exit {exitCode}):\n{output}");
+        Assert.Contains("\"openapi\"", output);
+        Assert.Contains("3.1.0", output);
         Assert.Contains("ProductDto", output);
         Assert.Contains("ProductStatus", output);
-        Assert.Contains("getProduct", output);
     }
 
     [Fact]
-    public async Task FromContract_WithOutput_WritesFiles()
+    public async Task FromContract_WithOutput_WritesOpenApiJson()
     {
         var repoRoot = PublishFixture.FindRepoRoot();
         var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
@@ -37,16 +43,15 @@ public sealed class FromContractTests
 
             Assert.True(exitCode == 0, $"--from --output failed (exit {exitCode}):\n{output}");
 
-            var tsFiles = Directory.GetFiles(outputDir, "*.ts", SearchOption.AllDirectories);
-            Assert.NotEmpty(tsFiles);
+            // OpenAPI is the default output: --output <dir> writes <dir>/openapi.json
+            var specPath = Path.Combine(outputDir, "openapi.json");
+            Assert.True(File.Exists(specPath), $"expected OpenAPI spec at {specPath}");
+            var spec = await File.ReadAllTextAsync(specPath);
+            Assert.Contains("\"openapi\": \"3.1.0\"", spec);
+            Assert.Contains("ProductDto", spec);
 
-            // Should have types/ dir with type files
-            var typesDir = Path.Combine(outputDir, "types");
-            Assert.True(Directory.Exists(typesDir), "types/ directory should exist");
-
-            // Should have client/ dir with client files
-            var clientDir = Path.Combine(outputDir, "client");
-            Assert.True(Directory.Exists(clientDir), "client/ directory should exist");
+            // The TS outputs are gone — nothing else is written
+            Assert.Empty(Directory.GetFiles(outputDir, "*.ts", SearchOption.AllDirectories));
         }
         finally
         {
@@ -98,11 +103,10 @@ public sealed class FromContractTests
 
         Assert.True(exitCode == 0, $"--from --quiet failed (exit {exitCode}):\n{output}");
         Assert.DoesNotContain("ProductDto", output);
-        Assert.DoesNotContain("===", output);
     }
 
     [Fact]
-    public async Task FromContract_JsonSchemaFlag_EmitsSchemaInPreview()
+    public async Task FromContract_RemovedCompileFlag_FailsLoudly()
     {
         var repoRoot = PublishFixture.FindRepoRoot();
         var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
@@ -110,16 +114,16 @@ public sealed class FromContractTests
 
         var (exitCode, output) = await PublishFixture.RunProcessAsync(
             "dotnet",
-            $"run --project \"{csproj}\" -- --from \"{fixture}\" --jsonschema",
+            $"run --project \"{csproj}\" -- --from \"{fixture}\" --compile",
             repoRoot);
 
-        Assert.True(exitCode == 0, $"--from --jsonschema failed (exit {exitCode}):\n{output}");
-        Assert.Contains("=== schemas.ts ===", output);
-        Assert.Contains("ProductDto", output);
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("removed in v2", output);
+        Assert.Contains("openapi-typescript", output);
     }
 
     [Fact]
-    public async Task FromContract_TaggedUnion_WithCompile_AndOpenApi_Writes_Discriminated_Outputs()
+    public async Task FromContract_TaggedUnion_OpenApi_Has_Discriminator()
     {
         var repoRoot = PublishFixture.FindRepoRoot();
         var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-tagged-union.json");
@@ -130,38 +134,17 @@ public sealed class FromContractTests
         {
             var (exitCode, output) = await PublishFixture.RunProcessAsync(
                 "dotnet",
-                $"run --project \"{csproj}\" -- --from \"{fixture}\" --output \"{outputDir}\" --openapi openapi.json --compile",
+                $"run --project \"{csproj}\" -- --from \"{fixture}\" --output \"{outputDir}\" --openapi openapi.json",
                 repoRoot);
 
             Assert.True(exitCode == 0, $"--from tagged union failed (exit {exitCode}):\n{output}");
-
-            var typeFiles = Directory.GetFiles(Path.Combine(outputDir, "types"), "*.ts", SearchOption.AllDirectories);
-            var generatedTypes = string.Join("\n", typeFiles.Select(File.ReadAllText));
-            Assert.Contains("export type DisplayState =", generatedTypes);
-            Assert.Contains("kind: \"hidden\"", generatedTypes);
-            Assert.Contains("kind: \"shown\"", generatedTypes);
 
             var openApiPath = Path.Combine(outputDir, "openapi.json");
             Assert.True(File.Exists(openApiPath));
             var openApiJson = await File.ReadAllTextAsync(openApiPath);
             Assert.Contains("\"discriminator\"", openApiJson);
             Assert.Contains("\"propertyName\": \"kind\"", openApiJson);
-
-            var schemasPath = Path.Combine(outputDir, "schemas.ts");
-            Assert.True(File.Exists(schemasPath));
-            var schemas = await File.ReadAllTextAsync(schemasPath);
-            Assert.Contains("DisplayStateSchema", schemas);
-            Assert.Contains("\"oneOf\"", schemas);
-
-            var validatorsPath = Path.Combine(outputDir, "validators.ts");
-            Assert.True(File.Exists(validatorsPath));
-            var validators = await File.ReadAllTextAsync(validatorsPath);
-            Assert.Contains("assertDisplayState", validators);
-
-            var clientFiles = Directory.GetFiles(Path.Combine(outputDir, "client"), "*.ts", SearchOption.AllDirectories);
-            var generatedClient = string.Join("\n", clientFiles.Select(File.ReadAllText));
-            Assert.Contains("Promise<DisplayState>", generatedClient);
-            Assert.Contains("assertDisplayState", generatedClient);
+            Assert.Contains("\"oneOf\"", openApiJson);
         }
         finally
         {

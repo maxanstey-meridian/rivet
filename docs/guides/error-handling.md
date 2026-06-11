@@ -4,7 +4,10 @@ This page is being rewritten.
 
 At a high level:
 
-- default generated calls throw on non-2xx responses
-- use `unwrap: false` to get typed result objects instead
+- declared error responses (e.g. `.Returns<NotFoundDto>(404)` on a contract, or
+  `[ProducesResponseType(typeof(NotFoundDto), 404)]` on a controller) become typed
+  responses in the emitted OpenAPI spec
+- `openapi-fetch` surfaces them as a typed `{ data, error, response }` result — `error`
+  narrows to the declared error DTO for non-2xx statuses
 
-See [Getting Started](/getting-started) and the generated client output in your own project as the current source of truth.
+See [Getting Started](/getting-started) and the [Contracts guide](/guides/contracts).

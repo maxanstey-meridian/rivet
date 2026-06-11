@@ -6,19 +6,8 @@ namespace Rivet.Tests;
 
 public sealed class ContractEndpointTests
 {
-    private static (IReadOnlyList<TsEndpointDefinition> Endpoints, string Client) Generate(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var definitions = walker.Definitions.Values.ToList();
-        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
-        var typeFileMap = typeGrouping.BuildTypeFileMap();
-        var controllerGroups = ClientEmitter.GroupByController(endpoints);
-        var client = string.Join("\n", controllerGroups.Select(g =>
-            ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
-        return (endpoints, client);
-    }
+    private static IReadOnlyList<TsEndpointDefinition> Generate(string source)
+        => CompilationHelper.WalkContract(source).Endpoints;
 
     [Fact]
     public void Get_WithInputAndOutput_RouteAndQueryParams()
@@ -42,7 +31,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -92,7 +81,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -131,7 +120,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -169,7 +158,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -209,7 +198,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var requestExample = Assert.Single(ep.RequestExamples!);
@@ -244,7 +233,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var response = ep.Responses.First(r => r.StatusCode == 422);
@@ -280,7 +269,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var response = ep.Responses.First(r => r.StatusCode == 422);
@@ -310,7 +299,7 @@ public sealed class ContractEndpointTests
             """;
 
         IReadOnlyList<TsEndpointDefinition> endpoints = null!;
-        var stderr = CompilationHelper.CaptureStdErr(() => (endpoints, _) = Generate(source));
+        var stderr = CompilationHelper.CaptureStdErr(() => endpoints = Generate(source));
 
         var ep = Assert.Single(endpoints);
         Assert.Single(ep.Responses);
@@ -349,7 +338,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var response = ep.Responses.First(r => r.StatusCode == 422);
@@ -389,7 +378,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var response = ep.Responses.First(r => r.StatusCode == 422);
@@ -427,7 +416,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var response = ep.Responses.First(r => r.StatusCode == 422);
@@ -468,7 +457,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var response = ep.Responses.First(r => r.StatusCode == 422);
@@ -506,7 +495,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var example = Assert.Single(ep.RequestExamples!);
@@ -602,7 +591,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(ep.RequestExamples);
@@ -645,7 +634,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var example = Assert.Single(ep.RequestExamples!);
@@ -681,7 +670,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var example = Assert.Single(ep.RequestExamples!);
@@ -716,7 +705,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var example = Assert.Single(ep.RequestExamples!);
@@ -748,7 +737,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var example = Assert.Single(ep.RequestExamples!);
@@ -780,7 +769,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var example = Assert.Single(ep.RequestExamples!);
@@ -809,7 +798,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var example = Assert.Single(ep.RequestExamples!);
@@ -838,7 +827,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var example = Assert.Single(ep.RequestExamples!);
@@ -870,7 +859,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var example = Assert.Single(ep.RequestExamples!);
@@ -904,7 +893,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var endpoint = Assert.Single(endpoints);
         var requestExample = Assert.Single(endpoint.RequestExamples!);
@@ -943,7 +932,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var response = ep.Responses.First(r => r.StatusCode == 201);
@@ -977,7 +966,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var response = ep.Responses.First(r => r.StatusCode == 202);
@@ -1004,7 +993,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var response = ep.Responses.First(r => r.StatusCode == 204);
@@ -1066,7 +1055,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var response = ep.Responses.First(r => r.StatusCode == 200);
@@ -1100,7 +1089,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
         var response = ep.Responses.First(r => r.StatusCode == 422);
@@ -1129,7 +1118,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1140,7 +1129,6 @@ public sealed class ContractEndpointTests
         Assert.Single(ep.Responses);
         Assert.Equal(200, ep.Responses[0].StatusCode);
         Assert.True(ep.Responses[0].DataType is TsType.TypeRef { Name: "TaskDto" });
-        Assert.Contains("Promise<TaskDto>", client);
     }
 
     [Fact]
@@ -1159,7 +1147,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1174,7 +1162,6 @@ public sealed class ContractEndpointTests
 
         Assert.Null(ep.ReturnType);
 
-        Assert.Contains("Promise<void>", client);
     }
 
     [Fact]
@@ -1200,7 +1187,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1237,7 +1224,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1272,7 +1259,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1305,7 +1292,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         Assert.Equal("caseStatuses", endpoints[0].ControllerName);
@@ -1415,7 +1402,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         Assert.Equal("/api/tasks/{id}", endpoints[0].RouteTemplate);
@@ -1444,7 +1431,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         Assert.Equal("Retrieve a single task by ID", endpoints[0].Description);
@@ -1470,7 +1457,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         Assert.Null(endpoints[0].Description);
@@ -1500,7 +1487,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "TaskDto" });
@@ -1539,7 +1526,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         Assert.Equal("Retrieve a task", endpoints[0].Description);
@@ -1551,7 +1538,7 @@ public sealed class ContractEndpointTests
 
     // --- Abstract base class contract tests ---
 
-    private static (IReadOnlyList<TsEndpointDefinition> Endpoints, string Client) GenerateWithBothWalkers(string source)
+    private static IReadOnlyList<TsEndpointDefinition> GenerateWithBothWalkers(string source)
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
@@ -1559,15 +1546,7 @@ public sealed class ContractEndpointTests
         var annotationEndpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
 
         // Merge via the production EndpointMerger (contract wins on collision) — same code as Program.cs
-        var merged = EndpointMerger.Merge(contractEndpoints, annotationEndpoints);
-
-        var definitions = walker.Definitions.Values.ToList();
-        var typeGrouping = TypeGrouper.Group(definitions, walker.Brands.Values.ToList(), walker.Enums, walker.TypeNamespaces);
-        var typeFileMap = typeGrouping.BuildTypeFileMap();
-        var controllerGroups = ClientEmitter.GroupByController(merged);
-        var client = string.Join("\n", controllerGroups.Select(g =>
-            ClientEmitter.EmitControllerClient(g.Key, g.Value, typeFileMap)));
-        return (merged, client);
+        return EndpointMerger.Merge(contractEndpoints, annotationEndpoints);
     }
 
     [Fact]
@@ -1594,7 +1573,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1636,7 +1615,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1676,7 +1655,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1717,7 +1696,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = GenerateWithBothWalkers(source);
+        var endpoints = GenerateWithBothWalkers(source);
 
         // Only one endpoint — from the contract. Controller not discovered (no [RivetClient])
         Assert.Single(endpoints);
@@ -1748,7 +1727,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         Assert.Equal("caseStatuses", endpoints[0].ControllerName);
@@ -1779,11 +1758,10 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         Assert.Equal("/api/tasks/{id}", endpoints[0].RouteTemplate);
-        Assert.DoesNotContain(":guid", client);
     }
 
     [Fact]
@@ -1807,7 +1785,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1819,9 +1797,6 @@ public sealed class ContractEndpointTests
         Assert.Equal("file", ep.Params[0].Name);
         Assert.Equal(ParamSource.File, ep.Params[0].Source);
 
-        // Client should use FormData
-        Assert.Contains("input: { body: { file: File; }; }", client);
-        Assert.Contains("FormData", client);
     }
 
     [Fact]
@@ -1845,7 +1820,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1857,7 +1832,6 @@ public sealed class ContractEndpointTests
         Assert.Equal("file", ep.Params[1].Name);
         Assert.Equal(ParamSource.File, ep.Params[1].Source);
 
-        Assert.Contains("input: { params: { id: string; }; body: { file: File; }; }", client);
     }
 
     [Fact]
@@ -1882,7 +1856,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1891,13 +1865,7 @@ public sealed class ContractEndpointTests
         Assert.Equal("application/octet-stream", ep.FileContentType);
         Assert.Null(ep.ReturnType);
 
-        // Client should return Blob
-        Assert.Contains("Promise<Blob>", client);
-        Assert.Contains("blob: true", client);
 
-        // Result DU should use Blob for success, not void
-        Assert.Contains("data: Blob", client);
-        Assert.DoesNotContain("status: 200; data: void", client);
 
         // Error response should still be typed
         Assert.Single(ep.Responses, r => r.StatusCode == 404);
@@ -1920,7 +1888,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         Assert.Equal("application/octet-stream", endpoints[0].FileContentType);
@@ -1980,7 +1948,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -1988,8 +1956,6 @@ public sealed class ContractEndpointTests
         // byte[] infers file endpoint — no explicit .ProducesFile() needed
         Assert.Equal("application/octet-stream", ep.FileContentType);
         Assert.Null(ep.ReturnType); // TS gets Blob, not number[]
-        Assert.Contains("Promise<Blob>", client);
-        Assert.Contains("blob: true", client);
         // Error response still typed
         Assert.Single(ep.Responses, r => r.StatusCode == 404);
     }
@@ -2011,7 +1977,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         // Explicit .ProducesFile() wins over the byte[] default
@@ -2062,15 +2028,13 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
         Assert.Equal("download", ep.Name);
         Assert.Equal("application/octet-stream", ep.FileContentType);
         Assert.Null(ep.ReturnType);
-        Assert.Contains("Promise<Blob>", client);
-        Assert.Contains("blob: true", client);
     }
 
     [Fact]
@@ -2117,12 +2081,11 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         Assert.Equal("application/octet-stream", endpoints[0].FileContentType);
         Assert.Null(endpoints[0].ReturnType);
-        Assert.Contains("Promise<Blob>", client);
     }
 
     [Fact]
@@ -2148,7 +2111,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
 
         Assert.Single(endpoints);
         var ep = endpoints[0];
@@ -2167,9 +2130,6 @@ public sealed class ContractEndpointTests
         Assert.NotNull(categoryParam);
         Assert.Equal(ParamSource.FormField, categoryParam.Source);
 
-        // Client should append text fields to FormData
-        Assert.Contains("fd.append(\"title\", input.body.title)", client);
-        Assert.Contains("fd.append(\"categoryId\", JSON.stringify(input.body.categoryId))", client);
     }
 
     [Fact]
@@ -2218,14 +2178,11 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
         var ep = Assert.Single(endpoints);
 
         Assert.True(ep.IsFormEncoded, "Endpoint should have IsFormEncoded=true");
 
-        // Client should emit URLSearchParams for form-encoded body
-        Assert.Contains("URLSearchParams", client);
-        Assert.Contains("formEncoded: true", client);
     }
 
     [Fact]
@@ -2283,7 +2240,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, client) = Generate(source);
+        var endpoints = Generate(source);
         var ep = Assert.Single(endpoints);
 
         // 404 with description, no data type
@@ -2297,9 +2254,6 @@ public sealed class ContractEndpointTests
         Assert.NotNull(resp409);
         Assert.Null(resp409.DataType);
 
-        // Client result DU should have void for both
-        Assert.Contains("status: 404; data: void", client);
-        Assert.Contains("status: 409; data: void", client);
     }
 
     [Fact]
@@ -2405,7 +2359,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (voidEndpoints, _) = Generate(voidSource);
+        var voidEndpoints = Generate(voidSource);
         var voidEp = Assert.Single(voidEndpoints);
         var voidSuccess = voidEp.Responses.FirstOrDefault(r => r.StatusCode is >= 200 and < 300);
         Assert.NotNull(voidSuccess);
@@ -2430,7 +2384,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (outputEndpoints, _) = Generate(outputSource);
+        var outputEndpoints = Generate(outputSource);
         var outputEp = Assert.Single(outputEndpoints);
         var outputSuccess = outputEp.Responses.FirstOrDefault(r => r.StatusCode is >= 200 and < 300);
         Assert.NotNull(outputSuccess);
@@ -2459,7 +2413,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
         var ep = Assert.Single(endpoints);
         Assert.True(ep.IsFormEncoded);
     }
@@ -2485,7 +2439,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
         var ep = Assert.Single(endpoints);
         Assert.True(ep.IsFormEncoded);
     }
@@ -2507,7 +2461,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
         var ep = Assert.Single(endpoints);
         Assert.True(ep.IsFormEncoded);
     }
@@ -2535,7 +2489,7 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var (endpoints, _) = Generate(source);
+        var endpoints = Generate(source);
         var ep = Assert.Single(endpoints);
 
         Assert.Equal("Get an item", ep.Summary);

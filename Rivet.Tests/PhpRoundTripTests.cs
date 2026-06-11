@@ -1,9 +1,38 @@
+using System.Text.Json;
+
 namespace Rivet.Tests;
 
+/// <summary>
+/// rivet-php emits Rivet contract JSON (`rivet:reflect` → `rivet --from`). These tests
+/// pin the .NET side of that pipeline: contract JSON shapes a PHP reflector produces →
+/// OpenAPI 3.1 component schemas (post-Phase-3 the tool's only output).
+/// </summary>
 public sealed class PhpRoundTripTests
 {
+    private static JsonElement SchemasFor(string contractJson)
+    {
+        var spec = CompilationHelper.EmitOpenApiFromJson(contractJson);
+        return JsonDocument.Parse(spec).RootElement
+            .GetProperty("components").GetProperty("schemas");
+    }
+
+    private static JsonElement Prop(JsonElement schemas, string type, string prop)
+        => schemas.GetProperty(type).GetProperty("properties").GetProperty(prop);
+
+    private static List<string?> Required(JsonElement schemas, string type)
+        => schemas.GetProperty(type).GetProperty("required")
+            .EnumerateArray().Select(e => e.GetString()).ToList();
+
+    private static void AssertNullableType(JsonElement prop, string expectedType)
+    {
+        // OpenAPI 3.1: nullable is a type array ["T", "null"]
+        var types = prop.GetProperty("type").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains(expectedType, types);
+        Assert.Contains("null", types);
+    }
+
     [Fact]
-    public void Scalars_Produce_Correct_TypeScript()
+    public void Scalars_Produce_Correct_Schema_Types()
     {
         var json = """
             {
@@ -24,17 +53,18 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("export type ScalarDto = {", ts);
-        Assert.Contains("  name: string;", ts);
-        Assert.Contains("  count: number;", ts);
-        Assert.Contains("  rate: number;", ts);
-        Assert.Contains("  isActive: boolean;", ts);
+        Assert.Equal("string", Prop(schemas, "ScalarDto", "name").GetProperty("type").GetString());
+        Assert.Equal("integer", Prop(schemas, "ScalarDto", "count").GetProperty("type").GetString());
+        Assert.Equal("int32", Prop(schemas, "ScalarDto", "count").GetProperty("format").GetString());
+        Assert.Equal("number", Prop(schemas, "ScalarDto", "rate").GetProperty("type").GetString());
+        Assert.Equal("double", Prop(schemas, "ScalarDto", "rate").GetProperty("format").GetString());
+        Assert.Equal("boolean", Prop(schemas, "ScalarDto", "isActive").GetProperty("type").GetString());
     }
 
     [Fact]
-    public void Nullables_Wrap_Inner_Type()
+    public void Nullables_Emit_Type_Arrays()
     {
         var json = """
             {
@@ -53,14 +83,14 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("  maybeName: string | null;", ts);
-        Assert.Contains("  maybeCount: number | null;", ts);
+        AssertNullableType(Prop(schemas, "NullableDto", "maybeName"), "string");
+        AssertNullableType(Prop(schemas, "NullableDto", "maybeCount"), "integer");
     }
 
     [Fact]
-    public void List_Produces_Array_Type()
+    public void List_Produces_Array_Schema()
     {
         var json = """
             {
@@ -79,14 +109,19 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("  tags: string[];", ts);
-        Assert.Contains("  scores: number[];", ts);
+        var tags = Prop(schemas, "ListDto", "tags");
+        Assert.Equal("array", tags.GetProperty("type").GetString());
+        Assert.Equal("string", tags.GetProperty("items").GetProperty("type").GetString());
+
+        var scores = Prop(schemas, "ListDto", "scores");
+        Assert.Equal("array", scores.GetProperty("type").GetString());
+        Assert.Equal("integer", scores.GetProperty("items").GetProperty("type").GetString());
     }
 
     [Fact]
-    public void Dictionary_Produces_Record_Type()
+    public void Dictionary_Produces_AdditionalProperties_Schema()
     {
         var json = """
             {
@@ -104,13 +139,15 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("  scores: Record<string, number>;", ts);
+        var scores = Prop(schemas, "DictDto", "scores");
+        Assert.Equal("object", scores.GetProperty("type").GetString());
+        Assert.Equal("integer", scores.GetProperty("additionalProperties").GetProperty("type").GetString());
     }
 
     [Fact]
-    public void ArrayShape_Produces_InlineObject()
+    public void ArrayShape_Produces_Inline_Object_Schema()
     {
         var json = """
             {
@@ -138,13 +175,17 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("dimensions: { width: number; height: number; };", ts);
+        var dimensions = Prop(schemas, "ShapeDto", "dimensions");
+        Assert.Equal("object", dimensions.GetProperty("type").GetString());
+        var props = dimensions.GetProperty("properties");
+        Assert.Equal("number", props.GetProperty("width").GetProperty("type").GetString());
+        Assert.Equal("number", props.GetProperty("height").GetProperty("type").GetString());
     }
 
     [Fact]
-    public void BackedEnum_Produces_StringUnion_And_Ref()
+    public void BackedEnum_Produces_Enum_Component_And_Ref()
     {
         var json = """
             {
@@ -164,14 +205,17 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("export type Status = \"active\" | \"inactive\" | \"pending\";", ts);
-        Assert.Contains("  status: Status;", ts);
+        Assert.Equal("#/components/schemas/Status",
+            Prop(schemas, "WithEnumDto", "status").GetProperty("$ref").GetString());
+        Assert.Equal(new[] { "active", "inactive", "pending" },
+            schemas.GetProperty("Status").GetProperty("enum")
+                .EnumerateArray().Select(e => e.GetString()).ToArray());
     }
 
     [Fact]
-    public void Optional_Property_Emits_QuestionMark()
+    public void Optional_Property_Excluded_From_Required()
     {
         var json = """
             {
@@ -190,14 +234,15 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("  required: string;", ts);
-        Assert.Contains("  nickname?: string;", ts);
+        var required = Required(schemas, "OptionalDto");
+        Assert.Contains("required", required);
+        Assert.DoesNotContain("nickname", required);
     }
 
     [Fact]
-    public void IntBackedEnum_Produces_IntUnion_And_Ref()
+    public void IntBackedEnum_Produces_Int_Enum_Component_And_Ref()
     {
         var json = """
             {
@@ -218,14 +263,17 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("export type Priority = 1 | 2 | 3;", ts);
-        Assert.Contains("  priority: Priority;", ts);
+        Assert.Equal("#/components/schemas/Priority",
+            Prop(schemas, "TaskDto", "priority").GetProperty("$ref").GetString());
+        Assert.Equal(new[] { 1, 2, 3 },
+            schemas.GetProperty("Priority").GetProperty("enum")
+                .EnumerateArray().Select(e => e.GetInt32()).ToArray());
     }
 
     [Fact]
-    public void DocblockStringUnion_Produces_Inline_Union()
+    public void DocblockStringUnion_Produces_Inline_Enum()
     {
         var json = """
             {
@@ -243,13 +291,15 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("  priority: \"low\" | \"medium\" | \"high\";", ts);
+        var priority = Prop(schemas, "PriorityDto", "priority");
+        Assert.Equal(new[] { "low", "medium", "high" },
+            priority.GetProperty("enum").EnumerateArray().Select(e => e.GetString()).ToArray());
     }
 
     [Fact]
-    public void DocblockIntUnion_Produces_Inline_Union()
+    public void DocblockIntUnion_Produces_Inline_Enum()
     {
         var json = """
             {
@@ -267,13 +317,15 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("  priority: 1 | 2 | 3;", ts);
+        var priority = Prop(schemas, "IntDocblockDto", "priority");
+        Assert.Equal(new[] { 1, 2, 3 },
+            priority.GetProperty("enum").EnumerateArray().Select(e => e.GetInt32()).ToArray());
     }
 
     [Fact]
-    public void NestedDto_Emits_Both_Types_With_Ref()
+    public void NestedDto_Emits_Both_Schemas_With_Ref()
     {
         var json = """
             {
@@ -300,17 +352,16 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("export type PersonDto", ts);
-        Assert.Contains("  address: AddressDto;", ts);
-        Assert.Contains("export type AddressDto", ts);
-        Assert.Contains("  street: string;", ts);
-        Assert.Contains("  city: string;", ts);
+        Assert.Equal("#/components/schemas/AddressDto",
+            Prop(schemas, "PersonDto", "address").GetProperty("$ref").GetString());
+        Assert.Equal("string", Prop(schemas, "AddressDto", "street").GetProperty("type").GetString());
+        Assert.Equal("string", Prop(schemas, "AddressDto", "city").GetProperty("type").GetString());
     }
 
     [Fact]
-    public void FullContract_AllVariations_Produce_Correct_TypeScript()
+    public void FullContract_AllVariations_Produce_Correct_Schemas()
     {
         var json = """
             {
@@ -409,42 +460,54 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        // Enums (alphabetical)
-        Assert.Contains("export type Priority = 1 | 2 | 3;", ts);
-        Assert.Contains("export type Status = \"active\" | \"pending\";", ts);
+        // Enum components
+        Assert.Equal(new[] { "active", "pending" },
+            schemas.GetProperty("Status").GetProperty("enum")
+                .EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal(new[] { 1, 2, 3 },
+            schemas.GetProperty("Priority").GetProperty("enum")
+                .EnumerateArray().Select(e => e.GetInt32()).ToArray());
 
         // Scalar types
-        Assert.Contains("  name: string;", ts);
-        Assert.Contains("  count: number;", ts);
-        Assert.Contains("  rate: number;", ts);
-        Assert.Contains("  active: boolean;", ts);
+        Assert.Equal("string", Prop(schemas, "ScalarDto", "name").GetProperty("type").GetString());
+        Assert.Equal("integer", Prop(schemas, "ScalarDto", "count").GetProperty("type").GetString());
+        Assert.Equal("number", Prop(schemas, "ScalarDto", "rate").GetProperty("type").GetString());
+        Assert.Equal("boolean", Prop(schemas, "ScalarDto", "active").GetProperty("type").GetString());
 
         // Nullable
-        Assert.Contains("  nickname: string | null;", ts);
+        AssertNullableType(Prop(schemas, "NullableDto", "nickname"), "string");
 
         // List
-        Assert.Contains("  tags: string[];", ts);
+        Assert.Equal("array", Prop(schemas, "ListDto", "tags").GetProperty("type").GetString());
 
         // Dictionary
-        Assert.Contains("  scores: Record<string, number>;", ts);
+        Assert.Equal("integer",
+            Prop(schemas, "DictDto", "scores").GetProperty("additionalProperties").GetProperty("type").GetString());
 
         // Inline object
-        Assert.Contains("dimensions: { width: number; height: number; };", ts);
+        Assert.Equal("number",
+            Prop(schemas, "ShapeDto", "dimensions").GetProperty("properties").GetProperty("width").GetProperty("type").GetString());
 
         // Enum refs
-        Assert.Contains("  status: Status;", ts);
-        Assert.Contains("  priority: Priority;", ts);
+        Assert.Equal("#/components/schemas/Status",
+            Prop(schemas, "EnumDto", "status").GetProperty("$ref").GetString());
+        Assert.Equal("#/components/schemas/Priority",
+            Prop(schemas, "IntEnumDto", "priority").GetProperty("$ref").GetString());
 
         // Docblock unions inline
-        Assert.Contains("  level: \"low\" | \"high\";", ts);
-        Assert.Contains("  code: 1 | 2 | 3;", ts);
+        Assert.Equal(new[] { "low", "high" },
+            Prop(schemas, "UnionDto", "level").GetProperty("enum")
+                .EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal(new[] { 1, 2, 3 },
+            Prop(schemas, "UnionDto", "code").GetProperty("enum")
+                .EnumerateArray().Select(e => e.GetInt32()).ToArray());
 
         // Nested ref
-        Assert.Contains("  child: ChildDto;", ts);
-        Assert.Contains("export type ChildDto", ts);
-        Assert.Contains("export type ParentDto", ts);
+        Assert.Equal("#/components/schemas/ChildDto",
+            Prop(schemas, "ParentDto", "child").GetProperty("$ref").GetString());
+        Assert.Equal("string", Prop(schemas, "ChildDto", "value").GetProperty("type").GetString());
     }
 
     [Fact]
@@ -474,9 +537,19 @@ public sealed class PhpRoundTripTests
             }
             """;
 
-        var ts = CompilationHelper.EmitTypesFromJson(json);
+        var schemas = SchemasFor(json);
 
-        Assert.Contains("  address: AddressDto | null;", ts);
-        Assert.Contains("  tags: string[] | null;", ts);
+        // Nullable $ref: 3.1 — anyOf [$ref, null] or oneOf; assert the ref is reachable
+        var address = Prop(schemas, "ProfileDto", "address");
+        var addressJson = address.GetRawText();
+        Assert.Contains("#/components/schemas/AddressDto", addressJson);
+        Assert.Contains("null", addressJson);
+
+        // Nullable array: type ["array","null"] with string items
+        var tags = Prop(schemas, "ProfileDto", "tags");
+        var tagTypes = tags.GetProperty("type").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("array", tagTypes);
+        Assert.Contains("null", tagTypes);
+        Assert.Equal("string", tags.GetProperty("items").GetProperty("type").GetString());
     }
 }

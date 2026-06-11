@@ -16,14 +16,14 @@ The samples project catches real-world issues (name collisions, missing usings) 
 
 Rivet has two pipelines:
 
-**Forward (C# → TS):**
-Roslyn reads attributed classes → walkers build an intermediate model → emitters produce TS types, clients, validators, and OpenAPI specs.
+**Forward (C# → OpenAPI):**
+Roslyn reads attributed classes → walkers build an intermediate model → the OpenAPI emitter produces the 3.1 spec.
 
 ```
 [RivetContract] / [RivetClient]
   → ContractWalker / EndpointWalker
   → TsEndpointDefinition + TsTypeDefinition
-  → TypeEmitter, ClientEmitter, ZodValidatorEmitter, OpenApiEmitter
+  → InlineTypeExtractor → OpenApiEmitter → openapi.json
 ```
 
 **Import (OpenAPI → C#):**
