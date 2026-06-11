@@ -95,6 +95,9 @@ public sealed class CliParserTests
     [InlineData("-o")]
     [InlineData("--security")]
     [InlineData("--namespace")]
+    [InlineData("--title")]
+    [InlineData("--version")]
+    [InlineData("--server")]
     public void ParseArgs_ValueTakingFlag_WithoutValue_Fails_With_Loud_Error(string flag)
     {
         var originalError = Console.Error;
@@ -167,6 +170,109 @@ public sealed class CliParserTests
         Assert.NotNull(options);
         Assert.Equal(new[] { "Contracts.cs", "Types.cs" }, options!.Files);
         Assert.Equal("Contracts.cs", options.ProjectPath);
+    }
+
+    // ════════ --title / --version / --server (spec metadata plumbing) ════════
+
+    [Fact]
+    public void ParseArgs_TitleAndVersion_SetOptions()
+    {
+        var options = CliParser.ParseArgs(
+            ["--project", "app.csproj", "--title", "Orders API", "--version", "2.3.0"]);
+
+        Assert.NotNull(options);
+        Assert.Equal("Orders API", options!.Title);
+        Assert.Equal("2.3.0", options.Version);
+    }
+
+    [Fact]
+    public void ParseArgs_Server_Repeatable_AccumulatesInOrder()
+    {
+        var options = CliParser.ParseArgs(
+        [
+            "--project", "app.csproj",
+            "--server", "https://api.example.com",
+            "--server", "https://staging.example.com",
+            "--server", "/relative-base",
+        ]);
+
+        Assert.NotNull(options);
+        Assert.Equal(
+            new[] { "https://api.example.com", "https://staging.example.com", "/relative-base" },
+            options!.Servers);
+    }
+
+    [Fact]
+    public void ParseArgs_NoMetadataFlags_LeavesTitleVersionNull_And_ServersEmpty()
+    {
+        var options = CliParser.ParseArgs(["--project", "app.csproj"]);
+
+        Assert.NotNull(options);
+        Assert.Null(options!.Title);
+        Assert.Null(options.Version);
+        Assert.True(options.Servers is null or { Count: 0 });
+    }
+
+    [Theory]
+    [InlineData("not a url")]
+    [InlineData("ftp://example.com")]
+    [InlineData("example.com")]
+    public void ParseArgs_Server_GarbageUrl_Fails_With_Loud_Error(string url)
+    {
+        var originalError = Console.Error;
+        try
+        {
+            using var sw = new StringWriter();
+            Console.SetError(sw);
+
+            var options = CliParser.ParseArgs(["--project", "app.csproj", "--server", url]);
+
+            Assert.Null(options);
+            Assert.Contains($"'--server' value '{url}' is not a valid URL", sw.ToString());
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+    }
+
+    [Fact]
+    public void ParseArgs_MetadataFlags_FlowThrough_FromContractMode()
+    {
+        var options = CliParser.ParseArgs(
+        [
+            "--from", "contracts.json",
+            "--title", "Orders API", "--version", "2.3.0",
+            "--server", "https://api.example.com",
+        ]);
+
+        Assert.NotNull(options);
+        Assert.Equal("contracts.json", options!.FromContractPath);
+        Assert.Equal("Orders API", options.Title);
+        Assert.Equal("2.3.0", options.Version);
+        Assert.Equal(new[] { "https://api.example.com" }, options.Servers);
+    }
+
+    [Fact]
+    public void PrintUsage_IncludesMetadataFlags()
+    {
+        var originalError = Console.Error;
+        try
+        {
+            using var sw = new StringWriter();
+            Console.SetError(sw);
+
+            CliParser.PrintUsage();
+
+            var output = sw.ToString();
+            Assert.Contains("--title", output);
+            Assert.Contains("--version", output);
+            Assert.Contains("--server", output);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
     }
 
     [Fact]

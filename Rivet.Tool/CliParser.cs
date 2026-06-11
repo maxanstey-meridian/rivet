@@ -19,6 +19,9 @@ internal static class CliParser
         string? fromOpenApiPath = null;
         string? fromContractPath = null;
         string? importNamespace = null;
+        string? title = null;
+        string? version = null;
+        var servers = new List<string>();
         var check = false;
         var quiet = false;
         var routes = false;
@@ -55,6 +58,23 @@ internal static class CliParser
                 case "--namespace" when i + 1 < args.Length:
                     importNamespace = args[++i];
                     break;
+                case "--title" when i + 1 < args.Length:
+                    title = args[++i];
+                    break;
+                case "--version" when i + 1 < args.Length:
+                    version = args[++i];
+                    break;
+                case "--server" when i + 1 < args.Length:
+                    var server = args[++i];
+                    if (!IsValidServerUrl(server))
+                    {
+                        Console.Error.WriteLine(
+                            $"error: '--server' value '{server}' is not a valid URL (expected an absolute http(s) URL or a path starting with '/')");
+                        return null;
+                    }
+
+                    servers.Add(server);
+                    break;
                 case "--check":
                     check = true;
                     break;
@@ -67,7 +87,8 @@ internal static class CliParser
                 // C3: value-taking flags reached without a following value (the guarded cases
                 // above didn't match) — error loudly instead of treating the flag as a file.
                 case "--project" or "-p" or "--output" or "-o" or "--security"
-                    or "--from-openapi" or "--from" or "--namespace":
+                    or "--from-openapi" or "--from" or "--namespace"
+                    or "--title" or "--version" or "--server":
                     Console.Error.WriteLine($"error: flag '{args[i]}' requires a value");
                     return null;
                 default:
@@ -90,7 +111,8 @@ internal static class CliParser
             return new RivetOptions(
                 fromContractPath, outputDir, files.ToArray(),
                 OpenApiPath: openApiPath, DefaultSecurity: defaultSecurity,
-                Quiet: quiet, FromContractPath: fromContractPath);
+                Quiet: quiet, FromContractPath: fromContractPath,
+                Title: title, Version: version, Servers: servers);
         }
 
         // Import mode doesn't need a project path
@@ -98,7 +120,7 @@ internal static class CliParser
         {
             return new RivetOptions(
                 fromOpenApiPath, outputDir, files.ToArray(),
-                openApiPath, defaultSecurity, FromOpenApiPath: fromOpenApiPath, ImportNamespace: importNamespace, Check: check, Quiet: quiet, Routes: routes);
+                openApiPath, defaultSecurity, FromOpenApiPath: fromOpenApiPath, ImportNamespace: importNamespace, Check: check, Quiet: quiet, Routes: routes, Title: title, Version: version, Servers: servers);
         }
 
         projectPath ??= files.FirstOrDefault();
@@ -108,8 +130,15 @@ internal static class CliParser
             return null;
         }
 
-        return new RivetOptions(projectPath, outputDir, files.ToArray(), openApiPath, defaultSecurity, Check: check, Quiet: quiet, Routes: routes);
+        return new RivetOptions(projectPath, outputDir, files.ToArray(), openApiPath, defaultSecurity, Check: check, Quiet: quiet, Routes: routes, Title: title, Version: version, Servers: servers);
     }
+
+    // OpenAPI server URLs are either absolute (http/https) or paths relative to the
+    // host serving the spec — anything else is a typo, not a server.
+    private static bool IsValidServerUrl(string value) =>
+        value.StartsWith('/')
+        || (Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "https");
 
     public static void PrintUsage()
     {
@@ -130,6 +159,9 @@ internal static class CliParser
         Console.Error.WriteLine("  -o, --output <dir>         Output directory for openapi.json (omit for stdout preview)");
         Console.Error.WriteLine("  --openapi [file]           Explicit spec path override (relative paths resolve against --output)");
         Console.Error.WriteLine("  --security <spec>          Default security scheme (bearer, bearer:jwt, cookie:name, apikey:in:name)");
+        Console.Error.WriteLine("  --title <text>             Spec info.title (default: API)");
+        Console.Error.WriteLine("  --version <text>           Spec info.version (default: 1.0.0) — there is no print-tool-version flag");
+        Console.Error.WriteLine("  --server <url>             Spec servers entry (repeatable; omitted entirely when not given)");
         Console.Error.WriteLine("  --from <contract.json>     Emit OpenAPI from a Rivet contract JSON file");
         Console.Error.WriteLine("  --from-openapi <spec.json> Onboarding scaffold: one-shot import of an OpenAPI spec");
         Console.Error.WriteLine("                             → C# contracts + DTOs; the C# becomes the source of");
@@ -148,4 +180,7 @@ sealed record RivetOptions(
     bool Check = false,
     bool Quiet = false,
     bool Routes = false,
-    string? FromContractPath = null);
+    string? FromContractPath = null,
+    string? Title = null,
+    string? Version = null,
+    IReadOnlyList<string>? Servers = null);

@@ -31,7 +31,12 @@ internal static class EmitPipeline
         var endpoints = extraction.Endpoints;
 
         var securityConfig = SecurityParser.Parse(options.DefaultSecurity);
-        var openApiJson = OpenApiEmitter.Emit(endpoints, definitionsByName, input.BrandsByName, input.Enums, securityConfig);
+        var documentInfo = new OpenApiDocumentInfo(
+            options.Title ?? "API",
+            options.Version ?? "1.0.0",
+            options.Servers is { Count: > 0 } ? options.Servers : null);
+        var openApiJson = OpenApiEmitter.Emit(
+            endpoints, definitionsByName, input.BrandsByName, input.Enums, securityConfig, documentInfo);
 
         // Resolve the spec path: --openapi overrides (resolved against --output when relative);
         // otherwise --output <dir> writes <dir>/openapi.json.

@@ -52,6 +52,12 @@ public sealed class OpenApiConformanceTests : IDisposable
     private static readonly string RepoRoot = FindRepoRoot();
     private static readonly string JsDir = Path.Combine(RepoRoot, "Rivet.Tests", "js");
 
+    // Conformance fixtures are emitted the way a real deployment would invoke the
+    // tool: --title/--version/--server set. This is what lets the spectral gate
+    // assert oas3-api-servers absent (see DeniedWarningCodes).
+    private static readonly OpenApiDocumentInfo FixtureDocumentInfo = new(
+        "Rivet Conformance Fixture", "1.2.3", ["https://api.example.com"]);
+
     public static string EmitSpec(string fixtureName) => fixtureName switch
     {
         "maximal-contract" => EmitFromSources([MaximalContractSource], "bearer"),
@@ -61,14 +67,14 @@ public sealed class OpenApiConformanceTests : IDisposable
         "file-endpoints-query-auth" => EmitFromSources([FileEndpointsQueryAuthSource], "bearer"),
         "validation-metadata" => EmitFromSources([ValidationMetadataSource], null),
         "contractapi-sample" => EmitFromSources(LoadContractApiSampleSources(), "bearer"),
-        "contract-sample-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-sample.json")),
-        "contract-tagged-union-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-tagged-union.json")),
-        "php-golden-contract-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("php-golden-contract.json")),
+        "contract-sample-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-sample.json"), FixtureDocumentInfo),
+        "contract-tagged-union-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-tagged-union.json"), FixtureDocumentInfo),
+        "php-golden-contract-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("php-golden-contract.json"), FixtureDocumentInfo),
         // TS-lowerer-shaped contract JSON: brands appear only as inline kind:"brand"
         // nodes, and multipart inputs are decomposed into params with an inputTypeName
         // that has NO matching entry in types[] (mirrors rivet-ts output; BUG-1/BUG-2).
-        "contract-ts-brands-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-ts-brands.json")),
-        "contract-ts-multipart-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-ts-multipart.json")),
+        "contract-ts-brands-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-ts-brands.json"), FixtureDocumentInfo),
+        "contract-ts-multipart-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-ts-multipart.json"), FixtureDocumentInfo),
         _ => throw new ArgumentException($"Unknown conformance fixture '{fixtureName}'"),
     };
 
@@ -80,7 +86,7 @@ public sealed class OpenApiConformanceTests : IDisposable
         var annotationEndpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var merged = EndpointMerger.Merge(contractEndpoints, annotationEndpoints);
         var securityConfig = security is null ? null : SecurityParser.Parse(security);
-        return OpenApiEmitter.Emit(merged, walker.Definitions, walker.Brands, walker.Enums, securityConfig);
+        return OpenApiEmitter.Emit(merged, walker.Definitions, walker.Brands, walker.Enums, securityConfig, FixtureDocumentInfo);
     }
 
     private static string LoadFixture(string name)
@@ -141,6 +147,14 @@ public sealed class OpenApiConformanceTests : IDisposable
 
     // ═══════════════════════ Check 1 — spectral lint ════════════════════════
 
+    // Warning codes the --title/--version/--server flags make fixable, promoted to
+    // asserted-absent now that the corpus is emitted with those flags (a named-codes
+    // denylist, NOT fail-on-all-warnings). Only oas3-api-servers qualifies:
+    // info.title/info.version are schema-required (missing ones are already
+    // severity-error), and info-contact / info-description need contact/description
+    // data no flag provides — those stay reported-but-not-failing.
+    private static readonly string[] DeniedWarningCodes = ["oas3-api-servers"];
+
     [Theory]
     [InlineData("maximal-contract")]
     [InlineData("controller-annotations")]
@@ -178,9 +192,13 @@ public sealed class OpenApiConformanceTests : IDisposable
         static string Describe(JsonNode? f) =>
             $"{f?["code"]} at {string.Join('.', f?["path"]?.AsArray().Select(p => p?.ToString()) ?? [])}: {f?["message"]}";
 
-        // Severity 0 = error (the gate); 1+ = warning/info/hint (reported, not failing).
-        var errors = findings.Where(f => f?["severity"]?.GetValue<int>() == 0).ToList();
-        var warnings = findings.Where(f => f?["severity"]?.GetValue<int>() != 0).ToList();
+        // Severity 0 = error (the gate); 1+ = warning/info/hint (reported, not
+        // failing) — except the denylisted codes, which fail at any severity.
+        var errors = findings
+            .Where(f => f?["severity"]?.GetValue<int>() == 0
+                || DeniedWarningCodes.Contains(f?["code"]?.GetValue<string>()))
+            .ToList();
+        var warnings = findings.Except(errors).ToList();
 
         foreach (var warning in warnings)
         {

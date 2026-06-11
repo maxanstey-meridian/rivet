@@ -19,13 +19,28 @@ against `--output`). When given, it is the sole writer.
 dotnet rivet --project path/to/Api.csproj --output ./generated --openapi ../spec/openapi.json
 ```
 
-### Security
+### Spec metadata and security
+
+`--title`, `--version`, and `--server` set the spec's `info.title`, `info.version`,
+and `servers` entries; `--security` sets the default security scheme. All four are
+emit-time CLI data — they describe the deployment, not the contracts, and are not
+recovered by `--from-openapi` import.
 
 ```bash
-dotnet rivet --project path/to/Api.csproj --output ./generated --security bearer
+dotnet rivet --project path/to/Api.csproj --output ./generated \
+  --title "Orders API" --version 2.3.0 \
+  --server https://api.example.com --server https://staging.example.com \
+  --security bearer
 ```
 
-Accepted forms: `bearer`, `bearer:jwt`, `cookie:<name>`, `apikey:<in>:<name>`.
+- `--title <text>` — `info.title` (default `API`).
+- `--version <text>` — `info.version` (default `1.0.0`). Rivet has no
+  print-tool-version flag, so `--version` always means the spec version.
+- `--server <url>` — adds a `servers` entry; repeat for multiple. Accepts absolute
+  `http(s)` URLs or paths starting with `/`. With no `--server`, no `servers`
+  block is emitted at all.
+- `--security <spec>` — accepted forms: `bearer`, `bearer:jwt`, `cookie:<name>`,
+  `apikey:<in>:<name>`.
 
 ## From Contract JSON
 

@@ -41,13 +41,14 @@ public static class OpenApiEmitter
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
         IReadOnlyDictionary<string, TsType> enums,
-        SecurityConfig? security)
+        SecurityConfig? security,
+        OpenApiDocumentInfo? documentInfo = null)
     {
         _ctx = new EmitContext();
         try
         {
             AssignComponentNames(endpoints, definitions, brands, enums, _ctx);
-            return EmitCore(endpoints, definitions, brands, enums, security);
+            return EmitCore(endpoints, definitions, brands, enums, security, documentInfo ?? new OpenApiDocumentInfo());
         }
         finally
         {
@@ -60,7 +61,8 @@ public static class OpenApiEmitter
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
         IReadOnlyDictionary<string, TsType> enums,
-        SecurityConfig? security)
+        SecurityConfig? security,
+        OpenApiDocumentInfo documentInfo)
     {
         var paths = BuildPaths(endpoints, definitions, security);
         var schemas = BuildSchemas(endpoints, definitions, brands, enums);
@@ -84,10 +86,17 @@ public static class OpenApiEmitter
             ["openapi"] = "3.1.0",
             ["info"] = new Dictionary<string, object>
             {
-                ["title"] = "API",
-                ["version"] = "1.0.0",
+                ["title"] = documentInfo.Title,
+                ["version"] = documentInfo.Version,
             },
         };
+
+        if (documentInfo.Servers is { Count: > 0 })
+        {
+            doc["servers"] = documentInfo.Servers
+                .Select(object (url) => new Dictionary<string, object> { ["url"] = url })
+                .ToList();
+        }
 
         // W4: operations carry tags — declare them in the global tags array
         // (operation-tag-defined; docs-UI consumers use it for grouping/ordering).

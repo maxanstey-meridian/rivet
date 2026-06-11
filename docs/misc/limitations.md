@@ -27,8 +27,9 @@ Verified limits of the current tool, so you don't discover them in production.
   conventions. Runtime polymorphism (returning derived types), custom serializer
   settings, and validation living outside attributes (e.g. FluentValidation) are
   invisible to the spec.
-- `info.title` and `info.version` are currently fixed (`"API"` / `"1.0.0"`); there
-  is no flag to set them, and `servers` is not emitted.
+- `info.title`, `info.version`, and `servers` come from the `--title`, `--version`,
+  and `--server` flags (defaults: `"API"` / `"1.0.0"` / no `servers` block); there
+  is no flag for `info.contact`, `info.description`, or `info.license`.
 
 ## Importer (`--from-openapi`)
 

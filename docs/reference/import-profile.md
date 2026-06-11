@@ -102,7 +102,9 @@ diagnostics above where applicable):
 - Polymorphic `discriminator` dispatch (schemas import as plain records/unions)
 - Multi-scheme security semantics, security scheme type definitions, OAuth
   scopes/flows
-- `servers` (incl. variables), `externalDocs`
+- `servers` (incl. variables), `externalDocs` — `info` and `servers` are
+  CLI-provided emit-time data (`--title`/`--version`/`--server`), not contract
+  data; they are lost on import by design
 - Non-JSON structured content (CBOR, YAML, JSON-Patch, …)
 
 ## Quality gate

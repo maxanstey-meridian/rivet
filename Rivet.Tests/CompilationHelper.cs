@@ -255,11 +255,11 @@ public static class CompilationHelper
 
     // --- JSON contract helpers ---
 
-    public static string EmitOpenApiFromJson(string json)
+    public static string EmitOpenApiFromJson(string json, OpenApiDocumentInfo? documentInfo = null)
     {
         var (types, enums, endpoints, brands) = JsonContractReader.Read(json);
         var definitions = types.ToDictionary(t => t.Name);
-        return OpenApiEmitter.Emit(endpoints, definitions, brands, enums, security: null);
+        return OpenApiEmitter.Emit(endpoints, definitions, brands, enums, security: null, documentInfo);
     }
 
     // --- Emission helpers ---
