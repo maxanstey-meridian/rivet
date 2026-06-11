@@ -48,6 +48,9 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1011` | Warning | `char` has no schema mapping — emitted as an untyped (empty) schema. | Use `string` instead of `char`. |
 | `RIV1012` | Warning | `object` has no schema mapping — emitted as an untyped (empty) schema. | Use a concrete type, or `JsonElement` to state "untyped" deliberately. |
 | `RIV1013` | Warning | Dictionary key type has no contract representation (supported: `string`, enums, string-backed brands, string-serializable primitives like `Guid`/`DateTime`/numerics) — keys are emitted as unconstrained strings. | Use a supported key type, or accept the unconstrained string keys. |
+| `RIV1014` | Warning | `[JsonDerivedType]` registration with a non-string (int or absent) discriminator tag — a string-discriminated `oneOf` cannot represent it; the base type falls back to plain property flattening. | Use string discriminator tags, or accept the flattened base schema. |
+| `RIV1015` | Warning | `[JsonPolymorphic]` base type has no `[JsonDerivedType]` registrations — there is no variant set to emit; the type falls back to plain property flattening. | Register the derived types with `[JsonDerivedType]`, or remove `[JsonPolymorphic]`. |
+| `RIV1016` | Warning | `[JsonPolymorphic]` `UnknownDerivedTypeHandling` has no spec representation — the emitted `oneOf` admits only the registered derived types. | Accept that unknown-type fallback behaviour is invisible to spec consumers. |
 
 ## RIV2xxx — emission
 
@@ -75,7 +78,7 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV3002` | Warning | Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented. | Review the scaffold's `.Secure(...)` calls; multi-scheme semantics are out of scope. |
 | `RIV3003` | Warning | HEAD/OPTIONS/TRACE operation dropped — the HTTP method has no contract representation. | No action; these methods are out of scope for the contract model. |
 | `RIV3004` | Warning | Named schema declares both `properties` and `additionalProperties` — imported as a record; extra members are not represented. | Pick one side in the scaffolded C# (record vs dictionary) and adjust by hand. |
-| `RIV3005` | Warning | `discriminator` on a plain object schema (no `oneOf` union) — imported as a regular record; dispatch semantics dropped. | Model the polymorphism as a `oneOf` union upstream, or accept the plain record. |
+| `RIV3005` | Warning | `discriminator` with no reversible polymorphic shape (plain object without `oneOf`, or `oneOf` whose `mapping` is absent/unusable) — imported without dispatch semantics. | Model the polymorphism as a `oneOf` with a complete `discriminator.mapping` whose variants carry the tag property, or accept the non-polymorphic import. |
 | `RIV3006` | Warning | Alias schema references a missing schema — consumers fall back to `JsonElement`. | Fix the dangling `$ref` in the source spec, or type the member after scaffolding. |
 | `RIV3007` | Warning | Alias schema is part of a `$ref` cycle — consumers fall back to `JsonElement`. | Break the cycle in the source spec, or type the member after scaffolding. |
 | `RIV3008` | Warning | Reference to an unresolvable alias schema (cycle or missing target) — using `JsonElement`. | Fix the alias it references (see `RIV3006`/`RIV3007`). |

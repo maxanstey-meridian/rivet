@@ -35,6 +35,9 @@ public static class Diagnostics
     public const string UnsupportedChar = "RIV1011";
     public const string UnsupportedObject = "RIV1012";
     public const string DictionaryKeyTypeDropped = "RIV1013";
+    public const string PolymorphicNonStringTag = "RIV1014";
+    public const string PolymorphicNoDerivedTypes = "RIV1015";
+    public const string PolymorphicUnknownHandlingDropped = "RIV1016";
 
     // ----- RIV2xxx: emission -----
     public const string TaggedUnionComponentCollision = "RIV2001";
@@ -87,6 +90,9 @@ public static class Diagnostics
         [UnsupportedChar] = "char has no schema mapping — emitted as an untyped (empty) schema.",
         [UnsupportedObject] = "object has no schema mapping — emitted as an untyped (empty) schema.",
         [DictionaryKeyTypeDropped] = "Dictionary key type has no contract representation (supported: string, enums, string-backed brands, string-serializable primitives) — keys are emitted as unconstrained strings.",
+        [PolymorphicNonStringTag] = "[JsonDerivedType] registration with a non-string (int or absent) discriminator tag — a string-discriminated oneOf cannot represent it; the base type falls back to plain property flattening.",
+        [PolymorphicNoDerivedTypes] = "[JsonPolymorphic] base type has no [JsonDerivedType] registrations — there is no variant set to emit; the type falls back to plain property flattening.",
+        [PolymorphicUnknownHandlingDropped] = "[JsonPolymorphic] UnknownDerivedTypeHandling has no spec representation — the emitted oneOf admits only the registered derived types.",
         [TaggedUnionComponentCollision] = "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
         [UndefinedSecurityScheme] = "Endpoint references a security scheme with no definition — a default bearer securityScheme component is emitted.",
         [DuplicateEndpoint] = "Two endpoints share an HTTP method + path — the later definition wins.",
@@ -99,7 +105,7 @@ public static class Diagnostics
         [ImportSecuritySchemesDropped] = "Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented.",
         [ImportOperationMethodDropped] = "HEAD/OPTIONS/TRACE operation dropped — the HTTP method has no contract representation.",
         [ImportAdditionalPropertiesDropped] = "Named schema declares both 'properties' and 'additionalProperties' — imported as a record; extra members are not represented.",
-        [ImportDiscriminatorDropped] = "Discriminator on a plain object schema (no oneOf union) — imported as a regular record; dispatch semantics dropped.",
+        [ImportDiscriminatorDropped] = "Discriminator with no reversible polymorphic shape (plain object without oneOf, or oneOf whose mapping is absent/unusable) — imported without dispatch semantics.",
         [ImportAliasTargetMissing] = "Alias schema references a missing schema — consumers fall back to JsonElement.",
         [ImportAliasRefCycle] = "Alias schema is part of a $ref cycle — consumers fall back to JsonElement.",
         [ImportUnresolvableAliasReference] = "Reference to an unresolvable alias schema (cycle or missing target) — using JsonElement.",

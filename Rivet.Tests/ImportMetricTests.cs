@@ -235,6 +235,16 @@ public sealed class ImportMetricTests
             .Where(f => f.FileName.StartsWith("Types/"))
             .Any(f => f.FileName.Contains('-'));
         Assert.False(hasHyphens, "Type filenames should not contain hyphens");
+
+        // P2 wave 4: oneOf + discriminator + usable mapping now reverses to a
+        // [JsonPolymorphic] hierarchy (4 bases at last audit — must not shrink),
+        // and unusable mappings drop loudly with a reason (RIV3005) instead of
+        // silently. Ratchet (count may only go DOWN): 15 drops at last audit.
+        var polymorphicBases = CountPattern(r, "Types/", "[JsonPolymorphic(");
+        Assert.True(polymorphicBases >= 4, $"Expected ≥4 polymorphic bases, got {polymorphicBases}");
+        var discriminatorDrops = r.Warnings.Count(w => DiagnosticId(w) == Diagnostics.ImportDiscriminatorDropped);
+        Assert.True(discriminatorDrops <= 15,
+            $"Expected ≤15 discriminator-dropped warnings (ratchet, was 15), got {discriminatorDrops}");
     }
 
     // ========== DocuSign — */* responses, $ref requestBodies ==========
@@ -277,6 +287,16 @@ public sealed class ImportMetricTests
         // Ratchet (counts may only go DOWN): 142 at last audit — must not grow.
         Assert.True(UnsupportedError(r) <= 142, $"Expected ≤142 unsupported errors (ratchet, was 142), got {UnsupportedError(r)}");
         Assert.Equal(0, UnsupportedBody(r));
+
+        // P2 wave 4: Jira's CustomFieldContextDefaultValue + WorkflowCondition unions
+        // carry complete discriminator mappings — now reversed to [JsonPolymorphic]
+        // hierarchies (2 bases at last audit — must not shrink). CustomContextVariable
+        // declares sibling properties alongside its oneOf and falls back loudly.
+        var polymorphicBases = CountPattern(r, "Types/", "[JsonPolymorphic(");
+        Assert.True(polymorphicBases >= 2, $"Expected ≥2 polymorphic bases, got {polymorphicBases}");
+        var discriminatorDrops = r.Warnings.Count(w => DiagnosticId(w) == Diagnostics.ImportDiscriminatorDropped);
+        Assert.True(discriminatorDrops <= 1,
+            $"Expected ≤1 discriminator-dropped warning (ratchet, was 1), got {discriminatorDrops}");
     }
 
     // ========== Docker — mix of $ref responses and non-JSON ==========

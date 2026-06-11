@@ -66,6 +66,7 @@ public sealed class OpenApiConformanceTests : IDisposable
         "mixed-contracts-controllers" => EmitFromSources([MixedContractsControllersSource], null),
         "file-endpoints-query-auth" => EmitFromSources([FileEndpointsQueryAuthSource], "bearer"),
         "validation-metadata" => EmitFromSources([ValidationMetadataSource], null),
+        "polymorphic-shapes" => EmitFromSources([PolymorphicShapesSource], "bearer"),
         "contractapi-sample" => EmitFromSources(LoadContractApiSampleSources(), "bearer"),
         "contract-sample-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-sample.json"), FixtureDocumentInfo),
         "contract-tagged-union-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-tagged-union.json"), FixtureDocumentInfo),
@@ -162,6 +163,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("mixed-contracts-controllers")]
     [InlineData("file-endpoints-query-auth")]
     [InlineData("validation-metadata")]
+    [InlineData("polymorphic-shapes")]
     [InlineData("contractapi-sample")]
     [InlineData("contract-sample-json")]
     [InlineData("contract-tagged-union-json")]
@@ -219,6 +221,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("mixed-contracts-controllers")]
     [InlineData("file-endpoints-query-auth")]
     [InlineData("validation-metadata")]
+    [InlineData("polymorphic-shapes")]
     [InlineData("contractapi-sample")]
     [InlineData("contract-sample-json")]
     [InlineData("contract-tagged-union-json")]
@@ -264,6 +267,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("mixed-contracts-controllers")]
     [InlineData("file-endpoints-query-auth")]
     [InlineData("validation-metadata")]
+    [InlineData("polymorphic-shapes")]
     [InlineData("contractapi-sample")]
     public void SelfLoop_Emit_Import_Emit_Is_Stable(string fixtureName)
     {
@@ -833,6 +837,64 @@ public sealed class OpenApiConformanceTests : IDisposable
             public static readonly Define Login =
                 Define.Post<LoginInput, LoginResult>("/api/auth/login")
                     .FormEncoded();
+        }
+        """;
+
+    /// <summary>
+    /// P2 wave 4 — STJ polymorphism: a default-<c>$type</c> hierarchy, a
+    /// custom-discriminator hierarchy, nested type references inside variants,
+    /// and a derived type referenced directly (whose standalone schema stays
+    /// untagged, matching System.Text.Json's wire semantics).
+    /// </summary>
+    private const string PolymorphicShapesSource = """
+        using System;
+        using System.Collections.Generic;
+        using System.Text.Json.Serialization;
+        using Rivet;
+
+        namespace Test;
+
+        [RivetType]
+        public sealed record PointDto(double X, double Y);
+
+        [RivetType]
+        [JsonPolymorphic]
+        [JsonDerivedType(typeof(Circle), "circle")]
+        [JsonDerivedType(typeof(Square), "square")]
+        public abstract record Shape(string Id, PointDto Origin);
+
+        public sealed record Circle(string Id, PointDto Origin, double Radius) : Shape(Id, Origin);
+        public sealed record Square(string Id, PointDto Origin, double Side, string? Label) : Shape(Id, Origin);
+
+        [RivetType]
+        [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+        [JsonDerivedType(typeof(EmailChannel), "email")]
+        [JsonDerivedType(typeof(SmsChannel), "sms")]
+        public abstract record Channel;
+
+        public sealed record EmailChannel(string Address) : Channel;
+        public sealed record SmsChannel(string Number, string? Carrier) : Channel;
+
+        [RivetContract]
+        public static class ShapesContract
+        {
+            public static readonly Define GetShape =
+                Define.Get<Shape>("/api/shapes/{id}");
+
+            public static readonly Define CreateShape =
+                Define.Post<Shape, Shape>("/api/shapes")
+                    .Status(201);
+
+            // Derived type referenced directly — its standalone schema stays untagged
+            public static readonly Define GetCircle =
+                Define.Get<Circle>("/api/circles/{id}");
+        }
+
+        [RivetContract]
+        public static class ChannelsContract
+        {
+            public static readonly Define GetChannel =
+                Define.Get<Channel>("/api/channels/{id}");
         }
         """;
 }

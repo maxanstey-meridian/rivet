@@ -88,7 +88,7 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3010` | `unsupported-schema-type` | Unhandled JSON Schema `type` → `JsonElement`. |
 | `RIV3011` | `array-missing-items` | Array schema without `items` → `List<JsonElement>`. |
 | `RIV3012` | `enum-constraint-dropped` | Enum that can't be a C# enum (single-value, mixed, out-of-range) degrades to a primitive. |
-| `RIV3005` | `discriminator-dropped` | `discriminator` on a plain object (no `oneOf`) — dispatch semantics dropped. |
+| `RIV3005` | `discriminator-dropped` | `discriminator` with no reversible polymorphic shape (plain object without `oneOf`, or `oneOf` whose `mapping` is absent/unusable) — dispatch semantics dropped. |
 | `RIV3001`, `RIV3006`, `RIV3007`, `RIV3008` | `alias-unresolvable` | Cyclic / dangling `$ref` alias chains broken with placeholders. |
 | `RIV3013` | `properties-dropped` | Schema declares both `properties` and `additionalProperties`; the dictionary side won (inline objects). |
 | `RIV3004` | `additional-properties-dropped` | Same conflict on a named schema; the record side won. |
@@ -102,7 +102,9 @@ diagnostics above where applicable):
 
 - `callbacks`, `webhooks`, `links`, response headers
 - Parameter serialization (`style`, `explode`, `allowReserved`), XML mappings
-- Polymorphic `discriminator` dispatch (schemas import as plain records/unions)
+- Polymorphic `discriminator` dispatch *without* a usable `oneOf` mapping
+  (imports as plain records/unions, loudly); usable mappings reverse to
+  `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies
 - Multi-scheme security semantics, security scheme type definitions, OAuth
   scopes/flows
 - `servers` (incl. variables), `externalDocs` — `info` and `servers` are

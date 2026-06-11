@@ -41,6 +41,11 @@ public sealed class TypeWalker
     private readonly INamedTypeSymbol? _jsonIgnoreType;
     private readonly INamedTypeSymbol? _obsoleteType;
 
+    // STJ polymorphism attributes (P2 wave 4): [JsonPolymorphic]/[JsonDerivedType]
+    // base types lower to a TaggedUnion alias instead of silently flattening.
+    private readonly INamedTypeSymbol? _jsonPolymorphicType;
+    private readonly INamedTypeSymbol? _jsonDerivedTypeType;
+
     public TypeWalker(Compilation compilation)
     {
         // Build set of walkable assemblies: source + project references (not NuGet/framework)
@@ -91,6 +96,8 @@ public sealed class TypeWalker
         _jsonPropertyNameType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonPropertyNameAttribute");
         _jsonIgnoreType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonIgnoreAttribute");
         _obsoleteType = compilation.GetTypeByMetadataName("System.ObsoleteAttribute");
+        _jsonPolymorphicType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonPolymorphicAttribute");
+        _jsonDerivedTypeType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonDerivedTypeAttribute");
     }
 
     private static void AddScalar(
@@ -275,6 +282,20 @@ public sealed class TypeWalker
             .Select(tp => tp.Name)
             .ToList();
 
+        // P2 wave 4: a [JsonPolymorphic]/[JsonDerivedType] base type registers as a
+        // TaggedUnion alias definition (oneOf + discriminator + mapping) instead of
+        // silently flattening to its own property surface. Diagnosed-unsupported
+        // shapes (non-string tags, zero registrations) fall through to flattening.
+        // Generic polymorphic bases keep the flattening path — a generic alias has
+        // no monomorphisation template the emitter could instantiate.
+        if (!definition.IsGenericType && TryBuildPolymorphicUnion(definition, name) is { } union)
+        {
+            _visiting.Remove(name);
+            _definitions[name] = new TsTypeDefinition(name, typeParams, union, GetTypeDescription(definition));
+            _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
+            return;
+        }
+
         var properties = new List<TsPropertyDefinition>();
 
         // A3: include inherited properties by flattening the BaseType chain
@@ -393,21 +414,156 @@ public sealed class TypeWalker
         }
 
         // Read type-level [RivetDescription] attribute
-        string? typeDescription = null;
+        var typeDescription = GetTypeDescription(definition);
+
+        _visiting.Remove(name);
+        _definitions[name] = new TsTypeDefinition(name, typeParams, properties, typeDescription);
+        _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
+    }
+
+    private static string? GetTypeDescription(INamedTypeSymbol definition)
+    {
         foreach (var attr in definition.GetAttributes())
         {
             if (attr.AttributeClass?.Name is "RivetDescriptionAttribute"
                 && attr.ConstructorArguments.Length > 0
                 && attr.ConstructorArguments[0].Value is string td)
             {
-                typeDescription = td;
-                break;
+                return td;
             }
         }
 
-        _visiting.Remove(name);
-        _definitions[name] = new TsTypeDefinition(name, typeParams, properties, typeDescription);
-        _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
+        return null;
+    }
+
+    /// <summary>
+    /// P2 wave 4: lowers a [JsonPolymorphic]/[JsonDerivedType] base type to a
+    /// TaggedUnion whose variants are the [JsonDerivedType] registrations, matching
+    /// System.Text.Json's wire semantics when serializing AS the base type: the
+    /// discriminator property (default <c>$type</c>) is written first with the
+    /// registration's tag, followed by the derived type's full flattened property
+    /// surface. The base itself is a variant only if explicitly registered. Returns
+    /// null when the symbol carries neither attribute, or when the shape is
+    /// diagnosed-unsupported (non-string tags, zero registrations) — callers then
+    /// fall back to the plain flattening path.
+    /// </summary>
+    private TsType.TaggedUnion? TryBuildPolymorphicUnion(INamedTypeSymbol definition, string name)
+    {
+        if (_jsonPolymorphicType is null && _jsonDerivedTypeType is null)
+        {
+            return null;
+        }
+
+        AttributeData? polymorphicAttr = null;
+        var derivedAttrs = new List<AttributeData>();
+        foreach (var attr in definition.GetAttributes())
+        {
+            if (SymbolEqualityComparer.Default.Equals(attr.AttributeClass, _jsonPolymorphicType))
+            {
+                polymorphicAttr = attr;
+            }
+            else if (SymbolEqualityComparer.Default.Equals(attr.AttributeClass, _jsonDerivedTypeType))
+            {
+                derivedAttrs.Add(attr);
+            }
+        }
+
+        if (polymorphicAttr is null && derivedAttrs.Count == 0)
+        {
+            return null;
+        }
+
+        if (polymorphicAttr is not null
+            && polymorphicAttr.NamedArguments.Any(a => a.Key == "UnknownDerivedTypeHandling"))
+        {
+            Diagnostics.Warn(
+                Diagnostics.PolymorphicUnknownHandlingDropped,
+                $"[JsonPolymorphic] UnknownDerivedTypeHandling on '{name}' has no spec representation — " +
+                "the emitted oneOf admits only the registered derived types");
+        }
+
+        if (derivedAttrs.Count == 0)
+        {
+            Diagnostics.Warn(
+                Diagnostics.PolymorphicNoDerivedTypes,
+                $"[JsonPolymorphic] on '{name}' has no [JsonDerivedType] registrations — " +
+                "there is no variant set to emit; falling back to plain property flattening");
+            return null;
+        }
+
+        var discriminator = "$type";
+        if (polymorphicAttr?.NamedArguments
+                .FirstOrDefault(a => a.Key == "TypeDiscriminatorPropertyName").Value.Value is string custom)
+        {
+            discriminator = custom;
+        }
+
+        var registrations = new List<(INamedTypeSymbol Type, string Tag)>();
+        foreach (var attr in derivedAttrs)
+        {
+            if (attr.ConstructorArguments.Length == 0
+                || attr.ConstructorArguments[0].Value is not INamedTypeSymbol derivedType)
+            {
+                continue;
+            }
+
+            var tagValue = attr.ConstructorArguments.Length > 1 ? attr.ConstructorArguments[1].Value : null;
+            if (tagValue is not string tag)
+            {
+                // Do NOT stringify int tags: a spec validating string tags against an
+                // int wire value would be a lie. Flatten the whole base, loudly.
+                Diagnostics.Warn(
+                    Diagnostics.PolymorphicNonStringTag,
+                    $"[JsonDerivedType] on '{name}' registers '{derivedType.ToDisplayString()}' with " +
+                    $"{(tagValue is null ? "no" : "a non-string")} discriminator tag — a string-discriminated " +
+                    $"oneOf cannot represent it; falling back to plain property flattening for '{name}'");
+                return null;
+            }
+
+            registrations.Add((derivedType, tag));
+        }
+
+        if (registrations.Count == 0)
+        {
+            return null;
+        }
+
+        var variants = new List<TsType.TaggedUnionVariant>();
+        foreach (var (derivedType, tag) in registrations)
+        {
+            // Synthesized discriminator property first — a single-member StringUnion,
+            // required (non-Nullable), mirroring the TS lowerer's variant shape —
+            // then the derived type's full flattened property surface.
+            var fields = new List<(string Name, TsType Type)>
+            {
+                (discriminator, new TsType.StringUnion([tag])),
+            };
+
+            foreach (var member in GetEffectiveProperties(derivedType))
+            {
+                if (IsJsonIgnored(member))
+                {
+                    continue;
+                }
+
+                var fieldName = GetJsonPropertyName(member) ?? Naming.ToCamelCase(member.Name);
+                var fieldType = MapTypeCore(member.Type, $"{name}.{tag}.{member.Name}");
+
+                // InlineObject has no optionality slot: required = non-Nullable.
+                // Optional-but-non-nullable properties widen to Nullable so they
+                // stay out of the variant's required array.
+                if (IsOptionalProperty(member) && fieldType is not TsType.Nullable)
+                {
+                    fieldType = new TsType.Nullable(fieldType);
+                }
+
+                fields.Add((fieldName, fieldType));
+            }
+
+            variants.Add(new TsType.TaggedUnionVariant(tag, new TsType.InlineObject(fields)));
+        }
+
+        return new TsType.TaggedUnion(discriminator, variants);
     }
 
     /// <summary>

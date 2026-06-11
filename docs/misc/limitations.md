@@ -24,9 +24,10 @@ Verified limits of the current tool, so you don't discover them in production.
 - Security scheme definitions come from the `--security` flag; `.Secure("name")`
   with no matching definition emits a default bearer scheme with a warning.
 - The spec reflects *declared* C# types and the default System.Text.Json
-  conventions. Runtime polymorphism (returning derived types), custom serializer
-  settings, and validation living outside attributes (e.g. FluentValidation) are
-  invisible to the spec.
+  conventions. `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies emit as
+  `oneOf` + `discriminator`; runtime polymorphism *without* those registrations,
+  custom serializer settings, and validation living outside attributes
+  (e.g. FluentValidation) are invisible to the spec.
 - `info.title`, `info.version`, and `servers` come from the `--title`, `--version`,
   and `--server` flags (defaults: `"API"` / `"1.0.0"` / no `servers` block); there
   is no flag for `info.contact`, `info.description`, or `info.license`.
@@ -34,8 +35,10 @@ Verified limits of the current tool, so you don't discover them in production.
 ## Importer (`--from-openapi`)
 
 A one-shot onboarding scaffold, not a sync tool. Callbacks, webhooks, links,
-response headers, parameter serialization styles, discriminator dispatch,
-multi-scheme security, and security scheme types are out of scope — the full
+response headers, parameter serialization styles, multi-scheme security, and
+security scheme types are out of scope (discriminator dispatch imports as a
+`[JsonPolymorphic]` hierarchy when the `oneOf` mapping is usable, and falls
+back loudly otherwise) — the full
 honest list, including every diagnostic marker and warning category, is in the
 [Import Profile](/reference/import-profile).
 

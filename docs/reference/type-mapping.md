@@ -42,6 +42,16 @@ How C# types lower into OpenAPI 3.1 schemas. Property names camelCase by default
   (e.g. `record Email(string Value)`) lowers to its inner primitive with
   `x-rivet-brand` — `{ "type": "string", "x-rivet-brand": "Email" }`. On the wire
   it is just the primitive.
+- **Polymorphic hierarchies** (`[JsonPolymorphic]`/`[JsonDerivedType]` on a base
+  type) → `oneOf` + `discriminator` with a complete tag → `$ref` `mapping`, named
+  after the base. Each registration becomes a `{Base}_{Tag}` variant component:
+  the discriminator property first (default `$type`, single-value `enum`,
+  required), then the derived type's full flattened property surface — matching
+  System.Text.Json's wire output when serializing *as the base type*. A derived
+  type referenced directly keeps its own untagged schema (STJ writes no
+  discriminator for it). Non-string tags (`RIV1014`) and registration-less
+  `[JsonPolymorphic]` (`RIV1015`) fall back to plain flattening, loudly;
+  `UnknownDerivedTypeHandling` has no spec representation (`RIV1016`).
 
 ## Constraint and metadata flow
 

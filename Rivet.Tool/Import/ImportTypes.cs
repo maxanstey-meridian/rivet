@@ -16,7 +16,20 @@ internal sealed record GeneratedRecord(
     string Name,
     IReadOnlyList<RecordProperty> Properties,
     IReadOnlyList<string>? TypeParameters = null,
-    string? Description = null);
+    string? Description = null,
+    PolymorphismInfo? Polymorphism = null,
+    string? BaseTypeName = null);
+
+/// <summary>
+/// Reversal of an emitted oneOf + discriminator + mapping union: the record becomes an
+/// abstract base carrying [JsonPolymorphic(TypeDiscriminatorPropertyName = ...)] plus one
+/// [JsonDerivedType(typeof(Variant), "tag")] per mapping entry.
+/// </summary>
+internal sealed record PolymorphismInfo(
+    string DiscriminatorPropertyName,
+    IReadOnlyList<PolymorphicVariantRef> Variants);
+
+internal sealed record PolymorphicVariantRef(string TypeName, string Tag);
 
 internal sealed record RecordProperty(
     string Name,

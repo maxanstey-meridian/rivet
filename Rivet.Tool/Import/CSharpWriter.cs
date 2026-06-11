@@ -20,6 +20,10 @@ internal static class CSharpWriter
         {
             sb.AppendLine("using System.ComponentModel.DataAnnotations;");
         }
+        if (record.Polymorphism is not null)
+        {
+            sb.AppendLine("using System.Text.Json.Serialization;");
+        }
         // I6: substring match — IFormFile can appear nested (List<IFormFile>,
         // Dictionary<string, IFormFile>), not only as the bare property type.
         if (record.Properties.Any(p => p.CSharpType.Contains("IFormFile", StringComparison.Ordinal)))
@@ -34,15 +38,31 @@ internal static class CSharpWriter
         {
             sb.AppendLine($"[RivetDescription(\"{EscapeString(record.Description)}\")]");
         }
-        sb.AppendLine("[RivetType]");
+        if (record.Polymorphism is { } poly)
+        {
+            sb.AppendLine($"[JsonPolymorphic(TypeDiscriminatorPropertyName = \"{EscapeString(poly.DiscriminatorPropertyName)}\")]");
+            foreach (var variant in poly.Variants)
+            {
+                sb.AppendLine($"[JsonDerivedType(typeof({variant.TypeName}), \"{EscapeString(variant.Tag)}\")]");
+            }
+        }
+        // Derived polymorphic records are not [RivetType] entry points — the walker
+        // reaches them through the base's [JsonDerivedType] registrations; attributing
+        // them would emit a second, untagged component alongside the union variant.
+        if (record.BaseTypeName is null)
+        {
+            sb.AppendLine("[RivetType]");
+        }
         var typeParamSuffix = record.TypeParameters is { Count: > 0 }
             ? $"<{string.Join(", ", record.TypeParameters)}>"
             : "";
-        sb.Append($"public sealed record {record.Name}{typeParamSuffix}(");
+        var modifier = record.Polymorphism is not null ? "abstract" : "sealed";
+        var closeSuffix = record.BaseTypeName is null ? ");" : $") : {record.BaseTypeName};";
+        sb.Append($"public {modifier} record {record.Name}{typeParamSuffix}(");
 
         if (record.Properties.Count == 0)
         {
-            sb.AppendLine(");");
+            sb.AppendLine(closeSuffix);
             return sb.ToString();
         }
 
@@ -51,7 +71,7 @@ internal static class CSharpWriter
         for (var i = 0; i < record.Properties.Count; i++)
         {
             var prop = record.Properties[i];
-            var separator = i < record.Properties.Count - 1 ? "," : ");";
+            var separator = i < record.Properties.Count - 1 ? "," : closeSuffix;
             if (!prop.IsRequired)
             {
                 sb.AppendLine("    [property: RivetOptional]");

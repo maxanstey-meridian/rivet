@@ -446,6 +446,78 @@ public sealed class OpenApiRoundTripTests
     }
 
     [Fact]
+    public void Polymorphic_Base_Survives_RoundTrip()
+    {
+        // P2 wave 4: C# → spec → C# must preserve the [JsonPolymorphic]/[JsonDerivedType]
+        // attribute surface, and the re-walked model must reproduce the same TaggedUnion.
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+            [JsonDerivedType(typeof(Circle), "circle")]
+            [JsonDerivedType(typeof(Square), "square")]
+            public abstract record Shape(string Id);
+
+            public sealed record Circle(string Id, double Radius) : Shape(Id);
+            public sealed record Square(string Id, double Side) : Shape(Id);
+
+            [RivetContract]
+            public static class ShapesContract
+            {
+                public static readonly Define GetShape =
+                    Define.Get<Shape>("/api/shapes/{id}");
+            }
+            """;
+
+        // Attribute fidelity on the scaffolded C# (spec → C#)
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var openApiJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var importResult = OpenApiImporter.Import(openApiJson, new ImportOptions("RoundTrip"));
+
+        var baseContent = CompilationHelper.FindFile(importResult, "Shape.cs");
+        Assert.Contains("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"kind\")]", baseContent);
+        Assert.Contains("[JsonDerivedType(typeof(ShapeCircle), \"circle\")]", baseContent);
+        Assert.Contains("[JsonDerivedType(typeof(ShapeSquare), \"square\")]", baseContent);
+        Assert.Contains("public abstract record Shape", baseContent);
+
+        // Re-walked model reproduces the TaggedUnion (C# → spec → C# → walk)
+        var (reEndpoints, rewalker) = RoundTrip(source);
+
+        var shapeDef = rewalker.Definitions["Shape"];
+        var union = Assert.IsType<TsType.TaggedUnion>(shapeDef.Type);
+        Assert.Equal("kind", union.Discriminator);
+        Assert.Equal(["circle", "square"], union.Variants.Select(v => v.Tag));
+
+        var circleVariant = Assert.IsType<TsType.InlineObject>(union.Variants[0].Type);
+        Assert.Equal("kind", circleVariant.Fields[0].Name);
+        var tag = Assert.IsType<TsType.StringUnion>(circleVariant.Fields[0].Type);
+        Assert.Equal(["circle"], tag.Members);
+        Assert.Contains(circleVariant.Fields, f => f.Name == "id");
+        Assert.Contains(circleVariant.Fields, f => f.Name == "radius");
+
+        var getShape = reEndpoints.First(e => e.HttpMethod == "GET");
+        Assert.True(getShape.ReturnType is TsType.TypeRef { Name: "Shape" },
+            $"Expected TypeRef(Shape) but got {getShape.ReturnType}");
+
+        // …and the spec emitted from the re-walked model is identical on the union
+        var reEmitted = OpenApiEmitter.Emit(
+            reEndpoints, rewalker.Definitions, rewalker.Brands, rewalker.Enums, null);
+        var schemas0 = JsonNode.Parse(openApiJson)!["components"]!["schemas"]!;
+        var schemas1 = JsonNode.Parse(reEmitted)!["components"]!["schemas"]!;
+        foreach (var component in new[] { "Shape", "Shape_Circle", "Shape_Square" })
+        {
+            Assert.True(JsonNode.DeepEquals(schemas0[component], schemas1[component]),
+                $"'{component}' drifted across the round-trip.\n--- first ---\n{schemas0[component]}\n--- second ---\n{schemas1[component]}");
+        }
+    }
+
+    [Fact]
     public void Endpoint_Examples_Survive_OpenApi_RoundTrip()
     {
         var source = """

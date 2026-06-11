@@ -22,6 +22,19 @@ internal sealed class SchemaMapper
     private readonly HashSet<string> _unresolvableAliases = new(StringComparer.Ordinal);
     private IDictionary<string, IOpenApiSchema>? _componentSchemas;
 
+    // P2 wave 4: oneOf + discriminator + usable mapping reverses to an abstract
+    // [JsonPolymorphic] base record with [JsonDerivedType] registrations. Bases are
+    // keyed by schema key; each conforming variant key maps back to its base key;
+    // bases whose mapping could NOT be reversed record the reason for the loud
+    // RIV3005 fallback warning.
+    private readonly Dictionary<string, PolymorphicUnion> _polymorphicBases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _polymorphicVariantKeys = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _polymorphicRejections = new(StringComparer.Ordinal);
+
+    private sealed record PolymorphicUnion(
+        string DiscriminatorProperty,
+        IReadOnlyList<(string Tag, string VariantKey)> Variants);
+
     public SchemaMapper(List<string> warnings)
     {
         _ctx = new ResolutionContext(warnings);
@@ -220,6 +233,10 @@ internal sealed class SchemaMapper
             }
         }
 
+        // P2 wave 4: detect reversible polymorphic unions BEFORE mapping so variant
+        // schemas can be generated as derived records regardless of iteration order.
+        DetectPolymorphicUnions(schemas);
+
         foreach (var (key, schema) in schemas)
         {
             // Skip $ref aliases — resolved via the alias-target map (I1); unresolvable
@@ -257,6 +274,37 @@ internal sealed class SchemaMapper
 
             var schemaDescription = string.IsNullOrEmpty(schema.Description) ? null : schema.Description;
 
+            // P2 wave 4: a schema claimed as a polymorphic union variant becomes a
+            // derived record: the discriminator property is STRIPPED (System.Text.Json
+            // re-adds it on the wire — keeping it would double-emit) and the record
+            // inherits from the abstract base.
+            if (_polymorphicVariantKeys.TryGetValue(key, out var polymorphicBaseKey))
+            {
+                if (schema.AdditionalProperties is not null)
+                {
+                    _ctx.Warnings.Add(Diagnostics.Prefix(
+                        Diagnostics.ImportAdditionalPropertiesDropped,
+                        $"additionalProperties dropped on '{name}': schema has both 'properties' and 'additionalProperties' — imported as a record; extra members are not represented."));
+                }
+
+                var derived = _synth.MapRecord(name, schema);
+                var discName = Naming.ToPascalCaseFromSegments(
+                    _polymorphicBases[polymorphicBaseKey].DiscriminatorProperty);
+                if (discName == name)
+                {
+                    discName += "Value";
+                }
+
+                derived = derived with
+                {
+                    Properties = derived.Properties.Where(p => p.Name != discName).ToList(),
+                    BaseTypeName = _ctx.SchemaNameMap[polymorphicBaseKey],
+                    Description = schemaDescription,
+                };
+                records.Add(derived);
+                continue;
+            }
+
             if (schema.AllOf is { Count: > 0 })
             {
                 var record = _synth.ResolveAllOfRecord(name, schema.AllOf, inheritedRequired: schema.Required);
@@ -280,6 +328,30 @@ internal sealed class SchemaMapper
                 if (SchemaClassifier.IsNullableOneOf(schema.OneOf))
                 {
                     continue;
+                }
+
+                // P2 wave 4: oneOf + discriminator + usable mapping reverses to an
+                // abstract [JsonPolymorphic] base record with one [JsonDerivedType]
+                // registration per mapping entry.
+                if (_polymorphicBases.TryGetValue(key, out var poly))
+                {
+                    var variantRefs = poly.Variants
+                        .Select(v => new PolymorphicVariantRef(_ctx.SchemaNameMap[v.VariantKey], v.Tag))
+                        .ToList();
+                    records.Add(new GeneratedRecord(name, [],
+                        Description: schemaDescription,
+                        Polymorphism: new PolymorphismInfo(poly.DiscriminatorProperty, variantRefs)));
+                    continue;
+                }
+
+                // A oneOf carrying a discriminator the importer could NOT reverse —
+                // never silently: the drop names the reason (RIV3005).
+                if (schema.Discriminator?.PropertyName is { } droppedDiscriminator)
+                {
+                    _ctx.Warnings.Add(Diagnostics.Prefix(
+                        Diagnostics.ImportDiscriminatorDropped,
+                        $"Discriminator dropped on '{name}': property '{droppedDiscriminator}' has no usable oneOf mapping " +
+                        $"({_polymorphicRejections.GetValueOrDefault(key, "mapping absent")}) — imported as a union wrapper record."));
                 }
 
                 var unionRecord = _synth.ResolveUnionRecord(name, schema.OneOf);
@@ -448,6 +520,176 @@ internal sealed class SchemaMapper
                 current = targetId;
             }
         }
+    }
+
+    /// <summary>
+    /// P2 wave 4: detects oneOf schemas whose <c>discriminator.propertyName</c> +
+    /// <c>mapping</c> can be reversed into a [JsonPolymorphic] base with
+    /// [JsonDerivedType] registrations. A union qualifies only when every mapped
+    /// variant resolves to a plain object component carrying a conforming tag
+    /// property and the mapping covers the oneOf exactly; anything else records a
+    /// rejection reason and keeps the ResolveUnionRecord fallback — loudly.
+    /// </summary>
+    private void DetectPolymorphicUnions(IDictionary<string, IOpenApiSchema> schemas)
+    {
+        foreach (var (key, schema) in schemas)
+        {
+            if (schema is OpenApiSchemaReference
+                || schema.OneOf is not { Count: > 0 }
+                || schema.Discriminator is not { PropertyName: { } discriminatorProperty } discriminator)
+            {
+                continue;
+            }
+
+            if (discriminator.Mapping is not { Count: > 0 } mapping)
+            {
+                _polymorphicRejections[key] = "mapping absent";
+                continue;
+            }
+
+            var failure = TryResolvePolymorphicVariants(
+                key, discriminatorProperty, schema, mapping, schemas, out var variants);
+            if (failure is not null)
+            {
+                _polymorphicRejections[key] = failure;
+                continue;
+            }
+
+            _polymorphicBases[key] = new PolymorphicUnion(discriminatorProperty, variants);
+            foreach (var (_, variantKey) in variants)
+            {
+                _polymorphicVariantKeys[variantKey] = key;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validates and resolves a discriminator mapping's variants. Returns null on
+    /// success (with <paramref name="variants"/> populated as tag → final schema key),
+    /// or the human-readable rejection reason.
+    /// </summary>
+    private string? TryResolvePolymorphicVariants(
+        string baseKey,
+        string discriminatorProperty,
+        IOpenApiSchema baseSchema,
+        IDictionary<string, OpenApiSchemaReference> mapping,
+        IDictionary<string, IOpenApiSchema> schemas,
+        out List<(string Tag, string VariantKey)> variants)
+    {
+        variants = [];
+
+        if (baseSchema.Properties is { Count: > 0 })
+        {
+            return "the schema declares sibling properties alongside oneOf";
+        }
+
+        var oneOfIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in baseSchema.OneOf!)
+        {
+            if (entry is not OpenApiSchemaReference { Reference.Id: { } entryId })
+            {
+                return "oneOf contains inline (non-$ref) variants";
+            }
+
+            oneOfIds.Add(entryId);
+        }
+
+        var mappedIds = new HashSet<string>(StringComparer.Ordinal);
+        var claimedKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (tag, reference) in mapping)
+        {
+            if (reference.Reference?.Id is not { } refId)
+            {
+                return $"mapping entry '{tag}' is not a local schema reference";
+            }
+
+            mappedIds.Add(refId);
+
+            var finalKey = _aliasTargets.GetValueOrDefault(refId, refId);
+            if (!schemas.TryGetValue(finalKey, out var target) || target is OpenApiSchemaReference)
+            {
+                return $"mapping entry '{tag}' references unresolvable schema '{refId}'";
+            }
+
+            if (finalKey == baseKey)
+            {
+                return $"mapping entry '{tag}' references the union itself";
+            }
+
+            if (!claimedKeys.Add(finalKey))
+            {
+                return $"mapping maps multiple tags to schema '{refId}'";
+            }
+
+            if (_polymorphicVariantKeys.ContainsKey(finalKey) || _polymorphicBases.ContainsKey(finalKey))
+            {
+                return $"schema '{refId}' is already part of another polymorphic union";
+            }
+
+            if (target.AllOf is { Count: > 0 } || target.OneOf is { Count: > 0 } || target.AnyOf is { Count: > 0 })
+            {
+                return $"variant '{refId}' is a composition (allOf/oneOf/anyOf), not a plain object";
+            }
+
+            if (!VariantCarriesTag(target, discriminatorProperty, tag, schemas))
+            {
+                return $"variant '{refId}' has no conforming '{discriminatorProperty}' tag property";
+            }
+
+            variants.Add((tag, finalKey));
+        }
+
+        if (!oneOfIds.SetEquals(mappedIds))
+        {
+            return "mapping does not cover the oneOf variants exactly";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// True when the variant is a plain object whose <paramref name="discriminatorProperty"/>
+    /// is a string-typed property admitting <paramref name="tag"/> (any enum/const
+    /// constraint must contain the tag).
+    /// </summary>
+    private bool VariantCarriesTag(
+        IOpenApiSchema variant,
+        string discriminatorProperty,
+        string tag,
+        IDictionary<string, IOpenApiSchema> schemas)
+    {
+        if (!SchemaClassifier.IsObject(variant)
+            || variant.Properties is not { } properties
+            || !properties.TryGetValue(discriminatorProperty, out var tagSchema))
+        {
+            return false;
+        }
+
+        // The tag property may itself be a $ref (e.g. to a shared enum) — resolve it.
+        if (tagSchema is OpenApiSchemaReference { Reference.Id: { } tagRefId })
+        {
+            var finalKey = _aliasTargets.GetValueOrDefault(tagRefId, tagRefId);
+            if (!schemas.TryGetValue(finalKey, out var resolved) || resolved is OpenApiSchemaReference)
+            {
+                return false;
+            }
+
+            tagSchema = resolved;
+        }
+
+        if (tagSchema.Enum is { Count: > 0 } allowed)
+        {
+            return allowed.Any(v =>
+                v?.GetValueKind() == System.Text.Json.JsonValueKind.String
+                && v.GetValue<string>() == tag);
+        }
+
+        if (tagSchema.Const is { } constValue)
+        {
+            return constValue == tag;
+        }
+
+        return tagSchema.Type is { } type && (type & JsonSchemaType.String) == JsonSchemaType.String;
     }
 
     private bool TryResolveSchemaReference(OpenApiSchemaReference schemaRef, string? context, out string result)
