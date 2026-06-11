@@ -6,8 +6,10 @@ Verified limits of the current tool, so you don't discover them in production.
 
 - Rivet performs **no runtime data validation**: response body shape is not
   checked (extra properties on returned objects reach the wire), constraint
-  attributes (`[Range]`, ...) are spec-only, and `Define.File` endpoints have no
-  runtime enforcement at all. Full statement:
+  attributes (`[Range]`, ...) are not checked by Rivet — enforcement is the host
+  framework's job ([recipes](/guides/runtime-validation#enforcing-constraints-at-runtime);
+  `[RivetConstraints]` is a `ValidationAttribute` and participates) — and
+  `Define.File` endpoints have no runtime enforcement at all. Full statement:
   [Runtime Validation](/guides/runtime-validation).
 - Typed-result validation checks C# type assignability and declared status codes —
   it is not JSON Schema validation.
@@ -39,7 +41,8 @@ Verified limits of the current tool, so you don't discover them in production.
 ## Importer (`--from-openapi`)
 
 A one-shot onboarding scaffold, not a sync tool. Callbacks, webhooks, links,
-response headers, parameter serialization styles, multi-scheme security, and
+response-header schemas beyond `string` (header name/description/`required`
+do import), parameter serialization styles, multi-scheme security, and
 security scheme types are out of scope (discriminator dispatch imports as a
 `[JsonPolymorphic]` hierarchy when the `oneOf` mapping is usable, and falls
 back loudly otherwise) — the full

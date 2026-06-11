@@ -2,12 +2,16 @@
 
 ## Uploads (multipart/form-data)
 
-On controller endpoints, an `IFormFile` (or `List<IFormFile>`) parameter makes the
-operation a `multipart/form-data` request body; the file property is emitted as
-`{ "type": "string", "format": "binary" }` and other parameters are classified
-alongside it (route params stay in the path, scalars join the form body).
+On controller endpoints, an `IFormFile` parameter — or a collection of them
+(`List<IFormFile>`, `IFormFile[]`, `IReadOnlyList<IFormFile>`, ...) — makes the
+operation a `multipart/form-data` request body; a single file property is emitted as
+`{ "type": "string", "format": "binary" }`, a collection as an array of binary parts,
+and other parameters are classified alongside it (route params stay in the path,
+scalars join the form body).
 
-On contracts, mark the definition with `.AcceptsFile()`:
+On contracts, a `TInput` that is `IFormFile` itself, or a record with `IFormFile`
+(or collection-of-`IFormFile`) properties, is detected as multipart automatically.
+`.AcceptsFile()` marks a definition explicitly:
 
 ```csharp
 public static readonly RouteDefinition<UploadRequest, UploadResponse> Upload =

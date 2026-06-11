@@ -1,54 +1,71 @@
 # CLAUDE.md
 
-## Project conventions (beyond global CLAUDE.md)
+## What Rivet is (v2)
 
-### Nuxt / Vue
+A meta-framework over OpenAPI: Roslyn reads compiled C# (contracts, controllers,
+minimal APIs) and emits an OpenAPI 3.1 spec; codegen (TS types, clients, Zod) is
+delegated to the OpenAPI ecosystem. The v1 TypeScript/Zod emitters (`--compile`,
+`--jsonschema`) are gone — OpenAPI is the only public output. The contract JSON
+consumed by `--from` is an internal IR shared with the sibling runtimes
+(rivet-ts, rivet-php), not a public format.
 
-- `<script setup lang="ts">` always.
-- `useState()` with namespace keys for SSR-safe shared state. No Pinia.
-- Components are presentational; side effects live in pages or composables.
-- @nuxt/ui v4 for component library.
+Pipeline (`Rivet.Tool/`):
 
-### .NET / C# (project-specific)
+- `Analysis/` — `TypeWalker` (C# types → `TsType` model), `ContractWalker`
+  (`[RivetContract]` `Define.*` chains), `EndpointWalker` (controllers/minimal
+  APIs), `CoverageChecker` (`--check`).
+- `Emit/` — `EmitPipeline` → `OpenApiEmitter` (spec + `x-rivet-*` extensions);
+  `JsonContractReader` for `--from`; `OpenApiDocumentInfo` for
+  `--title`/`--version`/`--server`.
+- `Import/` — `--from-openapi` one-shot onboarding scaffold: `OpenApiImporter` →
+  `SchemaMapper`/`ContractBuilder` → `CSharpWriter` (generates C# that feeds the
+  forward pipeline).
+- `Diagnostics.cs` — the registry of stable `RIVnnnn` IDs (1xxx extraction,
+  2xxx emission, 3xxx import, 4xxx coverage). Retired IDs are never reused.
 
-- Primary constructor DI for use cases. Signature: `ExecuteAsync(Command, CancellationToken)`.
-- EF Core entities: `sealed class` (not records), `init`/`set`. Fluent config in `*EntityConfiguration.cs`.
-- Module registration via `IServiceCollection` extension methods. No auto-scanning.
-- FluentValidation with `.WithErrorCode()`. Custom `ValidationActionFilter`.
-- Cookie-based auth (HttpOnly `sid`/`rtid`). JWT extracted from cookie.
-- `JsonStringEnumConverter` globally.
-- Colocate `Command` and `Result` records with their use case class.
+`Rivet.Attributes/` is the runtime-facing package: attributes, the
+`Define`/`RouteDefinition` builder, `Invoke` helpers. Runtime enforcement is
+deliberately narrow (status codes + C# payload types on the typed-results path;
+`[RivetConstraints]` is a `ValidationAttribute` enforced by validating hosts) —
+`docs/guides/runtime-validation.md` is the scope statement.
 
-## Rivet architecture
+## Repo layout
 
-### Two pipelines
+`Rivet.Attributes/`, `Rivet.Tool/`, `Rivet.Tests/`, `samples/` (ContractApi is
+the contract + runtime-enforcement exemplar; AnnotationApi, TypeShowcase,
+ImportDemo), `docs/` (VitePress, deployed to GitHub Pages), `openapi/` (import
+corpus fixtures), `php-reflector/` (sibling PHP lowerer), Taskfile.yml.
 
-1. **C# → TS** (forward): Roslyn `[RivetContract]`/`[RivetClient]` → `ContractWalker`/`EndpointWalker` →
-   `TsEndpointDefinition` + `TsTypeDefinition` → emitters (Type, Client, ZodValidator, OpenApi)
-2. **OpenAPI → C#** (import): JSON → `OpenApiImporter` → `SchemaMapper` + `ContractBuilder` → `CSharpWriter` → `.cs`
-   files that feed pipeline 1
+## Build / test
 
-### Contract style
+- `task build` / `task test` / `task samples:build` / `task check` (everything,
+  incl. docs build) — or directly: `dotnet test ./Rivet.Tests/Rivet.Tests.csproj`.
+- Single area: `dotnet test --filter <TestClassName>`.
+- Conformance tests shell out to spectral in `Rivet.Tests/js/` (`npm install
+  --prefix Rivet.Tests/js` once, or `task install`).
+- Before done: full `dotnet test` + sample builds (`task samples:build`).
 
-`[RivetContract] public static class` with `RouteDefinition<T>` fields via `Define.Get/Post/etc.` factory methods. Not
-abstract classes, not ASP.NET-coupled.
+## Test conventions
 
-### Change ripple map
+- Test-first; every behavior change lands with a pinning test.
+- **Conformance gate** (`OpenApiConformanceTests`): every emitted fixture spec
+  must pass spectral lint (zero errors), parse as 3.1, and satisfy importer
+  stability — don't weaken the ruleset to pass.
+- **Ratchets** (`ImportMetricTests`): import warnings must fall into named
+  categories keyed by RIV ID (`CategorizeWarning`); unsupported counts may only
+  go down. New categories are added consciously, never absorbed.
+- **Diagnostics**: every stderr warning carries a stable RIV ID.
+  `DiagnosticsTests` cross-checks `Rivet.Tool/Diagnostics.cs` against
+  `docs/reference/diagnostics.md` in both directions — adding/retiring an ID
+  requires editing that page in the same change.
+- **Round-trips** (`OpenApiRoundTripTests`): emit → import → emit must reach a
+  fixed point; importer changes need fixture round-trip coverage.
+- Real-world import corpus lives under `openapi/`; scaffolded C# must compile
+  (`ImportMetricTests.Scaffolded_CSharp_Compiles`, `RealWorldImportTests`).
 
-| If you change…                                   | Also verify…                                                           |
-|--------------------------------------------------|------------------------------------------------------------------------|
-| `Rivet.Attributes`                               | ContractWalker, EndpointWalker, CSharpWriter, samples build, all tests |
-| Importer (`Rivet.Tool/Import/`)                  | Fixture round-trip tests, samples, drift detection tests               |
-| `ContractWalker`/`EndpointWalker`                | OpenApiEmitterTests, ContractEndpointTests, importer round-trip        |
-| OpenAPI emitter                                  | OpenApiEmitterTests; check type mapping consistency with importer      |
-| Type mappings (SchemaMapper, TypeWalker, TsType) | Both pipeline directions; all emitters share `TsType` methods          |
+## Docs
 
-### Testing
-
-- Always add tests for new functionality.
-- Fixture round-trip tests mandatory for importer changes.
-- Run `dotnet test` (full suite) and `dotnet build samples/ContractApi/ContractApi.csproj` before done.
-
-### Staleness hotspots
-
-`Rivet.slnx` project refs, `samples/ContractApi/` contract style, README feature docs, importer test assertions.
+`docs/` claims are verified-against-code; when behavior changes, update the
+matching reference page (diagnostics.md is test-enforced, the rest is
+discipline). `README.md` feature claims and `docs/misc/limitations.md` go stale
+easily — check them when adding capabilities.

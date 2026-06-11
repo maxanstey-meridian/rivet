@@ -16,6 +16,8 @@ dotnet rivet --project path/to/Api.csproj --output ./generated
 ```
 
 This writes `./generated/openapi.json`. Omit `--output` to preview the spec on stdout.
+Add `--title`, `--version`, and `--server` to set the spec's `info` and `servers`
+metadata — see the [CLI Reference](/reference/cli).
 
 ## Consume the Spec
 

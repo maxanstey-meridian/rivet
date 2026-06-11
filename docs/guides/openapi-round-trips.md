@@ -25,8 +25,8 @@ within the document (`SpecRefResolutionTests`).
   scheme *definition* in a re-emitted spec comes from the `--security` flag, not
   from the original document.
 - **Anything in the importer's out-of-scope list** (callbacks, webhooks, links,
-  response headers, ...) — see the
-  [Import Profile](/reference/import-profile).
+  response-header schemas beyond `string`, parameter serialization styles, ...) —
+  see the [Import Profile](/reference/import-profile).
 
 The importer remains a one-shot onboarding scaffold; round-trip stability is what
 makes the scaffold trustworthy, not an invitation to ping-pong between formats.

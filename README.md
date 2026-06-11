@@ -34,7 +34,8 @@ dotnet rivet --project path/to/Api.csproj --output ./generated
 
 This writes `./generated/openapi.json` — an OpenAPI 3.1 spec derived from your compiled
 C# (Roslyn semantic model, not runtime reflection). Omit `--output` to preview the spec
-on stdout.
+on stdout. `--title`, `--version`, and `--server` set the spec's `info` and `servers`
+metadata ([CLI reference](https://maxanstey-meridian.github.io/rivet/reference/cli)).
 
 ## C# Types → OpenAPI Schemas
 
@@ -69,9 +70,12 @@ public sealed record MemberDto(Guid Id, string Name, Email Email, string Role);
 
 Value-object brands, generics (monomorphised), nullability, validation attributes
 (`[Range]`, `[StringLength]`, `[RegularExpression]`, ...), descriptions, and examples all
-flow into the spec — plus `x-rivet-*` vendor extensions that preserve C#-level fidelity
+flow into the spec. So do `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies
+(`oneOf` + `discriminator`) and dictionary key types (`propertyNames` for enum, branded,
+and primitive keys) — plus `x-rivet-*` vendor extensions that preserve C#-level fidelity
 (brands, generics, contract names) through the spec
-([vendor extensions reference](https://maxanstey-meridian.github.io/rivet/reference/vendor-extensions)).
+([vendor extensions reference](https://maxanstey-meridian.github.io/rivet/reference/vendor-extensions),
+[type mapping](https://maxanstey-meridian.github.io/rivet/reference/type-mapping)).
 
 ## ASP.NET Endpoints → OpenAPI Operations
 
@@ -95,7 +99,8 @@ public sealed class TasksController : ControllerBase
 ```
 
 becomes `GET /api/tasks/{id}` with a typed `200` (TaskDetailDto) and `404` (NotFoundDto)
-response — route constraints normalised, params classified (route/query/body/form/file),
+response — route constraints normalised, params classified
+(route/query/header/body/form/file — `[FromHeader]` maps to `in: header`),
 multipart and form-encoded bodies handled.
 
 ## Consume the Spec (TypeScript)
@@ -134,6 +139,8 @@ Rivet also supports:
 - contract-driven APIs with [`[RivetContract]`](https://maxanstey-meridian.github.io/rivet/guides/contracts) — compiler-enforced single source of truth for routes, inputs, outputs, and error responses, with runtime `Invoke` helpers and [coverage checking](https://maxanstey-meridian.github.io/rivet/guides/contract-coverage)
 - minimal API hosts
 - file endpoints with query-string auth ([file uploads & downloads](https://maxanstey-meridian.github.io/rivet/guides/file-uploads))
+- headers as contract concepts — `[RivetHeader]`/`[FromHeader]` request headers and `.WithResponseHeader(...)` response headers ([attributes](https://maxanstey-meridian.github.io/rivet/reference/attributes), [route definition API](https://maxanstey-meridian.github.io/rivet/reference/endpoint-builder))
+- stable `RIVnnnn` diagnostic IDs on every warning — grep or baseline by ID ([diagnostics reference](https://maxanstey-meridian.github.io/rivet/reference/diagnostics))
 - [OpenAPI import](https://maxanstey-meridian.github.io/rivet/guides/openapi-import) — a one-shot onboarding scaffold for existing APIs: it generates C# contracts once, with loud diagnostics for anything it can't represent ([supported profile](https://maxanstey-meridian.github.io/rivet/reference/import-profile)); the C# then becomes the source of truth
 - [round-trips](https://maxanstey-meridian.github.io/rivet/guides/openapi-round-trips): emit → import → emit produces an equivalent spec (security scheme definitions come from `--security`, not the original spec)
 - the TypeScript-first sibling project [rivet-ts](https://github.com/maxanstey-meridian/rivet-ts) (Hono runtime + the same OpenAPI pipeline via the bundled Rivet binary)
@@ -146,9 +153,14 @@ status codes (and, for ASP.NET typed results, the payload's C# type) match the
 declaration. Rivet does **not** validate request or response data at runtime:
 
 - constraint attributes (`[Range]`, `[StringLength]`, ...) flow into the spec but are
-  not checked by Rivet at runtime
+  not checked by Rivet at runtime — enforcement is the host framework's job, and the
+  docs have the recipes (`[ApiController]` model validation on controller hosts,
+  `Validator.TryValidateObject` on minimal-API hosts; `[RivetConstraints]` is a
+  `ValidationAttribute` and participates in both)
 - response bodies are not shape-checked — extra properties on a returned object
   serialize to the wire
+- declared request/response headers are spec-only — Rivet never binds, sets, or
+  validates them
 - `Define.File` endpoints have no runtime enforcement at all
 
 Full statement: [Runtime Validation](https://maxanstey-meridian.github.io/rivet/guides/runtime-validation).
