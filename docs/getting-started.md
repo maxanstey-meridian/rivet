@@ -46,3 +46,5 @@ Want runtime validation? Generate Zod schemas from the same spec with
 - Follow the [Tutorial](/guides/tutorial)
 - Check the [CLI Reference](/reference/cli)
 - See [OpenAPI Emission](/guides/openapi-emission) for what flows into the spec
+- Read [Runtime Validation](/guides/runtime-validation) for what Rivet does and
+  doesn't enforce at runtime

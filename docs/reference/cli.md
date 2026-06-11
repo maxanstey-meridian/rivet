@@ -29,8 +29,10 @@ Accepted forms: `bearer`, `bearer:jwt`, `cookie:<name>`, `apikey:<in>:<name>`.
 
 ## From Contract JSON
 
-`--from` consumes a Rivet contract JSON document (produced by rivet-ts or rivet-php)
-and emits the same OpenAPI spec:
+`--from` consumes a Rivet contract JSON document (produced by the sibling runtimes,
+rivet-ts and rivet-php) and emits the same OpenAPI spec. The contract JSON is an
+internal intermediate representation, not a public format — OpenAPI is the only
+public output:
 
 ```bash
 dotnet rivet --from contract.json --output ./generated
@@ -42,6 +44,12 @@ dotnet rivet --from contract.json --output ./generated
 dotnet rivet --project path/to/Api.csproj --check
 dotnet rivet --project path/to/Api.csproj --routes
 ```
+
+`--check` verifies contract coverage (missing implementations, route/method
+mismatches — see [Contract Coverage](/guides/contract-coverage)); without
+`--output`, any warning exits with code `1`. `--routes` lists every discovered
+endpoint (method, route, handler) and exits. `-q`/`--quiet` suppresses generation
+output (useful with `--check` in CI).
 
 ## Import (onboarding scaffold)
 

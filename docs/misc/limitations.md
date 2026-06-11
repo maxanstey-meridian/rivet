@@ -1,5 +1,47 @@
 # Limitations
 
-This page is being rewritten.
+Verified limits of the current tool, so you don't discover them in production.
 
-Known limitations will be re-documented once the main getting-started and reference surfaces are stable again.
+## Runtime
+
+- Rivet performs **no runtime data validation**: response body shape is not
+  checked (extra properties on returned objects reach the wire), constraint
+  attributes (`[Range]`, ...) are spec-only, and `Define.File` endpoints have no
+  runtime enforcement at all. Full statement:
+  [Runtime Validation](/guides/runtime-validation).
+- Typed-result validation checks C# type assignability and declared status codes —
+  it is not JSON Schema validation.
+- Framework results without a status code (`ChallengeHttpResult`,
+  `SignOutHttpResult`) cannot be validated; use `.SkipValidation()`.
+
+## Generation
+
+- Input must compile: generation aborts on compilation errors, and on type-name
+  collisions between namespaces (component names are global).
+- Enum values are emitted camelCased — the spec matches a camelCase
+  `JsonStringEnumConverter`; if your API serializes enums differently (e.g. as
+  integers), the spec will not match the wire.
+- Security scheme definitions come from the `--security` flag; `.Secure("name")`
+  with no matching definition emits a default bearer scheme with a warning.
+- The spec reflects *declared* C# types and the default System.Text.Json
+  conventions. Runtime polymorphism (returning derived types), custom serializer
+  settings, and validation living outside attributes (e.g. FluentValidation) are
+  invisible to the spec.
+- `info.title` and `info.version` are currently fixed (`"API"` / `"1.0.0"`); there
+  is no flag to set them, and `servers` is not emitted.
+
+## Importer (`--from-openapi`)
+
+A one-shot onboarding scaffold, not a sync tool. Callbacks, webhooks, links,
+response headers, parameter serialization styles, discriminator dispatch,
+multi-scheme security, and security scheme types are out of scope — the full
+honest list, including every diagnostic marker and warning category, is in the
+[Import Profile](/reference/import-profile).
+
+## Formats
+
+- OpenAPI 3.1 is the only public output. The contract JSON consumed by `--from` is
+  an internal IR shared with the sibling runtimes.
+- The v1 TypeScript/Zod generators (`--compile`, `--jsonschema`) were removed in
+  v2; those flags exit with an error pointing at the OpenAPI ecosystem
+  replacements.
