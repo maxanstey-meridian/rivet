@@ -53,6 +53,10 @@ public sealed class ImportMetricTests
         _ when warning.StartsWith("Enum constraint dropped", StringComparison.Ordinal) => "enum-constraint-dropped",
         // Added with I.A-17: discriminator on a plain object record — dispatch semantics dropped.
         _ when warning.StartsWith("Discriminator dropped", StringComparison.Ordinal) => "discriminator-dropped",
+        // Added with WP-1.2 I1: component $ref aliases that cannot resolve (cycle or
+        // missing target) — consumers fall back to an untyped object, loudly.
+        _ when warning.StartsWith("Alias schema", StringComparison.Ordinal) => "alias-unresolvable",
+        _ when warning.StartsWith("Reference to unresolvable alias schema", StringComparison.Ordinal) => "alias-unresolvable",
         _ => $"UNCATEGORIZED: {warning}",
     };
 

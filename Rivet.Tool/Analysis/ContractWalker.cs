@@ -112,6 +112,9 @@ public static class ContractWalker
             return null;
         }
 
+        // A6: substitute [controller]/[action] tokens before constraint stripping
+        fullRoute = EndpointWalker.SubstituteRouteTokens(fullRoute, method.ContainingType, method);
+
         fullRoute = RouteParser.StripRouteConstraints(fullRoute);
 
         var parameters = EndpointWalker.ExtractParams(wkt, method, typeWalker, fullRoute);
@@ -493,9 +496,9 @@ public static class ContractWalker
                 TsType paramType = new TsType.Primitive("string");
                 if (tInput is not null)
                 {
-                    var matchingProp = tInput.GetMembers().OfType<IPropertySymbol>()
-                        .FirstOrDefault(p => !p.IsImplicitlyDeclared
-                            && string.Equals(p.Name, paramName, StringComparison.OrdinalIgnoreCase));
+                    // A3: match against the flattened property surface (incl. inherited)
+                    var matchingProp = typeWalker.GetEffectiveProperties(tInput)
+                        .FirstOrDefault(p => string.Equals(p.Name, paramName, StringComparison.OrdinalIgnoreCase));
                     if (matchingProp is not null)
                     {
                         paramType = typeWalker.MapType(matchingProp.Type);
@@ -518,16 +521,12 @@ public static class ContractWalker
                     parameters.Add(new TsEndpointParam("file", new TsType.Primitive("File"), ParamSource.File));
                 }
                 // Check if TInput is a record containing IFormFile properties
-                else if (HasFormFileProperty(wkt, tInput))
+                else if (HasFormFileProperty(wkt, typeWalker, tInput))
                 {
                     inputTypeName = tInput.Name;
-                    foreach (var member in tInput.GetMembers())
+                    // A3: walk the flattened property surface (incl. inherited)
+                    foreach (var prop in typeWalker.GetEffectiveProperties(tInput))
                     {
-                        if (member is not IPropertySymbol prop || prop.IsImplicitlyDeclared)
-                        {
-                            continue;
-                        }
-
                         if (typeWalker.IsJsonIgnored(prop))
                         {
                             continue;
@@ -574,19 +573,16 @@ public static class ContractWalker
                 inputTypeName = tInput.Name;
                 var matchedRouteParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                foreach (var member in tInput.GetMembers())
+                // A3: walk the flattened property surface (incl. inherited)
+                foreach (var prop in typeWalker.GetEffectiveProperties(tInput))
                 {
-                    if (member is not IPropertySymbol prop || prop.IsImplicitlyDeclared)
-                    {
-                        continue;
-                    }
-
                     if (typeWalker.IsJsonIgnored(prop))
                     {
                         continue;
                     }
 
-                    var tsName = typeWalker.GetJsonPropertyName(prop) ?? Naming.ToCamelCase(prop.Name);
+                    var jsonName = typeWalker.GetJsonPropertyName(prop);
+                    var tsName = jsonName ?? Naming.ToCamelCase(prop.Name);
 
                     var isFormFile = SymbolEqualityComparer.Default.Equals(prop.Type, wkt.IFormFile);
                     if (isFormFile)
@@ -600,16 +596,31 @@ public static class ContractWalker
 
                     var tsType = typeWalker.MapType(prop.Type);
                     // Route matching uses C# property name (matches template {Id}), not JSON name
-                    var source = routeParamNames.Contains(prop.Name)
-                        ? ParamSource.Route
-                        : ParamSource.Query;
-
-                    if (source == ParamSource.Route)
+                    if (routeParamNames.TryGetValue(prop.Name, out var routeName))
                     {
                         matchedRouteParams.Add(prop.Name);
+
+                        // A14: a route-bound param must keep the ROUTE name — runtime route
+                        // binding uses the C# property name, so a [JsonPropertyName] rename
+                        // would leave the {token} uninterpolated in every client.
+                        if (jsonName is not null && jsonName != routeName)
+                        {
+                            Console.Error.WriteLine(
+                                $"warning: [JsonPropertyName(\"{jsonName}\")] on route-bound property '{prop.Name}' " +
+                                $"is ignored for route interpolation — the contract param keeps the route name '{routeName}'.");
+                        }
+
+                        parameters.Add(new TsEndpointParam(routeName, tsType, ParamSource.Route));
+                        continue;
                     }
 
-                    parameters.Add(new TsEndpointParam(tsName, tsType, source));
+                    // E8: surface property-level optionality ([RivetOptional], nullability)
+                    // on the param so emitters mark non-nullable optionals required: false
+                    parameters.Add(new TsEndpointParam(
+                        tsName,
+                        tsType,
+                        ParamSource.Query,
+                        IsOptional: TypeWalker.IsOptionalProperty(prop)));
                 }
 
                 // Add route params that have no matching TInput property (default to string)
@@ -637,9 +648,10 @@ public static class ContractWalker
     private static bool IsFormFileType(WellKnownTypes wkt, ITypeSymbol type) =>
         SymbolEqualityComparer.Default.Equals(type, wkt.IFormFile);
 
-    private static bool HasFormFileProperty(WellKnownTypes wkt, ITypeSymbol type) =>
-        type.GetMembers().OfType<IPropertySymbol>()
-            .Any(p => !p.IsImplicitlyDeclared && IsFormFileType(wkt, p.Type));
+    private static bool HasFormFileProperty(WellKnownTypes wkt, TypeWalker typeWalker, ITypeSymbol type) =>
+        // A3: consider inherited properties too
+        typeWalker.GetEffectiveProperties(type)
+            .Any(p => IsFormFileType(wkt, p.Type));
 
     /// <summary>
     /// Checks if the return type is a known file/stream type that should be treated

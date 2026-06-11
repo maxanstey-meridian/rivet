@@ -836,9 +836,10 @@ public sealed class TypeEmitterTests
     }
 
     [Fact]
-    public void TypeNameCollision_DifferentNamespaces_SetsHasErrors()
+    public void TypeNameCollision_DifferentNamespaces_DisambiguatesWithLoudDiagnostic()
     {
-        // Two types with the same simple name but different namespaces should flag an error
+        // A5 (WP-1.2 conversion): collisions no longer abort the walk — both types are
+        // emitted under deterministic distinct names with a loud diagnostic.
         var sources = new[]
         {
             """
@@ -860,10 +861,17 @@ public sealed class TypeEmitterTests
         };
 
         var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
-        var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
-        var walker = Rivet.Tool.Analysis.TypeWalker.Create(compilation, discovered.RivetTypes);
+        Rivet.Tool.Analysis.TypeWalker walker = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+        {
+            var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
+            walker = Rivet.Tool.Analysis.TypeWalker.Create(compilation, discovered.RivetTypes);
+        });
 
-        Assert.True(walker.HasErrors, "TypeWalker should report error on name collision from different namespaces");
+        Assert.Contains("collision", stderr);
+        Assert.False(walker.HasErrors);
+        Assert.Single(walker.Definitions["TaskDto"].Properties, p => p.Name == "id");
+        Assert.Single(walker.Definitions["TaskDto2"].Properties, p => p.Name == "name");
     }
 
     [Fact]

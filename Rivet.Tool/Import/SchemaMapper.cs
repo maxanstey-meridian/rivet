@@ -13,6 +13,14 @@ internal sealed class SchemaMapper
     private readonly ResolutionContext _ctx;
     private readonly RecordSynthesizer _synth;
 
+    // I1: component alias resolution ("Alias": {"$ref": "#/components/schemas/Real"}).
+    // Alias keys map to their FINAL (non-reference) target key; cyclic/missing chains are
+    // recorded separately so consumers fall back loudly instead of overflowing the stack
+    // chasing the library's reference proxies.
+    private readonly Dictionary<string, string> _aliasTargets = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _unresolvableAliases = new(StringComparer.Ordinal);
+    private IDictionary<string, IOpenApiSchema>? _componentSchemas;
+
     public SchemaMapper(List<string> warnings)
     {
         _ctx = new ResolutionContext(warnings);
@@ -109,12 +117,24 @@ internal sealed class SchemaMapper
         var brands = new List<GeneratedBrand>();
         var usedNames = new HashSet<string>();
 
+        // I1: resolve alias chains first, using raw reference ids only (never proxied
+        // members — a cyclic alias would overflow the stack inside the library's proxy)
+        _componentSchemas = schemas;
+        ResolveAliasTargets(schemas);
+
         // Pre-scan: collect generic template info from x-rivet-generic extensions
         var genericTemplates = new Dictionary<string, GenericTemplateInfo>();
         var handledByGeneric = new HashSet<string>();
 
         foreach (var (key, schema) in schemas)
         {
+            // I1: alias entries are resolved via _aliasTargets; touching their proxied
+            // members here would recurse on cyclic chains
+            if (schema is OpenApiSchemaReference)
+            {
+                continue;
+            }
+
             if (SchemaClassifier.TryGetGenericExtension(schema, out var info))
             {
                 if (!genericTemplates.ContainsKey(info!.Name))
@@ -142,6 +162,13 @@ internal sealed class SchemaMapper
         // name with a different shape (I3 — two types in one Types/{Name}.cs file).
         foreach (var (key, schema) in schemas)
         {
+            // I1: aliases produce no file of their own and must NOT claim a name — they
+            // map to their target's name in the follow-up loop below
+            if (schema is OpenApiSchemaReference)
+            {
+                continue;
+            }
+
             var name = SanitizeName(key);
 
             // Deduplicate schema names that collide after PascalCase sanitization
@@ -157,23 +184,36 @@ internal sealed class SchemaMapper
 
             // Track mapping from original OpenAPI key to (possibly deduped) C# name
             _ctx.SchemaNameMap[key] = name;
+            _ctx.ReservedTypeNames.Add(name);
+        }
 
-            // $ref aliases produce no file of their own; everything else claims its name
+        // I1: alias keys map to the FINAL target's mapped name so every consumer of the
+        // alias resolves to a type that actually exists. Unresolvable aliases (cycles,
+        // missing targets) get no mapping — their consumers fall back loudly.
+        foreach (var (key, schema) in schemas)
+        {
             if (schema is not OpenApiSchemaReference)
             {
-                _ctx.ReservedTypeNames.Add(name);
+                continue;
+            }
+
+            if (_aliasTargets.TryGetValue(key, out var finalKey)
+                && _ctx.SchemaNameMap.TryGetValue(finalKey, out var targetName))
+            {
+                _ctx.SchemaNameMap[key] = targetName;
             }
         }
 
         foreach (var (key, schema) in schemas)
         {
-            var name = _ctx.SchemaNameMap[key];
-
-            // Skip $ref aliases — these are resolved by the library and handled inline
+            // Skip $ref aliases — resolved via the alias-target map (I1); unresolvable
+            // aliases have no SchemaNameMap entry at all
             if (schema is OpenApiSchemaReference)
             {
                 continue;
             }
+
+            var name = _ctx.SchemaNameMap[key];
 
             // Skip monomorphised schemas handled by generic templates
             if (handledByGeneric.Contains(key))
@@ -335,31 +375,105 @@ internal sealed class SchemaMapper
 
     // --- Resolution dispatch methods (order matters — earlier branches take precedence) ---
 
+    /// <summary>
+    /// I1: walks every component alias entry's $ref chain using raw reference ids
+    /// (never proxied members) and records the final non-reference target, or marks
+    /// the alias unresolvable (cycle / missing target) with a loud warning.
+    /// </summary>
+    private void ResolveAliasTargets(IDictionary<string, IOpenApiSchema> schemas)
+    {
+        foreach (var (key, schema) in schemas)
+        {
+            if (schema is not OpenApiSchemaReference)
+            {
+                continue;
+            }
+
+            var visited = new HashSet<string>(StringComparer.Ordinal) { key };
+            var current = key;
+
+            while (true)
+            {
+                if (schemas[current] is not OpenApiSchemaReference reference)
+                {
+                    _aliasTargets[key] = current;
+                    break;
+                }
+
+                var targetId = reference.Reference.Id;
+                if (targetId is null || !schemas.ContainsKey(targetId))
+                {
+                    _ctx.Warnings.Add(
+                        $"Alias schema '{key}' references missing schema '{targetId ?? "(null)"}' — consumers fall back to JsonElement.");
+                    _unresolvableAliases.Add(key);
+                    break;
+                }
+
+                if (!visited.Add(targetId))
+                {
+                    _ctx.Warnings.Add(
+                        $"Alias schema '{key}' is part of a $ref cycle ({string.Join(" -> ", visited)}) — consumers fall back to JsonElement.");
+                    _unresolvableAliases.Add(key);
+                    break;
+                }
+
+                current = targetId;
+            }
+        }
+    }
+
     private bool TryResolveSchemaReference(OpenApiSchemaReference schemaRef, string? context, out string result)
     {
         result = "";
 
+        var refId = schemaRef.Reference.Id;
+
+        // I1: refs to unresolvable aliases (cycle/missing target) — loud fallback,
+        // and never touch the proxy (a cyclic chain overflows the stack)
+        if (refId is not null && _unresolvableAliases.Contains(refId))
+        {
+            _ctx.Warnings.Add(
+                $"Reference to unresolvable alias schema '{refId}'{(context is null ? "" : $" (in '{context}')")} — using JsonElement.");
+            result = "System.Text.Json.JsonElement";
+            return true;
+        }
+
+        // I1: refs to alias entries resolve against the FINAL target schema and name
+        var effective = (IOpenApiSchema)schemaRef;
+        var effectiveId = refId;
+        if (refId is not null
+            && _aliasTargets.TryGetValue(refId, out var finalKey)
+            && _componentSchemas is not null
+            && _componentSchemas.TryGetValue(finalKey, out var finalSchema))
+        {
+            effective = finalSchema;
+            effectiveId = finalKey;
+        }
+
         // If the target is a property-less object schema, resolve to Dictionary
         // (no record was generated for it in MapSchemas) — unless marked as empty record
-        if (SchemaClassifier.IsObject(schemaRef) && schemaRef.Properties is not { Count: > 0 }
-            && !SchemaClassifier.HasExtension(schemaRef, "x-rivet-empty-record"))
+        if (SchemaClassifier.IsObject(effective) && effective.Properties is not { Count: > 0 }
+            && !SchemaClassifier.HasExtension(effective, "x-rivet-empty-record"))
         {
-            result = ResolveObjectType(schemaRef, context);
+            result = ResolveObjectType(effective, context);
             return true;
         }
 
         // If the target has x-rivet-generic, resolve to generic type string
-        if (SchemaClassifier.TryGetGenericExtension(schemaRef, out var genericInfo))
+        if (SchemaClassifier.TryGetGenericExtension(effective, out var genericInfo))
         {
             result = SchemaClassifier.BuildGenericTypeString(genericInfo!);
             return true;
         }
 
-        // If the target would generate a type (record, enum, brand), use the ref name.
-        // Otherwise it's a primitive alias — fall through to resolve the underlying type.
-        if (SchemaClassifier.WouldGenerateType(schemaRef))
+        // If the target would generate a type (record, enum, brand), use the mapped name
+        // (alias-chased, dedup-aware). Otherwise it's a primitive alias — fall through to
+        // resolve the underlying type.
+        if (SchemaClassifier.WouldGenerateType(effective))
         {
-            result = SanitizeName(schemaRef.Reference.Id!);
+            result = effectiveId is not null && _ctx.SchemaNameMap.TryGetValue(effectiveId, out var mapped)
+                ? mapped
+                : SanitizeName(effectiveId ?? schemaRef.Reference.Id!);
             return true;
         }
 

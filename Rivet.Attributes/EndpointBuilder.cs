@@ -27,6 +27,11 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     private List<RouteErrorResponse>? _errorResponses;
     private bool _skipValidation;
 
+    // R3: contract definitions are stored in shared static readonly fields; once a
+    // definition has been published (first Invoke) any builder mutation would silently
+    // change global state for all requests. Frozen definitions throw instead.
+    private bool _published;
+
     /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
     public string Method { get; }
 
@@ -76,20 +81,40 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         target._skipValidation = _skipValidation;
     }
 
+    /// <summary>
+    /// R3: marks this definition as published. Called by every Invoke overload —
+    /// after this, all builder mutators throw.
+    /// </summary>
+    protected void MarkPublished() => _published = true;
+
+    private void EnsureMutable()
+    {
+        if (_published)
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: contract definitions are immutable once published — " +
+                "builder methods cannot be called after the endpoint has been invoked. " +
+                "Configure the definition fully in its static readonly initializer.");
+        }
+    }
+
     public TSelf Summary(string summary)
     {
+        EnsureMutable();
         _summary = summary;
         return (TSelf)this;
     }
 
     public TSelf Description(string description)
     {
+        EnsureMutable();
         _description = description;
         return (TSelf)this;
     }
 
     public TSelf Status(int statusCode)
     {
+        EnsureMutable();
         if (_statusSet)
         {
             throw new InvalidOperationException($"Status already set to {_successStatus} — cannot set to {statusCode}. Call .Status() only once.");
@@ -102,6 +127,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
 
     public TSelf FormEncoded()
     {
+        EnsureMutable();
         _formEncoded = true;
         return (TSelf)this;
     }
@@ -113,6 +139,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     /// </summary>
     public TSelf SkipValidation()
     {
+        EnsureMutable();
         _skipValidation = true;
         return (TSelf)this;
     }
@@ -131,6 +158,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
 
     private TSelf AddErrorResponse(RouteErrorResponse response)
     {
+        EnsureMutable();
         _errorResponses ??= [];
 
         if (_errorResponses.Any(existing => existing.StatusCode == response.StatusCode))
@@ -170,12 +198,14 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
 
     public TSelf Anonymous()
     {
+        EnsureMutable();
         _anonymous = true;
         return (TSelf)this;
     }
 
     public TSelf Secure(string scheme)
     {
+        EnsureMutable();
         _securityScheme = scheme;
         return (TSelf)this;
     }
@@ -187,6 +217,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     /// </summary>
     public TSelf QueryAuth(string parameterName = "token")
     {
+        EnsureMutable();
         _queryAuthParameterName = parameterName;
         return (TSelf)this;
     }
@@ -197,6 +228,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     /// </summary>
     public TSelf ProducesFile(string contentType = "application/octet-stream")
     {
+        EnsureMutable();
         _fileContentType = contentType;
         return (TSelf)this;
     }
@@ -207,6 +239,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     /// </summary>
     public TSelf AcceptsFile()
     {
+        EnsureMutable();
         _acceptsFile = true;
         return (TSelf)this;
     }
@@ -226,6 +259,7 @@ public sealed class RouteDefinition<TInput, TOutput> : RouteDefinitionBase<Route
     /// </summary>
     public async Task<RivetResult<TOutput>> Invoke(TInput input, Func<TInput, Task<TOutput>> handler)
     {
+        MarkPublished();
         var result = await handler(input);
         return new RivetResult<TOutput>(SuccessStatus, result);
     }
@@ -296,6 +330,7 @@ public sealed class RouteDefinition<TInput, TOutput> : RouteDefinitionBase<Route
         Func<TInput, Task<TResult>> handler)
         where TResult : IResult
     {
+        MarkPublished();
         var result = await handler(input);
         TypedResultValidator.Validate(Route, SuccessStatus, successResponseType, RouteErrorResponses, result, ShouldSkipValidation);
         return result;
@@ -317,6 +352,7 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
     /// </summary>
     public async Task<RivetResult<TOutput>> Invoke(Func<Task<TOutput>> handler)
     {
+        MarkPublished();
         var result = await handler();
         return new RivetResult<TOutput>(SuccessStatus, result);
     }
@@ -371,6 +407,7 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
         Func<Task<TResult>> handler)
         where TResult : IResult
     {
+        MarkPublished();
         var result = await handler();
         TypedResultValidator.Validate(Route, SuccessStatus, successResponseType, RouteErrorResponses, result, ShouldSkipValidation);
         return result;
@@ -393,6 +430,7 @@ public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRout
     /// </summary>
     public async Task<RivetResult> Invoke(TInput input, Func<TInput, Task> handler)
     {
+        MarkPublished();
         await handler(input);
         return new RivetResult(SuccessStatus);
     }
@@ -453,6 +491,7 @@ public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRout
         Func<TInput, Task<TResult>> handler)
         where TResult : IResult
     {
+        MarkPublished();
         var result = await handler(input);
         TypedResultValidator.Validate(Route, SuccessStatus, null, RouteErrorResponses, result, ShouldSkipValidation);
         return result;
@@ -484,6 +523,7 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
     /// </summary>
     public async Task<RivetResult> Invoke(Func<Task> handler)
     {
+        MarkPublished();
         await handler();
         return new RivetResult(SuccessStatus);
     }
@@ -530,6 +570,7 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
     private async Task<TResult> InvokeTypedResult<TResult>(Func<Task<TResult>> handler)
         where TResult : IResult
     {
+        MarkPublished();
         var result = await handler();
         TypedResultValidator.Validate(Route, SuccessStatus, null, RouteErrorResponses, result, ShouldSkipValidation);
         return result;

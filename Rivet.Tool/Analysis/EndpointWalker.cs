@@ -75,6 +75,9 @@ public static class EndpointWalker
             return null;
         }
 
+        // A6: substitute [controller]/[action] tokens before constraint stripping
+        fullRoute = SubstituteRouteTokens(fullRoute, method.ContainingType, method);
+
         // Strip route constraints: {id:guid} → {id}
         fullRoute = RouteParser.StripRouteConstraints(fullRoute);
 
@@ -320,6 +323,30 @@ public static class EndpointWalker
     }
 
     /// <summary>
+    /// A6: substitutes ASP.NET <c>[controller]</c>/<c>[action]</c> route tokens.
+    /// <c>[controller]</c> resolves to the controller class name minus the
+    /// "Controller" suffix; <c>[action]</c> to the action method name.
+    /// Token matching is case-insensitive, matching ASP.NET conventions.
+    /// </summary>
+    internal static string SubstituteRouteTokens(string route, INamedTypeSymbol? containingType, IMethodSymbol method)
+    {
+        if (!route.Contains('['))
+        {
+            return route;
+        }
+
+        var controllerName = containingType?.Name ?? "";
+        if (controllerName.EndsWith("Controller", StringComparison.Ordinal))
+        {
+            controllerName = controllerName[..^"Controller".Length];
+        }
+
+        return route
+            .Replace("[controller]", controllerName, StringComparison.OrdinalIgnoreCase)
+            .Replace("[action]", method.Name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Combines controller route prefix with method route segment.
     /// e.g. "api/case-statuses" + "{id:guid}" → "/api/case-statuses/{id:guid}"
     /// </summary>
@@ -369,6 +396,23 @@ public static class EndpointWalker
 
         foreach (var param in method.Parameters)
         {
+            // A10: [FromServices] params are DI plumbing — excluded from the contract
+            // entirely. [FromHeader] params have no representable ParamSource (the model
+            // supports Route/Body/Query/File/FormField only), so they are excluded with
+            // a loud diagnostic instead of being mis-bucketed into query/form fields.
+            if (HasAttribute(param, wkt.FromServices))
+            {
+                continue;
+            }
+
+            if (HasAttribute(param, wkt.FromHeader))
+            {
+                Console.Error.WriteLine(
+                    $"warning: [FromHeader] parameter '{param.Name}' on '{method.Name}' has no header parameter source " +
+                    "in the contract model — excluded from the generated contract.");
+                continue;
+            }
+
             var source = ClassifyParam(wkt, param, routeParamNames);
             if (source is null)
             {
@@ -381,7 +425,11 @@ public static class EndpointWalker
                 // In mixed upload methods, unclassified params are form fields
                 if (hasFileParam)
                 {
-                    parameters.Add(new TsEndpointParam(param.Name, typeWalker.MapType(param.Type), ParamSource.FormField));
+                    parameters.Add(new TsEndpointParam(
+                        param.Name,
+                        typeWalker.MapType(param.Type),
+                        ParamSource.FormField,
+                        IsOptional: param.HasExplicitDefaultValue));
                 }
 
                 continue;
@@ -391,11 +439,17 @@ public static class EndpointWalker
             var tsType = source == ParamSource.File
                 ? new TsType.Primitive("File")
                 : typeWalker.MapType(param.Type);
-            parameters.Add(new TsEndpointParam(param.Name, tsType, source.Value));
+            // E8: a C# default value makes the param optional on the wire
+            parameters.Add(new TsEndpointParam(param.Name, tsType, source.Value, IsOptional: param.HasExplicitDefaultValue));
         }
 
         return parameters;
     }
+
+    private static bool HasAttribute(IParameterSymbol param, INamedTypeSymbol? attributeType) =>
+        attributeType is not null
+        && param.GetAttributes().Any(a =>
+            SymbolEqualityComparer.Default.Equals(a.AttributeClass, attributeType));
 
     private static bool IsInfrastructureType(WellKnownTypes wkt, ITypeSymbol type)
     {
@@ -506,7 +560,10 @@ public static class EndpointWalker
     /// Collects typed result mappings from a type that is either Results&lt;T1, T2, ...&gt;
     /// or a single typed result (e.g. Ok&lt;T&gt;). Returns an empty list if the type is neither.
     /// </summary>
-    private static List<(int StatusCode, ITypeSymbol? BodyType)> CollectTypedResultMappings(WellKnownTypes wkt, INamedTypeSymbol type)
+    private static List<(int StatusCode, ITypeSymbol? BodyType)> CollectTypedResultMappings(
+        WellKnownTypes wkt,
+        INamedTypeSymbol type,
+        string? warnContext = null)
     {
         var results = new List<(int StatusCode, ITypeSymbol? BodyType)>();
 
@@ -520,6 +577,14 @@ public static class EndpointWalker
                     if (mapped is not null)
                     {
                         results.Add(mapped.Value);
+                    }
+                    else if (warnContext is not null)
+                    {
+                        // A8: an unmapped Results<> branch must never vanish silently —
+                        // the contract would advertise fewer responses than the handler returns
+                        Console.Error.WriteLine(
+                            $"warning: unmapped typed result '{resultArg.Name}' in Results<...> on '{warnContext}' — " +
+                            "this response branch is omitted from the contract. Add a mapping or use a supported typed result.");
                     }
                 }
             }
@@ -597,18 +662,57 @@ public static class EndpointWalker
     {
         foreach (var attr in method.GetAttributes())
         {
-            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.ProducesResponseType))
+            var parsed = ReadProducesResponseType(wkt, attr);
+            if (parsed is { Type: not null, StatusCode: >= 200 and < 300 })
             {
-                continue;
+                return parsed.Value.Type;
             }
+        }
 
-            // ProducesResponseType(typeof(T), statusCode) — two constructor args
+        return null;
+    }
+
+    /// <summary>
+    /// Reads a [ProducesResponseType(typeof(T), code)] / [ProducesResponseType(code)] /
+    /// generic [ProducesResponseType&lt;T&gt;(code)] (A7 — .NET 7+) attribute.
+    /// Returns null when the attribute is neither form.
+    /// </summary>
+    private static (ITypeSymbol? Type, int? StatusCode)? ReadProducesResponseType(WellKnownTypes wkt, AttributeData attr)
+    {
+        var attrClass = attr.AttributeClass;
+        if (attrClass is null)
+        {
+            return null;
+        }
+
+        // A7: generic ProducesResponseTypeAttribute`1 is a distinct symbol — the body
+        // type rides on the attribute class's type argument, the status on ctor arg 0
+        if (wkt.ProducesResponseTypeOfT is not null
+            && SymbolEqualityComparer.Default.Equals(attrClass.OriginalDefinition, wkt.ProducesResponseTypeOfT))
+        {
+            var type = attrClass.TypeArguments.Length == 1 ? attrClass.TypeArguments[0] : null;
+            int? status = attr.ConstructorArguments.Length >= 1
+                && attr.ConstructorArguments[0].Value is int genericCode
+                ? genericCode
+                : null;
+            return (type, status);
+        }
+
+        if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.ProducesResponseType))
+        {
+            // ProducesResponseType(typeof(T), statusCode)
             if (attr.ConstructorArguments.Length >= 2
                 && attr.ConstructorArguments[0].Value is ITypeSymbol typeArg
-                && attr.ConstructorArguments[1].Value is int statusCode
-                && statusCode >= 200 && statusCode < 300)
+                && attr.ConstructorArguments[1].Value is int statusCode)
             {
-                return typeArg;
+                return (typeArg, statusCode);
+            }
+
+            // ProducesResponseType(statusCode) — no body
+            if (attr.ConstructorArguments.Length == 1
+                && attr.ConstructorArguments[0].Value is int codeOnly)
+            {
+                return (null, codeOnly);
             }
         }
 
@@ -628,25 +732,15 @@ public static class EndpointWalker
 
         foreach (var attr in method.GetAttributes())
         {
-            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.ProducesResponseType))
+            // A7: covers the classic and the generic [ProducesResponseType<T>] forms
+            var parsed = ReadProducesResponseType(wkt, attr);
+            if (parsed is not { StatusCode: int statusCode })
             {
                 continue;
             }
 
-            // ProducesResponseType(typeof(T), statusCode)
-            if (attr.ConstructorArguments.Length >= 2
-                && attr.ConstructorArguments[0].Value is ITypeSymbol typeArg
-                && attr.ConstructorArguments[1].Value is int statusCode)
-            {
-                var tsType = typeWalker.MapType(typeArg);
-                responses.Add(new TsResponseType(statusCode, tsType));
-            }
-            // ProducesResponseType(statusCode) — no body
-            else if (attr.ConstructorArguments.Length == 1
-                && attr.ConstructorArguments[0].Value is int codeOnly)
-            {
-                responses.Add(new TsResponseType(codeOnly, null));
-            }
+            var tsType = parsed.Value.Type is not null ? typeWalker.MapType(parsed.Value.Type) : null;
+            responses.Add(new TsResponseType(statusCode, tsType));
         }
 
         // If [ProducesResponseType] attributes exist but none are 2xx, synthesize the
@@ -668,7 +762,9 @@ public static class EndpointWalker
             var unwrapped = UnwrapTask(wkt, method.ReturnType, out _);
             if (unwrapped is INamedTypeSymbol namedType)
             {
-                foreach (var mapping in CollectTypedResultMappings(wkt, namedType))
+                // A8: warn loudly for unmapped Results<> branches (only on this path so
+                // the warning is emitted once per endpoint)
+                foreach (var mapping in CollectTypedResultMappings(wkt, namedType, method.Name))
                 {
                     var tsType = mapping.BodyType is not null
                         ? typeWalker.MapType(mapping.BodyType)

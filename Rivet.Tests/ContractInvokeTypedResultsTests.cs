@@ -202,6 +202,23 @@ public sealed class ContractInvokeTypedResultsTests
         Assert.Equal("Missing item", branch.Value.Message);
     }
 
+    [Fact]
+    public async Task R3_TypedResultsInvoke_FreezesDefinition_MutationThrows()
+    {
+        // R3: the typed-results Invoke path publishes the definition too —
+        // a later builder call on the shared static must throw, not mutate.
+        var route = Define.Get<ItemDto>("/api/items/{id}")
+            .Returns<NotFoundDto>(StatusCodes.Status404NotFound, "Not found");
+
+        await route.Invoke<Ok<ItemDto>, NotFound<NotFoundDto>>(
+            () => Task.FromResult<Results<Ok<ItemDto>, NotFound<NotFoundDto>>>(
+                TypedResults.Ok(new ItemDto("item_1", "Widget"))));
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => route.Returns<ErrorDto>(StatusCodes.Status409Conflict));
+        Assert.Contains("immutable once published", ex.Message);
+    }
+
     public sealed record ItemDto(string Id, string Name);
 
     public sealed record ErrorDto(string Message);

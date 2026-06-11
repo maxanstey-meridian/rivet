@@ -369,7 +369,8 @@ public static class OpenApiEmitter
                 : "application/json";
             operation["requestBody"] = new Dictionary<string, object>
             {
-                ["required"] = true,
+                // E11: a Nullable body type means the request body is optional
+                ["required"] = bodyParam.Type is not TsType.Nullable,
                 ["content"] = WithExamples(
                     new Dictionary<string, object>
                     {
@@ -388,7 +389,8 @@ public static class OpenApiEmitter
                 : "application/json";
             operation["requestBody"] = new Dictionary<string, object>
             {
-                ["required"] = true,
+                // E11: a Nullable body type means the request body is optional
+                ["required"] = ep.RequestType is not TsType.Nullable,
                 ["content"] = WithExamples(
                     new Dictionary<string, object>
                     {
@@ -1014,6 +1016,47 @@ public static class OpenApiEmitter
         var genericInstances = new Dictionary<string, TsType.Generic>();
         CollectGenericInstances(endpoints, definitions, genericInstances);
 
+        // E6: templates are skipped during collection (their unresolved Generic refs are
+        // garbage like PagedResult_T), so nested instantiations only surface when a
+        // template's properties are resolved against concrete type args. Iterate to a
+        // fixpoint so e.g. Wrapper<X> { PagedResult<X> } registers PagedResult_X too.
+        var pending = new Queue<TsType.Generic>(genericInstances.Values);
+        while (pending.Count > 0)
+        {
+            var instance = pending.Dequeue();
+            if (!definitions.TryGetValue(instance.Name, out var template))
+            {
+                continue;
+            }
+
+            var instanceMap = new Dictionary<string, TsType>();
+            for (var i = 0; i < Math.Min(template.TypeParameters.Count, instance.TypeArguments.Count); i++)
+            {
+                instanceMap[template.TypeParameters[i]] = instance.TypeArguments[i];
+            }
+
+            var discovered = new Dictionary<string, TsType.Generic>();
+            if (template.Type is not null)
+            {
+                CollectGenericsFromType(ResolveTypeParams(template.Type, instanceMap), discovered);
+            }
+            else
+            {
+                foreach (var prop in template.Properties)
+                {
+                    CollectGenericsFromType(ResolveTypeParams(prop.Type, instanceMap), discovered);
+                }
+            }
+
+            foreach (var (discoveredName, discoveredInstance) in discovered)
+            {
+                if (genericInstances.TryAdd(discoveredName, discoveredInstance))
+                {
+                    pending.Enqueue(discoveredInstance);
+                }
+            }
+        }
+
         foreach (var (monoName, generic) in genericInstances)
         {
             if (!definitions.TryGetValue(generic.Name, out var genericDef))
@@ -1237,6 +1280,14 @@ public static class OpenApiEmitter
         // Walk all definitions' properties (all schemas are emitted, so all generics must be monomorphised)
         foreach (var (_, def) in definitions)
         {
+            // E6: skip generic TEMPLATE definitions — their Generic refs still contain
+            // unresolved TypeParams and used to register garbage Foo_T instances. Only
+            // concrete instantiations monomorphise (nested ones via the fixpoint pass).
+            if (def.TypeParameters.Count > 0)
+            {
+                continue;
+            }
+
             if (def.Type is not null)
             {
                 CollectGenericsFromType(def.Type, genericInstances);

@@ -22,9 +22,12 @@ public sealed class WellKnownTypes
     public readonly INamedTypeSymbol? FromForm;
     public readonly INamedTypeSymbol? FromQuery;
     public readonly INamedTypeSymbol? FromRoute;
+    public readonly INamedTypeSymbol? FromHeader;
+    public readonly INamedTypeSymbol? FromServices;
 
     // Response metadata
     public readonly INamedTypeSymbol? ProducesResponseType;
+    public readonly INamedTypeSymbol? ProducesResponseTypeOfT;
     public readonly INamedTypeSymbol? RivetRequestExample;
     public readonly INamedTypeSymbol? RivetResponseExample;
 
@@ -63,6 +66,15 @@ public sealed class WellKnownTypes
     public readonly INamedTypeSymbol? Conflict;
     public readonly INamedTypeSymbol? UnprocessableEntity;
 
+    // A8: previously-unmapped typed results — Results<> branches using these were
+    // silently dropped from the contract
+    public readonly INamedTypeSymbol? ProblemHttpResult;
+    public readonly INamedTypeSymbol? ValidationProblem;
+    public readonly INamedTypeSymbol? ForbidHttpResult;
+    public readonly INamedTypeSymbol? InternalServerError;
+    public readonly INamedTypeSymbol? InternalServerErrorOfT;
+    public readonly INamedTypeSymbol? JsonHttpResultOfT;
+
     /// <summary>
     /// Maps HTTP method attribute symbol → verb string ("GET", "POST", etc.).
     /// </summary>
@@ -93,9 +105,13 @@ public sealed class WellKnownTypes
         FromForm = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromFormAttribute");
         FromQuery = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromQueryAttribute");
         FromRoute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromRouteAttribute");
+        FromHeader = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromHeaderAttribute");
+        FromServices = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromServicesAttribute");
 
         // Response metadata
         ProducesResponseType = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute");
+        // A7: the .NET 7+ generic [ProducesResponseType<T>] is a distinct symbol
+        ProducesResponseTypeOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute`1");
         RivetRequestExample = compilation.GetTypeByMetadataName("Rivet.RivetRequestExampleAttribute");
         RivetResponseExample = compilation.GetTypeByMetadataName("Rivet.RivetResponseExampleAttribute");
 
@@ -134,6 +150,14 @@ public sealed class WellKnownTypes
         Conflict = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.Conflict");
         UnprocessableEntity = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.UnprocessableEntity");
 
+        // A8: typed results that were missing from the mapping table
+        ProblemHttpResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult");
+        ValidationProblem = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.ValidationProblem");
+        ForbidHttpResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.ForbidHttpResult");
+        InternalServerError = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.InternalServerError");
+        InternalServerErrorOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.InternalServerError`1");
+        JsonHttpResultOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.JsonHttpResult`1");
+
         // Build convenience dictionaries
         HttpMethodAttributes = BuildHttpMethodAttributes();
         TypedResultStatusCodes = BuildTypedResultStatusCodes();
@@ -170,6 +194,15 @@ public sealed class WellKnownTypes
         TryAdd(builder, Conflict, 409);
         TryAdd(builder, UnprocessableEntityOfT, 422);
         TryAdd(builder, UnprocessableEntity, 422);
+        // A8: ProblemHttpResult defaults to 500, ValidationProblem is a 400
+        // ValidationProblemDetails, ForbidHttpResult is 403, InternalServerError[<T>]
+        // is 500 (.NET 9), JsonHttpResult<T> is a 200 with a JSON body
+        TryAdd(builder, ProblemHttpResult, 500);
+        TryAdd(builder, ValidationProblem, 400);
+        TryAdd(builder, ForbidHttpResult, 403);
+        TryAdd(builder, InternalServerError, 500);
+        TryAdd(builder, InternalServerErrorOfT, 500);
+        TryAdd(builder, JsonHttpResultOfT, 200);
         return builder.ToImmutable();
     }
 

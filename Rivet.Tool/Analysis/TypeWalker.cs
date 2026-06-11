@@ -17,6 +17,12 @@ public sealed class TypeWalker
     private readonly Dictionary<string, string?> _typeNamespaces = new();
     private readonly HashSet<string> _visiting = new();
 
+    // A5: emitted-name registry keyed by fully-qualified name (namespace + arity).
+    // Distinct types whose simple names collide get deterministic numeric suffixes
+    // (discovery order), mirroring the component-name registry in OpenApiEmitter.
+    private readonly Dictionary<string, string> _emittedNames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _claimedNames = new(StringComparer.Ordinal);
+
     // Scalar C# types that map directly to TsType.Primitive (Guid → string/uuid, etc.)
     private readonly ImmutableDictionary<INamedTypeSymbol, TsType.Primitive> _scalarTypes;
 
@@ -145,6 +151,68 @@ public sealed class TypeWalker
     }
 
     /// <summary>
+    /// A3: flattens the property surface of a type across its BaseType chain
+    /// (base-most first; derived declarations win on name collision — overrides and
+    /// shadowing both resolve to the most-derived declaration). Stops at object/ValueType
+    /// and at base types outside the walkable assemblies. Skips static/indexer/implicitly
+    /// declared members and records' synthesized EqualityContract.
+    /// </summary>
+    public IReadOnlyList<IPropertySymbol> GetEffectiveProperties(ITypeSymbol type)
+    {
+        var chain = new List<ITypeSymbol>();
+        var current = type;
+        while (current is not null
+            && current.SpecialType is not SpecialType.System_Object
+            && current.SpecialType is not SpecialType.System_ValueType)
+        {
+            chain.Add(current);
+
+            var baseType = (current as INamedTypeSymbol)?.BaseType;
+            current = baseType is not null
+                && baseType.ContainingAssembly is not null
+                && _walkableAssemblies.Contains(baseType.ContainingAssembly)
+                ? baseType
+                : null;
+        }
+
+        chain.Reverse(); // base-most first, matching rivet-ts's X5 flatten semantics
+
+        var ordered = new List<IPropertySymbol>();
+        var indexByName = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var link in chain)
+        {
+            foreach (var member in link.GetMembers().OfType<IPropertySymbol>())
+            {
+                if (member.IsStatic || member.IsIndexer || member.IsImplicitlyDeclared)
+                {
+                    continue;
+                }
+
+                // Records synthesize EqualityContract; guard by name in case a compiler
+                // version stops marking it implicitly declared.
+                if (member.Name == "EqualityContract")
+                {
+                    continue;
+                }
+
+                if (indexByName.TryGetValue(member.Name, out var existingIndex))
+                {
+                    // Derived override/shadow wins, keeping the base's position
+                    ordered[existingIndex] = member;
+                }
+                else
+                {
+                    indexByName[member.Name] = ordered.Count;
+                    ordered.Add(member);
+                }
+            }
+        }
+
+        return ordered;
+    }
+
+    /// <summary>
     /// Returns the [JsonPropertyName] value if present, null otherwise.
     /// </summary>
     public string? GetJsonPropertyName(IPropertySymbol prop)
@@ -175,24 +243,12 @@ public sealed class TypeWalker
     {
         // For closed generics like PagedResult<MessageDto>, walk the open definition
         var definition = symbol.IsGenericType ? symbol.OriginalDefinition : symbol;
-        var name = definition.Name;
+        // A5: resolve via the full-namespace registry — same FQN reuses its emitted name,
+        // a simple-name collision gets a deterministic disambiguated name + loud diagnostic
+        var name = GetEmittedName(definition);
 
         if (_definitions.ContainsKey(name) || _visiting.Contains(name))
         {
-            // Check for collision: same simple name, different fully-qualified name
-            if (_definitions.ContainsKey(name))
-            {
-                var existingNs = _typeNamespaces.GetValueOrDefault(name);
-                var incomingNs = GetNamespaceGroup(definition);
-                if (existingNs != incomingNs)
-                {
-                    Console.Error.WriteLine(
-                        $"error: type name collision — '{name}' exists in namespace '{existingNs ?? "(global)"}' and '{incomingNs ?? "(global)"}'. " +
-                        "Use distinct type names or namespaces.");
-                    HasErrors = true;
-                }
-            }
-
             return;
         }
 
@@ -214,13 +270,9 @@ public sealed class TypeWalker
 
         var properties = new List<TsPropertyDefinition>();
 
-        foreach (var member in definition.GetMembers().OfType<IPropertySymbol>())
+        // A3: include inherited properties by flattening the BaseType chain
+        foreach (var member in GetEffectiveProperties(definition))
         {
-            if (member.IsStatic || member.IsIndexer || member.IsImplicitlyDeclared)
-            {
-                continue;
-            }
-
             // [JsonIgnore] → skip property
             if (_jsonIgnoreType is not null
                 && member.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIgnoreType)))
@@ -351,14 +403,46 @@ public sealed class TypeWalker
         _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
     }
 
-    private TsType MapTypeCore(ITypeSymbol symbol)
+    /// <summary>
+    /// A5: returns the emitted (schema/TS) name for a type. Keyed internally by
+    /// fully-qualified name so distinct types never silently merge; the emitted name
+    /// stays the short simple name unless it collides, in which case the later type
+    /// gets a deterministic numeric suffix (discovery order) and a loud diagnostic —
+    /// consistent with the OpenApiEmitter component-name registry.
+    /// </summary>
+    private string GetEmittedName(INamedTypeSymbol symbol)
     {
-        // Type parameter (e.g. T in PagedResult<T>) → emit as-is
-        if (symbol is ITypeParameterSymbol typeParam)
+        var definition = symbol.OriginalDefinition;
+        var key = definition.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+        if (_emittedNames.TryGetValue(key, out var existing))
         {
-            return new TsType.TypeParam(typeParam.Name);
+            return existing;
         }
 
+        var name = definition.Name;
+        if (!_claimedNames.Add(name))
+        {
+            var pure = name;
+            var i = 2;
+            do
+            {
+                name = pure + i;
+                i++;
+            }
+            while (!_claimedNames.Add(name));
+
+            Console.Error.WriteLine(
+                $"warning: type name collision — '{pure}' ({key}) collides with a previously walked type of the same name; " +
+                $"emitting it as '{name}'. Use distinct type names to keep schema names stable.");
+        }
+
+        _emittedNames[key] = name;
+        return name;
+    }
+
+    private TsType MapTypeCore(ITypeSymbol symbol)
+    {
         // Nullable value type: int? → Nullable<int>
         if (symbol is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
         {
@@ -366,12 +450,20 @@ public sealed class TypeWalker
             return new TsType.Nullable(inner);
         }
 
-        // Nullable reference type annotation
+        // Nullable reference type annotation.
+        // A12: must run before the type-parameter check so Wrapper<T>(T? Value)
+        // lowers as Nullable(TypeParam), not bare TypeParam.
         if (symbol.NullableAnnotation == NullableAnnotation.Annotated
             && symbol is not INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T })
         {
             var inner = MapTypeCore(symbol.WithNullableAnnotation(NullableAnnotation.NotAnnotated));
             return new TsType.Nullable(inner);
+        }
+
+        // Type parameter (e.g. T in PagedResult<T>) → emit as-is
+        if (symbol is ITypeParameterSymbol typeParam)
+        {
+            return new TsType.TypeParam(typeParam.Name);
         }
 
         // Array T[]
@@ -415,7 +507,10 @@ public sealed class TypeWalker
             // Enum → named string union type
             if (namedType.TypeKind == TypeKind.Enum)
             {
-                if (!_enums.ContainsKey(namedType.Name))
+                // A5: full-namespace keyed naming — colliding enum names disambiguate
+                // loudly instead of first-wins TryAdd
+                var enumName = GetEmittedName(namedType);
+                if (!_enums.ContainsKey(enumName))
                 {
                     var members = namedType.GetMembers()
                         .OfType<IFieldSymbol>()
@@ -434,11 +529,11 @@ public sealed class TypeWalker
                         })
                         .ToList();
 
-                    _enums[namedType.Name] = new TsType.StringUnion(members);
-                    _typeNamespaces.TryAdd(namedType.Name, GetNamespaceGroup(namedType));
+                    _enums[enumName] = new TsType.StringUnion(members);
+                    _typeNamespaces.TryAdd(enumName, GetNamespaceGroup(namedType));
                 }
 
-                return new TsType.TypeRef(namedType.Name);
+                return new TsType.TypeRef(enumName);
             }
 
             // Named record/class from source or project-referenced assembly → walk transitively
@@ -450,22 +545,25 @@ public sealed class TypeWalker
                 var voInner = namedType.IsGenericType ? null : TryGetValueObjectInner(namedType);
                 if (voInner is not null)
                 {
-                    var brand = new TsType.Brand(namedType.Name, MapTypeCore(voInner));
-                    _brands.TryAdd(namedType.Name, brand);
-                    _typeNamespaces.TryAdd(namedType.Name, GetNamespaceGroup(namedType));
+                    // A5: brands used to be keyed by simple name with first-wins TryAdd
+                    var brandName = GetEmittedName(namedType);
+                    var brand = new TsType.Brand(brandName, MapTypeCore(voInner));
+                    _brands.TryAdd(brandName, brand);
+                    _typeNamespaces.TryAdd(brandName, GetNamespaceGroup(namedType));
                     return brand;
                 }
 
                 WalkType(namedType);
+                var emittedName = GetEmittedName(namedType);
 
                 // Closed generic (e.g. PagedResult<MessageDto>) → Generic node
                 if (namedType.IsGenericType && !namedType.IsUnboundGenericType)
                 {
                     var tsArgs = namedType.TypeArguments.Select(MapTypeCore).ToList();
-                    return new TsType.Generic(namedType.Name, tsArgs);
+                    return new TsType.Generic(emittedName, tsArgs);
                 }
 
-                return new TsType.TypeRef(namedType.Name);
+                return new TsType.TypeRef(emittedName);
             }
         }
 
@@ -590,8 +688,21 @@ public sealed class TypeWalker
                     break;
 
                 case "RangeAttribute" when attr.ConstructorArguments.Length >= 2:
-                    var rangeMin = Convert.ToDouble(attr.ConstructorArguments[0].Value);
-                    var rangeMax = Convert.ToDouble(attr.ConstructorArguments[1].Value);
+                    // A9: the (Type, string, string) overload puts an ITypeSymbol in arg 0 —
+                    // the old Convert.ToDouble crashed the tool with InvalidCastException
+                    var args = attr.ConstructorArguments;
+                    var (minArg, maxArg) = args.Length >= 3 && args[0].Value is ITypeSymbol
+                        ? (args[1].Value, args[2].Value)
+                        : (args[0].Value, args[1].Value);
+
+                    if (!TryConvertRangeBound(minArg, out var rangeMin)
+                        || !TryConvertRangeBound(maxArg, out var rangeMax))
+                    {
+                        Console.Error.WriteLine(
+                            $"warning: unparseable [Range] bound ('{minArg}', '{maxArg}') — skipping the range constraint");
+                        break;
+                    }
+
                     // Filter sentinel values emitted by CSharpWriter for single-sided constraints
                     if (rangeMin is not double.MinValue)
                         minimum = rangeMin;
@@ -614,6 +725,29 @@ public sealed class TypeWalker
             Maximum: maximum);
 
         return c.HasAny ? c : null;
+    }
+
+    /// <summary>
+    /// A9: converts a [Range] constructor argument to double. Strings parse with
+    /// InvariantCulture (the old Convert.ToDouble misparsed under comma-decimal locales).
+    /// </summary>
+    private static bool TryConvertRangeBound(object? value, out double result)
+    {
+        switch (value)
+        {
+            case string text:
+                return double.TryParse(
+                    text,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out result);
+            case int or long or short or byte or sbyte or uint or ulong or ushort or float or double or decimal:
+                result = Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+                return true;
+            default:
+                result = 0;
+                return false;
+        }
     }
 
     private static string? ReadDataAnnotationFormat(ImmutableArray<AttributeData> attributes)
