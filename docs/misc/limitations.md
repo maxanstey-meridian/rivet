@@ -21,6 +21,10 @@ Verified limits of the current tool, so you don't discover them in production.
 - Enum values are emitted camelCased — the spec matches a camelCase
   `JsonStringEnumConverter`; if your API serializes enums differently (e.g. as
   integers), the spec will not match the wire.
+- `TimeSpan` and `BigInteger` have no schema mapping — they emit an untyped (empty)
+  schema with a diagnostic (`RIV1009`/`RIV1010`). Escape hatch: expose the value as a
+  `string` property (ISO 8601 for `TimeSpan`, digits for `BigInteger`) or as a number
+  when the range allows.
 - Security scheme definitions come from the `--security` flag; `.Secure("name")`
   with no matching definition emits a default bearer scheme with a warning.
 - The spec reflects *declared* C# types and the default System.Text.Json

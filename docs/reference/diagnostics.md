@@ -44,9 +44,7 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1008` | Warning | A `[Range]` bound could not be parsed — the range constraint is skipped. | Use numeric `[Range]` bounds the walker can evaluate. |
 | `RIV1009` | Warning | `TimeSpan` has no schema mapping — emitted as an untyped (empty) schema. | Expose the value as a supported type (e.g. ISO 8601 `string`, or seconds as a number). |
 | `RIV1010` | Warning | `BigInteger` has no schema mapping — emitted as an untyped (empty) schema. | Expose the value as a supported type (e.g. `string`, or `long` when the range allows). |
-| `RIV1011` | Warning | `char` has no schema mapping — emitted as an untyped (empty) schema. | Use `string` instead of `char`. |
-| `RIV1012` | Warning | `object` has no schema mapping — emitted as an untyped (empty) schema. | Use a concrete type, or `JsonElement` to state "untyped" deliberately. |
-| `RIV1013` | Warning | Dictionary key type has no contract representation (supported: `string`, enums, string-backed brands, string-serializable primitives like `Guid`/`DateTime`/numerics) — keys are emitted as unconstrained strings. | Use a supported key type, or accept the unconstrained string keys. |
+| `RIV1013` | Warning | Dictionary key type has no contract representation (supported: `string`, enums, string-backed brands, string-serializable primitives like `Guid`/`DateTime`/`char`/numerics) — keys are emitted as unconstrained strings. | Use a supported key type, or accept the unconstrained string keys. |
 | `RIV1014` | Warning | `[JsonDerivedType]` registration with a non-string (int or absent) discriminator tag — a string-discriminated `oneOf` cannot represent it; the base type falls back to plain property flattening. | Use string discriminator tags, or accept the flattened base schema. |
 | `RIV1015` | Warning | `[JsonPolymorphic]` base type has no `[JsonDerivedType]` registrations — there is no variant set to emit; the type falls back to plain property flattening. | Register the derived types with `[JsonDerivedType]`, or remove `[JsonPolymorphic]`. |
 | `RIV1016` | Warning | `[JsonPolymorphic]` `UnknownDerivedTypeHandling` has no spec representation — the emitted `oneOf` admits only the registered derived types. | Accept that unknown-type fallback behaviour is invisible to spec consumers. |
@@ -60,6 +58,14 @@ Retired IDs are never reused; they keep a tombstone here instead of a table row.
   parameters used to be excluded from the contract with this warning; they now map to a
   first-class header parameter source (`in: header` in the emitted spec), so the
   diagnostic no longer exists.
+- ~~`RIV1011`~~ (`UnsupportedChar`) — retired in P2 wave 6. `char` used to emit an
+  untyped (empty) schema with this warning; it now maps to a length-1 `string` schema
+  (`minLength`/`maxLength: 1` — the System.Text.Json wire shape) with
+  `x-rivet-csharp-type: char`, so the diagnostic no longer exists.
+- ~~`RIV1012`~~ (`UnsupportedObject`) — retired in P2 wave 6. `object` used to emit an
+  untyped (empty) schema with this warning; the untyped schema *is* the honest spec for
+  "any JSON value", so `object`/`object?` now map to it deliberately and silently, and
+  the diagnostic no longer exists.
 
 ## RIV2xxx — emission
 

@@ -775,14 +775,13 @@ public sealed class TypeWalker
             return new TsType.InlineObject(fields);
         }
 
-        // Diagnosed-unsupported scalars (FABLE_GAPS §7 item 12): TimeSpan, BigInteger,
-        // char and object used to fall through to the empty {} fallback schema with no
-        // diagnostic naming the cause (the emitter's catch-all blamed JsonElement).
-        // Diagnose, don't change the wire: the fallback schema is emitted as before.
-        var unsupportedId = symbol.SpecialType switch
+        // Diagnosed-unsupported scalars (FABLE_GAPS §7 item 12): TimeSpan and BigInteger
+        // fall through to the empty {} fallback schema with a diagnostic naming the
+        // cause — diagnose, don't change the wire. char (length-1 string) and object
+        // (deliberately untyped) graduated to supported mappings in P2 wave 6
+        // (RIV1011/RIV1012 retired).
+        var unsupportedId = symbol switch
         {
-            SpecialType.System_Char => Diagnostics.UnsupportedChar,
-            SpecialType.System_Object => Diagnostics.UnsupportedObject,
             _ when SymbolEqualityComparer.Default.Equals(symbol, _timeSpanType) => Diagnostics.UnsupportedTimeSpan,
             _ when SymbolEqualityComparer.Default.Equals(symbol, _bigIntegerType) => Diagnostics.UnsupportedBigInteger,
             _ => null,
@@ -808,7 +807,7 @@ public sealed class TypeWalker
     /// Supported: string, enums (mapping registers the key enum's schema — the
     /// "vanishing key-enum" fix), string-backed value-object brands, and primitives
     /// System.Text.Json serializes as string dictionary keys (Guid, dates/times, Uri,
-    /// numerics). Numeric keys become string-typed primitives keeping the numeric
+    /// char, numerics). Numeric keys become string-typed primitives keeping the numeric
     /// format, with CSharpType pinning the exact key type for import round-trips.
     /// Anything else sets <paramref name="supported"/> false — the caller diagnoses
     /// (RIV1013) and falls back to unconstrained string keys.
@@ -900,6 +899,16 @@ public sealed class TypeWalker
         var result = symbol.SpecialType switch
         {
             SpecialType.System_String => new TsType.Primitive("string"),
+            // char (P2 wave 6): System.Text.Json writes char as a single-character
+            // JSON string (and char dictionary keys as single-character property
+            // names) — the emitter pins both length bounds to 1; CSharpType recovers
+            // the exact type on import.
+            SpecialType.System_Char => new TsType.Primitive("string", null, "char"),
+            // object (P2 wave 6): "any JSON value" — the untyped (empty) schema is
+            // the honest spec for it, deliberately and silently. CSharpType "object"
+            // tells the emitter the untyped emission is intentional (no RIV2005);
+            // the wire schema stays a bare {} with no sidecar.
+            SpecialType.System_Object => new TsType.Primitive("unknown", null, "object"),
             SpecialType.System_Boolean => new TsType.Primitive("boolean"),
             SpecialType.System_Int32 => new TsType.Primitive("number", "int32"),
             SpecialType.System_UInt32 => new TsType.Primitive("number", "uint32", "uint"),

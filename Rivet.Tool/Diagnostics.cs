@@ -33,8 +33,12 @@ public static class Diagnostics
     public const string UnparseableRangeBound = "RIV1008";
     public const string UnsupportedTimeSpan = "RIV1009";
     public const string UnsupportedBigInteger = "RIV1010";
-    public const string UnsupportedChar = "RIV1011";
-    public const string UnsupportedObject = "RIV1012";
+    // RIV1011 (UnsupportedChar) retired in P2 wave 6: char now maps to a length-1 string
+    // schema (the System.Text.Json wire shape) with x-rivet-csharp-type. The number is
+    // never reused.
+    // RIV1012 (UnsupportedObject) retired in P2 wave 6: object/object? now map to the
+    // untyped (empty) schema deliberately and silently — "any JSON value" is exactly
+    // what the type declares. The number is never reused.
     public const string DictionaryKeyTypeDropped = "RIV1013";
     public const string PolymorphicNonStringTag = "RIV1014";
     public const string PolymorphicNoDerivedTypes = "RIV1015";
@@ -89,8 +93,6 @@ public static class Diagnostics
         [UnparseableRangeBound] = "[Range] bound could not be parsed — the range constraint is skipped.",
         [UnsupportedTimeSpan] = "TimeSpan has no schema mapping — emitted as an untyped (empty) schema.",
         [UnsupportedBigInteger] = "BigInteger has no schema mapping — emitted as an untyped (empty) schema.",
-        [UnsupportedChar] = "char has no schema mapping — emitted as an untyped (empty) schema.",
-        [UnsupportedObject] = "object has no schema mapping — emitted as an untyped (empty) schema.",
         [DictionaryKeyTypeDropped] = "Dictionary key type has no contract representation (supported: string, enums, string-backed brands, string-serializable primitives) — keys are emitted as unconstrained strings.",
         [PolymorphicNonStringTag] = "[JsonDerivedType] registration with a non-string (int or absent) discriminator tag — a string-discriminated oneOf cannot represent it; the base type falls back to plain property flattening.",
         [PolymorphicNoDerivedTypes] = "[JsonPolymorphic] base type has no [JsonDerivedType] registrations — there is no variant set to emit; the type falls back to plain property flattening.",

@@ -147,6 +147,35 @@ public sealed class DictionaryKeyTests
     }
 
     [Fact]
+    public void CharKeyedDictionary_SetsStringTypedKey_WithCSharpType()
+    {
+        // P2 wave 6: System.Text.Json writes char dictionary keys as single-character
+        // property names — char joined the supported key matrix (formerly RIV1013).
+        var source = """
+            using System.Collections.Generic;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TalliesDto(Dictionary<char, int> ByInitial);
+            """;
+
+        Rivet.Tool.Analysis.TypeWalker walker = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+        {
+            (_, walker) = CompilationHelper.WalkContract(source);
+        });
+
+        var byInitial = Assert.Single(walker.Definitions["TalliesDto"].Properties);
+        var dict = Assert.IsType<TsType.Dictionary>(byInitial.Type);
+        var key = Assert.IsType<TsType.Primitive>(dict.Key);
+        Assert.Equal(new TsType.Primitive("string", null, "char"), key);
+
+        Assert.DoesNotContain("RIV1013", stderr);
+    }
+
+    [Fact]
     public void UnsupportedKeyTypes_StillEmitRIV1013_AndFallBackToStringKeys()
     {
         var source = """
@@ -205,6 +234,7 @@ public sealed class DictionaryKeyTests
             Dictionary<Color, int> ByColor,
             Dictionary<Sku, int> BySku,
             Dictionary<int, string> ByYear,
+            Dictionary<char, int> ByInitial,
             Dictionary<string, string> Plain);
 
         [RivetContract]
@@ -242,6 +272,14 @@ public sealed class DictionaryKeyTests
         Assert.Equal("string", byYearKeys.GetProperty("type").GetString());
         Assert.Equal("int32", byYearKeys.GetProperty("format").GetString());
         Assert.Equal("int", byYearKeys.GetProperty("x-rivet-csharp-type").GetString());
+
+        // char key → string-typed with length-1 bounds + x-rivet-csharp-type (P2 wave 6)
+        var byInitialKeys = props.GetProperty("byInitial").GetProperty("propertyNames");
+        Assert.Equal("string", byInitialKeys.GetProperty("type").GetString());
+        Assert.Equal(1, byInitialKeys.GetProperty("minLength").GetInt32());
+        Assert.Equal(1, byInitialKeys.GetProperty("maxLength").GetInt32());
+        Assert.Equal("char", byInitialKeys.GetProperty("x-rivet-csharp-type").GetString());
+        Assert.False(byInitialKeys.TryGetProperty("format", out _));
 
         // String keys stay propertyNames-less (status quo)
         Assert.False(props.GetProperty("plain").TryGetProperty("propertyNames", out _));
@@ -293,9 +331,14 @@ public sealed class DictionaryKeyTests
                         "type": "object",
                         "additionalProperties": { "type": "string" },
                         "propertyNames": { "type": "string", "format": "int32", "x-rivet-csharp-type": "int" }
+                    },
+                    "byInitial": {
+                        "type": "object",
+                        "additionalProperties": { "type": "string" },
+                        "propertyNames": { "type": "string", "minLength": 1, "maxLength": 1, "x-rivet-csharp-type": "char" }
                     }
                 },
-                "required": ["byGuid", "byYear"]
+                "required": ["byGuid", "byYear", "byInitial"]
             }
             """);
 
@@ -304,6 +347,7 @@ public sealed class DictionaryKeyTests
         var lookup = CompilationHelper.FindFile(result, "LookupDto.cs");
         Assert.Contains("Dictionary<Guid, string>", lookup);
         Assert.Contains("Dictionary<int, string>", lookup);
+        Assert.Contains("Dictionary<char, string>", lookup);
         CompilationHelper.CompileImportResult(result);
     }
 

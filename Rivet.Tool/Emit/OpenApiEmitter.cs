@@ -910,6 +910,21 @@ public static class OpenApiEmitter
             return base64Schema;
         }
 
+        // char (P2 wave 6): System.Text.Json serializes char as a single-character
+        // JSON string on the wire, so the schema is a string with both length bounds
+        // pinned to 1. x-rivet-csharp-type carries the exact C# type for lossless
+        // import round-trips (a plain length-1 string stays a C# string).
+        if (p is { Name: "string", CSharpType: "char" })
+        {
+            return new Dictionary<string, object>
+            {
+                ["type"] = "string",
+                ["minLength"] = 1,
+                ["maxLength"] = 1,
+                ["x-rivet-csharp-type"] = "char",
+            };
+        }
+
         // OpenAPI uses "integer" for all integer formats, not "number"
         var type = p.Format is "int32" or "int64" or "int16" or "uint16" or "int8" or "uint8"
             or "uint32" or "uint64"
@@ -1322,8 +1337,10 @@ public static class OpenApiEmitter
             ["items"] = MapTsTypeToJsonSchema(a.Element, context),
         };
 
-        // Propagate CSharpType from inner unknown (JsonArray) to parent schema
-        if (a.Element is TsType.Primitive { Name: "unknown", CSharpType: not null } p)
+        // Propagate CSharpType from inner unknown (JsonArray) to parent schema.
+        // "object" elements are excluded: their untyped emission is deliberate and
+        // carries no sidecar — stamping the parent would re-type the whole array.
+        if (a.Element is TsType.Primitive { Name: "unknown", CSharpType: not (null or "object") } p)
         {
             schema["x-rivet-csharp-type"] = p.CSharpType;
         }
@@ -1348,8 +1365,10 @@ public static class OpenApiEmitter
             schema["propertyNames"] = BuildDictionaryKeySchema(d.Key, context);
         }
 
-        // Propagate CSharpType from inner unknown (JsonObject) to parent schema
-        if (d.Value is TsType.Primitive { Name: "unknown", CSharpType: not null } p)
+        // Propagate CSharpType from inner unknown (JsonObject) to parent schema.
+        // "object" values are excluded: their untyped emission is deliberate and
+        // carries no sidecar — stamping the parent would re-type the whole dictionary.
+        if (d.Value is TsType.Primitive { Name: "unknown", CSharpType: not (null or "object") } p)
         {
             schema["x-rivet-csharp-type"] = p.CSharpType;
         }
@@ -1368,6 +1387,13 @@ public static class OpenApiEmitter
             if (p.Format is not null)
             {
                 schema["format"] = p.Format;
+            }
+            // char keys (P2 wave 6): single-character property names on the wire —
+            // same length-1 shape as the char property schema.
+            if (p.CSharpType is "char")
+            {
+                schema["minLength"] = 1;
+                schema["maxLength"] = 1;
             }
             if (p.CSharpType is not null)
             {

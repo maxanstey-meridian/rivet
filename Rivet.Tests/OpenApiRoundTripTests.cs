@@ -445,6 +445,120 @@ public sealed class OpenApiRoundTripTests
         }, $"Expected Severity-keyed dictionary but got {tallies.Type}");
     }
 
+    /// <summary>
+    /// P2 wave 6: char is a supported primitive — System.Text.Json writes it as a
+    /// single-character JSON string (and char dictionary keys as single-character
+    /// property names). char, char? and Dictionary&lt;char,&gt; must survive the full
+    /// C# → OpenAPI → C# → walk loop.
+    /// </summary>
+    [Fact]
+    public void Char_Survives_RoundTrip()
+    {
+        var source = """
+            using System.Collections.Generic;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record GradeDto(
+                char Letter,
+                char? Modifier,
+                Dictionary<char, int> TalliesByInitial);
+
+            [RivetContract]
+            public static class GradesContract
+            {
+                public static readonly Define Get =
+                    Define.Get<GradeDto>("/api/grades/{id}");
+            }
+            """;
+
+        var (_, walker) = RoundTrip(source);
+        var grade = walker.Definitions["GradeDto"];
+
+        var letter = grade.Properties.First(p => p.Name == "letter");
+        Assert.Equal(new TsType.Primitive("string", null, "char"), letter.Type);
+
+        var modifier = grade.Properties.First(p => p.Name == "modifier");
+        var nullable = Assert.IsType<TsType.Nullable>(modifier.Type);
+        Assert.Equal(new TsType.Primitive("string", null, "char"), nullable.Inner);
+
+        var tallies = grade.Properties.First(p => p.Name == "talliesByInitial");
+        Assert.True(tallies.Type is TsType.Dictionary
+        {
+            Value: TsType.Primitive { Name: "number" },
+            Key: TsType.Primitive { Name: "string", Format: null, CSharpType: "char" },
+        }, $"Expected char-keyed dictionary but got {tallies.Type}");
+    }
+
+    /// <summary>
+    /// P2 wave 6: object is supported as the deliberately untyped "any JSON value" —
+    /// a bare {} schema with no diagnostic, no sidecar, and no [rivet:unsupported]
+    /// marker. The importer's spelling of "any JSON value" is JsonElement, which
+    /// re-emits the same bare {} — the loop is a fixed point.
+    /// </summary>
+    [Fact]
+    public void Object_Survives_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record EnvelopeDto(string Kind, object Payload, object? Extra);
+
+            [RivetContract]
+            public static class EnvelopesContract
+            {
+                public static readonly Define Get =
+                    Define.Get<EnvelopeDto>("/api/envelopes/{id}");
+            }
+            """;
+
+        // Emission is silent: no retired RIV1012, no RIV2005 — the untyped schema
+        // is deliberate.
+        string json0 = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+        {
+            var compilation = CompilationHelper.CreateCompilation(source);
+            var (discovered, walker0) = CompilationHelper.DiscoverAndWalk(compilation);
+            var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker0);
+            json0 = OpenApiEmitter.Emit(
+                endpoints, walker0.Definitions, walker0.Brands, walker0.Enums, null);
+        });
+        Assert.DoesNotContain("RIV1012", stderr);
+        Assert.DoesNotContain("RIV2005", stderr);
+
+        // Wire shape: bare {} for object, no sidecar; object? is identical
+        // (the empty schema already admits null).
+        using var doc = JsonDocument.Parse(json0);
+        var props = doc.RootElement.GetProperty("components").GetProperty("schemas")
+            .GetProperty("EnvelopeDto").GetProperty("properties");
+        Assert.Equal(0, props.GetProperty("payload").EnumerateObject().Count());
+        Assert.Equal(0, props.GetProperty("extra").EnumerateObject().Count());
+
+        // Import: untyped schema → JsonElement, with no fidelity marker and no warning
+        var importResult = OpenApiImporter.Import(json0, new ImportOptions("RoundTrip"));
+        var dtoFile = importResult.Files.First(f => f.Content.Contains("EnvelopeDto"));
+        Assert.Contains("System.Text.Json.JsonElement Payload", dtoFile.Content);
+        Assert.DoesNotContain("[rivet:unsupported", dtoFile.Content);
+        Assert.DoesNotContain(importResult.Warnings, w => w.Contains("payload") || w.Contains("extra"));
+
+        // Loop is a fixed point: the re-walked model emits the same untyped schema
+        var compilation1 = CompilationHelper.CreateCompilationFromMultiple(
+            importResult.Files.Select(f => f.Content).ToArray());
+        var (discovered1, walker1) = CompilationHelper.DiscoverAndWalk(compilation1);
+        var endpoints1 = CompilationHelper.WalkContracts(compilation1, discovered1, walker1);
+        var json1 = OpenApiEmitter.Emit(
+            endpoints1, walker1.Definitions, walker1.Brands, walker1.Enums, null);
+        using var doc1 = JsonDocument.Parse(json1);
+        var props1 = doc1.RootElement.GetProperty("components").GetProperty("schemas")
+            .GetProperty("EnvelopeDto").GetProperty("properties");
+        Assert.Equal(0, props1.GetProperty("payload").EnumerateObject().Count());
+    }
+
     [Fact]
     public void Polymorphic_Base_Survives_RoundTrip()
     {
@@ -2190,6 +2304,8 @@ public sealed class OpenApiRoundTripTests
                 DateTimeOffset DateTimeOffsetVal,
                 DateOnly DateOnlyVal,
                 Guid GuidVal,
+                char CharVal,
+                object ObjectVal,
                 // Nullable primitives
                 string? NullableString,
                 int? NullableInt,
@@ -2197,12 +2313,15 @@ public sealed class OpenApiRoundTripTests
                 Guid? NullableGuid,
                 DateTime? NullableDateTime,
                 DateTimeOffset? NullableDateTimeOffset,
+                char? NullableChar,
+                object? NullableObject,
                 // Collections
                 List<string> Tags,
                 List<int> Scores,
                 Dictionary<string, string> Metadata,
                 Dictionary<string, int> Counts,
                 Dictionary<Priority, int> PriorityTallies,
+                Dictionary<char, int> InitialTallies,
                 List<Guid> IdList,
                 // Brand + enum refs
                 Email AuthorEmail,
@@ -2484,6 +2603,22 @@ public sealed class OpenApiRoundTripTests
             Value: TsType.Primitive { Name: "number" },
             Key: TsType.TypeRef { Name: "Priority" },
         }, $"Expected Priority-keyed dictionary but got {prioTallies.Type}");
+
+        // char (P2 wave 6): single-character string with the exact type pinned
+        AssertPrimitive("charVal", "string", null, "char");
+        AssertNullablePrimitive("nullableChar", "string", null, "char");
+
+        // char-keyed dictionary (P2 wave 6): the key survives via propertyNames
+        var initialTallies = sink.Properties.First(p => p.Name == "initialTallies");
+        Assert.True(initialTallies.Type is TsType.Dictionary
+        {
+            Value: TsType.Primitive { Name: "number" },
+            Key: TsType.Primitive { Name: "string", CSharpType: "char" },
+        }, $"Expected char-keyed dictionary but got {initialTallies.Type}");
+
+        // object (P2 wave 6): deliberately untyped — imports as JsonElement ("any
+        // JSON value"), which re-emits the same bare {} schema
+        AssertPrimitive("objectVal", "unknown", null, null);
 
         // Brand references
         var emailRef = sink.Properties.First(p => p.Name == "authorEmail");

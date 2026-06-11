@@ -18,6 +18,8 @@ How C# types lower into OpenAPI 3.1 schemas. Property names camelCase by default
 | `TimeOnly` | `string`, `format: time` |
 | `Uri` | `string`, `format: uri` |
 | `byte[]` | `string`, `contentEncoding: base64` (the OpenAPI 3.1 idiom — matches the System.Text.Json wire format), plus `x-rivet-csharp-type` |
+| `char` | `string` with `minLength: 1` and `maxLength: 1` (System.Text.Json writes a single-character JSON string), plus `x-rivet-csharp-type` so the import round-trip recovers `char` |
+| `object` | untyped (empty) schema — "any JSON value", emitted deliberately and with no diagnostic. openapi-typescript consumers see `unknown`; cast at the boundary. |
 
 ## Composites
 
@@ -33,8 +35,9 @@ How C# types lower into OpenAPI 3.1 schemas. Property names camelCase by default
   `propertyNames` schema: enum keys `$ref` the enum schema (which is emitted —
   `Dictionary<Color, int>` registers `Color`), string-backed brand keys `$ref` the
   brand schema, and string-serializable primitive keys (`Guid`, `DateTime`/`DateOnly`/
-  `TimeOnly`, `Uri`, numerics) emit `type: string` with the original `format` plus
-  `x-rivet-csharp-type` where the format alone is ambiguous. Unsupported key types
+  `TimeOnly`, `Uri`, `char`, numerics) emit `type: string` with the original `format`
+  (`char` keys carry the length-1 bounds instead) plus `x-rivet-csharp-type` where the
+  format alone is ambiguous. Unsupported key types
   degrade to unconstrained string keys with diagnostic `RIV1013`.
 - **Generics** are monomorphised: `PagedResult<MemberDto>` becomes a
   `PagedResult_MemberDto` component carrying `x-rivet-generic`.

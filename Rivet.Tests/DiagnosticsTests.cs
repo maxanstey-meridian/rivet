@@ -191,24 +191,26 @@ public sealed class DiagnosticsTests
         Assert.Contains("'HolderDto.Value'", stderr);
     }
 
+    // char and object graduated to supported mappings in P2 wave 6 — RIV1011 and
+    // RIV1012 are retired (tombstoned in Diagnostics.cs and diagnostics.md) and the
+    // walk must be silent for both.
+
     [Fact]
-    public void Char_Property_Emits_RIV1011_Naming_Type_And_Property()
+    public void Char_Property_Is_Supported_And_Walks_Silently()
     {
         var stderr = WalkDtoCapturingStdErr("char");
 
-        Assert.Contains("warning RIV1011:", stderr);
-        Assert.Contains("'char'", stderr);
-        Assert.Contains("'HolderDto.Value'", stderr);
+        Assert.DoesNotContain("RIV1011", stderr);
+        Assert.DoesNotContain("has no schema mapping", stderr);
     }
 
     [Fact]
-    public void Object_Property_Emits_RIV1012_Naming_Type_And_Property()
+    public void Object_Property_Is_Supported_And_Walks_Silently()
     {
         var stderr = WalkDtoCapturingStdErr("object");
 
-        Assert.Contains("warning RIV1012:", stderr);
-        Assert.Contains("'object'", stderr);
-        Assert.Contains("'HolderDto.Value'", stderr);
+        Assert.DoesNotContain("RIV1012", stderr);
+        Assert.DoesNotContain("has no schema mapping", stderr);
     }
 
     [Fact]

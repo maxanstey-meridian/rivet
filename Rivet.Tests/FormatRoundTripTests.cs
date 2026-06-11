@@ -324,6 +324,72 @@ public sealed class FormatRoundTripTests
     }
 
     [Fact]
+    public void Char_Property_Emits_Length1_String_Schema()
+    {
+        // P2 wave 6: System.Text.Json serializes char as a single-character JSON
+        // string on the wire. The schema must say type: string with both length
+        // bounds pinned to 1, plus x-rivet-csharp-type — exact shape.
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record GradeDto(char Letter, char? Modifier);
+            """;
+
+        var props = EmitSchemaFor(source, "GradeDto").GetProperty("properties");
+
+        var letter = props.GetProperty("letter");
+        Assert.Equal(4, letter.EnumerateObject().Count());
+        Assert.Equal("string", letter.GetProperty("type").GetString());
+        Assert.Equal(1, letter.GetProperty("minLength").GetInt32());
+        Assert.Equal(1, letter.GetProperty("maxLength").GetInt32());
+        Assert.Equal("char", letter.GetProperty("x-rivet-csharp-type").GetString());
+        Assert.False(letter.TryGetProperty("format", out _));
+
+        // Nullable char — 3.1 type array, length bounds intact
+        var modifier = props.GetProperty("modifier");
+        Assert.Equal(4, modifier.EnumerateObject().Count());
+        var typeArray = modifier.GetProperty("type").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Equal(new[] { "string", "null" }, typeArray);
+        Assert.Equal(1, modifier.GetProperty("minLength").GetInt32());
+        Assert.Equal(1, modifier.GetProperty("maxLength").GetInt32());
+        Assert.Equal("char", modifier.GetProperty("x-rivet-csharp-type").GetString());
+    }
+
+    [Fact]
+    public void Char_Survives_OpenApi_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record GradeDto(char Letter, char? Modifier);
+
+            [RivetContract]
+            public static class GradesContract
+            {
+                public static readonly RouteDefinition<GradeDto> Get =
+                    Define.Get<GradeDto>("/api/grades/{id}");
+            }
+            """;
+
+        var (_, _, openApiJson) = ForwardAndEmit(source);
+        var (_, walker) = ImportAndWalk(openApiJson);
+
+        var def = walker.Definitions.Values.First(d => d.Name == "GradeDto");
+        var letter = def.Properties.First(p => p.Name == "letter");
+        Assert.Equal(new TsType.Primitive("string", null, "char"), letter.Type);
+
+        var modifier = def.Properties.First(p => p.Name == "modifier");
+        var nullable = Assert.IsType<TsType.Nullable>(modifier.Type);
+        Assert.Equal(new TsType.Primitive("string", null, "char"), nullable.Inner);
+    }
+
+    [Fact]
     public void Short_Property_Has_Int16_Range_In_Schema()
     {
         var source = """
