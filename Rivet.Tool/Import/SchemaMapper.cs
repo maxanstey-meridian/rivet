@@ -44,6 +44,33 @@ internal sealed class SchemaMapper
     public bool HasMappedSchema(string name) => _ctx.SchemaNameMap.ContainsValue(name);
 
     /// <summary>
+    /// True when a components/schemas RECORD with this name exists AND its shape
+    /// (property names, C# types, required-ness) matches the candidate properties.
+    /// Name-only matches return false — callers must disambiguate instead of reusing.
+    /// </summary>
+    public bool HasMappedSchemaWithShape(string name, IReadOnlyList<RecordProperty> properties)
+    {
+        if (!_ctx.MappedComponentRecords.TryGetValue(name, out var record)
+            || record.Properties.Count != properties.Count)
+        {
+            return false;
+        }
+
+        var byName = record.Properties.ToDictionary(p => p.Name, StringComparer.Ordinal);
+        foreach (var prop in properties)
+        {
+            if (!byName.TryGetValue(prop.Name, out var existing)
+                || existing.CSharpType != prop.CSharpType
+                || existing.IsRequired != prop.IsRequired)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Walk #/components/schemas and return C# type representations.
     /// </summary>
     public SchemaMapResult MapSchemas(IDictionary<string, IOpenApiSchema> schemas)
@@ -199,11 +226,26 @@ internal sealed class SchemaMapper
                     continue;
                 }
 
+                // Named diagnostic (I.A-17): a discriminator on a plain object schema (no oneOf
+                // union to dispatch over) has no C# contract representation — the record is
+                // generated but the polymorphic dispatch semantics are dropped.
+                if (schema.Discriminator?.PropertyName is { } discriminatorProperty)
+                {
+                    _ctx.Warnings.Add(
+                        $"Discriminator dropped on '{name}': property '{discriminatorProperty}' has no oneOf union — imported as a regular record.");
+                }
+
                 records.Add(_synth.MapRecord(name, schema));
                 continue;
             }
 
             // Primitive aliases (e.g. { "type": "string", "format": "date-time" }) — skip, resolved inline
+        }
+
+        // Register component records for shape-checked reuse (I3 residual)
+        foreach (var record in records)
+        {
+            _ctx.MappedComponentRecords[record.Name] = record;
         }
 
         return new SchemaMapResult(records, enums, brands);
@@ -395,12 +437,14 @@ internal sealed class SchemaMapper
         // allOf inline → synthetic flattened record
         if (schema.AllOf is { Count: > 0 })
         {
-            // Short-circuit: allOf with a single $ref and no sibling properties → just use the named type
+            // Short-circuit: allOf with a single $ref and no sibling properties → resolve the ref
+            // recursively (I2): refs to primitives/enums resolve to the underlying type instead
+            // of a dangling name for a record that was never emitted.
             if (schema.AllOf.Count == 1
-                && schema.AllOf[0] is OpenApiSchemaReference singleRef
+                && schema.AllOf[0] is OpenApiSchemaReference
                 && schema.Properties is not { Count: > 0 })
             {
-                result = SanitizeName(singleRef.Reference.Id!);
+                result = ResolveCSharpType(schema.AllOf[0], context);
                 return true;
             }
 
@@ -447,6 +491,7 @@ internal sealed class SchemaMapper
 
         if (schema.Enum is { Count: > 0 })
         {
+            WarnEnumConstraintDropped(schema, context, "string");
             return "string";
         }
 
@@ -516,7 +561,13 @@ internal sealed class SchemaMapper
                 return SynthesizeInlineEnum(schema, context);
             }
 
-            return SchemaClassifier.ResolveStringType(schema);
+            var stringType = SchemaClassifier.ResolveStringType(schema);
+            if (schema.Enum is { Count: > 0 })
+            {
+                WarnEnumConstraintDropped(schema, context, stringType);
+            }
+
+            return stringType;
         }
 
         if (type.HasFlag(JsonSchemaType.Integer))
@@ -526,7 +577,13 @@ internal sealed class SchemaMapper
                 return SynthesizeInlineIntEnum(schema, context);
             }
 
-            return SchemaClassifier.ResolveIntegerType(schema);
+            var integerType = SchemaClassifier.ResolveIntegerType(schema);
+            if (schema.Enum is { Count: > 0 })
+            {
+                WarnEnumConstraintDropped(schema, context, integerType);
+            }
+
+            return integerType;
         }
 
         if (type.HasFlag(JsonSchemaType.Number))
@@ -566,6 +623,18 @@ internal sealed class SchemaMapper
     {
         _ctx.Warnings.Add($"{reason} — mapped to 'JsonElement'.");
         return "System.Text.Json.JsonElement";
+    }
+
+    /// <summary>
+    /// Named diagnostic (I.A-15): an enum constraint that cannot be represented as a C# enum
+    /// (single value, mixed/float values, out-of-int32-range values) degrades to a primitive.
+    /// Never silent — the values are dropped from the generated contract.
+    /// </summary>
+    private void WarnEnumConstraintDropped(IOpenApiSchema schema, string? context, string degradedTo)
+    {
+        var values = string.Join(", ", schema.Enum!.Select(v => v?.ToJsonString() ?? "null"));
+        var where = context is not null ? $" at '{context}'" : "";
+        _ctx.Warnings.Add($"Enum constraint dropped{where}: values [{values}] degraded to '{degradedTo}'.");
     }
 
     private string ResolveArrayType(IOpenApiSchema schema, string? context)

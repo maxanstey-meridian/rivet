@@ -595,12 +595,19 @@ public sealed class RealWorldImportTests
         var content = payloadFile.Content;
 
         // ItemDetail is a real object → should appear as AsItemDetail
-        Assert.Contains("AsItemDetail", content);
+        Assert.Contains("ItemDetail? AsItemDetail", content);
         // PublicEvent is bare object (no properties) → should NOT appear as "AsPublicEvent"
-        // (it would be unresolvable). Instead it resolves to Dictionary.
+        // (it would be unresolvable). Instead it resolves to Dictionary — positively present.
         Assert.DoesNotContain("PublicEvent", content);
-        // ContentDirectory is an array type → should NOT appear as "AsContentDirectory"
+        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement>? AsDictionary", content);
+        // ContentDirectory is an array type → should NOT appear as "AsContentDirectory";
+        // it resolves through to a list of the synthesized item record — positively present.
         Assert.DoesNotContain("ContentDirectory", content);
+        Assert.Contains("List<Synthetic1>? AsList", content);
+
+        // All three variants survive into the union record — none were dropped
+        var variantCount = content.Split('\n').Count(line => line.Contains("? As"));
+        Assert.Equal(3, variantCount);
 
         CompilationHelper.CompileImportResult(result);
     }
@@ -891,11 +898,25 @@ public sealed class RealWorldImportTests
     }
 
     [Fact]
-    public void NamingEdgeCases_SchemaNameCollision_Handled()
+    public void NamingEdgeCases_SchemaNameCollision_Both_Emitted_With_Distinct_Names()
     {
-        // foo_bar_schema and FooBarSchema both PascalCase to FooBarSchema
-        // Should not crash — either dedup or one wins
+        // foo_bar_schema and FooBarSchema both PascalCase to FooBarSchema.
+        // BOTH schemas must survive with distinct names — "one wins" is silent data loss.
         var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
+
+        var first = CompilationHelper.FindFile(result, "Types/FooBarSchema.cs");
+        var second = CompilationHelper.FindFile(result, "Types/FooBarSchema_2.cs");
+
+        // foo_bar_schema (declared first) claims the base name; the literal FooBarSchema is suffixed
+        Assert.Contains("string Id", first);
+        Assert.Contains("string Name", second);
+        Assert.Contains("record FooBarSchema_2(", second);
+
+        // The consumer referencing both refs resolves to the two distinct types
+        var consumer = CompilationHelper.FindFile(result, "CaseTestResult.cs");
+        Assert.Contains("FooBarSchema? SnakeCase", consumer);
+        Assert.Contains("FooBarSchema_2? PascalCase", consumer);
+
         var errors = GetCompilationErrors(result);
         Assert.True(errors.Count == 0,
             $"Schema collision errors:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");

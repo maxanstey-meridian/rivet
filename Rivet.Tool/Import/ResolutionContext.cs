@@ -96,6 +96,12 @@ internal sealed class ResolutionContext(List<string> warnings)
             && a.Description == b.Description;
     }
     public List<GeneratedEnum> ExtraEnums { get; } = [];
+
+    /// <summary>
+    /// Records generated from #/components/schemas, keyed by final (deduped) C# name.
+    /// Used for shape-checked reuse of synthesized parameter-input records (I3 residual).
+    /// </summary>
+    public Dictionary<string, GeneratedRecord> MappedComponentRecords { get; } = new(StringComparer.Ordinal);
     public List<string> Warnings { get; } = warnings;
     public HashSet<string> Resolving { get; } = [];
     public Dictionary<string, string> SchemaFingerprints { get; } = new();

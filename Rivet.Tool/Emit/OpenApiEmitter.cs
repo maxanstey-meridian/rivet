@@ -197,7 +197,9 @@ public static class OpenApiEmitter
                     {
                         ["name"] = param.Name,
                         ["in"] = "query",
-                        ["required"] = param.Type is not TsType.Nullable,
+                        // N1: honour explicit optionality (e.g. C# default values, rivet-ts
+                        // isOptional) as well as type-level nullability.
+                        ["required"] = param.Type is not TsType.Nullable && !param.IsOptional,
                         ["schema"] = MapTsTypeToJsonSchema(param.Type),
                     };
                     parameters.Add(queryParam);

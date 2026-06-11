@@ -52,7 +52,11 @@ public static class JsonContractReader
             endpoint.InputTypeName,
             endpoint.IsFormEncoded,
             endpoint.RequestType,
-            endpoint.RequestExamples?.Select(ToEndpointExample).ToList());
+            endpoint.RequestExamples?.Select(ToEndpointExample).ToList(),
+            // E5/N3: these were serialized by ContractEmitter but silently dropped on read —
+            // file endpoints and query-auth must survive the JSON contract round-trip.
+            endpoint.IsFileEndpoint,
+            endpoint.QueryAuth is { } qa ? new QueryAuthMetadata(qa.ParameterName) : null);
     }
 
     private static TsResponseType ToResponseType(ContractEmitter.ContractResponseType response)

@@ -70,7 +70,21 @@ internal static class CliParser
                 case "--jsonschema":
                     jsonSchema = true;
                     break;
+                // C3: value-taking flags reached without a following value (the guarded cases
+                // above didn't match) — error loudly instead of treating the flag as a file.
+                case "--project" or "-p" or "--output" or "-o" or "--security"
+                    or "--from-openapi" or "--from" or "--namespace":
+                    Console.Error.WriteLine($"error: flag '{args[i]}' requires a value");
+                    return null;
                 default:
+                    // C7: unknown flags are an error, not a file path — silent acceptance
+                    // turns typos into "no contracts found" mysteries.
+                    if (args[i].StartsWith('-'))
+                    {
+                        Console.Error.WriteLine($"error: unknown flag '{args[i]}'");
+                        return null;
+                    }
+
                     files.Add(args[i]);
                     break;
             }

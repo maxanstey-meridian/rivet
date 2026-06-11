@@ -314,6 +314,10 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Default_Error_Response_Mapped_As_500()
     {
+        // DELIBERATE PROJECTION: OpenAPI's "default" response is a catch-all with no C#
+        // contract equivalent; the importer projects it to 500 (see
+        // ContractBuilder.ResolveErrorResponses/NormalizeStatusCode). A spec declaring both
+        // "default" and "500" keeps the concrete 500 (first-in wins per status).
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         var content = CompilationHelper.FindFile(result, "FormsContract.cs");
 
@@ -395,12 +399,17 @@ public sealed class KitchenSinkImportTests
     }
 
     [Fact]
-    public void Discriminator_Object_Becomes_Regular_Record()
+    public void Discriminator_Object_Becomes_Regular_Record_With_Named_Warning()
     {
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         var content = CompilationHelper.FindFile(result, "DiscriminatedShape.cs");
 
         Assert.Contains("string Kind", content);
+
+        // The discriminator's polymorphic dispatch semantics are dropped — never silently
+        // (I.A-17): the import surfaces a named warning.
+        Assert.Contains(result.Warnings, w =>
+            w.StartsWith("Discriminator dropped on 'DiscriminatedShape'") && w.Contains("'kind'"));
     }
 
     // ========== File upload ==========
@@ -455,6 +464,10 @@ public sealed class KitchenSinkImportTests
         // should NOT generate a record — it resolves to Dictionary inline.
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         Assert.DoesNotContain(result.Files, f => f.FileName.Contains("OpenMapDto"));
+
+        // Consumer-side: refs to the skipped schema resolve to Dictionary, not a dangling name
+        var consumer = CompilationHelper.FindFile(result, "MapRefConsumerDto.cs");
+        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement> OpenMap", consumer);
     }
 
     // ========== Bare object ==========
@@ -465,6 +478,10 @@ public sealed class KitchenSinkImportTests
         // { "type": "object" } with no properties — resolved inline as Dictionary, no record generated
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         Assert.DoesNotContain(result.Files, f => f.FileName.Contains("BareObjectDto"));
+
+        // Consumer-side: refs to the skipped schema resolve to Dictionary, not a dangling name
+        var consumer = CompilationHelper.FindFile(result, "MapRefConsumerDto.cs");
+        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement> BareObj", consumer);
     }
 
     [Fact]
@@ -588,6 +605,10 @@ public sealed class KitchenSinkImportTests
         // { "type": "object", "properties": {} } — no actual properties, no record generated
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         Assert.DoesNotContain(result.Files, f => f.FileName.Contains("EmptyDto"));
+
+        // Consumer-side: refs to the skipped schema resolve to Dictionary, not a dangling name
+        var consumer = CompilationHelper.FindFile(result, "MapRefConsumerDto.cs");
+        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement>? Empty", consumer);
     }
 
     [Fact]

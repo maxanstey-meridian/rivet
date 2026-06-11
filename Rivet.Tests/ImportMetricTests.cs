@@ -48,6 +48,11 @@ public sealed class ImportMetricTests
         _ when warning.StartsWith("Schema could not be resolved", StringComparison.Ordinal) => "unresolved-schema",
         _ when warning.StartsWith("Unsupported JSON Schema type", StringComparison.Ordinal) => "unsupported-schema-type",
         _ when warning.StartsWith("Array schema missing 'items'", StringComparison.Ordinal) => "array-missing-items",
+        // Added with I.A-15: enum constraints that can't become a C# enum (single-value,
+        // mixed/float, out-of-int32-range) degrade to a primitive WITH a named warning.
+        _ when warning.StartsWith("Enum constraint dropped", StringComparison.Ordinal) => "enum-constraint-dropped",
+        // Added with I.A-17: discriminator on a plain object record — dispatch semantics dropped.
+        _ when warning.StartsWith("Discriminator dropped", StringComparison.Ordinal) => "discriminator-dropped",
         _ => $"UNCATEGORIZED: {warning}",
     };
 
@@ -106,7 +111,10 @@ public sealed class ImportMetricTests
         Assert.True(TypedInputCount(r) >= 580, $"Expected ≥580 typed inputs, got {TypedInputCount(r)}");
         Assert.Equal(0, UnsupportedBody(r));
         // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
-        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items");
+        // "enum-constraint-dropped" added deliberately with I.A-15: Stripe's `object:
+        // {"enum": ["account"]}` discriminator constants are single-value enums that degrade
+        // to string — previously silent, now each emits a named warning.
+        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items", "enum-constraint-dropped");
     }
 
     // ========== GitHub — large, well-structured, many tags ==========
@@ -121,7 +129,10 @@ public sealed class ImportMetricTests
         Assert.True(TypedInputCount(r) >= 300, $"Expected ≥300 typed inputs, got {TypedInputCount(r)}");
         Assert.True(UnsupportedBody(r) <= 5, $"Expected ≤5 unsupported bodies, got {UnsupportedBody(r)}");
         // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
-        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items");
+        // "enum-constraint-dropped" added deliberately with I.A-15: GitHub's single-value
+        // permission enums ({"enum": ["read"]} etc.) degrade to string — previously silent,
+        // now each emits a named warning.
+        AssertWarningCategoriesSubsetOf(r, "unresolved-schema", "unsupported-schema-type", "array-missing-items", "enum-constraint-dropped");
     }
 
     // ========== Kubernetes — */* content type, PATCH-heavy ==========

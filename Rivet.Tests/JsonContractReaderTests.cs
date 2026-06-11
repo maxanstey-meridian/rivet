@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -749,5 +750,171 @@ public sealed class JsonContractReaderTests
         Assert.Equal(2, result.Endpoints.Count);
         Assert.Equal(ParamSource.Body, result.Endpoints[0].Params[0].Source);
         Assert.Equal(ParamSource.Query, result.Endpoints[1].Params[0].Source);
+    }
+
+    // ========== E5/N1/N3: reader must not drop queryAuth / isFileEndpoint / isOptional ==========
+    // ContractEmitterTests pins that these SERIALIZE; these tests pin that the reader carries
+    // them back into the model and that they surface in the emitted OpenAPI — the cross-repo
+    // (--from) path must reach the same emitter behavior as the C# walker path.
+
+    [Fact]
+    public void QueryAuth_Survives_Emit_And_Read_RoundTrip_And_Surfaces_In_OpenApi()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "streamVideo",
+            "GET",
+            "/api/media/{id}/stream",
+            [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+            null,
+            "media",
+            [new TsResponseType(200, null)],
+            QueryAuth: new QueryAuthMetadata("token"));
+
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]);
+
+        var result = JsonContractReader.Read(json);
+
+        // The model carries query-auth through the read (N3: previously silently dropped)
+        var roundTripped = Assert.Single(result.Endpoints);
+        Assert.NotNull(roundTripped.QueryAuth);
+        Assert.Equal("token", roundTripped.QueryAuth!.ParameterName);
+
+        // ...and it surfaces in OpenAPI exactly like the C# walker path: a required query
+        // parameter plus the x-rivet-query-auth extension.
+        var openApi = OpenApiEmitter.Emit(
+            [roundTripped],
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            security: null);
+
+        using var doc = JsonDocument.Parse(openApi);
+        var operation = doc.RootElement
+            .GetProperty("paths")
+            .GetProperty("/api/media/{id}/stream")
+            .GetProperty("get");
+
+        var queryAuth = operation.GetProperty("x-rivet-query-auth");
+        Assert.Equal("token", queryAuth.GetProperty("parameterName").GetString());
+
+        var tokenParam = operation.GetProperty("parameters").EnumerateArray()
+            .Single(p => p.GetProperty("name").GetString() == "token");
+        Assert.Equal("query", tokenParam.GetProperty("in").GetString());
+        Assert.True(tokenParam.GetProperty("required").GetBoolean());
+    }
+
+    [Fact]
+    public void IsFileEndpoint_Survives_Emit_And_Read_RoundTrip()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "downloadFile",
+            "GET",
+            "/api/files/{id}",
+            [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
+            null,
+            "files",
+            [new TsResponseType(200, null)],
+            FileContentType: "application/pdf",
+            IsFileEndpoint: true);
+
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]);
+
+        var result = JsonContractReader.Read(json);
+
+        // The model carries the file-endpoint flag through the read (E5: previously dropped)
+        var roundTripped = Assert.Single(result.Endpoints);
+        Assert.True(roundTripped.IsFileEndpoint);
+        Assert.Equal("application/pdf", roundTripped.FileContentType);
+
+        // Re-serializing is lossless — the flag does not decay across contract hops
+        var reEmitted = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [roundTripped]);
+
+        using var doc = JsonDocument.Parse(reEmitted);
+        var ep = doc.RootElement.GetProperty("endpoints")[0];
+        Assert.True(ep.GetProperty("isFileEndpoint").GetBoolean());
+
+        // ...and the OpenAPI output keeps the binary response content type
+        var openApi = OpenApiEmitter.Emit(
+            [roundTripped],
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            security: null);
+
+        using var openApiDoc = JsonDocument.Parse(openApi);
+        var response200 = openApiDoc.RootElement
+            .GetProperty("paths")
+            .GetProperty("/api/files/{id}")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("200");
+        Assert.True(response200.GetProperty("content").TryGetProperty("application/pdf", out _));
+    }
+
+    [Fact]
+    public void Param_IsOptional_Survives_Emit_And_Read_RoundTrip_And_Surfaces_In_OpenApi()
+    {
+        // N1 (reader side): a non-nullable but optional query param — optionality must not
+        // depend on type-level nullability alone.
+        var endpoint = new TsEndpointDefinition(
+            "search",
+            "GET",
+            "/api/items",
+            [
+                new TsEndpointParam("q", new TsType.Primitive("string"), ParamSource.Query),
+                new TsEndpointParam("limit", new TsType.Primitive("number"), ParamSource.Query, IsOptional: true),
+            ],
+            null,
+            "items",
+            [new TsResponseType(200, null)]);
+
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]);
+
+        // The wire key is "isOptional" (the rivet-ts interop contract shape)
+        using (var contractDoc = JsonDocument.Parse(json))
+        {
+            var limitParam = contractDoc.RootElement.GetProperty("endpoints")[0]
+                .GetProperty("params")[1];
+            Assert.True(limitParam.GetProperty("isOptional").GetBoolean());
+        }
+
+        var result = JsonContractReader.Read(json);
+
+        var roundTripped = Assert.Single(result.Endpoints);
+        Assert.False(roundTripped.Params[0].IsOptional);
+        Assert.True(roundTripped.Params[1].IsOptional);
+
+        // OpenAPI: the optional param is NOT required; the required one is
+        var openApi = OpenApiEmitter.Emit(
+            [roundTripped],
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            security: null);
+
+        using var doc = JsonDocument.Parse(openApi);
+        var parameters = doc.RootElement
+            .GetProperty("paths")
+            .GetProperty("/api/items")
+            .GetProperty("get")
+            .GetProperty("parameters");
+
+        var qParam = parameters.EnumerateArray().Single(p => p.GetProperty("name").GetString() == "q");
+        Assert.True(qParam.GetProperty("required").GetBoolean());
+
+        var limitQueryParam = parameters.EnumerateArray().Single(p => p.GetProperty("name").GetString() == "limit");
+        Assert.False(limitQueryParam.GetProperty("required").GetBoolean());
     }
 }

@@ -753,6 +753,7 @@
         "properties": {
           "openMap": { "$ref": "#/components/schemas/OpenMapDto" },
           "bareObj": { "$ref": "#/components/schemas/BareObjectDto" },
+          "empty": { "$ref": "#/components/schemas/EmptyDto" },
           "label": { "type": "string" }
         },
         "required": ["openMap", "bareObj", "label"]

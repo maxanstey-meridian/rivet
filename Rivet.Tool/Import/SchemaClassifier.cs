@@ -123,7 +123,10 @@ internal static class SchemaClassifier
 
         if (schema.AllOf is { Count: > 0 })
         {
-            return true;
+            // Must agree with MapSchemas (I2): an allOf whose merged record would have zero
+            // properties is SKIPPED there, so refs to it must not resolve to the (never
+            // emitted) record name. Mirrors ResolveAllOfRecord + MergeWithSiblingProperties.
+            return AllOfYieldsProperties(schema);
         }
 
         if (schema.OneOf is { Count: > 0 } && !IsNullableOneOf(schema.OneOf))
@@ -147,6 +150,49 @@ internal static class SchemaClassifier
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Static mirror of RecordSynthesizer.ResolveAllOfRecord + MergeWithSiblingProperties:
+    /// would this allOf schema's merged record contain at least one property?
+    /// Sibling properties count at the top level; allOf elements contribute their own
+    /// properties, or (for elements that themselves compose allOf) their allOf elements'.
+    /// </summary>
+    private static bool AllOfYieldsProperties(IOpenApiSchema schema, int depth = 0)
+    {
+        if (depth > 25)
+        {
+            return true; // pathological nesting — assume a record is generated
+        }
+
+        if (schema.Properties is { Count: > 0 })
+        {
+            return true;
+        }
+
+        if (schema.AllOf is not { Count: > 0 })
+        {
+            return false;
+        }
+
+        return schema.AllOf.Any(element => AllOfElementContributes(element, depth));
+    }
+
+    private static bool AllOfElementContributes(IOpenApiSchema element, int depth)
+    {
+        if (depth > 25)
+        {
+            return true; // pathological nesting — assume a record is generated
+        }
+
+        // ResolveAllOfRecord recurses into a REF element's allOf when present (ignoring its
+        // sibling properties — I4); all other elements contribute their own properties only.
+        if (element is OpenApiSchemaReference && element.AllOf is { Count: > 0 })
+        {
+            return element.AllOf.Any(nested => AllOfElementContributes(nested, depth + 1));
+        }
+
+        return element.Properties is { Count: > 0 };
     }
 
     internal static bool HasResolvableProperties(IOpenApiSchema schema)

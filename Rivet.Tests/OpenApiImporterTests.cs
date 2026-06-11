@@ -1767,14 +1767,19 @@ public sealed class OpenApiImporterTests
         // Unresolvable ref → no input type, just bare RouteDefinition
         Assert.DoesNotContain("InputRouteDefinition", content);
         Assert.Contains("public static readonly RouteDefinition Create", content);
+
+        // ...but NEVER silently (I11 class): the dropped body leaves a named marker
+        Assert.Contains("// [rivet:unsupported body $ref=DoesNotExist reason=unresolved-ref]", content);
     }
 
     // ========== Empty allOf record skipping ==========
 
     [Fact]
-    public void AllOf_With_Primitive_Ref_Skips_Empty_Record()
+    public void AllOf_With_Primitive_Ref_Skips_Empty_Record_And_Consumers_Resolve_Through()
     {
-        // allOf referencing a primitive-like schema (no properties) should not emit an empty record
+        // allOf referencing a primitive-like schema (no properties) should not emit an empty
+        // record — and consumers of the skipped schema must resolve to the underlying primitive
+        // instead of a dangling type name (I2: CS0246 in generated code).
         var spec = CompilationHelper.BuildSpec(schemas: """
             "StringAlias": {
                 "type": "string"
@@ -1783,6 +1788,13 @@ public sealed class OpenApiImporterTests
                 "allOf": [
                     { "$ref": "#/components/schemas/StringAlias" }
                 ]
+            },
+            "Holder": {
+                "type": "object",
+                "properties": {
+                    "thing": { "$ref": "#/components/schemas/Wrapper" }
+                },
+                "required": ["thing"]
             }
             """, title: "API");
 
@@ -1790,6 +1802,53 @@ public sealed class OpenApiImporterTests
 
         // Wrapper should not be emitted as an empty record
         Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("Wrapper.cs"));
+
+        // The consumer resolves through to the underlying primitive...
+        var holderContent = CompilationHelper.FindFile(result, "Holder.cs");
+        Assert.Contains("string Thing", holderContent);
+        Assert.DoesNotContain("Wrapper", holderContent);
+
+        // ...and the generated source compiles (no dangling Wrapper reference)
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void AllOf_With_Enum_Ref_Resolves_To_Enum_Type()
+    {
+        // The OpenAPI 3.0 allOf-wrapped-enum idiom emitted by NSwag/openapi-generator:
+        // "status": { "allOf": [ { "$ref": "#/components/schemas/SomeEnum" } ] }.
+        // The wrapper record is skipped; consumers must resolve to the enum type (I2).
+        var spec = CompilationHelper.BuildSpec(schemas: """
+            "SomeEnum": {
+                "type": "string",
+                "enum": ["active", "paused", "canceled"]
+            },
+            "NullableStatus": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/SomeEnum" }
+                ]
+            },
+            "Holder": {
+                "type": "object",
+                "properties": {
+                    "status": { "$ref": "#/components/schemas/NullableStatus" }
+                },
+                "required": ["status"]
+            }
+            """, title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // The enum itself is emitted; the empty allOf wrapper is not
+        Assert.Contains(result.Files, f => f.FileName.EndsWith("SomeEnum.cs"));
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("NullableStatus.cs"));
+
+        // The consumer resolves through the wrapper to the enum type and compiles
+        var holderContent = CompilationHelper.FindFile(result, "Holder.cs");
+        Assert.Contains("SomeEnum Status", holderContent);
+        Assert.DoesNotContain("NullableStatus", holderContent);
+
+        CompilationHelper.CompileImportResult(result);
     }
 
     [Fact]
@@ -2091,6 +2150,97 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains(".Returns<ServerErrorDto>(500, \"Server error\")",
             CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs"));
+    }
+
+    [Fact]
+    public void Wildcard_2XX_Status_Code_Maps_To_200_Typed_Output()
+    {
+        // I9: an operation whose ONLY success response is the "2XX" range must not import as
+        // a void endpoint — the range maps to the success status 200 with its typed output.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "TaskDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/tasks": {
+                    "get": {
+                        "operationId": "tasks_list",
+                        "tags": ["Tasks"],
+                        "responses": {
+                            "2XX": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """, title: "API");
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
+
+        Assert.Contains("RouteDefinition<TaskDto>", content);
+        Assert.DoesNotContain("[rivet:unsupported", content);
+    }
+
+    [Fact]
+    public void Concrete_2xx_Status_Wins_Over_2XX_Wildcard()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "TaskDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                },
+                "GenericDto": {
+                    "type": "object",
+                    "properties": { "data": { "type": "string" } },
+                    "required": ["data"]
+                }
+                """,
+            paths: """
+                "/api/tasks": {
+                    "post": {
+                        "operationId": "tasks_create",
+                        "tags": ["Tasks"],
+                        "responses": {
+                            "2XX": {
+                                "description": "Some success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/GenericDto" }
+                                    }
+                                }
+                            },
+                            "201": {
+                                "description": "Created",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """, title: "API");
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
+
+        // The concrete 201 wins; the range wildcard never overrides a declared status.
+        // (201 is the POST method default, so no explicit .Status() call is emitted —
+        // a wildcard win would surface as .Status(200).)
+        Assert.Contains("RouteDefinition<TaskDto>", content);
+        Assert.DoesNotContain(".Status(200)", content);
+        Assert.DoesNotContain("GenericDto", content);
     }
 
     [Fact]
@@ -2723,10 +2873,72 @@ public sealed class OpenApiImporterTests
         Assert.Contains("string SessionId", inputContent);
     }
 
-    // ========== HasMappedSchema dedup guard ==========
+    // ========== HasMappedSchemaWithShape dedup guard (I3 residual) ==========
 
     [Fact]
-    public void Param_Input_Record_Reuses_Existing_Schema_When_Name_Matches()
+    public void Param_Input_Record_Reuses_Existing_Schema_When_Name_And_Shape_Match()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ListItemsInput": {
+                    "type": "object",
+                    "properties": {
+                        "page": { "type": "integer" }
+                    },
+                    "required": ["page"]
+                },
+                "ItemDto": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" }
+                    },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "ListItems",
+                        "parameters": [
+                            {
+                                "name": "page",
+                                "in": "query",
+                                "required": true,
+                                "schema": { "type": "integer" }
+                            }
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "array",
+                                            "items": { "$ref": "#/components/schemas/ItemDto" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // Identical shape (page: long, required) — the component schema is reused, no duplicate
+        var inputFiles = result.Files.Where(f => f.FileName.Contains("ListItemsInput")).ToList();
+        var inputFile = Assert.Single(inputFiles);
+        Assert.Equal("Types/ListItemsInput.cs", inputFile.FileName);
+        Assert.Contains("long Page", inputFile.Content);
+
+        Assert.Contains("ListItemsInput", CompilationHelper.FindFile(result, "DefaultContract.cs"));
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void Param_Input_Record_Disambiguates_When_Existing_Schema_Shape_Differs()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -2778,14 +2990,112 @@ public sealed class OpenApiImporterTests
 
         var result = CompilationHelper.Import(spec);
 
-        // Should use the existing schema, not generate a duplicate
-        var inputFiles = result.Files.Where(f => f.FileName.Contains("ListItemsInput")).ToList();
-        Assert.Single(inputFiles);
+        // The component ListItemsInput {page, limit} does NOT match the synthesized input
+        // {page} — name-only reuse would hand the endpoint a type demanding a Limit the
+        // operation never declared (I3 residual). Both types are emitted, distinctly named.
+        var componentContent = CompilationHelper.FindFile(result, "Types/ListItemsInput.cs");
+        Assert.Contains("long Page", componentContent);
+        Assert.Contains("long Limit", componentContent);
 
-        // The existing schema has both page and limit; should compile
-        var content = inputFiles[0].Content;
-        Assert.Contains("long Page", content);
-        Assert.Contains("long Limit", content);
+        var synthesizedContent = CompilationHelper.FindFile(result, "Types/ListItemsInput2.cs");
+        Assert.Contains("long Page", synthesizedContent);
+        Assert.DoesNotContain("Limit", synthesizedContent);
+
+        // The endpoint references the disambiguated synthesized input, not the component
+        var contractContent = CompilationHelper.FindFile(result, "DefaultContract.cs");
+        Assert.Contains("ListItemsInput2", contractContent);
+
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void Two_Tags_Synthesizing_Same_Input_Name_With_Different_Shapes_Get_Distinct_Types()
+    {
+        // I3 main case: members_getById (string memberId) and orders_getById (long orderNumber)
+        // both synthesize "GetByIdInput" after tag-prefix stripping. They must never silently
+        // share one type — each contract gets its own, distinctly named, compiled input record.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "MemberDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                },
+                "OrderDto": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }
+                """,
+            paths: """
+                "/api/members/{memberId}": {
+                    "get": {
+                        "operationId": "members_getById",
+                        "tags": ["Members"],
+                        "parameters": [
+                            {
+                                "name": "memberId",
+                                "in": "path",
+                                "required": true,
+                                "schema": { "type": "string" }
+                            }
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/MemberDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/api/orders/{orderNumber}": {
+                    "get": {
+                        "operationId": "orders_getById",
+                        "tags": ["Orders"],
+                        "parameters": [
+                            {
+                                "name": "orderNumber",
+                                "in": "path",
+                                "required": true,
+                                "schema": { "type": "integer", "format": "int64" }
+                            }
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": { "$ref": "#/components/schemas/OrderDto" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+
+        // Two distinct input records, one per shape
+        var memberInput = CompilationHelper.FindFile(result, "Types/GetByIdInput.cs");
+        Assert.Contains("string MemberId", memberInput);
+
+        var orderInput = CompilationHelper.FindFile(result, "Types/GetByIdInput2.cs");
+        Assert.Contains("long OrderNumber", orderInput);
+
+        // Each contract references its own input type
+        Assert.Contains("GetByIdInput", CompilationHelper.FindFile(result, "MembersContract.cs"));
+        Assert.Contains("GetByIdInput2", CompilationHelper.FindFile(result, "OrdersContract.cs"));
+        Assert.DoesNotContain("GetByIdInput2", CompilationHelper.FindFile(result, "MembersContract.cs"));
+
+        // No duplicate filenames with different content; everything compiles
+        Assert.Equal(result.Files.Count, result.Files.Select(f => f.FileName).Distinct().Count());
+        CompilationHelper.CompileImportResult(result);
     }
 
     // ========== IsStringEnum type inference from values ==========
@@ -3400,6 +3710,10 @@ public sealed class OpenApiImporterTests
         // The DTO property should fall through to long
         var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
         Assert.Contains("long Code", dtoContent);
+
+        // Never silently: the dropped enum constraint emits a named warning (I.A-15)
+        Assert.Contains(result.Warnings, w =>
+            w.StartsWith("Enum constraint dropped") && w.Contains("[42]") && w.Contains("'long'"));
     }
 
     [Fact]
@@ -3426,6 +3740,10 @@ public sealed class OpenApiImporterTests
         // Untyped single-value falls through to string in ResolveFallbackType
         var dtoContent = CompilationHelper.FindFile(result, "ItemDto.cs");
         Assert.Contains("string Val", dtoContent);
+
+        // Never silently: the dropped enum constraint emits a named warning (I.A-15)
+        Assert.Contains(result.Warnings, w =>
+            w.StartsWith("Enum constraint dropped") && w.Contains("[42]") && w.Contains("'string'"));
     }
 
     [Fact]
@@ -3453,6 +3771,10 @@ public sealed class OpenApiImporterTests
         // The DTO property should fall through to long
         var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
         Assert.Contains("long Code", dtoContent);
+
+        // Never silently: the dropped enum constraint emits a named warning (I.A-15)
+        Assert.Contains(result.Warnings, w =>
+            w.StartsWith("Enum constraint dropped") && w.Contains("3.5") && w.Contains("'long'"));
     }
 
     [Fact]
@@ -3506,6 +3828,10 @@ public sealed class OpenApiImporterTests
 
         var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
         Assert.Contains("long Code", dtoContent);
+
+        // Never silently: the dropped enum constraint emits a named warning (I.A-15)
+        Assert.Contains(result.Warnings, w =>
+            w.StartsWith("Enum constraint dropped") && w.Contains("2147483648") && w.Contains("'long'"));
     }
 
     [Fact]

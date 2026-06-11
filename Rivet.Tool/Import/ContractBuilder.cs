@@ -111,7 +111,22 @@ internal static class ContractBuilder
     private static (string? InputType, bool IsFormEncoded) ResolveInputType(
         OpenApiOperation operation, SchemaMapper mapper, string fieldName, List<string> unsupported)
     {
-        var content = operation.RequestBody?.Content;
+        var requestBody = operation.RequestBody;
+        if (requestBody is null)
+        {
+            return (null, false);
+        }
+
+        // A $ref request body that the library could not resolve has no content —
+        // never drop it silently (I11 class): leave a loud marker on the endpoint.
+        if (requestBody is OpenApiRequestBodyReference { Target: null } unresolvedRef)
+        {
+            var refId = unresolvedRef.Reference?.Id ?? "unknown";
+            unsupported.Add($"body $ref={refId} reason=unresolved-ref");
+            return (null, false);
+        }
+
+        var content = requestBody.Content;
         if (content is null)
         {
             return (null, false);
@@ -207,17 +222,19 @@ internal static class ContractBuilder
         }
 
         var recordName = $"{fieldName}Input";
+        var deduped = SchemaClassifier.DeduplicateProperties(properties);
 
-        // If a schema with this name was already mapped from components/schemas, reuse it
-        if (!mapper.HasMappedSchema(recordName))
+        // Reuse a components/schemas record only when its SHAPE matches the synthesized input —
+        // name-only reuse silently hands the endpoint someone else's type (I3 residual).
+        if (mapper.HasMappedSchemaWithShape(recordName, deduped))
         {
-            // Dedup-with-shape-check (I3): a same-named synthetic input with a different shape
-            // (e.g. two tags both synthesizing GetByIdInput) gets a disambiguated name.
-            recordName = mapper.AddExtraRecord(
-                new GeneratedRecord(recordName, SchemaClassifier.DeduplicateProperties(properties)));
+            return recordName;
         }
 
-        return recordName;
+        // Dedup-with-shape-check (I3): a same-named synthetic input with a different shape
+        // (e.g. two tags both synthesizing GetByIdInput, or a name-only collision with a
+        // component schema) gets a disambiguated name.
+        return mapper.AddExtraRecord(new GeneratedRecord(recordName, deduped));
     }
 
     private static readonly HashSet<string> BinaryContentTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -253,12 +270,32 @@ internal static class ContractBuilder
         int? successCode = null;
         string? fileContentType = null;
 
+        // Collect concrete 2xx responses; a "2XX" range wildcard (I9) maps to 200 but only
+        // when no concrete 2xx status is declared — concrete statuses always win.
+        var successResponses = new List<(int Code, IOpenApiResponse Response)>();
+        (int Code, IOpenApiResponse Response)? rangeWildcard = null;
+
         foreach (var (statusStr, response) in operation.Responses)
         {
-            if (!int.TryParse(statusStr, out var code) || code < 200 || code >= 300)
+            if (statusStr is "2XX" or "2xx")
             {
+                rangeWildcard ??= (200, response);
                 continue;
             }
+
+            if (int.TryParse(statusStr, out var parsed) && parsed is >= 200 and < 300)
+            {
+                successResponses.Add((parsed, response));
+            }
+        }
+
+        if (successResponses.Count == 0 && rangeWildcard is not null)
+        {
+            successResponses.Add(rangeWildcard.Value);
+        }
+
+        foreach (var (code, response) in successResponses)
+        {
 
             if (successCode.HasValue && code >= successCode.Value)
             {
@@ -327,6 +364,8 @@ internal static class ContractBuilder
         foreach (var (statusStr, response) in operation.Responses)
         {
             int code;
+            // NOTE: "default" responses are projected to 500 — OpenAPI's catch-all has no
+            // C# contract equivalent, and real-world specs overwhelmingly use it for errors.
             if (statusStr == "default")
             {
                 code = 500;
@@ -592,6 +631,11 @@ internal static class ContractBuilder
         if (statusStr == "default")
         {
             return 500;
+        }
+
+        if (statusStr is "2XX" or "2xx")
+        {
+            return 200;
         }
 
         if (statusStr is "4XX" or "4xx")
