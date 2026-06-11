@@ -102,13 +102,141 @@ public sealed class ValidationIntegrationTests
     }
 
     [Fact]
-    public void Exotic_RivetConstraints_Ignored_By_Validator()
+    public void Exotic_RivetConstraints_Enforced_By_Validator()
     {
-        // Score = -5 violates ExclusiveMinimum = 0 conceptually,
-        // but RivetConstraintsAttribute is not a ValidationAttribute,
-        // so Validator.TryValidateObject() ignores it entirely.
+        // Score = -5 violates ExclusiveMinimum = 0. RivetConstraintsAttribute
+        // is a ValidationAttribute, so Validator.TryValidateObject() enforces it.
         var dto = ValidInstance with { Score = -5 };
         var (isValid, results) = Validate(dto);
+
+        Assert.False(isValid);
+        Assert.Contains(results, r => r.MemberNames.Contains("Score"));
+    }
+
+    // ========== Per-facet RivetConstraints enforcement ==========
+
+    private sealed record FacetDto(
+        [property: RivetConstraints(ExclusiveMinimum = 0)]
+        double AboveZero,
+
+        [property: RivetConstraints(ExclusiveMaximum = 100)]
+        int BelowHundred,
+
+        [property: RivetConstraints(MultipleOf = 0.5)]
+        double HalfSteps,
+
+        [property: RivetConstraints(MinItems = 1, MaxItems = 3)]
+        IReadOnlyList<string>? Items,
+
+        [property: RivetConstraints(UniqueItems = true)]
+        IReadOnlyList<int>? Distinct);
+
+    private static FacetDto ValidFacets => new(
+        AboveZero: 0.1,
+        BelowHundred: 99,
+        HalfSteps: 2.5,
+        Items: ["one"],
+        Distinct: [1, 2, 3]);
+
+    private static (bool IsValid, List<ValidationResult> Results) ValidateFacets(FacetDto instance)
+    {
+        var results = new List<ValidationResult>();
+        var context = new ValidationContext(instance);
+        var isValid = Validator.TryValidateObject(instance, context, results, validateAllProperties: true);
+        return (isValid, results);
+    }
+
+    [Fact]
+    public void Facets_Valid_Instance_Passes()
+    {
+        var (isValid, results) = ValidateFacets(ValidFacets);
+
+        Assert.True(isValid);
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public void ExclusiveMinimum_Boundary_Value_Fails()
+    {
+        // Exclusive: the boundary itself is a violation.
+        var (isValid, results) = ValidateFacets(ValidFacets with { AboveZero = 0 });
+
+        Assert.False(isValid);
+        Assert.Contains(results, r => r.MemberNames.Contains("AboveZero"));
+    }
+
+    [Fact]
+    public void ExclusiveMaximum_Boundary_Value_Fails()
+    {
+        var (isValid, results) = ValidateFacets(ValidFacets with { BelowHundred = 100 });
+
+        Assert.False(isValid);
+        Assert.Contains(results, r => r.MemberNames.Contains("BelowHundred"));
+    }
+
+    [Fact]
+    public void ExclusiveMaximum_Value_Below_Passes()
+    {
+        var (isValid, _) = ValidateFacets(ValidFacets with { BelowHundred = -50 });
+
+        Assert.True(isValid);
+    }
+
+    [Fact]
+    public void MultipleOf_NonMultiple_Fails()
+    {
+        var (isValid, results) = ValidateFacets(ValidFacets with { HalfSteps = 2.3 });
+
+        Assert.False(isValid);
+        Assert.Contains(results, r => r.MemberNames.Contains("HalfSteps"));
+    }
+
+    [Fact]
+    public void MultipleOf_Tolerates_FloatingPoint_Accumulation()
+    {
+        // 0.1 + 0.2 + 0.3 + 0.4 + 0.5 is mathematically 1.5 (a multiple of 0.5)
+        // but accumulates to 1.5000000000000002 in doubles — must still pass.
+        var noisy = 0.1 + 0.2 + 0.3 + 0.4 + 0.5;
+        var (isValid, _) = ValidateFacets(ValidFacets with { HalfSteps = noisy });
+
+        Assert.True(isValid);
+    }
+
+    [Fact]
+    public void MinItems_Violation_Fails()
+    {
+        var (isValid, results) = ValidateFacets(ValidFacets with { Items = [] });
+
+        Assert.False(isValid);
+        Assert.Contains(results, r => r.MemberNames.Contains("Items"));
+    }
+
+    [Fact]
+    public void MaxItems_Violation_Fails()
+    {
+        var (isValid, results) = ValidateFacets(
+            ValidFacets with { Items = ["a", "b", "c", "d"] });
+
+        Assert.False(isValid);
+        Assert.Contains(results, r => r.MemberNames.Contains("Items"));
+    }
+
+    [Fact]
+    public void UniqueItems_Duplicate_Fails()
+    {
+        var (isValid, results) = ValidateFacets(ValidFacets with { Distinct = [1, 2, 2] });
+
+        Assert.False(isValid);
+        Assert.Contains(results, r => r.MemberNames.Contains("Distinct"));
+    }
+
+    [Fact]
+    public void Null_Collections_Pass_Constraint_Validation()
+    {
+        // Null is [Required]'s job — RivetConstraints lets nulls through,
+        // matching the DataAnnotations convention.
+        var (isValid, results) = ValidateFacets(
+            ValidFacets with { Items = null, Distinct = null });
 
         Assert.True(isValid);
         Assert.Empty(results);

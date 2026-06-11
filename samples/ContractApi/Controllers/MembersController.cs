@@ -5,6 +5,7 @@ using ContractApi.Models;
 
 namespace ContractApi.Controllers;
 
+[ApiController]
 [Route("api/members")]
 public sealed class MembersController : ControllerBase
 {

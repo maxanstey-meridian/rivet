@@ -1,7 +1,9 @@
 # Attributes
 
 All attributes live in the `Rivet` namespace (`Rivet.Attributes` package). They are
-read by Roslyn at generation time; none of them changes runtime behaviour.
+read by Roslyn at generation time; none of them changes runtime behaviour, with one
+exception — `[RivetConstraints]` is a `ValidationAttribute` and is enforced by
+validating hosts at runtime.
 
 ## Discovery
 
@@ -22,7 +24,7 @@ read by Roslyn at generation time; none of them changes runtime behaviour.
 | `[RivetOptional]` | property | Removes the property from `required` |
 | `[RivetReadOnly]` / `[RivetWriteOnly]` | property | `readOnly: true` / `writeOnly: true` |
 | `[RivetFormat("fmt")]` | property | `format` — for custom formats (`uri-template`, `currency`, ...) with no dedicated C# type; takes precedence over formats inferred from DataAnnotations |
-| `[RivetConstraints(...)]` | property | `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minItems`, `maxItems`, `uniqueItems` — constraints DataAnnotations cannot express |
+| `[RivetConstraints(...)]` | property | `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minItems`, `maxItems`, `uniqueItems` — constraints DataAnnotations cannot express. Also a `ValidationAttribute`: enforced at runtime under validating hosts (`[ApiController]` model validation, `Validator.TryValidateObject`); null values pass — pair with `[Required]`. See [Runtime validation](../guides/runtime-validation.md#enforcing-constraints-at-runtime) |
 | `[RivetHeader("Wire-Name")]` | property | Marks a contract input-record property as a **request header parameter** (`in: header`, original casing preserved; without a name the property name is the header name). The property never enters the JSON schema. **Spec-only** — header binding stays the host's job. `Accept`/`Content-Type`/`Authorization` are rejected by the emitter (RIV2009). |
 
 ## Operation metadata

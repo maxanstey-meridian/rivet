@@ -42,11 +42,10 @@ Do not rely on Rivet for any of the following — none of it happens:
   object you return has extra properties (e.g. you return a derived type, or your
   serializer includes members the spec does not declare), those properties go to the
   wire. The typed-results check is C# type assignability, not JSON shape validation.
-- **Validation constraints.** `[Range]`, `[StringLength]`, `[RivetConstraints]` and
-  friends are *emitted to the spec only*. Rivet performs no constraint validation on
-  requests or responses. (ASP.NET's own `[ApiController]` model validation may
-  reject invalid request DTOs — that is host-framework behaviour, independent of
-  Rivet.)
+- **Validation constraints.** Rivet's `Invoke` performs no constraint validation on
+  requests or responses. Enforcement is the host framework's job — see
+  [Enforcing constraints at runtime](#enforcing-constraints-at-runtime) below for
+  the recipes.
 - **`Define.File` endpoints.** `FileRouteDefinition` has no `Invoke` and therefore no
   runtime enforcement: content type, stream contents, and status codes are entirely
   up to your handler.
@@ -59,6 +58,46 @@ Do not rely on Rivet for any of the following — none of it happens:
   sets, or validates them. Reading a request header is host-framework binding;
   emitting `Location`/`ETag`/`Retry-After` is handler code. Declaring a response
   header `required: true` is a documentation promise your handler must keep.
+
+## Enforcing constraints at runtime
+
+The same constraint attributes that flow into the spec can be enforced by the
+host — so the wire behaviour matches what the spec promises:
+
+- **Controller hosts.** Add `[ApiController]` to the controller: ASP.NET model
+  validation rejects invalid request DTOs before the action runs. The automatic
+  response is a `400 ValidationProblemDetails` — if your contract declares a
+  different error shape (e.g. `.Returns<ValidationErrorDto>(422)`), configure
+  `ApiBehaviorOptions.InvalidModelStateResponseFactory` to match it. The
+  `samples/ContractApi` project is the worked example: `[ApiController]` +
+  a factory that reshapes `ModelState` into the declared 422 `ValidationErrorDto`.
+- **Minimal-API hosts.** Run DataAnnotations yourself with
+  `Validator.TryValidateObject(dto, context, results, validateAllProperties: true)`
+  in an endpoint filter, returning your declared error shape on failure (this is
+  the scaffolded-host pattern).
+- **`[RivetConstraints]`** is a `ValidationAttribute`, so its facets
+  (`ExclusiveMinimum`, `ExclusiveMaximum`, `MultipleOf`, `MinItems`, `MaxItems`,
+  `UniqueItems`) participate in both of the above. Null values pass — pair with
+  `[Required]`, per DataAnnotations convention.
+
+### The positional-record gotcha
+
+Where the attribute *sits* on a record decides who can see it:
+
+- On a positional record parameter **without** `[property:]`, the attribute lands
+  on the constructor parameter: MVC model validation enforces it, but the Rivet
+  spec cannot see it — the wire is stricter than the spec. Drift in one direction.
+- **With** `[property:]`, the spec sees it and `Validator.TryValidateObject`
+  enforces it (the minimal-API pattern works) — but MVC model validation
+  **throws `InvalidOperationException` at request time** ("validation metadata
+  must be associated with the constructor parameter"), surfacing as a 500. Drift
+  in the other direction.
+
+For request DTOs validated by controller hosts, avoid the positional form
+entirely: declare the record with explicit `init` properties and put the
+constraint attributes on the properties. That single placement is visible to the
+spec, to MVC, and to `Validator.TryValidateObject` — see
+`InviteMemberRequest` in `samples/ContractApi/Models/MemberModels.cs`.
 
 ## Validating at the network boundary
 

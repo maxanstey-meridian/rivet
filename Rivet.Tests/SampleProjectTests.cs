@@ -145,6 +145,65 @@ public sealed class SampleProjectTests : IDisposable
         Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task SampleProject_Api_Rejects_Invalid_Requests_With_422_ValidationErrorDto()
+    {
+        var port = Random.Shared.Next(49152, 65000);
+        var url = $"http://localhost:{port}";
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var server = await StartSampleServer(url, cts.Token);
+
+        using var http = new HttpClient { BaseAddress = new Uri(url) };
+
+        // (a) DataAnnotations violation: role/nickname too short → 422
+        // ValidationErrorDto with field errors; handler not invoked (no id, no 201).
+        var invalidPayload = new StringContent(
+            """{"email":{"value":"test@example.com"},"role":"x","nickname":"z"}""",
+            Encoding.UTF8, "application/json");
+        var invalidResponse = await http.PostAsync("/api/members", invalidPayload, cts.Token);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, invalidResponse.StatusCode);
+        using (var doc = JsonDocument.Parse(await invalidResponse.Content.ReadAsStringAsync(cts.Token)))
+        {
+            Assert.Equal("Validation failed", doc.RootElement.GetProperty("message").GetString());
+            var errors = doc.RootElement.GetProperty("errors");
+            Assert.True(errors.TryGetProperty("role", out var roleErrors));
+            Assert.True(roleErrors.GetArrayLength() > 0);
+            Assert.True(errors.TryGetProperty("nickname", out _));
+            Assert.False(doc.RootElement.TryGetProperty("id", out _));
+        }
+
+        // (b) [RivetConstraints] facet violation (UniqueItems on tags) → 422,
+        // proving the ValidationAttribute participates in MVC model validation.
+        var duplicateTagsPayload = new StringContent(
+            """{"email":{"value":"test@example.com"},"role":"admin","nickname":"tester","tags":["a","a"]}""",
+            Encoding.UTF8, "application/json");
+        var duplicateTagsResponse = await http.PostAsync("/api/members", duplicateTagsPayload, cts.Token);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, duplicateTagsResponse.StatusCode);
+        using (var doc = JsonDocument.Parse(await duplicateTagsResponse.Content.ReadAsStringAsync(cts.Token)))
+        {
+            Assert.True(doc.RootElement.GetProperty("errors").TryGetProperty("tags", out _));
+        }
+
+        // (b continued) MaxItems = 5 violated → 422.
+        var tooManyTagsPayload = new StringContent(
+            """{"email":{"value":"test@example.com"},"role":"admin","nickname":"tester","tags":["a","b","c","d","e","f"]}""",
+            Encoding.UTF8, "application/json");
+        var tooManyTagsResponse = await http.PostAsync("/api/members", tooManyTagsPayload, cts.Token);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, tooManyTagsResponse.StatusCode);
+
+        // (c) Valid request (with tags) still succeeds → 201 + id.
+        var validPayload = new StringContent(
+            """{"email":{"value":"test@example.com"},"role":"admin","nickname":"tester","tags":["a","b"]}""",
+            Encoding.UTF8, "application/json");
+        var validResponse = await http.PostAsync("/api/members", validPayload, cts.Token);
+        Assert.Equal(HttpStatusCode.Created, validResponse.StatusCode);
+        using (var doc = JsonDocument.Parse(await validResponse.Content.ReadAsStringAsync(cts.Token)))
+        {
+            Assert.True(doc.RootElement.TryGetProperty("id", out _));
+        }
+    }
+
     // ========== Tier 3: Generated TS client with mocked fetch ==========
 
     // ========== Tier 4: Zod-validated client with mocked fetch ==========
