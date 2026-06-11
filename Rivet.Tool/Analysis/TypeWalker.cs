@@ -308,6 +308,14 @@ public sealed class TypeWalker
                 continue;
             }
 
+            // P2 wave 5: [RivetHeader] properties are request header params, never part
+            // of a JSON schema — ContractWalker/EndpointWalker surface them as
+            // ParamSource.Header params instead.
+            if (GetHeaderName(member) is not null)
+            {
+                continue;
+            }
+
             // [JsonPropertyName("x")] → use "x" instead of camelCase(Name)
             string? jsonPropertyName = null;
             if (_jsonPropertyNameType is not null)
@@ -1068,6 +1076,26 @@ public sealed class TypeWalker
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// P2 wave 5: the wire header name of a [RivetHeader] property, or null when the
+    /// property is not header-bound. The attribute's name argument keeps the original
+    /// casing ("Notion-Version"); without one the property name itself is the header name.
+    /// </summary>
+    public static string? GetHeaderName(IPropertySymbol prop)
+    {
+        var attr = prop.GetAttributes()
+            .FirstOrDefault(a => a.AttributeClass?.Name is "RivetHeaderAttribute");
+
+        if (attr is null)
+        {
+            return null;
+        }
+
+        return attr.ConstructorArguments.Length > 0 && attr.ConstructorArguments[0].Value is string name
+            ? name
+            : prop.Name;
     }
 
     public static bool IsOptionalProperty(IPropertySymbol prop)

@@ -5099,10 +5099,11 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Header_And_Cookie_Params_Get_Location_Erasure_Marker() // I13 — marker
+    public void Header_Params_Are_Preserved_And_Cookie_Params_Get_Location_Erasure_Marker() // I13 (narrowed by P2 wave 5)
     {
-        // Header/cookie params fold into the synthesized input record, which re-emits
-        // them as query params — the location erasure must be loud.
+        // P2 wave 5 inverts the old header pin: header params keep their location — the
+        // synthesized input property carries [RivetHeader("original-name")] and re-emits
+        // as in: header. COOKIE params still erase to query, loudly.
         var spec = CompilationHelper.BuildSpec(paths: """
             "/api/items/{id}": {
                 "get": {
@@ -5121,10 +5122,43 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
-        Assert.Contains("[rivet:unsupported param name=x-trace in=header reason=location-erased-to-query]", contract);
+        // Header params are preserved — no erasure marker, [RivetHeader] on the input record
+        Assert.DoesNotContain("param name=x-trace", contract);
+        var inputRecord = CompilationHelper.FindFile(result, "GetInput.cs");
+        Assert.Contains("[property: RivetHeader(\"x-trace\")]", inputRecord);
+
         Assert.Contains("[rivet:unsupported param name=session in=cookie reason=location-erased-to-query]", contract);
         // path params keep their semantics — no marker
         Assert.DoesNotContain("param name=id", contract);
+    }
+
+    [Fact]
+    public void Reserved_Header_Params_Are_Dropped_Loudly() // P2 wave 5
+    {
+        // Accept/Content-Type/Authorization are not legal OpenAPI header parameters —
+        // the emitter could never re-emit them (RIV2009), so the importer drops them
+        // with a marker instead of writing an unkeepable [RivetHeader] promise.
+        var spec = CompilationHelper.BuildSpec(paths: """
+            "/api/items": {
+                "get": {
+                    "operationId": "items_list",
+                    "tags": ["Items"],
+                    "parameters": [
+                        { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } },
+                        { "name": "X-Fine", "in": "header", "schema": { "type": "string" } }
+                    ],
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """);
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
+
+        Assert.Contains("[rivet:unsupported param name=Authorization in=header reason=reserved-header-dropped]", contract);
+        var inputRecord = CompilationHelper.FindFile(result, "ListInput.cs");
+        Assert.Contains("[property: RivetHeader(\"X-Fine\")]", inputRecord);
+        Assert.DoesNotContain("Authorization", inputRecord);
     }
 
     [Fact]

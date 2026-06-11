@@ -229,7 +229,7 @@
       "properties": {
         "name": { "type": "string" },
         "type": { "$ref": "#/$defs/tsType" },
-        "source": { "type": "string", "enum": ["route", "body", "query", "file", "formField"] },
+        "source": { "type": "string", "enum": ["route", "body", "query", "file", "formField", "header"] },
         "isOptional": { "type": "boolean" }
       },
       "required": ["name", "type", "source"],
@@ -268,9 +268,20 @@
         "statusCode": { "type": "integer" },
         "dataType": { "$ref": "#/$defs/tsType" },
         "description": { "type": "string" },
-        "examples": { "type": "array", "items": { "$ref": "#/$defs/endpointExample" } }
+        "examples": { "type": "array", "items": { "$ref": "#/$defs/endpointExample" } },
+        "headers": { "type": "array", "items": { "$ref": "#/$defs/responseHeader" } }
       },
       "required": ["statusCode"],
+      "additionalProperties": false
+    },
+    "responseHeader": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "required": { "type": "boolean" }
+      },
+      "required": ["name"],
       "additionalProperties": false
     },
     "endpointSecurity": {

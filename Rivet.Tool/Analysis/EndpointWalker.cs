@@ -399,21 +399,22 @@ public static class EndpointWalker
 
         foreach (var param in method.Parameters)
         {
-            // A10: [FromServices] params are DI plumbing — excluded from the contract
-            // entirely. [FromHeader] params have no representable ParamSource (the model
-            // supports Route/Body/Query/File/FormField only), so they are excluded with
-            // a loud diagnostic instead of being mis-bucketed into query/form fields.
+            // A10: [FromServices] params are DI plumbing — excluded from the contract entirely.
             if (HasAttribute(param, wkt.FromServices))
             {
                 continue;
             }
 
+            // P2 wave 5 (retires RIV1005): [FromHeader] maps to ParamSource.Header. The
+            // attribute's Name property keeps the wire casing ("X-Api-Key"); without one
+            // the C# parameter name is the header name.
             if (HasAttribute(param, wkt.FromHeader))
             {
-                Diagnostics.Warn(
-                    Diagnostics.FromHeaderParameterExcluded,
-                    $"[FromHeader] parameter '{param.Name}' on '{method.Name}' has no header parameter source " +
-                    "in the contract model — excluded from the generated contract.");
+                parameters.Add(new TsEndpointParam(
+                    GetFromHeaderName(param, wkt) ?? param.Name,
+                    typeWalker.MapType(param.Type),
+                    ParamSource.Header,
+                    IsOptional: param.HasExplicitDefaultValue));
                 continue;
             }
 
@@ -457,6 +458,16 @@ public static class EndpointWalker
         attributeType is not null
         && param.GetAttributes().Any(a =>
             SymbolEqualityComparer.Default.Equals(a.AttributeClass, attributeType));
+
+    /// <summary>The [FromHeader(Name = "...")] value, or null when unset.</summary>
+    private static string? GetFromHeaderName(IParameterSymbol param, WellKnownTypes wkt)
+    {
+        var attr = param.GetAttributes()
+            .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, wkt.FromHeader));
+
+        var named = attr?.NamedArguments.FirstOrDefault(kv => kv.Key == "Name");
+        return named?.Value.Value as string;
+    }
 
     private static bool IsInfrastructureType(WellKnownTypes wkt, ITypeSymbol type)
     {

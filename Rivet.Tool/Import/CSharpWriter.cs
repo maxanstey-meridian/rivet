@@ -72,6 +72,10 @@ internal static class CSharpWriter
         {
             var prop = record.Properties[i];
             var separator = i < record.Properties.Count - 1 ? "," : closeSuffix;
+            if (prop.HeaderName is not null)
+            {
+                sb.AppendLine($"    [property: RivetHeader(\"{EscapeString(prop.HeaderName)}\")]");
+            }
             if (!prop.IsRequired)
             {
                 sb.AppendLine("    [property: RivetOptional]");
@@ -368,6 +372,11 @@ internal static class CSharpWriter
             }
         }
 
+        foreach (var responseHeader in field.ResponseHeaders)
+        {
+            calls.Add(BuildResponseHeaderCall(responseHeader));
+        }
+
         foreach (var responseExample in field.ResponseExamples)
         {
             var responseCall = BuildResponseExampleCall(responseExample);
@@ -427,6 +436,23 @@ internal static class CSharpWriter
         }
 
         return calls;
+    }
+
+    private static string BuildResponseHeaderCall(GeneratedResponseHeader header)
+    {
+        var call = $".WithResponseHeader({header.StatusCode}, \"{EscapeString(header.Name)}\"";
+
+        if (header.Description is not null)
+        {
+            call += $", \"{EscapeString(header.Description)}\"";
+        }
+
+        if (header.Required)
+        {
+            call += ", required: true";
+        }
+
+        return call + ")";
     }
 
     private static string? BuildRequestExampleCall(Rivet.Tool.Model.TsEndpointExample example)

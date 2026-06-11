@@ -66,6 +66,13 @@ internal sealed class SchemaMapper
     public bool HasMappedSchema(string name) => _ctx.SchemaNameMap.ContainsValue(name);
 
     /// <summary>
+    /// P2 wave 5: the header-augmented replacement for a component record, or null when
+    /// the record was not augmented. Consulted by OpenApiImporter when writing Types/.
+    /// </summary>
+    public GeneratedRecord? GetComponentRecordOverride(string name) =>
+        _ctx.ComponentRecordOverrides.TryGetValue(name, out var record) ? record : null;
+
+    /// <summary>
     /// True when a components/schemas RECORD with this name exists AND its shape
     /// (property names, C# types, required-ness) matches the candidate properties.
     /// Name-only matches return false — callers must disambiguate instead of reusing.
@@ -83,13 +90,101 @@ internal sealed class SchemaMapper
         {
             if (!byName.TryGetValue(prop.Name, out var existing)
                 || existing.CSharpType != prop.CSharpType
-                || existing.IsRequired != prop.IsRequired)
+                || existing.IsRequired != prop.IsRequired
+                // P2 wave 5: a header-bound property is a different shape from a plain
+                // one of the same name/type — headers never enter the JSON schema.
+                || existing.HeaderName != prop.HeaderName)
             {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// P2 wave 5: header-aware component reuse for synthesized inputs. [RivetHeader]
+    /// properties never enter a JSON schema, so the component a previous emit∘import loop
+    /// produced for a header-bearing input carries only the NON-header subset. When that
+    /// subset matches (base name first, then numbered variants), the component record is
+    /// REPLACED by an augmented copy carrying the header properties (plain properties keep
+    /// the component's instances — descriptions/formats survive) and its name is returned.
+    /// Null when nothing matches or the candidate carries no header properties.
+    /// </summary>
+    public string? AugmentComponentWithHeaderShape(string baseName, IReadOnlyList<RecordProperty> properties)
+    {
+        if (!properties.Any(p => p.HeaderName is not null))
+        {
+            return null;
+        }
+
+        var plain = properties.Where(p => p.HeaderName is null).ToList();
+
+        foreach (var candidate in ComponentCandidates(baseName))
+        {
+            if (!_ctx.MappedComponentRecords.TryGetValue(candidate, out var record)
+                // An already-augmented record (headers attached for another endpoint) is
+                // never re-clobbered here — exact matches were handled by the callers.
+                || record.Properties.Any(p => p.HeaderName is not null)
+                || !HasMappedSchemaWithShape(candidate, plain))
+            {
+                continue;
+            }
+
+            var byName = record.Properties.ToDictionary(p => p.Name, StringComparer.Ordinal);
+            var augmented = properties
+                .Select(p => p.HeaderName is null ? byName[p.Name] : p)
+                .ToList();
+
+            _ctx.ReplaceComponentRecord(candidate, record with { Properties = augmented });
+            return candidate;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// P2 wave 5 (body-merge case): replaces a component record's properties with a merged
+    /// list that differs ONLY by [RivetHeader] properties — the JSON shape (non-header
+    /// subset) must be unchanged, or the call refuses and returns false. Idempotent: an
+    /// identical property list returns true without touching anything.
+    /// </summary>
+    public bool TryAugmentComponentRecord(string name, IReadOnlyList<RecordProperty> merged)
+    {
+        if (!_ctx.MappedComponentRecords.TryGetValue(name, out var record))
+        {
+            return false;
+        }
+
+        if (record.Properties.SequenceEqual(merged))
+        {
+            return true;
+        }
+
+        var existingPlain = record.Properties.Where(p => p.HeaderName is null).ToList();
+        var mergedPlain = merged.Where(p => p.HeaderName is null).ToList();
+        if (!existingPlain.SequenceEqual(mergedPlain))
+        {
+            return false;
+        }
+
+        _ctx.ReplaceComponentRecord(name, record with { Properties = merged.ToList() });
+        return true;
+    }
+
+    /// <summary>Base name first, then numbered variants ordered by suffix.</summary>
+    private IEnumerable<string> ComponentCandidates(string baseName)
+    {
+        yield return baseName;
+
+        foreach (var name in _ctx.MappedComponentRecords.Keys
+            .Select(name => (Name: name, Suffix: ParseNumberedSuffix(name, baseName)))
+            .Where(entry => entry.Suffix is not null)
+            .OrderBy(entry => entry.Suffix!.Value)
+            .Select(entry => entry.Name))
+        {
+            yield return name;
+        }
     }
 
     /// <summary>

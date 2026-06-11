@@ -197,6 +197,7 @@ public static class ContractWalker
         var responses = new List<TsResponseType>();
         var requestExampleCalls = new List<PendingEndpointExampleCall>();
         var responseExampleCalls = new List<PendingEndpointExampleCall>();
+        var responseHeaderCalls = new List<PendingResponseHeaderCall>();
         int? successStatusOverride = null;
         string? endpointSummary = null;
         string? endpointDescription = null;
@@ -251,6 +252,16 @@ public static class ContractWalker
             else if (call.MethodName == "Returns" && call.TypeArgs.Count == 0 && call.StatusCodeArg is not null)
             {
                 responses.Add(new TsResponseType(call.StatusCodeArg.Value, null, call.StringArg));
+            }
+            else if (call.MethodName == "WithResponseHeader" && call.GetStringArg("name") is { } responseHeaderName)
+            {
+                // The convenience overload has no statusCode arg — null targets the
+                // success response, resolved after the responses list is built.
+                responseHeaderCalls.Add(new PendingResponseHeaderCall(
+                    call.GetIntArg("statusCode"),
+                    responseHeaderName,
+                    call.GetStringArg("description"),
+                    call.GetBoolArg("required") ?? false));
             }
             else if (call.MethodName == "Status" && call.StatusCodeArg is not null)
             {
@@ -359,6 +370,7 @@ public static class ContractWalker
             responses.Insert(0, new TsResponseType(successCode, returnType));
         }
         else if (fileContentType is not null || successStatusOverride is not null || responses.Count > 0
+            || responseHeaderCalls.Any(call => call.StatusCode is null)
             || DefaultSuccessCode(httpMethod, hasOutput: false) != 200)
         {
             var successCode = successStatusOverride ?? DefaultSuccessCode(httpMethod, hasOutput: false);
@@ -367,6 +379,11 @@ public static class ContractWalker
 
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
         ApplyResponseExamples(responses, responseExampleCalls, fileContentType, name);
+        ApplyResponseHeaders(
+            responses,
+            responseHeaderCalls,
+            successStatusOverride ?? DefaultSuccessCode(httpMethod, hasOutput: returnType is not null),
+            name);
 
         var requestExamples = requestExampleCalls.Count == 0
             ? null
@@ -477,6 +494,47 @@ public static class ContractWalker
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
     }
 
+    /// <summary>
+    /// P2 wave 5: attaches .WithResponseHeader(...) declarations to their responses.
+    /// A null status (convenience overload) targets the success status. Headers on a
+    /// status no .Returns()/.Status() declared are ignored LOUDLY (RIV1017), mirroring
+    /// the response-example policy.
+    /// </summary>
+    private static void ApplyResponseHeaders(
+        List<TsResponseType> responses,
+        IReadOnlyList<PendingResponseHeaderCall> responseHeaderCalls,
+        int successStatusCode,
+        string endpointName)
+    {
+        if (responseHeaderCalls.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var group in responseHeaderCalls.GroupBy(call => call.StatusCode ?? successStatusCode))
+        {
+            var headers = group
+                .Select(call => new TsResponseHeader(call.Name, call.Description, call.Required))
+                .ToList();
+
+            var responseIndex = responses.FindIndex(response => response.StatusCode == group.Key);
+            if (responseIndex >= 0)
+            {
+                var response = responses[responseIndex];
+                var mergedHeaders = response.Headers is null
+                    ? headers
+                    : response.Headers.Concat(headers).ToList();
+                responses[responseIndex] = response with { Headers = mergedHeaders };
+                continue;
+            }
+
+            Diagnostics.Warn(
+                Diagnostics.ResponseHeaderUndeclaredStatus,
+                $"ignoring response header(s) {string.Join(", ", headers.Select(h => $"'{h.Name}'"))} " +
+                $"for undeclared status {group.Key} on contract endpoint '{endpointName}'");
+        }
+    }
+
     private static (IReadOnlyList<TsEndpointParam> Params, string? InputTypeName) BuildParams(
         WellKnownTypes wkt,
         string httpMethod,
@@ -489,6 +547,26 @@ public static class ContractWalker
         var parameters = new List<TsEndpointParam>();
         var hasBody = httpMethod is "POST" or "PUT" or "PATCH";
         string? inputTypeName = null;
+
+        // P2 wave 5: [RivetHeader] properties are header params on every HTTP method —
+        // classified BEFORE the route/query/body split so a header never leaks into the
+        // body schema (TypeWalker skips them) or the query string.
+        if (tInput is not null)
+        {
+            foreach (var prop in typeWalker.GetEffectiveProperties(tInput))
+            {
+                if (typeWalker.IsJsonIgnored(prop) || TypeWalker.GetHeaderName(prop) is not { } headerName)
+                {
+                    continue;
+                }
+
+                parameters.Add(new TsEndpointParam(
+                    headerName,
+                    typeWalker.MapType(prop.Type),
+                    ParamSource.Header,
+                    IsOptional: TypeWalker.IsOptionalProperty(prop)));
+            }
+        }
 
         if (hasBody)
         {
@@ -530,6 +608,12 @@ public static class ContractWalker
                     foreach (var prop in typeWalker.GetEffectiveProperties(tInput))
                     {
                         if (typeWalker.IsJsonIgnored(prop))
+                        {
+                            continue;
+                        }
+
+                        // [RivetHeader] properties were already emitted as header params
+                        if (TypeWalker.GetHeaderName(prop) is not null)
                         {
                             continue;
                         }
@@ -588,6 +672,12 @@ public static class ContractWalker
                 foreach (var prop in typeWalker.GetEffectiveProperties(tInput))
                 {
                     if (typeWalker.IsJsonIgnored(prop))
+                    {
+                        continue;
+                    }
+
+                    // [RivetHeader] properties were already emitted as header params
+                    if (TypeWalker.GetHeaderName(prop) is not null)
                     {
                         continue;
                     }
@@ -768,6 +858,11 @@ public static class ContractWalker
                 ? number
                 : null;
 
+        public bool? GetBoolArg(string parameterName) =>
+            ConstantArgs.TryGetValue(parameterName, out var value) && value is bool flag
+                ? flag
+                : null;
+
         private string? GetFirstStringArg() =>
             ConstantArgs.Values.OfType<string>().FirstOrDefault();
     }
@@ -779,6 +874,13 @@ public static class ContractWalker
         string? Json,
         string? ComponentExampleId,
         string? ResolvedJson);
+
+    /// <summary>A .WithResponseHeader(...) call; null StatusCode = the success status.</summary>
+    private sealed record PendingResponseHeaderCall(
+        int? StatusCode,
+        string Name,
+        string? Description,
+        bool Required);
 
     /// <summary>
     /// Walks the invocation chain from the initializer expression using syntax + GetSymbolInfo.

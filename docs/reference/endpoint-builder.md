@@ -27,6 +27,8 @@ All return the definition for chaining.
 | `.Status(code)` | Override the success status. May only be called once. |
 | `.Returns<T>(status[, description])` | Declare an additional typed response (errors, alternates). Each status may be declared once. |
 | `.Returns(status[, description])` | Same, without a payload type. |
+| `.WithResponseHeader(status, name[, description][, required:])` | Declare a response header on a status (`responses[status].headers`). String-typed; `required` is an explicit opt-in promise. **Spec-only** — Rivet never sets or validates it; emitting the header is handler code. Each (status, name) pair may be declared once. |
+| `.WithResponseHeader(name[, description][, required:])` | Same, targeting the endpoint's success status. |
 | `.Secure(scheme)` | Reference a security scheme by name (define it with `--security`). |
 | `.Anonymous()` | No auth required (`security: []`). |
 | `.QueryAuth(name = "token")` | Auth token as a required query parameter — for media players that cannot set headers. Emits `x-rivet-query-auth`. |

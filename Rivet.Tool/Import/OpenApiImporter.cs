@@ -42,8 +42,11 @@ public static class OpenApiImporter
 
         foreach (var record in schemaResult.Records)
         {
-            var content = CSharpWriter.WriteRecord(record, ns);
-            files.Add(new GeneratedFile($"Types/{record.Name}.cs", content));
+            // P2 wave 5: contract building may have augmented a component record with
+            // [RivetHeader] properties (header-aware input reuse) — write the replacement.
+            var effective = mapper.GetComponentRecordOverride(record.Name) ?? record;
+            var content = CSharpWriter.WriteRecord(effective, ns);
+            files.Add(new GeneratedFile($"Types/{effective.Name}.cs", content));
         }
 
         // Emit synthetic records from inline objects

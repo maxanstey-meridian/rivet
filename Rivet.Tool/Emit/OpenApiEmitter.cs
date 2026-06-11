@@ -180,6 +180,15 @@ public static class OpenApiEmitter
         return JsonSerializer.Serialize(doc, JsonOptions);
     }
 
+    /// <summary>
+    /// OpenAPI 3.x rule: Accept, Content-Type and Authorization must not be declared
+    /// as header parameters.
+    /// </summary>
+    private static bool IsReservedHeaderName(string name) =>
+        name.Equals("Accept", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("Authorization", StringComparison.OrdinalIgnoreCase);
+
     private static Dictionary<string, object> BuildPaths(
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
@@ -269,6 +278,28 @@ public static class OpenApiEmitter
                         ["schema"] = MapTsTypeToJsonSchema(param.Type, $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"),
                     };
                     parameters.Add(queryParam);
+                    break;
+
+                case ParamSource.Header:
+                    // OpenAPI 3.x: Accept/Content-Type/Authorization are not legal header
+                    // parameters (they belong to content negotiation / securitySchemes) —
+                    // diagnose and skip rather than emit an invalid spec.
+                    if (IsReservedHeaderName(param.Name))
+                    {
+                        Diagnostics.Warn(
+                            Diagnostics.ReservedHeaderParameterSkipped,
+                            $"header param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}' is reserved by OpenAPI " +
+                            "(Accept/Content-Type/Authorization are described by content/securitySchemes) — omitted from the spec");
+                        break;
+                    }
+
+                    parameters.Add(new Dictionary<string, object>
+                    {
+                        ["name"] = param.Name,
+                        ["in"] = "header",
+                        ["required"] = param.Type is not TsType.Nullable && !param.IsOptional,
+                        ["schema"] = MapTsTypeToJsonSchema(param.Type, $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"),
+                    });
                     break;
 
                 case ParamSource.Body:
@@ -443,6 +474,32 @@ public static class OpenApiEmitter
             var respObj = new Dictionary<string, object>();
 
             respObj["description"] = resp.Description ?? DefaultStatusDescription(resp.StatusCode);
+
+            // P2 wave 5: declared response headers (string-typed v1; spec-only at runtime).
+            // required is emitted only on explicit opt-in — Rivet cannot enforce presence,
+            // so defaulting it would over-promise.
+            if (resp.Headers is { Count: > 0 })
+            {
+                var headerObjs = new Dictionary<string, object>();
+                foreach (var header in resp.Headers)
+                {
+                    var headerObj = new Dictionary<string, object>();
+                    if (header.Description is not null)
+                    {
+                        headerObj["description"] = header.Description;
+                    }
+
+                    if (header.Required)
+                    {
+                        headerObj["required"] = true;
+                    }
+
+                    headerObj["schema"] = new Dictionary<string, object> { ["type"] = "string" };
+                    headerObjs[header.Name] = headerObj;
+                }
+
+                respObj["headers"] = headerObjs;
+            }
 
             if (resp.DataType is not null)
             {

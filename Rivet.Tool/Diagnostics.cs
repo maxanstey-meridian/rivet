@@ -26,7 +26,8 @@ public static class Diagnostics
     public const string ContractExampleUndeclaredStatus = "RIV1002";
     public const string RouteBoundJsonPropertyNameIgnored = "RIV1003";
     public const string ControllerExampleUndeclaredStatus = "RIV1004";
-    public const string FromHeaderParameterExcluded = "RIV1005";
+    // RIV1005 (FromHeaderParameterExcluded) retired in P2 wave 5: [FromHeader] params now
+    // map to ParamSource.Header instead of being excluded. The number is never reused.
     public const string UnmappedTypedResult = "RIV1006";
     public const string TypeNameCollision = "RIV1007";
     public const string UnparseableRangeBound = "RIV1008";
@@ -38,6 +39,7 @@ public static class Diagnostics
     public const string PolymorphicNonStringTag = "RIV1014";
     public const string PolymorphicNoDerivedTypes = "RIV1015";
     public const string PolymorphicUnknownHandlingDropped = "RIV1016";
+    public const string ResponseHeaderUndeclaredStatus = "RIV1017";
 
     // ----- RIV2xxx: emission -----
     public const string TaggedUnionComponentCollision = "RIV2001";
@@ -48,6 +50,7 @@ public static class Diagnostics
     public const string UnresolvedTypeParameter = "RIV2006";
     public const string GenericTemplateMissing = "RIV2007";
     public const string BrandConflictingUnderlyingTypes = "RIV2008";
+    public const string ReservedHeaderParameterSkipped = "RIV2009";
 
     // ----- RIV3xxx: import -----
     public const string ImportAliasCycleBroken = "RIV3001";
@@ -81,7 +84,6 @@ public static class Diagnostics
         [ContractExampleUndeclaredStatus] = "Response example targets a status code the contract endpoint does not declare — the example is ignored.",
         [RouteBoundJsonPropertyNameIgnored] = "[JsonPropertyName] on a route-bound property is ignored for route interpolation — the contract param keeps the route name.",
         [ControllerExampleUndeclaredStatus] = "Response example targets a status code the controller endpoint does not declare — the example is ignored.",
-        [FromHeaderParameterExcluded] = "[FromHeader] parameter has no header parameter source in the contract model — excluded from the generated contract.",
         [UnmappedTypedResult] = "Unmapped typed result branch in Results<...> — the response branch is omitted from the contract.",
         [TypeNameCollision] = "Two walked types share a simple name — the later type is emitted under a disambiguated name.",
         [UnparseableRangeBound] = "[Range] bound could not be parsed — the range constraint is skipped.",
@@ -93,6 +95,7 @@ public static class Diagnostics
         [PolymorphicNonStringTag] = "[JsonDerivedType] registration with a non-string (int or absent) discriminator tag — a string-discriminated oneOf cannot represent it; the base type falls back to plain property flattening.",
         [PolymorphicNoDerivedTypes] = "[JsonPolymorphic] base type has no [JsonDerivedType] registrations — there is no variant set to emit; the type falls back to plain property flattening.",
         [PolymorphicUnknownHandlingDropped] = "[JsonPolymorphic] UnknownDerivedTypeHandling has no spec representation — the emitted oneOf admits only the registered derived types.",
+        [ResponseHeaderUndeclaredStatus] = ".WithResponseHeader() targets a status code the contract endpoint does not declare — the header is ignored.",
         [TaggedUnionComponentCollision] = "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
         [UndefinedSecurityScheme] = "Endpoint references a security scheme with no definition — a default bearer securityScheme component is emitted.",
         [DuplicateEndpoint] = "Two endpoints share an HTTP method + path — the later definition wins.",
@@ -101,6 +104,7 @@ public static class Diagnostics
         [UnresolvedTypeParameter] = "Unresolved generic type parameter in the OpenAPI schema — emitted as object.",
         [GenericTemplateMissing] = "Generic template is absent from the contract's type definitions — a free-form object schema is emitted for the instantiation.",
         [BrandConflictingUnderlyingTypes] = "Brand declared with conflicting underlying types — the first declaration wins.",
+        [ReservedHeaderParameterSkipped] = "Header parameter named Accept, Content-Type or Authorization — OpenAPI forbids these as header parameters; the parameter is omitted from the spec.",
         [ImportAliasCycleBroken] = "Alias schema is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object.",
         [ImportSecuritySchemesDropped] = "Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented.",
         [ImportOperationMethodDropped] = "HEAD/OPTIONS/TRACE operation dropped — the HTTP method has no contract representation.",

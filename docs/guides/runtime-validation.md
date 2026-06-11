@@ -54,6 +54,11 @@ Do not rely on Rivet for any of the following — none of it happens:
   not by Rivet.
 - **Examples.** `.RequestExampleJson(...)` / `.ResponseExampleJson(...)` are runtime
   no-ops; Roslyn reads them at generation time only.
+- **Headers.** Declared request headers (`[RivetHeader]` / `[FromHeader]`) and
+  response headers (`.WithResponseHeader(...)`) are *spec-only* — Rivet never binds,
+  sets, or validates them. Reading a request header is host-framework binding;
+  emitting `Location`/`ETag`/`Retry-After` is handler code. Declaring a response
+  header `required: true` is a documentation promise your handler must keep.
 
 ## Validating at the network boundary
 

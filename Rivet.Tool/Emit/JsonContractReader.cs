@@ -178,7 +178,10 @@ public static class JsonContractReader
             response.StatusCode,
             response.DataType,
             response.Description,
-            response.Examples?.Select(ToEndpointExample).ToList());
+            response.Examples?.Select(ToEndpointExample).ToList(),
+            // P2 wave 5: headers are optional in contract JSON — absence (old contracts,
+            // TS lowerer output) deserializes to null and is tolerated everywhere.
+            response.Headers);
     }
 
     private static TsEndpointExample ToEndpointExample(ContractEmitter.ContractEndpointExample example)

@@ -9,6 +9,13 @@ using Microsoft.AspNetCore.Http.HttpResults;
 public sealed record RouteErrorResponse(int StatusCode, Type? ResponseType, string? Description);
 
 /// <summary>
+/// Describes a response header declared via .WithResponseHeader(). A null StatusCode
+/// targets the endpoint's success status. Spec-only: Rivet never sets or validates
+/// response headers at runtime — emitting them is handler code.
+/// </summary>
+public sealed record RouteResponseHeader(int? StatusCode, string Name, string? Description, bool Required);
+
+/// <summary>
 /// Shared builder state and fluent methods for all RouteDefinition variants.
 /// Uses CRTP so each builder method returns the concrete type for chaining.
 /// </summary>
@@ -25,6 +32,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     private bool _formEncoded;
     private string? _queryAuthParameterName;
     private List<RouteErrorResponse>? _errorResponses;
+    private List<RouteResponseHeader>? _responseHeaders;
     private bool _skipValidation;
 
     // R3: contract definitions are stored in shared static readonly fields; once a
@@ -48,6 +56,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public bool IsQueryAuth => _queryAuthParameterName is not null;
     public string? QueryAuthParameterName => _queryAuthParameterName;
     public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses => _errorResponses;
+    public IReadOnlyList<RouteResponseHeader>? ResponseHeaders => _responseHeaders;
     public bool ShouldSkipValidation => _skipValidation;
 
     /// <summary>The resolved success status code for this endpoint.</summary>
@@ -78,6 +87,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         target._formEncoded = _formEncoded;
         target._queryAuthParameterName = _queryAuthParameterName;
         target._errorResponses = _errorResponses?.ToList();
+        target._responseHeaders = _responseHeaders?.ToList();
         target._skipValidation = _skipValidation;
     }
 
@@ -168,6 +178,38 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         }
 
         _errorResponses.Add(response);
+        return (TSelf)this;
+    }
+
+    /// <summary>
+    /// Declares a response header on the given status code (contract concept).
+    /// Spec-only: Rivet never sets or validates response headers at runtime —
+    /// emitting Location/ETag/... is handler code. <paramref name="required"/> is an
+    /// explicit opt-in promise that the header is always present.
+    /// </summary>
+    public TSelf WithResponseHeader(int statusCode, string name, string? description = null, bool required = false)
+        => AddResponseHeader(new RouteResponseHeader(statusCode, name, description, required));
+
+    /// <summary>
+    /// Declares a response header on the endpoint's success status (contract concept).
+    /// See <see cref="WithResponseHeader(int, string, string?, bool)"/>.
+    /// </summary>
+    public TSelf WithResponseHeader(string name, string? description = null, bool required = false)
+        => AddResponseHeader(new RouteResponseHeader(null, name, description, required));
+
+    private TSelf AddResponseHeader(RouteResponseHeader header)
+    {
+        EnsureMutable();
+        _responseHeaders ??= [];
+
+        if (_responseHeaders.Any(existing => existing.StatusCode == header.StatusCode
+            && string.Equals(existing.Name, header.Name, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                $"Response header '{header.Name}' is already declared for this status via .WithResponseHeader() — declare each header only once per status.");
+        }
+
+        _responseHeaders.Add(header);
         return (TSelf)this;
     }
 

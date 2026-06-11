@@ -23,6 +23,7 @@ read by Roslyn at generation time; none of them changes runtime behaviour.
 | `[RivetReadOnly]` / `[RivetWriteOnly]` | property | `readOnly: true` / `writeOnly: true` |
 | `[RivetFormat("fmt")]` | property | `format` — for custom formats (`uri-template`, `currency`, ...) with no dedicated C# type; takes precedence over formats inferred from DataAnnotations |
 | `[RivetConstraints(...)]` | property | `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minItems`, `maxItems`, `uniqueItems` — constraints DataAnnotations cannot express |
+| `[RivetHeader("Wire-Name")]` | property | Marks a contract input-record property as a **request header parameter** (`in: header`, original casing preserved; without a name the property name is the header name). The property never enters the JSON schema. **Spec-only** — header binding stays the host's job. `Accept`/`Content-Type`/`Authorization` are rejected by the emitter (RIV2009). |
 
 ## Operation metadata
 
@@ -40,8 +41,10 @@ read by Roslyn at generation time; none of them changes runtime behaviour.
 - `System.Text.Json`: `[JsonPropertyName("x")]` overrides the camelCased property
   name.
 - ASP.NET: `[Route]`, `[HttpGet]`/`[HttpPost]`/..., `[ProducesResponseType]`,
-  `[FromBody]`/`[FromQuery]`/`[FromForm]`/... drive operation shape on controller
-  endpoints.
+  `[FromBody]`/`[FromQuery]`/`[FromForm]`/`[FromHeader]`/... drive operation shape
+  on controller endpoints. `[FromHeader(Name = "X-Api-Key")]` maps to an
+  `in: header` parameter with the attribute's casing (P2 wave 5; previously
+  excluded with the now-retired RIV1005).
 - `[Obsolete]` → `deprecated: true`.
 
 None of the constraint metadata is validated by Rivet at runtime — see

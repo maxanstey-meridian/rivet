@@ -42,7 +42,10 @@ internal sealed record RecordProperty(
     string? Description = null,
     string? Example = null,
     bool IsReadOnly = false,
-    bool IsWriteOnly = false);
+    bool IsWriteOnly = false,
+    // P2 wave 5: non-null for request-header properties — the wire header name with its
+    // original casing. Written as [property: RivetHeader("...")], never part of JSON.
+    string? HeaderName = null);
 
 internal sealed record GeneratedEnumMember(
     string CSharpName,
@@ -79,11 +82,13 @@ internal sealed record GeneratedEndpointField(
     IReadOnlyList<TsEndpointExample>? RequestExamples = null,
     IReadOnlyList<GeneratedEndpointResponseExample>? ResponseExamples = null,
     bool IsFileEndpoint = false,
-    string? QueryAuthParameterName = null)
+    string? QueryAuthParameterName = null,
+    IReadOnlyList<GeneratedResponseHeader>? ResponseHeaders = null)
 {
     public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
     public IReadOnlyList<TsEndpointExample> RequestExamples { get; init; } = RequestExamples ?? [];
     public IReadOnlyList<GeneratedEndpointResponseExample> ResponseExamples { get; init; } = ResponseExamples ?? [];
+    public IReadOnlyList<GeneratedResponseHeader> ResponseHeaders { get; init; } = ResponseHeaders ?? [];
 }
 
 internal sealed record GeneratedErrorResponse(
@@ -94,3 +99,10 @@ internal sealed record GeneratedErrorResponse(
 internal sealed record GeneratedEndpointResponseExample(
     int StatusCode,
     TsEndpointExample Example);
+
+/// <summary>P2 wave 5: a response header re-emitted as a .WithResponseHeader(...) chain call.</summary>
+internal sealed record GeneratedResponseHeader(
+    int StatusCode,
+    string Name,
+    string? Description,
+    bool Required);

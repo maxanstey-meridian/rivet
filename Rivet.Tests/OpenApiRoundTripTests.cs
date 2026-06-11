@@ -1055,6 +1055,98 @@ public sealed class OpenApiRoundTripTests
     }
 
     [Fact]
+    public void Header_Param_Survives_RoundTrip() // P2 wave 5
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ListPagesInput(
+                [property: RivetHeader("Notion-Version")] string Version,
+                string Workspace,
+                string? Cursor);
+
+            [RivetType]
+            public sealed record PageDto(string Id, string Title);
+
+            [RivetContract]
+            public static class PagesContract
+            {
+                public static readonly Define ListPages =
+                    Define.Get<ListPagesInput, PageDto>("/api/{Workspace}/pages");
+            }
+            """;
+
+        var (endpoints, _) = RoundTrip(source);
+
+        var ep = Assert.Single(endpoints);
+        Assert.Equal(3, ep.Params.Count);
+
+        // Original wire casing survives emit → import → re-walk
+        var headerParam = Assert.Single(ep.Params, p => p.Name == "Notion-Version");
+        Assert.Equal(ParamSource.Header, headerParam.Source);
+        Assert.True(headerParam.Type is TsType.Primitive { Name: "string" },
+            $"Expected Primitive(string) but got {headerParam.Type}");
+        Assert.False(headerParam.IsOptional);
+
+        // Route + query siblings keep their sources
+        Assert.Single(ep.Params, p => p.Name == "Workspace" && p.Source == ParamSource.Route);
+        Assert.Single(ep.Params, p => p.Name == "cursor" && p.Source == ParamSource.Query);
+    }
+
+    [Fact]
+    public void Response_Headers_Survive_RoundTrip() // P2 wave 5
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record CreateTaskRequest(string Title);
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetType]
+            public sealed record ErrorDto(string Message);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define CreateTask =
+                    Define.Post<CreateTaskRequest, TaskDto>("/api/tasks")
+                        .WithResponseHeader("Location", "URL of the created task", required: true)
+                        .WithResponseHeader(201, "ETag")
+                        .Returns<ErrorDto>(429, "Rate limited")
+                        .WithResponseHeader(429, "Retry-After", "Seconds to wait");
+            }
+            """;
+
+        var (endpoints, _) = RoundTrip(source);
+
+        var ep = Assert.Single(endpoints);
+
+        var created = Assert.Single(ep.Responses, r => r.StatusCode == 201);
+        Assert.NotNull(created.Headers);
+        var location = Assert.Single(created.Headers!, h => h.Name == "Location");
+        Assert.Equal("URL of the created task", location.Description);
+        Assert.True(location.Required, "explicit required: true must survive the round-trip");
+        var etag = Assert.Single(created.Headers!, h => h.Name == "ETag");
+        Assert.Null(etag.Description);
+        Assert.False(etag.Required, "required must stay opt-in");
+
+        var rateLimited = Assert.Single(ep.Responses, r => r.StatusCode == 429);
+        Assert.NotNull(rateLimited.Headers);
+        var retryAfter = Assert.Single(rateLimited.Headers!);
+        Assert.Equal("Retry-After", retryAfter.Name);
+        Assert.Equal("Seconds to wait", retryAfter.Description);
+        Assert.False(retryAfter.Required);
+    }
+
+    [Fact]
     public void Brand_Survives_RoundTrip()
     {
         var source = """

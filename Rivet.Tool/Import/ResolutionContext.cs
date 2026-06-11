@@ -102,6 +102,20 @@ internal sealed class ResolutionContext(List<string> warnings)
     /// Used for shape-checked reuse of synthesized parameter-input records (I3 residual).
     /// </summary>
     public Dictionary<string, GeneratedRecord> MappedComponentRecords { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// P2 wave 5: component records that gained [RivetHeader] properties during contract
+    /// building (header-aware input reuse). MapSchemas has already materialized its result
+    /// by then, so OpenApiImporter consults these replacements when writing Types/ files.
+    /// </summary>
+    public Dictionary<string, GeneratedRecord> ComponentRecordOverrides { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Replaces a mapped component record (header augmentation) in both registries.</summary>
+    public void ReplaceComponentRecord(string name, GeneratedRecord replacement)
+    {
+        MappedComponentRecords[name] = replacement;
+        ComponentRecordOverrides[name] = replacement;
+    }
     public List<string> Warnings { get; } = warnings;
     public HashSet<string> Resolving { get; } = [];
     public Dictionary<string, string> SchemaFingerprints { get; } = new();

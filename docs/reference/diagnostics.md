@@ -39,7 +39,6 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1002` | Warning | Response example targets a status code the contract endpoint does not declare — the example is ignored. | Declare the status on the endpoint (`.Status(...)` / `.Error<...>(...)`) or fix the example's status code. |
 | `RIV1003` | Warning | `[JsonPropertyName]` on a route-bound property is ignored for route interpolation — the contract param keeps the route name. | Align the route token and the property name, or accept that the route name wins for path params. |
 | `RIV1004` | Warning | Response example targets a status code the controller endpoint does not declare — the example is ignored. | Declare the response status on the action (e.g. `[ProducesResponseType]`) or fix the example's status code. |
-| `RIV1005` | Warning | `[FromHeader]` parameter has no header parameter source in the contract model — excluded from the generated contract. | Move the value to a route/query parameter or the body, or accept its exclusion from the contract. |
 | `RIV1006` | Warning | Unmapped typed result branch in `Results<...>` — the response branch is omitted from the contract. | Use a supported typed result for the branch so the response surface stays complete. |
 | `RIV1007` | Warning | Two walked types share a simple name — the later type is emitted under a disambiguated name (`Name2`, …). | Rename one of the colliding types to keep schema names stable. |
 | `RIV1008` | Warning | A `[Range]` bound could not be parsed — the range constraint is skipped. | Use numeric `[Range]` bounds the walker can evaluate. |
@@ -51,6 +50,16 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1014` | Warning | `[JsonDerivedType]` registration with a non-string (int or absent) discriminator tag — a string-discriminated `oneOf` cannot represent it; the base type falls back to plain property flattening. | Use string discriminator tags, or accept the flattened base schema. |
 | `RIV1015` | Warning | `[JsonPolymorphic]` base type has no `[JsonDerivedType]` registrations — there is no variant set to emit; the type falls back to plain property flattening. | Register the derived types with `[JsonDerivedType]`, or remove `[JsonPolymorphic]`. |
 | `RIV1016` | Warning | `[JsonPolymorphic]` `UnknownDerivedTypeHandling` has no spec representation — the emitted `oneOf` admits only the registered derived types. | Accept that unknown-type fallback behaviour is invisible to spec consumers. |
+| `RIV1017` | Warning | `.WithResponseHeader()` targets a status code the contract endpoint does not declare — the header is ignored. | Declare the status on the endpoint (`.Returns(...)` / `.Status(...)`) or fix the header's status code. |
+
+### Retired IDs
+
+Retired IDs are never reused; they keep a tombstone here instead of a table row.
+
+- ~~`RIV1005`~~ (`FromHeaderParameterExcluded`) — retired in P2 wave 5. `[FromHeader]`
+  parameters used to be excluded from the contract with this warning; they now map to a
+  first-class header parameter source (`in: header` in the emitted spec), so the
+  diagnostic no longer exists.
 
 ## RIV2xxx — emission
 
@@ -64,6 +73,7 @@ must have a row here, and every row here must be a registered ID.
 | `RIV2006` | Warning | Unresolved generic type parameter in the OpenAPI schema — emitted as `object`. | Expose a closed generic instantiation; open type parameters cannot be emitted. |
 | `RIV2007` | Warning | Generic template is absent from the contract's type definitions — a free-form object schema is emitted for the instantiation. | Fix the upstream producer to include the generic template definition. |
 | `RIV2008` | Warning | Brand declared with conflicting underlying types — the first declaration wins. | Align every declaration of the brand on one underlying type. |
+| `RIV2009` | Warning | Header parameter named `Accept`, `Content-Type` or `Authorization` — OpenAPI forbids these as header parameters; the parameter is omitted from the spec. | Describe content negotiation via media types and auth via security schemes; use a custom header name for anything else. |
 
 ## RIV3xxx — import
 

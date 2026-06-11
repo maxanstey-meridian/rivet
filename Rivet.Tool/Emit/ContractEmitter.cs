@@ -56,7 +56,8 @@ public static class ContractEmitter
         int StatusCode,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? DataType,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Description = null,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ContractEndpointExample>? Examples = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ContractEndpointExample>? Examples = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsResponseHeader>? Headers = null);
 
     internal sealed record ContractEndpointExample(
         string MediaType,
@@ -113,7 +114,8 @@ public static class ContractEmitter
             response.StatusCode,
             response.DataType,
             response.Description,
-            response.Examples?.Select(ToContractEndpointExample).ToList());
+            response.Examples?.Select(ToContractEndpointExample).ToList(),
+            response.Headers);
     }
 
     internal static ContractEndpointExample ToContractEndpointExample(TsEndpointExample example)

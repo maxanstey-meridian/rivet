@@ -67,6 +67,7 @@ public sealed class OpenApiConformanceTests : IDisposable
         "file-endpoints-query-auth" => EmitFromSources([FileEndpointsQueryAuthSource], "bearer"),
         "validation-metadata" => EmitFromSources([ValidationMetadataSource], null),
         "polymorphic-shapes" => EmitFromSources([PolymorphicShapesSource], "bearer"),
+        "header-contracts" => EmitFromSources([HeaderContractsSource], "bearer"),
         "contractapi-sample" => EmitFromSources(LoadContractApiSampleSources(), "bearer"),
         "contract-sample-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-sample.json"), FixtureDocumentInfo),
         "contract-tagged-union-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-tagged-union.json"), FixtureDocumentInfo),
@@ -164,6 +165,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("file-endpoints-query-auth")]
     [InlineData("validation-metadata")]
     [InlineData("polymorphic-shapes")]
+    [InlineData("header-contracts")]
     [InlineData("contractapi-sample")]
     [InlineData("contract-sample-json")]
     [InlineData("contract-tagged-union-json")]
@@ -222,6 +224,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("file-endpoints-query-auth")]
     [InlineData("validation-metadata")]
     [InlineData("polymorphic-shapes")]
+    [InlineData("header-contracts")]
     [InlineData("contractapi-sample")]
     [InlineData("contract-sample-json")]
     [InlineData("contract-tagged-union-json")]
@@ -268,6 +271,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("file-endpoints-query-auth")]
     [InlineData("validation-metadata")]
     [InlineData("polymorphic-shapes")]
+    [InlineData("header-contracts")]
     [InlineData("contractapi-sample")]
     public void SelfLoop_Emit_Import_Emit_Is_Stable(string fixtureName)
     {
@@ -837,6 +841,59 @@ public sealed class OpenApiConformanceTests : IDisposable
             public static readonly Define Login =
                 Define.Post<LoginInput, LoginResult>("/api/auth/login")
                     .FormEncoded();
+        }
+        """;
+
+    /// <summary>
+    /// P2 wave 5 — headers as contract concepts: [RivetHeader] request headers on a
+    /// GET (query siblings), a POST (body sibling — the header must stay OUT of the
+    /// body schema) and a route-param endpoint, plus .WithResponseHeader response
+    /// headers on success and error statuses (required-on-opt-in, descriptions).
+    /// </summary>
+    private const string HeaderContractsSource = """
+        using System;
+        using Rivet;
+
+        namespace Test;
+
+        public sealed record ListPagesInput(
+            [property: RivetHeader("Notion-Version")] string Version,
+            string? Cursor,
+            int? PageSize);
+
+        [RivetType]
+        public sealed record PageDto(string Id, string Title);
+
+        [RivetType]
+        public sealed record CreatePageRequest(
+            [property: RivetHeader("X-Request-Id")] string RequestId,
+            string Title,
+            string? Icon);
+
+        [RivetType]
+        public sealed record ErrorDto(string Message);
+
+        public sealed record GetPageInput(
+            string Id,
+            [property: RivetHeader("If-None-Match")] string? ETag);
+
+        [RivetContract]
+        public static class PagesContract
+        {
+            public static readonly Define ListPages =
+                Define.Get<ListPagesInput, PageDto>("/api/pages")
+                    .WithResponseHeader("X-Request-Cost", "Units consumed by this call");
+
+            public static readonly Define CreatePage =
+                Define.Post<CreatePageRequest, PageDto>("/api/pages")
+                    .WithResponseHeader("Location", "URL of the created page", required: true)
+                    .WithResponseHeader(201, "ETag")
+                    .Returns<ErrorDto>(429, "Rate limited")
+                    .WithResponseHeader(429, "Retry-After", "Seconds to wait before retrying");
+
+            public static readonly Define GetPage =
+                Define.Get<GetPageInput, PageDto>("/api/pages/{Id}")
+                    .Returns(304, "Not modified");
         }
         """;
 

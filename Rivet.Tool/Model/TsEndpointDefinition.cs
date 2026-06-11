@@ -36,7 +36,17 @@ public sealed record TsResponseType(
     int StatusCode,
     TsType? DataType,
     string? Description = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsEndpointExample>? Examples = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsEndpointExample>? Examples = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsResponseHeader>? Headers = null);
+
+/// <summary>
+/// A declared response header (string-typed in v1). Spec-only: Rivet never sets or
+/// validates response headers at runtime. Required is an explicit opt-in promise.
+/// </summary>
+public sealed record TsResponseHeader(
+    string Name,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Description = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Required = false);
 
 /// <summary>
 /// A parameter to a client function.
@@ -50,6 +60,7 @@ public enum ParamSource
     Query,
     File,
     FormField,
+    Header,
 }
 
 /// <summary>

@@ -24,8 +24,11 @@ the scheme *name* survives the import (see Security below).
   (form-encoded inputs), `multipart/form-data` (incl. `IFormFile` /
   `List<IFormFile>`), binary content types (file endpoints / `ProducesFile`),
   `text/*` and `*/*` fallbacks.
-- **Parameters**: path and query parameters → synthesized input records
-  (header/cookie parameters are folded in too, but see the markers below).
+- **Parameters**: path, query and header parameters → synthesized input records.
+  Header parameters KEEP their location (P2 wave 5): the synthesized property
+  carries `[RivetHeader("Original-Name")]` — original casing included — and
+  re-emits as `in: header`. Cookie parameters are still folded in with their
+  location erased (see the markers below).
   On operations that **also carry a request body**, parameters are merged with
   the body-derived record into a single synthesized `{Field}Input` record:
   an identically named *and* typed body property collapses into the parameter;
@@ -45,6 +48,11 @@ the scheme *name* survives the import (see Security below).
 - **Responses**: lowest concrete 2xx wins (a `2XX` wildcard maps to 200 when no
   concrete 2xx exists); typed error responses; `default` → 500; `4XX`/`5XX` →
   400/500; named and `$ref` component examples.
+- **Response headers** (P2 wave 5): re-emitted as `.WithResponseHeader(status,
+  "Name", description, required:)` chain calls — name, description and
+  `required` survive. The header schema is string-typed in v1: a non-string
+  schema degrades to `string` with a marker. Headers on a status the contract
+  cannot declare (e.g. a second 2xx) are dropped with a marker.
 - **Validation metadata on schema properties**: min/max length, pattern,
   ranges, item counts → DataAnnotations / Rivet constraint attributes;
   defaults, formats, descriptions, examples, readOnly/writeOnly.
@@ -67,7 +75,10 @@ the scheme *name* survives the import (see Security below).
 | `… reason=media-type-parameters` | Suffix on the three above: a media type carried parameters (e.g. `application/json; charset=utf-8`), which defeats the exact content-type match. |
 | `request-example …` / `response-example …` (`reason=unresolved-ref` / `missing-value`) | An example could not be resolved/carried. |
 | `security schemes=… reason=multi-scheme-first-only` | Operation declares multiple security schemes (OR alternatives / AND combinations); only the first is imported, scopes dropped. |
-| `param name=… in=header\|cookie reason=location-erased-to-query` | Header/cookie parameter folded into the input record; it will re-emit as a query parameter. |
+| `param name=… in=cookie reason=location-erased-to-query` | Cookie parameter folded into the input record; it will re-emit as a query parameter. (Header parameters stopped erasing in P2 wave 5 — they re-emit as `in: header`.) |
+| `header name=… status=… reason=schema-degraded-to-string` | Response header declared a non-string schema; imported with a `string` schema (v1 response headers are string-typed). |
+| `param name=… in=header reason=reserved-header-dropped` | `Accept`/`Content-Type`/`Authorization` declared as a header parameter — OpenAPI forbids these, the emitter could never re-emit them, so the parameter is dropped. |
+| `header name=… status=… reason=undeclared-status` | Response header sits on a status the contract cannot declare (e.g. a non-lowest 2xx); the header was dropped. |
 | `param-metadata params=… reason=metadata-dropped` | Parameter descriptions / deprecation / validation constraints did not survive into the synthesized input record. |
 | `param name=… in=… reason=dropped-unmergeable-body body-type=…` | Operation has both parameters and a request body whose type is not a plain record — the parameter could not be merged and was dropped. |
 | `param name=… in=… reason=body-property-shadowed-by-param body-type=…` | A body property shares a parameter's name but not its type; the parameter won, the body property was dropped. |
@@ -100,7 +111,9 @@ keyed by ID) — new categories are added consciously, never absorbed:
 These have no C# contract representation and are not imported (beyond the
 diagnostics above where applicable):
 
-- `callbacks`, `webhooks`, `links`, response headers
+- `callbacks`, `webhooks`, `links`
+- Response-header schemas beyond `string` (name/description/required are
+  imported; the schema type is not — see the markers above)
 - Parameter serialization (`style`, `explode`, `allowReserved`), XML mappings
 - Polymorphic `discriminator` dispatch *without* a usable `oneOf` mapping
   (imports as plain records/unions, loudly); usable mappings reverse to

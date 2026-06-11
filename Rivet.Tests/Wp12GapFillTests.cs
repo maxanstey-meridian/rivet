@@ -813,8 +813,8 @@ public sealed class Wp12GapFillTests
 
     // ---------------------------------------------------------------
     // A10 — [FromHeader]/[FromServices] params were mis-bucketed
-    // (ParamSource has no Header member — Route/Body/Query/File/FormField only —
-    //  so headers are excluded with a loud diagnostic; DI services are excluded silently)
+    // (DI services are excluded silently; headers used to be excluded with RIV1005 —
+    //  P2 wave 5 retired that drop: [FromHeader] now maps to ParamSource.Header)
     // ---------------------------------------------------------------
 
     [Fact]
@@ -850,7 +850,7 @@ public sealed class Wp12GapFillTests
     }
 
     [Fact]
-    public void A10_FromHeader_IsExcluded_WithLoudDiagnostic()
+    public void A10_FromHeader_MapsToHeaderParam_KeepingWireCasing()
     {
         var source = """
             using Microsoft.AspNetCore.Mvc;
@@ -878,10 +878,13 @@ public sealed class Wp12GapFillTests
             (endpoints, _) = CompilationHelper.WalkMerged(source);
         });
 
+        // P2 wave 5 inverts the old drop pin: [FromHeader] maps to ParamSource.Header,
+        // the wire name keeps the attribute's casing, and RIV1005 is retired (no warning).
         var ep = Assert.Single(endpoints);
-        Assert.Empty(ep.Params);
-        Assert.Contains("apiKey", stderr);
-        Assert.Contains("header", stderr, StringComparison.OrdinalIgnoreCase);
+        var param = Assert.Single(ep.Params);
+        Assert.Equal("X-Api-Key", param.Name);
+        Assert.Equal(ParamSource.Header, param.Source);
+        Assert.DoesNotContain("RIV1005", stderr);
     }
 
     [Fact]
@@ -919,8 +922,10 @@ public sealed class Wp12GapFillTests
 
         var ep = Assert.Single(endpoints);
 
-        // The old fallback turned headers and concrete DI services into FormFields
+        // The old fallback turned headers and concrete DI services into FormFields.
+        // P2 wave 5: the header is a first-class Header param now, never a form field.
         Assert.DoesNotContain(ep.Params, p => p.Name is "trace" or "audit");
+        Assert.Single(ep.Params, p => p.Name == "X-Trace" && p.Source == ParamSource.Header);
         Assert.Single(ep.Params, p => p.Name == "file" && p.Source == ParamSource.File);
         Assert.Single(ep.Params, p => p.Name == "title");
     }

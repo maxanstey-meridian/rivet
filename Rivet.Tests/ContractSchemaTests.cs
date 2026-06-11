@@ -347,9 +347,18 @@ public sealed class ContractSchemaTests
     [Fact]
     public void Invalid_ParamSource_Rejected()
     {
-        var json = """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"x","type":{"kind":"primitive","type":"string"},"source":"header"}],"controllerName":"C","responses":[]}]}""";
+        // "header" became a valid source in P2 wave 5 — "cookie" remains unrepresentable.
+        var json = """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"x","type":{"kind":"primitive","type":"string"},"source":"cookie"}],"controllerName":"C","responses":[]}]}""";
         var result = Validate(json);
         Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Header_ParamSource_And_Response_Headers_Accepted() // P2 wave 5
+    {
+        var json = """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"Notion-Version","type":{"kind":"primitive","type":"string"},"source":"header"}],"controllerName":"C","responses":[{"statusCode":200,"headers":[{"name":"ETag","description":"Entity tag","required":true}]}]}]}""";
+        var result = Validate(json);
+        Assert.True(result.IsValid);
     }
 
     [Fact]

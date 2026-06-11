@@ -129,6 +129,10 @@ internal static class ContractBuilder
             errorResponses,
             responseExamples);
 
+        // P2 wave 5: response headers re-emit as .WithResponseHeader(...) chain calls —
+        // resolved AFTER the declared-status set is final (success + error responses).
+        var responseHeaders = ResolveResponseHeaders(operation, successStatus, errorResponses, unsupported);
+
         // Security
         var (isAnonymous, securityScheme) = ResolveSecurity(operation, globalSecurityScheme, unsupported);
 
@@ -136,7 +140,77 @@ internal static class ContractBuilder
             fieldName, method, route, inputType, outputType,
             summary, description, successStatus, errorResponses,
             isAnonymous, securityScheme, unsupported, fileContentType, isFormEncoded,
-            requestExamples, responseExamples, isFileEndpoint, queryAuthParameterName);
+            requestExamples, responseExamples, isFileEndpoint, queryAuthParameterName,
+            responseHeaders);
+    }
+
+    /// <summary>
+    /// P2 wave 5: response headers (previously out-of-scope) become .WithResponseHeader()
+    /// calls — name, description and required survive; the schema is string-typed in v1,
+    /// so a non-string header schema degrades LOUDLY. Headers on a status the contract
+    /// cannot declare (e.g. a second 2xx) are dropped LOUDLY.
+    /// </summary>
+    private static IReadOnlyList<GeneratedResponseHeader> ResolveResponseHeaders(
+        OpenApiOperation operation,
+        int? successStatus,
+        IReadOnlyList<GeneratedErrorResponse> errorResponses,
+        List<string> unsupported)
+    {
+        if (operation.Responses is null)
+        {
+            return [];
+        }
+
+        var declaredStatuses = errorResponses.Select(error => error.StatusCode).ToHashSet();
+        if (successStatus is not null)
+        {
+            declaredStatuses.Add(successStatus.Value);
+        }
+
+        var headers = new List<GeneratedResponseHeader>();
+
+        foreach (var (statusStr, response) in operation.Responses)
+        {
+            if (response.Headers is not { Count: > 0 } || NormalizeStatusCode(statusStr) is not { } statusCode)
+            {
+                continue;
+            }
+
+            foreach (var (name, header) in response.Headers)
+            {
+                if (string.IsNullOrEmpty(name))
+                {
+                    continue;
+                }
+
+                if (!declaredStatuses.Contains(statusCode))
+                {
+                    unsupported.Add($"header name={name} status={statusCode} reason=undeclared-status");
+                    continue;
+                }
+
+                if (header.Schema is { } schema
+                    && schema.Type.HasValue
+                    && !schema.Type.Value.HasFlag(JsonSchemaType.String))
+                {
+                    unsupported.Add($"header name={name} status={statusCode} reason=schema-degraded-to-string");
+                }
+
+                if (headers.Any(existing => existing.StatusCode == statusCode
+                    && string.Equals(existing.Name, name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                headers.Add(new GeneratedResponseHeader(
+                    statusCode,
+                    name,
+                    string.IsNullOrEmpty(header.Description) ? null : header.Description,
+                    header.Required));
+            }
+        }
+
+        return headers;
     }
 
     private static (string? InputType, bool IsFormEncoded) ResolveInputType(
@@ -232,7 +306,9 @@ internal static class ContractBuilder
                 continue;
             }
 
-            if (param.Schema is null || param.Name is null)
+            // Empty names occur in the wild (Notion declares a nameless header param) —
+            // they cannot become a C# property.
+            if (param.Schema is null || string.IsNullOrEmpty(param.Name))
             {
                 continue;
             }
@@ -253,11 +329,22 @@ internal static class ContractBuilder
                 _ => "cookie",
             };
 
-            // I13: the synthesized input record erases the in-location — header/cookie
-            // params re-emit as query params. Loud per-param marker.
-            if (param.In is ParameterLocation.Header or ParameterLocation.Cookie)
+            // I13 residual (P2 wave 5 narrowed it): COOKIE params still erase to query.
+            // Header params now KEEP their location — the synthesized record property
+            // carries [RivetHeader("original-name")] and re-emits as in: header.
+            if (param.In is ParameterLocation.Cookie)
             {
                 unsupported.Add($"param name={param.Name} in={location} reason=location-erased-to-query");
+            }
+
+            // Accept/Content-Type/Authorization are not legal OpenAPI header params —
+            // the emitter would refuse to re-emit them (RIV2009), so importing them
+            // would break the round-trip promise. Dropped loudly instead (mirrors
+            // OpenApiEmitter.IsReservedHeaderName).
+            if (param.In is ParameterLocation.Header && IsReservedHeaderName(param.Name))
+            {
+                unsupported.Add($"param name={param.Name} in=header reason=reserved-header-dropped");
+                continue;
             }
 
             // I13: description/deprecated/constraints don't survive into the synthesized
@@ -279,7 +366,8 @@ internal static class ContractBuilder
                 new RecordProperty(
                     Naming.ToPascalCaseFromSegments(param.Name),
                     csharpType,
-                    param.Required),
+                    param.Required,
+                    HeaderName: param.In is ParameterLocation.Header ? param.Name : null),
                 param.Name,
                 location));
         }
@@ -328,6 +416,17 @@ internal static class ContractBuilder
         if (numberedVariant is not null)
         {
             return numberedVariant;
+        }
+
+        // P2 wave 5: [RivetHeader] properties are never part of a JSON schema, so a
+        // component emitted on a previous loop carries only the NON-header subset.
+        // Re-attaching the header properties to that component (instead of minting a
+        // numbered variant per loop) keeps emit∘import a fixed point for header-bearing
+        // inputs — same GAP-2/I3-residual reasoning as the numbered-variant reuse above.
+        var augmented = mapper.AugmentComponentWithHeaderShape(recordName, deduped);
+        if (augmented is not null)
+        {
+            return augmented;
         }
 
         // Dedup-with-shape-check (I3): a same-named synthetic input with a different shape
@@ -386,6 +485,16 @@ internal static class ContractBuilder
             merged.Add(bodyProp);
         }
 
+        // P2 wave 5: when every merged parameter is a header, the JSON body shape is
+        // untouched — re-attach the [RivetHeader] properties to the body record itself
+        // (headers never re-enter its JSON schema on emit) so the original record name
+        // survives the round-trip instead of being replaced by a synthesized {Field}Input.
+        if (paramProperties.All(p => p.Property.HeaderName is not null)
+            && mapper.TryAugmentComponentRecord(bodyInputType, merged))
+        {
+            return bodyInputType;
+        }
+
         // On body-carrying methods the single TInput re-emits as the JSON body, so a
         // merged query param's location is erased to body — marked per param (the
         // path params keep working via the route template, which carries their names).
@@ -402,6 +511,15 @@ internal static class ContractBuilder
 
         return SynthesizeInputRecord(merged, mapper, fieldName) ?? bodyInputType;
     }
+
+    /// <summary>
+    /// OpenAPI 3.x rule (kept in sync with OpenApiEmitter.IsReservedHeaderName):
+    /// Accept, Content-Type and Authorization must not be declared as header parameters.
+    /// </summary>
+    private static bool IsReservedHeaderName(string name) =>
+        name.Equals("Accept", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("Authorization", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// I13: does the parameter schema carry validation constraints that the synthesized

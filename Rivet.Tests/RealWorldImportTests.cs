@@ -925,4 +925,50 @@ public sealed class RealWorldImportTests
         Assert.True(errors.Count == 0,
             $"Schema collision errors:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
     }
+
+    // ========== P2 wave 5 — header preservation against the local corpus ==========
+
+    [Fact]
+    [Trait("Category", "Local")]
+    public void Notion_NotionVersion_Header_ReEmits_As_InHeader()
+    {
+        // The Notion API versions itself via a Notion-Version request header on every
+        // operation. Positive pin for P2 wave 5: the header survives import (as a
+        // [RivetHeader] property, no location-erasure marker) and re-emits as in: header
+        // with the original casing.
+        var specPath = Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "openapi", "notion.json");
+        var result = CompilationHelper.Import(File.ReadAllText(specPath), "Notion");
+
+        var allContracts = string.Join("\n", result.Files
+            .Where(f => f.FileName.StartsWith("Contracts/"))
+            .Select(f => f.Content));
+        // No location erasure for headers (cookies keep theirs). Two operations with
+        // unmergeable Dictionary bodies legitimately keep dropped-unmergeable-body markers.
+        Assert.DoesNotContain("param name=Notion-Version in=header reason=location-erased", allContracts);
+
+        var allTypes = string.Join("\n", result.Files
+            .Where(f => f.FileName.StartsWith("Types/"))
+            .Select(f => f.Content));
+        Assert.Contains("[property: RivetHeader(\"Notion-Version\")]", allTypes);
+
+        // Re-emit and pin the wire shape on a representative operation. Lenient compile:
+        // the Notion spec scaffolds a record with an "Equals" property (pre-existing,
+        // unrelated naming quirk) that errors under strict positional-record rules.
+        var compilation = CreateCompilationLenient(DeduplicateFiles(result));
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emitted = OpenApiEmitter.Emit(
+            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+
+        var doc = JsonSerializer.Deserialize<JsonElement>(emitted);
+        var parameters = doc.GetProperty("paths")
+            .GetProperty("/v1/blocks/{id}")
+            .GetProperty("get")
+            .GetProperty("parameters");
+
+        var headerParam = parameters.EnumerateArray()
+            .Single(p => p.GetProperty("in").GetString() == "header");
+        Assert.Equal("Notion-Version", headerParam.GetProperty("name").GetString());
+    }
 }
