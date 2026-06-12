@@ -1165,7 +1165,14 @@ public sealed class TypeWalker
         if (attributes.Any(a => a.AttributeClass?.Name is "RequiredAttribute"))
             return false;
 
-        // Nullable reference/value types are optional unless [Required]
+        // The C# `required` keyword: must be set at construction, may still be
+        // null — the one form that expresses required-AND-nullable (a real axis:
+        // 139 github-corpus properties). DataAnnotations [Required] cannot say
+        // this (it rejects null at MVC binding); the keyword can.
+        if (prop.IsRequired)
+            return false;
+
+        // Nullable reference/value types are optional unless required/[Required]
         if (prop.Type.NullableAnnotation == NullableAnnotation.Annotated)
             return true;
 

@@ -69,9 +69,22 @@ def top_type(s, res):
     s = res(s)
     if not isinstance(s, dict):
         return ('?',)
+    # Unwrap the nullable composition (oneOf/anyOf of [X, {type: null}]):
+    # 3.0 `nullable: true` on a component and a 3.1-style null branch are the
+    # same claim in different clothes — classifying them as different top types
+    # flagged every nullable-$ref body after the FABLE_ROUNDTRIP #6 fix.
+    for comp_key in ('oneOf', 'anyOf'):
+        branches = s.get(comp_key)
+        if isinstance(branches, list) and len(branches) == 2:
+            non_null = [b for b in branches if not (isinstance(b, dict) and b.get('type') == 'null')]
+            if len(non_null) == 1:
+                s = res(non_null[0])
+                if not isinstance(s, dict):
+                    return ('?',)
+                break
     t = s.get('type')
     if isinstance(t, list):
-        t = '|'.join(sorted(x for x in t))
+        t = '|'.join(sorted(x for x in t if x != 'null')) or 'null'
     f = s.get('format')
     comp = next((k for k in ('oneOf','anyOf','allOf') if k in s), None)
     return (t, f, comp, len(s.get(comp, [])) if comp else None)
@@ -252,10 +265,27 @@ for on, rn_ in pairs:
         return 'schema'
     if apkind(oap) != apkind(rap):
         sadd(f'addprops-{apkind(oap)}->{apkind(rap)}', (on, rn_), None)
-    # per-property comparison
+    # per-property comparison — unwrap the nullable composition on both sides
+    # first (oneOf/anyOf of [X, null]); nullability itself is compared via
+    # is_nullable on the WRAPPED form, but enum/format/type/default live on the
+    # inner schema. Reading them off the wrapper miscounted every optional
+    # enum-typed property as a dropped enum (519 false findings).
+    def unwrap_nullable(s, res):
+        for comp_key in ('oneOf', 'anyOf'):
+            branches = s.get(comp_key)
+            if isinstance(branches, list) and len(branches) == 2:
+                non_null = [b for b in branches if not (isinstance(b, dict) and b.get('type') == 'null')]
+                if len(non_null) == 1:
+                    inner = res(non_null[0])
+                    if isinstance(inner, dict):
+                        return inner
+        return s
+
     for pn in shared_props:
         ops_ = ores(oprops[pn]); rps = rres(rprops[pn])
         if not isinstance(ops_, dict) or not isinstance(rps, dict): continue
+        onul_pre, rnul_pre = is_nullable(ops_), is_nullable(rps)
+        ops_, rps = unwrap_nullable(ops_, ores), unwrap_nullable(rps, rres)
         ot, rt = eff_type(ops_), eff_type(rps)
         if ot != rt and not (ot is None or rt is None):
             sadd('prop-type', (on, rn_, pn), (ot, rt))
@@ -268,7 +298,8 @@ for on, rn_ in pairs:
             rsz = None if re_ is None else sorted(map(str, [x for x in re_ if x is not None]))
             if osz != rsz:
                 sadd('prop-enum', (on, rn_, pn), (oe, re_))
-        onul, rnul = is_nullable(ops_), is_nullable(rps)
+        onul = onul_pre or is_nullable(ops_)
+        rnul = rnul_pre or is_nullable(rps)
         if onul != rnul:
             sadd(f'prop-nullable-{onul}->{rnul}', (on, rn_, pn), None)
         odef, rdef = ops_.get('default'), rps.get('default')

@@ -72,7 +72,7 @@ internal static class CSharpWriter
         // land. Records carrying any ValidationAttribute are therefore emitted in the
         // non-positional required/init form, where the single property-level placement
         // is visible to MVC, Validator.TryValidateObject, and the Rivet walker alike.
-        if (CarriesValidationAttribute(record))
+        if (CarriesValidationAttribute(record) || HasRequiredNullableProperty(record))
         {
             var baseSuffix = record.BaseTypeName is null ? "" : $" : {record.BaseTypeName}";
             sb.AppendLine($"public {modifier} record {record.Name}{typeParamSuffix}{baseSuffix}");
@@ -128,6 +128,15 @@ internal static class CSharpWriter
     private static bool CarriesValidationAttribute(GeneratedRecord record)
         => record.Properties.Any(p =>
             p.Format is "email" or "uri" || p.Constraints is { HasAny: true });
+
+    /// <summary>
+    /// Required-and-nullable is only expressible with the `required` keyword
+    /// (FABLE_ROUNDTRIP #6/#11b): a positional `T? X` parameter reads as
+    /// optional to the walker, so records with such properties take the
+    /// non-positional required/init form where the keyword carries the axis.
+    /// </summary>
+    private static bool HasRequiredNullableProperty(GeneratedRecord record)
+        => record.Properties.Any(p => p.IsRequired && p.CSharpType.EndsWith('?'));
 
     private static void EmitPropertyAttributes(StringBuilder sb, RecordProperty prop, string target)
     {

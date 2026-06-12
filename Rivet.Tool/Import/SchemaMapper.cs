@@ -843,6 +843,17 @@ internal sealed class SchemaMapper
             result = effectiveId is not null && _ctx.SchemaNameMap.TryGetValue(effectiveId, out var mapped)
                 ? mapped
                 : SanitizeName(effectiveId ?? schemaRef.Reference.Id!);
+
+            // FABLE_ROUNDTRIP #6: a component that is itself nullable (3.0
+            // `nullable: true` / 3.1 null in the type array — both parse to the
+            // Null flag) makes every bare $ref use-site nullable. Dropping this
+            // typed 139 github-corpus properties non-nullable that the API can
+            // return as null — clients broke at runtime on an over-claim.
+            if (effective.Type is { } targetType && targetType.HasFlag(JsonSchemaType.Null))
+            {
+                result += "?";
+            }
+
             return true;
         }
 

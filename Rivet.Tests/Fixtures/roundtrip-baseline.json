@@ -1,13 +1,13 @@
 {
-  "cleanOps": 661,
+  "cleanOps": 671,
   "opFindings": {
     "param-dropped": 372,
     "param-invented": 388,
     "reqbody-content-types": 21,
     "reqbody-dropped": 17,
     "reqbody-invented": 3,
-    "reqbody-required-flag": 54,
-    "reqbody-schema-type": 24,
+    "reqbody-required-flag": 53,
+    "reqbody-schema-type": 10,
     "response-content-types": 62,
     "response-schema-type": 25,
     "response-status-invented": 28
@@ -15,14 +15,13 @@
   "schemaFindings": {
     "addprops-false->absent": 20,
     "addprops-true->absent": 6,
-    "prop-default-present->absent": 3,
-    "prop-enum": 513,
+    "prop-default-present->absent": 9,
+    "prop-enum": 282,
     "prop-format-None->double": 44,
     "prop-format-None->int64": 595,
     "prop-format-uri->None": 21,
     "prop-nullable-False->True": 2261,
-    "prop-nullable-True->False": 139,
-    "required-lost": 188,
+    "prop-nullable-True->False": 18,
     "schema-kind": 5
   },
   "totalOps": 1099
