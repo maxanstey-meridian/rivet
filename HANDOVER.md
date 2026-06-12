@@ -41,10 +41,13 @@ Authoritative list: `docs/reference/import-profile.md` (kept honest by tests). H
 6. **Releases v0.36.0 + v0.36.1 cut and on NuGet (2026-06-12, same day):** 0.36.0 ships the P1 enforcement; 0.36.1 multi-targets Rivet.Attributes net8.0/9.0/10.0 (net9-only locked out .NET 8 LTS Functions hosts).
 7. **Consumer migrations to the v2 client style — DONE (2026-06-12):** speechscribe-azure (branch merged into `uploads`, pushed; hand-owned openapi-fetch facade + types layer; local dotnet-rivet manifest — the GLOBAL tool stays 0.34.3 because reel needs v1 behavior); casebridge (local branch `rivet-v2-client` ae88759, NOT pushed — client Azure DevOps; Rivet.Attributes was floating "*" and is now pinned); lagon azure-functions (local commit 4b11434, NOT pushed; 0.22.2→0.36.1 source-compatible, zero code changes). NOT migrated by decision: confer (superseded), reel + iahg (old pins keep working). Found en route: speechscribe has UI flows hitting endpoints absent from the contract (raw apiFetch helper covers them; worth annotating someday); openapi-typescript types format:binary as string (one documented cast at casebridge's multipart upload).
 
+8. **v0.37.0 (2026-06-12): `.AcceptsBinary(contentType)`** — raw binary request bodies as a contract concept (spec-only; TInput lowers to route/query; imports back from `format: binary`; the old importer behavior of reshaping octet-stream bodies into IFormFile/multipart was a silent wire change and is gone). Motivating consumer: speechscribe's chunk-upload TODO — both its "Rivet can't do this" TODOs are now retired, its delete endpoint contract-ized, and the facade's raw `apiFetch` escape hatch deleted: the contract covers speechscribe's entire wire surface (28 ops).
+
 ## Remaining / deferred
 
 1. **IR→Zod for the dotnet/no-api scaffold flavors** — blocked on a FluentValidation→constraints channel; own project.
 2. **Residual cosmetics (known, deliberately left):** cloudflare ~20% description loss on round-trip (mostly already-warned degradations); the misleading `unsupported body content-type` marker on schema-less bodies; snake_case *query-param* name fidelity (binding-semantics design question); §7.14 dev-loop nits (watchedFiles race, artifacts-on-error-exit).
+4. **Backlog idea (from Max's "how did we miss this" question):** an inverse coverage check — `--check` warning for HTTP-routed actions that never `Invoke` a contract. Today nothing audits implementations-without-contracts; that blind spot is how the chunk endpoint stayed invisible.
 3. **Downstream pin refresh when convenient:** rivet-ts default binary pin (0.35.0) and golden/golden-meridian Rivet.Attributes (0.35.0) → 0.36.1. Cosmetic — 0.36.x changed runtime enforcement, not spec emission.
 
 ## How to verify everything
