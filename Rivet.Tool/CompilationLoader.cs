@@ -154,6 +154,56 @@ internal static class CompilationLoader
             : new Version(0, 0);
     }
 
+    /// <summary>
+    /// The loose-file path must offer the same surface a default csproj would:
+    /// a curated assembly shortlist silently fails on anything the importer
+    /// itself emits (System.Text.Json polymorphism, DataAnnotations
+    /// constraints, IFormFile multipart params), so reference the whole
+    /// NETCore.App shared framework plus its AspNetCore.App sibling.
+    /// </summary>
+    private static List<MetadataReference> CollectFrameworkReferences()
+    {
+        var references = new List<MetadataReference>
+        {
+            MetadataReference.CreateFromFile(typeof(Rivet.RivetTypeAttribute).Assembly.Location),
+        };
+
+        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+        var frameworkDirs = new List<string> { runtimeDir };
+
+        // runtimeDir is <root>/shared/Microsoft.NETCore.App/<version>; the
+        // ASP.NET shared framework sits beside it at the same version when
+        // installed. Best-effort: loose-file users without it just cannot
+        // compile IFormFile params, same as before.
+        var runtimeVersion = Path.GetFileName(runtimeDir);
+        var sharedRoot = Path.GetDirectoryName(Path.GetDirectoryName(runtimeDir));
+        if (sharedRoot is not null)
+        {
+            var aspNetDir = Path.Combine(sharedRoot, "Microsoft.AspNetCore.App", runtimeVersion);
+            if (Directory.Exists(aspNetDir))
+            {
+                frameworkDirs.Add(aspNetDir);
+            }
+        }
+
+        foreach (var frameworkDir in frameworkDirs)
+        {
+            foreach (var dll in Directory.GetFiles(frameworkDir, "*.dll"))
+            {
+                try
+                {
+                    references.Add(MetadataReference.CreateFromFile(dll));
+                }
+                catch (BadImageFormatException)
+                {
+                    // Native or resource-only binary — not referenceable.
+                }
+            }
+        }
+
+        return references;
+    }
+
     public static Compilation? CompileFromFiles(string[] paths)
     {
         var syntaxTrees = new List<SyntaxTree>();
@@ -169,14 +219,7 @@ internal static class CompilationLoader
             syntaxTrees.Add(CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest)));
         }
 
-        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
-        var references = new MetadataReference[]
-        {
-            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
-            MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Runtime.dll")),
-            MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Collections.dll")),
-            MetadataReference.CreateFromFile(typeof(Rivet.RivetTypeAttribute).Assembly.Location),
-        };
+        var references = CollectFrameworkReferences();
 
         var compilation = CSharpCompilation.Create(
             "RivetInput",
