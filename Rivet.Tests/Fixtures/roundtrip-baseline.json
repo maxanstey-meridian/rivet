@@ -1,11 +1,11 @@
 {
-  "cleanOps": 357,
+  "cleanOps": 661,
   "opFindings": {
-    "param-dropped": 370,
-    "param-invented": 815,
-    "reqbody-content-types": 84,
+    "param-dropped": 372,
+    "param-invented": 388,
+    "reqbody-content-types": 21,
     "reqbody-dropped": 17,
-    "reqbody-invented": 66,
+    "reqbody-invented": 3,
     "reqbody-required-flag": 54,
     "reqbody-schema-type": 24,
     "response-content-types": 62,
@@ -25,5 +25,5 @@
     "required-lost": 188,
     "schema-kind": 5
   },
-  "totalOps": 1087
+  "totalOps": 1099
 }

@@ -50,6 +50,7 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1016` | Warning | `[JsonPolymorphic]` `UnknownDerivedTypeHandling` has no spec representation — the emitted `oneOf` admits only the registered derived types. | Accept that unknown-type fallback behaviour is invisible to spec consumers. |
 | `RIV1017` | Warning | `.WithResponseHeader()` targets a status code the contract endpoint does not declare — the header is ignored. | Declare the status on the endpoint (`.Returns(...)` / `.Status(...)`) or fix the header's status code. |
 | `RIV1018` | Warning | `[RivetUnion]` wrapper has no variant properties — there is no union to emit; the type falls back to plain property flattening. | Give the wrapper one optional property per variant (the shape the importer generates), or remove the attribute. |
+| `RIV1019` | Warning | Route token has no matching property on the endpoint's input type (after normalized matching: case-insensitive, `_`/`-` stripped) — emitted as an untyped string path param. | Add a matching property to the input type (any casing of the token's words), or accept the untyped string param. |
 
 ### Retired IDs
 

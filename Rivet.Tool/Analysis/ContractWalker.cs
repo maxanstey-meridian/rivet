@@ -563,6 +563,16 @@ public static class ContractWalker
         string? binaryContentType = null)
     {
         var routeParamNames = RouteParser.ParseRouteParamNames(route);
+        // Wire-name pinning for params (FABLE_ROUNDTRIP #1/#4): a route token and a
+        // C# property are the same param when they match under normalization
+        // ({thing_id} ↔ ThingId, {enterprise-team} ↔ EnterpriseTeam). The param
+        // always keeps the TOKEN's spelling — the route template is wire truth.
+        var normalizedRouteTokens = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var token in routeParamNames)
+        {
+            normalizedRouteTokens.TryAdd(RouteParser.NormalizeForMatching(token), token);
+        }
+
         var parameters = new List<TsEndpointParam>();
         var hasBody = httpMethod is "POST" or "PUT" or "PATCH";
         // .AcceptsBinary(): the request body is the raw bytes (host code reads the
@@ -594,17 +604,27 @@ public static class ContractWalker
         if (lowersBody)
         {
             // Route params from template — try to match types from TInput properties
+            var routeMatchedProps = new HashSet<string>(StringComparer.Ordinal);
             foreach (var paramName in routeParamNames)
             {
                 TsType paramType = new TsType.Primitive("string");
                 if (tInput is not null)
                 {
                     // A3: match against the flattened property surface (incl. inherited)
+                    var normalized = RouteParser.NormalizeForMatching(paramName);
                     var matchingProp = typeWalker.GetEffectiveProperties(tInput)
-                        .FirstOrDefault(p => string.Equals(p.Name, paramName, StringComparison.OrdinalIgnoreCase));
+                        .FirstOrDefault(p => RouteParser.NormalizeForMatching(p.Name) == normalized);
                     if (matchingProp is not null)
                     {
                         paramType = typeWalker.MapType(matchingProp.Type);
+                        routeMatchedProps.Add(matchingProp.Name);
+                    }
+                    else
+                    {
+                        Diagnostics.Warn(
+                            Diagnostics.RouteTokenWithoutInputProperty,
+                            $"route token '{{{paramName}}}' on {httpMethod} {route} has no matching property " +
+                            $"on input type '{tInput.Name}' — emitted as an untyped string path param.");
                     }
                 }
                 parameters.Add(new TsEndpointParam(paramName, paramType, ParamSource.Route));
@@ -642,7 +662,7 @@ public static class ContractWalker
                         }
 
                         // Skip properties already emitted as route params
-                        if (routeParamNames.Contains(prop.Name, StringComparer.OrdinalIgnoreCase))
+                        if (routeMatchedProps.Contains(prop.Name))
                         {
                             continue;
                         }
@@ -677,9 +697,18 @@ public static class ContractWalker
                 }
                 else
                 {
-                    // Normal body param
-                    var tsType = typeWalker.MapType(tInput);
-                    parameters.Add(new TsEndpointParam("body", tsType, ParamSource.Body));
+                    // FABLE_ROUNDTRIP #4: an input whose every property is route-bound
+                    // has no body left to carry — emitting one anyway fabricated a
+                    // required JSON body on bodyless POST/PUTs (66 github-corpus ops).
+                    var bodyProps = typeWalker.GetEffectiveProperties(tInput)
+                        .Where(p => !typeWalker.IsJsonIgnored(p) && TypeWalker.GetHeaderName(p) is null)
+                        .ToList();
+                    if (bodyProps.Count == 0 || bodyProps.Any(p => !routeMatchedProps.Contains(p.Name)))
+                    {
+                        // Normal body param
+                        var tsType = typeWalker.MapType(tInput);
+                        parameters.Add(new TsEndpointParam("body", tsType, ParamSource.Body));
+                    }
                 }
             }
         }
@@ -720,10 +749,11 @@ public static class ContractWalker
                     }
 
                     var tsType = typeWalker.MapType(prop.Type);
-                    // Route matching uses C# property name (matches template {Id}), not JSON name
-                    if (routeParamNames.TryGetValue(prop.Name, out var routeName))
+                    // Route matching uses the normalized C# property name ({thing_id}
+                    // matches ThingId), never the JSON name — the token is wire truth
+                    if (normalizedRouteTokens.TryGetValue(RouteParser.NormalizeForMatching(prop.Name), out var routeName))
                     {
-                        matchedRouteParams.Add(prop.Name);
+                        matchedRouteParams.Add(routeName);
 
                         // A14: a route-bound param must keep the ROUTE name — runtime route
                         // binding uses the C# property name, so a [JsonPropertyName] rename
@@ -754,6 +784,10 @@ public static class ContractWalker
                 {
                     if (!matchedRouteParams.Contains(paramName))
                     {
+                        Diagnostics.Warn(
+                            Diagnostics.RouteTokenWithoutInputProperty,
+                            $"route token '{{{paramName}}}' on {httpMethod} {route} has no matching property " +
+                            $"on input type '{tInput.Name}' — emitted as an untyped string path param.");
                         parameters.Insert(0, new TsEndpointParam(paramName, new TsType.Primitive("string"), ParamSource.Route));
                     }
                 }

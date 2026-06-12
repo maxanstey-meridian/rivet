@@ -107,7 +107,11 @@ public static class RouteParser
     /// <summary>
     /// Extracts the parameter name from a token body per the ASP.NET grammar:
     /// [*|**]name[:constraint…][?] or name=default. The name ends at the first
-    /// ':' (constraint), '=' (default value), or '?' (optional marker).
+    /// ':' (constraint), '=' (default value), or '?' (optional marker) — and at
+    /// nothing else: hyphenated names like {enterprise-team} (legal in OpenAPI
+    /// path templates and common in imported specs) are one token, not a name
+    /// truncated at the hyphen. Truncation here used to collide two params into
+    /// one and corrupt the re-rendered template (FABLE_ROUNDTRIP #2).
     /// </summary>
     private static string ExtractParamName(string body)
     {
@@ -119,11 +123,34 @@ public static class RouteParser
         }
 
         var nameEnd = nameStart;
-        while (nameEnd < body.Length && (char.IsLetterOrDigit(body[nameEnd]) || body[nameEnd] == '_'))
+        while (nameEnd < body.Length && body[nameEnd] is not (':' or '=' or '?'))
         {
             nameEnd++;
         }
 
-        return body[nameStart..nameEnd];
+        return body[nameStart..nameEnd].Trim();
+    }
+
+    /// <summary>
+    /// Canonical form for matching a route token against a C# property name:
+    /// case-folded with '_'/'-' separators stripped, so {thing_id} ↔ ThingId and
+    /// {enterprise-team} ↔ EnterpriseTeam match without either side renaming the
+    /// wire artifact. The route token always keeps its original spelling.
+    /// </summary>
+    public static string NormalizeForMatching(string name)
+    {
+        Span<char> buffer = stackalloc char[name.Length];
+        var length = 0;
+        foreach (var c in name)
+        {
+            if (c is '_' or '-')
+            {
+                continue;
+            }
+
+            buffer[length++] = char.ToLowerInvariant(c);
+        }
+
+        return new string(buffer[..length]);
     }
 }
