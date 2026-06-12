@@ -4942,6 +4942,37 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Import_Deduplicates_Schema_Names_That_Collide_Case_Insensitively()
+    {
+        // Emitted names become Types/{Name}.cs files; on APFS/NTFS two names
+        // differing only by case clobber each other at write time (cloudflare:
+        // ...CustomHostname vs ...Customhostname left a dangling type ref).
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "custom-hostname": { "type": "object", "properties": { "id": { "type": "string" } } },
+                "custom_hostname": { "type": "object", "properties": { "name": { "type": "string" } } }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/custom-hostname" } } } } } } }
+                """);
+
+        var result = CompilationHelper.Import(spec);
+        var fileNames = result.Files.Select(f => f.FileName).ToList();
+        var caseCollisions = fileNames
+            .GroupBy(name => name.ToLowerInvariant())
+            .Where(group => group.Count() > 1)
+            .ToList();
+        Assert.Empty(caseCollisions);
+
+        // Both shapes must survive as distinct compilable types.
+        var compileErrors = CompilationHelper.CompileImportResult(result)
+            .GetDiagnostics()
+            .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+            .ToList();
+        Assert.Empty(compileErrors);
+    }
+
+    [Fact]
     public void Import_Keeps_Positional_Record_When_No_Constraints()
     {
         var spec = CompilationHelper.BuildSpec(

@@ -99,11 +99,12 @@ public sealed class CliPipelineTests
 
             // 3. Compile the on-disk output through the CLI's loose-file path
             //    and re-emit openapi.json — the importer must be able to eat
-            //    its own cooking via its own front door.
+            //    its own cooking via its own front door. The directory form is
+            //    load-bearing: 11k individual paths overflow ARG_MAX.
             var outDir = Path.Combine(workDir.FullName, "out");
             var emit = RunCli(
                 workDir.FullName,
-                [.. writtenFiles, "--openapi", "--output", outDir]);
+                [srcDir, "--openapi", "--output", outDir]);
             Assert.True(emit.ExitCode == 0, $"compile/emit failed:\n{emit.StdErr}");
 
             // 4. The round-tripped spec must be internally consistent: every

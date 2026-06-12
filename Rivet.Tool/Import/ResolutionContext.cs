@@ -7,13 +7,15 @@ internal sealed class ResolutionContext(List<string> warnings)
 {
     public List<GeneratedRecord> ExtraRecords { get; } = [];
 
-    private readonly Dictionary<string, object> _syntheticsByName = new(StringComparer.Ordinal);
+    // Case-insensitive (like ReservedTypeNames): names become Types/{Name}.cs files,
+    // and case-insensitive filesystems clobber case-variant siblings at write time.
+    private readonly Dictionary<string, object> _syntheticsByName = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Type names claimed by #/components/schemas (and generic templates) — synthetic records
     /// and enums must never reuse these, or two different shapes end up in one Types/{Name}.cs file.
     /// </summary>
-    public HashSet<string> ReservedTypeNames { get; } = new(StringComparer.Ordinal);
+    public HashSet<string> ReservedTypeNames { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Registers a synthetic record, deduplicating by name + shape (I3 guard).
@@ -24,12 +26,14 @@ internal sealed class ResolutionContext(List<string> warnings)
     /// </summary>
     public string AddOrReuseExtraRecord(GeneratedRecord record)
     {
-        var name = ResolveSyntheticName(record.Name, existing =>
+        var (name, existingName) = ResolveSyntheticName(record.Name, existing =>
             existing is GeneratedRecord other && SameShape(other, record));
 
         if (name is null)
         {
-            return record.Name; // identical shape already registered under this name
+            // Identical shape already registered — reuse ITS name (which may
+            // differ in case from the caller's under the IgnoreCase comparer).
+            return existingName!;
         }
 
         var toAdd = record.Name == name ? record : record with { Name = name };
@@ -44,12 +48,12 @@ internal sealed class ResolutionContext(List<string> warnings)
     /// </summary>
     public string AddOrReuseExtraEnum(GeneratedEnum enumDef)
     {
-        var name = ResolveSyntheticName(enumDef.Name, existing =>
+        var (name, existingName) = ResolveSyntheticName(enumDef.Name, existing =>
             existing is GeneratedEnum other && other.Members.SequenceEqual(enumDef.Members));
 
         if (name is null)
         {
-            return enumDef.Name;
+            return existingName!;
         }
 
         var toAdd = enumDef.Name == name ? enumDef : enumDef with { Name = name };
@@ -59,12 +63,15 @@ internal sealed class ResolutionContext(List<string> warnings)
     }
 
     /// <summary>
-    /// Finds the name a new synthetic type must use: the base name when free, a numeric-suffixed
-    /// variant when the base name is reserved/claimed by a different shape, or null when an
-    /// identical shape is already registered under a matching name (caller reuses it).
-    /// Returns null ONLY for exact-shape matches on the unsuffixed base name.
+    /// Finds the name a new synthetic type must use: (name, null) when free —
+    /// the base name or a numeric-suffixed variant when the base is
+    /// reserved/claimed by a different shape — or (null, existingName) when an
+    /// identical shape is already registered (caller reuses the REGISTERED
+    /// name, which may differ in case under the IgnoreCase comparer).
     /// </summary>
-    private string? ResolveSyntheticName(string baseName, Func<object, bool> isSameShape)
+    private (string? NewName, string? ExistingName) ResolveSyntheticName(
+        string baseName,
+        Func<object, bool> isSameShape)
     {
         var candidate = baseName;
         var suffix = 1;
@@ -75,12 +82,18 @@ internal sealed class ResolutionContext(List<string> warnings)
             {
                 if (!_syntheticsByName.TryGetValue(candidate, out var existing))
                 {
-                    return candidate;
+                    return (candidate, null);
                 }
 
                 if (isSameShape(existing))
                 {
-                    return null;
+                    var existingName = existing switch
+                    {
+                        GeneratedRecord record => record.Name,
+                        GeneratedEnum enumDef => enumDef.Name,
+                        _ => candidate,
+                    };
+                    return (null, existingName);
                 }
             }
 

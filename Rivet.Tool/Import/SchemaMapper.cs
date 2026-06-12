@@ -239,7 +239,10 @@ internal sealed class SchemaMapper
         var records = new List<GeneratedRecord>();
         var enums = new List<GeneratedEnum>();
         var brands = new List<GeneratedBrand>();
-        var usedNames = new HashSet<string>();
+        // Case-INSENSITIVE: emitted type names become Types/{Name}.cs files, and on
+        // APFS/NTFS two names differing only by case clobber each other at write time
+        // (cloudflare: ...CustomHostname vs ...Customhostname left a dangling type).
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // I1: resolve alias chains first, using raw reference ids only (never proxied
         // members — a cyclic alias would overflow the stack inside the library's proxy)

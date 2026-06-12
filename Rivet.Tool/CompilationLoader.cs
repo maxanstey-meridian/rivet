@@ -155,6 +155,31 @@ internal static class CompilationLoader
     }
 
     /// <summary>
+    /// A positional directory argument means "every .cs file under it" — an
+    /// imported contract set is thousands of files (cloudflare: 11k), which
+    /// overflows ARG_MAX long before a shell glob could deliver them.
+    /// </summary>
+    private static IEnumerable<string> ExpandDirectories(IEnumerable<string> paths)
+    {
+        foreach (var path in paths)
+        {
+            if (Directory.Exists(path))
+            {
+                foreach (var file in Directory
+                             .EnumerateFiles(path, "*.cs", SearchOption.AllDirectories)
+                             .OrderBy(static file => file, StringComparer.Ordinal))
+                {
+                    yield return file;
+                }
+            }
+            else
+            {
+                yield return path;
+            }
+        }
+    }
+
+    /// <summary>
     /// The loose-file path must offer the same surface a default csproj would:
     /// a curated assembly shortlist silently fails on anything the importer
     /// itself emits (System.Text.Json polymorphism, DataAnnotations
@@ -208,7 +233,7 @@ internal static class CompilationLoader
     {
         var syntaxTrees = new List<SyntaxTree>();
 
-        foreach (var path in paths)
+        foreach (var path in ExpandDirectories(paths))
         {
             if (!File.Exists(path))
             {
