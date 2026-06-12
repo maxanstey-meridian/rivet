@@ -16,6 +16,14 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install vendored node test tooling (Rivet.Tests/js/README.md)
+        run: npm ci
+        working-directory: Rivet.Tests/js
+
       - run: dotnet restore
 
       - run: dotnet test --no-restore --filter "Category!=Local"
