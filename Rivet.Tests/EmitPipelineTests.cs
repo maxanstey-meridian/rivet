@@ -139,6 +139,56 @@ public sealed class EmitPipelineTests : IDisposable
         Assert.True(extracted.TryGetProperty("y", out _));
     }
 
+    // ========== --verify: the drift gate ==========
+
+    [Fact]
+    public async Task Verify_Passes_When_Spec_Matches_And_Writes_Nothing()
+    {
+        var input = BuildEmitInput(DuplicateInlineEndpoints());
+        Assert.Equal(0, await EmitPipeline.RunAsync(input, new RivetOptions(".", _outputDir, [])));
+
+        var specPath = Path.Combine(_outputDir, "openapi.json");
+        var writtenAt = File.GetLastWriteTimeUtc(specPath);
+
+        var result = await EmitPipeline.RunAsync(input, new RivetOptions(".", _outputDir, [], Verify: true));
+
+        Assert.Equal(0, result);
+        Assert.Equal(writtenAt, File.GetLastWriteTimeUtc(specPath));
+    }
+
+    [Fact]
+    public async Task Verify_Fails_On_Stale_Spec_Without_Overwriting_It()
+    {
+        var input = BuildEmitInput(DuplicateInlineEndpoints());
+        await EmitPipeline.RunAsync(input, new RivetOptions(".", _outputDir, []));
+
+        var specPath = Path.Combine(_outputDir, "openapi.json");
+        var tampered = (await File.ReadAllTextAsync(specPath)).Replace("\"age\"", "\"years\"");
+        await File.WriteAllTextAsync(specPath, tampered);
+
+        int result = -1;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            result = EmitPipeline.RunAsync(input, new RivetOptions(".", _outputDir, [], Verify: true)).GetAwaiter().GetResult());
+
+        Assert.Equal(1, result);
+        Assert.Contains("is stale", stderr);
+        Assert.Equal(tampered, await File.ReadAllTextAsync(specPath));
+    }
+
+    [Fact]
+    public async Task Verify_Fails_When_Spec_File_Is_Missing()
+    {
+        var input = BuildEmitInput(DuplicateInlineEndpoints());
+
+        int result = -1;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            result = EmitPipeline.RunAsync(input, new RivetOptions(".", _outputDir, [], Verify: true)).GetAwaiter().GetResult());
+
+        Assert.Equal(1, result);
+        Assert.Contains("does not exist", stderr);
+        Assert.False(File.Exists(Path.Combine(_outputDir, "openapi.json")), "--verify must never write");
+    }
+
     [Fact]
     public async Task OpenApiOverride_Is_Sole_Writer_When_Both_Given()
     {

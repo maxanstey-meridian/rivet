@@ -52,6 +52,38 @@ internal static class EmitPipeline
             specPath = Path.GetFullPath(Path.Combine(options.OutputDir, "openapi.json"));
         }
 
+        // --verify: emission is deterministic, so freshness is plain string equality
+        // between the would-be spec and the committed file. Never writes.
+        if (options.Verify)
+        {
+            if (specPath is null)
+            {
+                // CliParser rejects --verify without a target; belt-and-braces.
+                Console.Error.WriteLine("error: '--verify' needs --output or --openapi — the committed spec to compare against");
+                return 1;
+            }
+
+            if (!File.Exists(specPath))
+            {
+                Console.Error.WriteLine($"error: --verify: {specPath} does not exist — run the same command without --verify to generate it");
+                return 1;
+            }
+
+            var committed = await File.ReadAllTextAsync(specPath);
+            if (!string.Equals(committed, openApiJson, StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine($"error: --verify: {specPath} is stale — the source no longer matches it. Regenerate (run without --verify) and commit the result.");
+                return 1;
+            }
+
+            if (!options.Quiet)
+            {
+                Console.WriteLine($"Spec is up to date: {specPath}");
+            }
+
+            return 0;
+        }
+
         if (specPath is not null)
         {
             if (options.OutputDir is not null)

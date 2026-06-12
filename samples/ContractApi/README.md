@@ -11,17 +11,17 @@ and `RivetResult<T>.ToActionResult()` as the framework bridge.
 ## Run
 
 ```bash
-# Preview to stdout
-dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj
+# Preview the OpenAPI 3.1 spec to stdout
+dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --security bearer
 
-# Preview with OpenAPI spec
-dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --openapi --security bearer
+# Write openapi.json to disk
+dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --output /tmp/rivet-contract --security bearer
 
-# Write to disk
-dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --output /tmp/rivet-contract
+# Coverage check: every contract field has an implementation on the declared route/method
+dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --check
 
-# Write to disk with OpenAPI spec
-dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --output /tmp/rivet-contract --openapi --security bearer
+# Drift gate: exit 1 if the written spec no longer matches the compiled C#
+dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --output /tmp/rivet-contract --security bearer --verify
 ```
 
 All commands should be run from the repository root.

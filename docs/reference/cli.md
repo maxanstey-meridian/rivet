@@ -67,6 +67,24 @@ mismatches — see [Contract Coverage](/guides/contract-coverage)); without
 endpoint (method, route, handler) and exits. `-q`/`--quiet` suppresses generation
 output (useful with `--check` in CI).
 
+### Drift gate (`--verify`)
+
+If you commit the generated spec (and artifacts derived from it, like
+`schema.d.ts`), nothing otherwise stops the C# and the committed spec drifting
+apart when someone forgets to regenerate. `--verify` is the CI gate: it derives
+the spec exactly as a normal run would, compares it against the existing file
+(`--output <dir>/openapi.json`, or the `--openapi` override), and exits `1` on
+any difference — without writing anything. Emission is deterministic, so a
+checkout where someone regenerated and committed always passes.
+
+```bash
+# CI step — fails the build when the committed openapi.json is stale
+dotnet rivet --project src/Api/Api.csproj --output ./generated --verify
+```
+
+Pass the same `--title`/`--version`/`--server`/`--security` flags you generate
+with, or the comparison will (correctly) flag the metadata difference.
+
 ## Diagnostics
 
 Every warning the tool writes to stderr carries a stable `RIV`-prefixed ID in

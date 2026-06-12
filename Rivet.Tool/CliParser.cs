@@ -23,6 +23,7 @@ internal static class CliParser
         string? version = null;
         var servers = new List<string>();
         var check = false;
+        var verify = false;
         var quiet = false;
         var routes = false;
         var files = new List<string>();
@@ -78,6 +79,9 @@ internal static class CliParser
                 case "--check":
                     check = true;
                     break;
+                case "--verify":
+                    verify = true;
+                    break;
                 case "--quiet" or "-q":
                     quiet = true;
                     break;
@@ -105,6 +109,20 @@ internal static class CliParser
             }
         }
 
+        // --verify compares the would-be spec against an existing file; without a
+        // target file (stdout preview) or in import mode there is nothing to compare.
+        if (verify && fromOpenApiPath is not null)
+        {
+            Console.Error.WriteLine("error: '--verify' does not apply to --from-openapi (import generates C#, not a spec)");
+            return null;
+        }
+
+        if (verify && outputDir is null && openApiPath is null)
+        {
+            Console.Error.WriteLine("error: '--verify' needs --output or --openapi — the committed spec to compare against");
+            return null;
+        }
+
         // Contract JSON mode doesn't need a project path
         if (fromContractPath is not null)
         {
@@ -112,7 +130,7 @@ internal static class CliParser
                 fromContractPath, outputDir, files.ToArray(),
                 OpenApiPath: openApiPath, DefaultSecurity: defaultSecurity,
                 Quiet: quiet, FromContractPath: fromContractPath,
-                Title: title, Version: version, Servers: servers);
+                Title: title, Version: version, Servers: servers, Verify: verify);
         }
 
         // Import mode doesn't need a project path
@@ -130,7 +148,7 @@ internal static class CliParser
             return null;
         }
 
-        return new RivetOptions(projectPath, outputDir, files.ToArray(), openApiPath, defaultSecurity, Check: check, Quiet: quiet, Routes: routes, Title: title, Version: version, Servers: servers);
+        return new RivetOptions(projectPath, outputDir, files.ToArray(), openApiPath, defaultSecurity, Check: check, Quiet: quiet, Routes: routes, Title: title, Version: version, Servers: servers, Verify: verify);
     }
 
     // OpenAPI server URLs are either absolute (http/https) or paths relative to the
@@ -168,6 +186,8 @@ internal static class CliParser
         Console.Error.WriteLine("                             truth (see docs/reference/import-profile)");
         Console.Error.WriteLine("  --namespace <ns>           Namespace for generated C# files (default: Generated)");
         Console.Error.WriteLine("  --check                    Verify contract coverage (missing impls, route/method mismatches)");
+        Console.Error.WriteLine("  --verify                   Compare the spec against the existing file instead of writing —");
+        Console.Error.WriteLine("                             exit 1 on drift (CI gate for committed openapi.json)");
         Console.Error.WriteLine("  --routes                   List all discovered endpoints (method, route, handler)");
         Console.Error.WriteLine("  -q, --quiet                Suppress codegen output (useful with --check)");
     }
@@ -183,4 +203,5 @@ sealed record RivetOptions(
     string? FromContractPath = null,
     string? Title = null,
     string? Version = null,
-    IReadOnlyList<string>? Servers = null);
+    IReadOnlyList<string>? Servers = null,
+    bool Verify = false);

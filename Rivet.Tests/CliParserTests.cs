@@ -28,6 +28,50 @@ public sealed class CliParserTests
         Assert.Null(options.OutputDir);
     }
 
+    // ========== --verify: drift gate flag ==========
+
+    [Theory]
+    [InlineData("--project", "Api.csproj")]
+    [InlineData("--from", "contracts.json")]
+    public void ParseArgs_VerifyFlag_SetsVerify(string modeFlag, string modeValue)
+    {
+        var options = CliParser.ParseArgs([modeFlag, modeValue, "--output", "./generated", "--verify"]);
+
+        Assert.NotNull(options);
+        Assert.True(options!.Verify);
+    }
+
+    [Fact]
+    public void ParseArgs_VerifyFlag_WithoutSpecTarget_Fails()
+    {
+        RivetOptions? options = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            options = CliParser.ParseArgs(["--project", "Api.csproj", "--verify"]));
+
+        Assert.Null(options);
+        Assert.Contains("'--verify' needs --output or --openapi", stderr);
+    }
+
+    [Fact]
+    public void ParseArgs_VerifyFlag_WithOpenApiOverrideOnly_IsAccepted()
+    {
+        var options = CliParser.ParseArgs(["--project", "Api.csproj", "--openapi", "spec/openapi.json", "--verify"]);
+
+        Assert.NotNull(options);
+        Assert.True(options!.Verify);
+    }
+
+    [Fact]
+    public void ParseArgs_VerifyFlag_InImportMode_Fails()
+    {
+        RivetOptions? options = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            options = CliParser.ParseArgs(["--from-openapi", "spec.json", "--output", "./out", "--verify"]));
+
+        Assert.Null(options);
+        Assert.Contains("does not apply to --from-openapi", stderr);
+    }
+
     // ========== Removed-in-v2 flags: loud error, not "unknown flag" ==========
 
     [Theory]
