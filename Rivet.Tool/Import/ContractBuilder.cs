@@ -93,7 +93,8 @@ internal static class ContractBuilder
         var queryAuthParameterName = ResolveQueryAuth(operation);
 
         // Resolve input type (requestBody — $ref resolved by library)
-        var (inputType, isFormEncoded) = ResolveInputType(operation, mapper, fieldName, unsupported);
+        var (inputType, isFormEncoded, binaryRequestContentType) =
+            ResolveInputType(operation, mapper, fieldName, unsupported);
 
         // I14: parameters must be resolved regardless of body presence — they used to be
         // silently discarded whenever the operation had a request body (262 Stripe GETs
@@ -143,7 +144,7 @@ internal static class ContractBuilder
             summary, description, successStatus, errorResponses,
             isAnonymous, securityScheme, unsupported, fileContentType, isFormEncoded,
             requestExamples, responseExamples, isFileEndpoint, queryAuthParameterName,
-            responseHeaders);
+            responseHeaders, binaryRequestContentType);
     }
 
     /// <summary>
@@ -215,13 +216,13 @@ internal static class ContractBuilder
         return headers;
     }
 
-    private static (string? InputType, bool IsFormEncoded) ResolveInputType(
+    private static (string? InputType, bool IsFormEncoded, string? BinaryRequestContentType) ResolveInputType(
         OpenApiOperation operation, SchemaMapper mapper, string fieldName, List<string> unsupported)
     {
         var requestBody = operation.RequestBody;
         if (requestBody is null)
         {
-            return (null, false);
+            return (null, false, null);
         }
 
         // A $ref request body that the library could not resolve has no content —
@@ -230,13 +231,13 @@ internal static class ContractBuilder
         {
             var refId = unresolvedRef.Reference?.Id ?? "unknown";
             unsupported.Add($"body $ref={refId} reason=unresolved-ref");
-            return (null, false);
+            return (null, false, null);
         }
 
         var content = requestBody.Content;
         if (content is null)
         {
-            return (null, false);
+            return (null, false, null);
         }
 
         // Try content types in priority order, tracking which one matched
@@ -265,7 +266,18 @@ internal static class ContractBuilder
             // containing them would mutate every loop.
             var context = GetExtensionString(schema, "x-rivet-input-type")
                 ?? $"{Naming.ToPascalCaseFromSegments(fieldName)}Request";
-            return (mapper.ResolveCSharpType(schema, context), isFormEncoded);
+            return (mapper.ResolveCSharpType(schema, context), isFormEncoded, null);
+        }
+
+        // Raw binary body: a non-multipart content entry whose schema is
+        // { type: string, format: binary } imports as .AcceptsBinary("<ct>") — the
+        // body never becomes a TInput; path/query params import as normal.
+        var binaryEntry = content.FirstOrDefault(entry =>
+            !entry.Key.Equals("multipart/form-data", StringComparison.OrdinalIgnoreCase)
+            && IsRawBinarySchema(entry.Value.Schema));
+        if (binaryEntry.Key is not null)
+        {
+            return (null, false, binaryEntry.Key);
         }
 
         // Fallback: try binary or text content types with a schema
@@ -275,13 +287,23 @@ internal static class ContractBuilder
             || k.StartsWith("application/x-", StringComparison.OrdinalIgnoreCase));
         if (fallbackType is not null && TryGetSchemaForContentType(content, fallbackType, out schema))
         {
-            return (mapper.ResolveCSharpType(schema!, $"{fieldName}Request"), false);
+            return (mapper.ResolveCSharpType(schema!, $"{fieldName}Request"), false, null);
         }
 
         // Request body exists but uses unsupported content type(s)
         unsupported.Add($"body {DescribeUnsupportedContent(content)}");
-        return (null, false);
+        return (null, false, null);
     }
+
+    /// <summary>
+    /// A schema of exactly { type: string, format: binary } — OpenAPI 3.x's encoding
+    /// for a raw binary request body.
+    /// </summary>
+    private static bool IsRawBinarySchema(IOpenApiSchema? schema) =>
+        schema is not null
+        && schema.Type.HasValue
+        && schema.Type.Value.HasFlag(JsonSchemaType.String)
+        && string.Equals(schema.Format, "binary", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// A path/query/header/cookie parameter resolved to a record property, keeping the

@@ -34,6 +34,7 @@ All return the definition for chaining.
 | `.QueryAuth(name = "token")` | Auth token as a required query parameter — for media players that cannot set headers. Emits `x-rivet-query-auth`. |
 | `.FormEncoded()` | Request body is `application/x-www-form-urlencoded`. |
 | `.AcceptsFile()` | Request body is `multipart/form-data` with a binary file part. |
+| `.AcceptsBinary(contentType = "application/octet-stream")` | Request body is the raw bytes (`type: string, format: binary`). **Spec-only** — host code reads the stream; `TInput` properties lower to route/query params instead of a JSON body. Mutually exclusive with `.AcceptsFile()` / `.FormEncoded()`. |
 | `.ProducesFile(contentType = "application/octet-stream")` | Response is a binary download. |
 | `.ContentType(mediaType)` | `FileRouteDefinition` alias for `ProducesFile`. |
 | `.RequestExampleJson(json, ...)` / `.ResponseExampleJson(status, json, ...)` | Attach examples. **Runtime no-ops** — read by Roslyn only. The `...Ref` variants reference component examples. |

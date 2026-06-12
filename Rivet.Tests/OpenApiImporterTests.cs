@@ -2462,7 +2462,11 @@ public sealed class OpenApiImporterTests
     // ========== Unsupported content type markers ==========
 
     [Fact]
-    public void Octet_Stream_Body_Resolves_To_IFormFile()
+    // Renamed from Octet_Stream_Body_Resolves_To_IFormFile: behavior improved — a raw
+    // binary body now imports as .AcceptsBinary() instead of an IFormFile input. The
+    // IFormFile lowering re-emitted as multipart/form-data, silently changing the wire
+    // contract; .AcceptsBinary() keeps the raw octet-stream requestBody through round-trips.
+    public void Octet_Stream_Body_Imports_As_AcceptsBinary()
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
@@ -2486,9 +2490,9 @@ public sealed class OpenApiImporterTests
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "UploadContract.cs");
 
-        // application/octet-stream with format: binary → IFormFile input type
-        Assert.Contains("InputRouteDefinition<IFormFile>", content);
-        Assert.Contains("using Microsoft.AspNetCore.Http;", content);
+        // application/octet-stream with format: binary → raw binary request body
+        Assert.Contains(".AcceptsBinary()", content);
+        Assert.DoesNotContain("IFormFile", content);
         Assert.DoesNotContain("rivet:unsupported", content);
     }
 

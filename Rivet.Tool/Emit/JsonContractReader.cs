@@ -176,7 +176,10 @@ public static class JsonContractReader
             // E5/N3: these were serialized by ContractEmitter but silently dropped on read —
             // file endpoints and query-auth must survive the JSON contract round-trip.
             endpoint.IsFileEndpoint,
-            endpoint.QueryAuth is { } qa ? new QueryAuthMetadata(qa.ParameterName) : null);
+            endpoint.QueryAuth is { } qa ? new QueryAuthMetadata(qa.ParameterName) : null,
+            // Raw-binary request bodies (rivet-ts pipeline) must survive the
+            // contract-JSON round-trip like IsFileEndpoint/QueryAuth above.
+            endpoint.BinaryRequestContentType);
     }
 
     private static TsResponseType ToResponseType(ContractEmitter.ContractResponseType response)

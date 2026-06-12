@@ -450,6 +450,18 @@ internal static class CSharpWriter
             calls.Add(".FormEncoded()");
         }
 
+        if (field.BinaryRequestContentType is not null)
+        {
+            if (field.BinaryRequestContentType == "application/octet-stream")
+            {
+                calls.Add(".AcceptsBinary()");
+            }
+            else
+            {
+                calls.Add($".AcceptsBinary(\"{EscapeString(field.BinaryRequestContentType)}\")");
+            }
+        }
+
         if (field.FileContentType is not null)
         {
             if (field.IsFileEndpoint)

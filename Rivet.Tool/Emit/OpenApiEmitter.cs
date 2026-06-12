@@ -334,7 +334,27 @@ public static class OpenApiEmitter
         }
 
         // Request body
-        if (fileParams.Count > 0)
+        if (ep.BinaryRequestContentType is not null)
+        {
+            // .AcceptsBinary(): the body is the raw bytes — never a JSON/multipart schema,
+            // even if a Body param somehow survived upstream (the walker prevents it).
+            operation["requestBody"] = new Dictionary<string, object>
+            {
+                ["required"] = true,
+                ["content"] = new Dictionary<string, object>
+                {
+                    [ep.BinaryRequestContentType] = new Dictionary<string, object>
+                    {
+                        ["schema"] = new Dictionary<string, object>
+                        {
+                            ["type"] = "string",
+                            ["format"] = "binary",
+                        },
+                    },
+                },
+            };
+        }
+        else if (fileParams.Count > 0)
         {
             Dictionary<string, object> multipartSchema;
 

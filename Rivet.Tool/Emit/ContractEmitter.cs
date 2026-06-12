@@ -50,7 +50,8 @@ public static class ContractEmitter
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? RequestType = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ContractEndpointExample>? RequestExamples = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFileEndpoint = false,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContractQueryAuth? QueryAuth = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContractQueryAuth? QueryAuth = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BinaryRequestContentType = null);
 
     internal sealed record ContractResponseType(
         int StatusCode,
@@ -105,7 +106,8 @@ public static class ContractEmitter
             endpoint.RequestType,
             endpoint.RequestExamples?.Select(ToContractEndpointExample).ToList(),
             endpoint.IsFileEndpoint,
-            endpoint.QueryAuth is { } qa ? new ContractQueryAuth(qa.ParameterName) : null);
+            endpoint.QueryAuth is { } qa ? new ContractQueryAuth(qa.ParameterName) : null,
+            endpoint.BinaryRequestContentType);
     }
 
     internal static ContractResponseType ToContractResponseType(TsResponseType response)

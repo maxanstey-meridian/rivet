@@ -30,6 +30,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     private string? _fileContentType;
     private bool _acceptsFile;
     private bool _formEncoded;
+    private string? _binaryRequestContentType;
     private string? _queryAuthParameterName;
     private List<RouteErrorResponse>? _errorResponses;
     private List<RouteResponseHeader>? _responseHeaders;
@@ -53,6 +54,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public string? FileContentType => _fileContentType;
     public bool IsFileUpload => _acceptsFile;
     public bool IsFormEncoded => _formEncoded;
+    public string? BinaryRequestContentType => _binaryRequestContentType;
     public bool IsQueryAuth => _queryAuthParameterName is not null;
     public string? QueryAuthParameterName => _queryAuthParameterName;
     public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses => _errorResponses;
@@ -85,6 +87,7 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         target._fileContentType = _fileContentType;
         target._acceptsFile = _acceptsFile;
         target._formEncoded = _formEncoded;
+        target._binaryRequestContentType = _binaryRequestContentType;
         target._queryAuthParameterName = _queryAuthParameterName;
         target._errorResponses = _errorResponses?.ToList();
         target._responseHeaders = _responseHeaders?.ToList();
@@ -138,6 +141,13 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public TSelf FormEncoded()
     {
         EnsureMutable();
+        if (_binaryRequestContentType is not null)
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: .FormEncoded() cannot be combined with .AcceptsBinary() — " +
+                "a request body is either raw binary or form-encoded, not both.");
+        }
+
         _formEncoded = true;
         return (TSelf)this;
     }
@@ -282,7 +292,42 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public TSelf AcceptsFile()
     {
         EnsureMutable();
+        if (_binaryRequestContentType is not null)
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: .AcceptsFile() cannot be combined with .AcceptsBinary() — " +
+                "a request body is either raw binary or multipart/form-data, not both.");
+        }
+
         _acceptsFile = true;
+        return (TSelf)this;
+    }
+
+    /// <summary>
+    /// Marks this endpoint as accepting a raw binary request body (application/octet-stream
+    /// unless overridden). The body is the raw bytes; binding/reading the request stream is
+    /// host code — Rivet never touches it at runtime. Rivet emits the binary requestBody
+    /// into the OpenAPI spec, and on contract definitions the TInput properties lower to
+    /// route/query parameters instead of a JSON body.
+    /// </summary>
+    public TSelf AcceptsBinary(string contentType = "application/octet-stream")
+    {
+        EnsureMutable();
+        if (_acceptsFile)
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: .AcceptsBinary() cannot be combined with .AcceptsFile() — " +
+                "a request body is either raw binary or multipart/form-data, not both.");
+        }
+
+        if (_formEncoded)
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: .AcceptsBinary() cannot be combined with .FormEncoded() — " +
+                "a request body is either raw binary or form-encoded, not both.");
+        }
+
+        _binaryRequestContentType = contentType;
         return (TSelf)this;
     }
 }

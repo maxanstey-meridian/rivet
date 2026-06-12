@@ -91,7 +91,8 @@ internal sealed record GeneratedEndpointField(
     IReadOnlyList<GeneratedEndpointResponseExample>? ResponseExamples = null,
     bool IsFileEndpoint = false,
     string? QueryAuthParameterName = null,
-    IReadOnlyList<GeneratedResponseHeader>? ResponseHeaders = null)
+    IReadOnlyList<GeneratedResponseHeader>? ResponseHeaders = null,
+    string? BinaryRequestContentType = null)
 {
     public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
     public IReadOnlyList<TsEndpointExample> RequestExamples { get; init; } = RequestExamples ?? [];

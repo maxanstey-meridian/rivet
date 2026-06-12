@@ -22,7 +22,8 @@ public sealed record TsEndpointDefinition(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? RequestType = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsEndpointExample>? RequestExamples = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFileEndpoint = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] QueryAuthMetadata? QueryAuth = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] QueryAuthMetadata? QueryAuth = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BinaryRequestContentType = null);
 
 /// <summary>
 /// Security metadata for an endpoint. null = inherit CLI default.

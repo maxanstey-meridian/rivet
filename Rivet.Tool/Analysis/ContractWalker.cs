@@ -205,6 +205,7 @@ public static class ContractWalker
         var acceptsFile = false;
         var isFormEncoded = false;
         string? fileContentType = null;
+        string? binaryRequestContentType = null;
         QueryAuthMetadata? queryAuth = null;
 
         for (var i = 1; i < chain.Count; i++)
@@ -221,6 +222,10 @@ public static class ContractWalker
             else if (call.MethodName == "FormEncoded")
             {
                 isFormEncoded = true;
+            }
+            else if (call.MethodName == "AcceptsBinary")
+            {
+                binaryRequestContentType = call.StringArg ?? "application/octet-stream";
             }
             else if (call.MethodName == "RequestExampleJson" && call.GetStringArg("json") is not null)
             {
@@ -322,6 +327,17 @@ public static class ContractWalker
             }
         }
 
+        // The builder throws on this combination at runtime, but a static readonly field
+        // initializer never runs at generation time — refuse loudly here too instead of
+        // emitting a spec with two competing request bodies.
+        if (binaryRequestContentType is not null && (acceptsFile || isFormEncoded))
+        {
+            var conflictingCall = acceptsFile ? ".AcceptsFile()" : ".FormEncoded()";
+            throw new InvalidOperationException(
+                $"{httpMethod} {route} ({controllerName}.{name}): .AcceptsBinary() cannot be combined " +
+                $"with {conflictingCall} — a request body is either raw binary or {(acceptsFile ? "multipart/form-data" : "form-encoded")}, not both.");
+        }
+
         // Define.File() defaults to application/octet-stream (constructor calls ProducesFile()
         // at runtime, but the syntax walker only sees the source-level chain)
         if (isFileEndpoint)
@@ -359,7 +375,8 @@ public static class ContractWalker
         TsType? returnType = tOutput is not null ? typeWalker.MapType(tOutput) : null;
 
         // Build params based on HTTP method and TInput
-        var (parameters, inputTypeName) = BuildParams(wkt, httpMethod, route, tInput, typeWalker, acceptsFile);
+        var (parameters, inputTypeName) = BuildParams(
+            wkt, httpMethod, route, tInput, typeWalker, acceptsFile, binaryRequestContentType);
 
         // Add success response to responses list
         // Void endpoints with typed error responses also need a success entry
@@ -407,7 +424,8 @@ public static class ContractWalker
             isFormEncoded,
             RequestExamples: requestExamples,
             IsFileEndpoint: isFileEndpoint,
-            QueryAuth: queryAuth);
+            QueryAuth: queryAuth,
+            BinaryRequestContentType: binaryRequestContentType);
     }
 
     /// <summary>
@@ -541,11 +559,16 @@ public static class ContractWalker
         string route,
         ITypeSymbol? tInput,
         TypeWalker typeWalker,
-        bool acceptsFile = false)
+        bool acceptsFile = false,
+        string? binaryContentType = null)
     {
         var routeParamNames = RouteParser.ParseRouteParamNames(route);
         var parameters = new List<TsEndpointParam>();
         var hasBody = httpMethod is "POST" or "PUT" or "PATCH";
+        // .AcceptsBinary(): the request body is the raw bytes (host code reads the
+        // stream), so TInput never lowers to a JSON body — its properties become
+        // route/query params exactly like a GET/DELETE input.
+        var lowersBody = hasBody && binaryContentType is null;
         string? inputTypeName = null;
 
         // P2 wave 5: [RivetHeader] properties are header params on every HTTP method —
@@ -568,7 +591,7 @@ public static class ContractWalker
             }
         }
 
-        if (hasBody)
+        if (lowersBody)
         {
             // Route params from template — try to match types from TInput properties
             foreach (var paramName in routeParamNames)
@@ -662,7 +685,8 @@ public static class ContractWalker
         }
         else
         {
-            // GET/DELETE: TInput properties matched by name to route → Route, remaining → Query
+            // GET/DELETE (and .AcceptsBinary() bodies): TInput properties matched by name
+            // to route → Route, remaining → Query — never a JSON body param
             if (tInput is not null)
             {
                 inputTypeName = tInput.Name;
