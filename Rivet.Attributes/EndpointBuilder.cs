@@ -31,6 +31,8 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     private bool _acceptsFile;
     private bool _formEncoded;
     private string? _binaryRequestContentType;
+    private string? _requestContentType;
+    private string? _responseContentType;
     private string? _queryAuthParameterName;
     private List<RouteErrorResponse>? _errorResponses;
     private List<RouteResponseHeader>? _responseHeaders;
@@ -55,6 +57,8 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     public bool IsFileUpload => _acceptsFile;
     public bool IsFormEncoded => _formEncoded;
     public string? BinaryRequestContentType => _binaryRequestContentType;
+    public string? RequestContentType => _requestContentType;
+    public string? ResponseContentType => _responseContentType;
     public bool IsQueryAuth => _queryAuthParameterName is not null;
     public string? QueryAuthParameterName => _queryAuthParameterName;
     public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses => _errorResponses;
@@ -88,6 +92,8 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         target._acceptsFile = _acceptsFile;
         target._formEncoded = _formEncoded;
         target._binaryRequestContentType = _binaryRequestContentType;
+        target._requestContentType = _requestContentType;
+        target._responseContentType = _responseContentType;
         target._queryAuthParameterName = _queryAuthParameterName;
         target._errorResponses = _errorResponses?.ToList();
         target._responseHeaders = _responseHeaders?.ToList();
@@ -149,6 +155,46 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         }
 
         _formEncoded = true;
+        return (TSelf)this;
+    }
+
+    /// <summary>
+    /// Declares the request body's media type when it is not application/json
+    /// (e.g. "text/plain" for a string body). The body SCHEMA is unchanged —
+    /// this overrides only the content-type key the spec declares. For raw
+    /// binary bodies use .AcceptsBinary(); for forms use .FormEncoded().
+    /// </summary>
+    public TSelf AcceptsContentType(string contentType)
+    {
+        EnsureMutable();
+        if (_formEncoded || _binaryRequestContentType is not null)
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: .AcceptsContentType() cannot be combined with " +
+                ".FormEncoded() or .AcceptsBinary() — those already declare the body media type.");
+        }
+
+        _requestContentType = contentType;
+        return (TSelf)this;
+    }
+
+    /// <summary>
+    /// Declares the success response's media type when it is not
+    /// application/json (e.g. "text/html" for a string response). The response
+    /// SCHEMA is unchanged — this overrides only the content-type key the spec
+    /// declares. For binary/file responses use .ProducesFile().
+    /// </summary>
+    public TSelf ProducesContentType(string contentType)
+    {
+        EnsureMutable();
+        if (_fileContentType is not null)
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: .ProducesContentType() cannot be combined with .ProducesFile() — " +
+                "the file content type already declares the response media type.");
+        }
+
+        _responseContentType = contentType;
         return (TSelf)this;
     }
 

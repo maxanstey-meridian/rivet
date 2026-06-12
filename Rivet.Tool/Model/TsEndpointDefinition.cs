@@ -23,7 +23,12 @@ public sealed record TsEndpointDefinition(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsEndpointExample>? RequestExamples = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFileEndpoint = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] QueryAuthMetadata? QueryAuth = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BinaryRequestContentType = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BinaryRequestContentType = null,
+    // .AcceptsContentType()/.ProducesContentType(): non-JSON media types for
+    // JSON-schema'd bodies (text/plain string body, text/html string response).
+    // Schema is unchanged — only the declared content-type key (FABLE_ROUNDTRIP #10).
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RequestContentTypeOverride = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResponseContentTypeOverride = null);
 
 /// <summary>
 /// Security metadata for an endpoint. null = inherit CLI default.

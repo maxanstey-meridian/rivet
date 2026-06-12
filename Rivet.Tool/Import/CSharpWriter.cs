@@ -471,6 +471,18 @@ internal static class CSharpWriter
             }
         }
 
+        // FABLE_ROUNDTRIP #10: text/* media types survive as content-type
+        // overrides — the schema is unchanged, only the declared media type.
+        if (field.RequestContentType is not null)
+        {
+            calls.Add($".AcceptsContentType(\"{EscapeString(field.RequestContentType)}\")");
+        }
+
+        if (field.ResponseContentType is not null)
+        {
+            calls.Add($".ProducesContentType(\"{EscapeString(field.ResponseContentType)}\")");
+        }
+
         if (field.FileContentType is not null)
         {
             if (field.IsFileEndpoint)

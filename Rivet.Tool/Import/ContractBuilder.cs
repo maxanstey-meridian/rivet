@@ -93,7 +93,7 @@ internal static class ContractBuilder
         var queryAuthParameterName = ResolveQueryAuth(operation);
 
         // Resolve input type (requestBody — $ref resolved by library)
-        var (inputType, isFormEncoded, binaryRequestContentType) =
+        var (inputType, isFormEncoded, binaryRequestContentType, requestContentType) =
             ResolveInputType(operation, mapper, fieldName, unsupported);
 
         // I14: parameters must be resolved regardless of body presence — they used to be
@@ -115,7 +115,8 @@ internal static class ContractBuilder
         }
 
         // Resolve output type (lowest 2xx response with JSON content)
-        var (outputType, successStatus, fileContentType) = ResolveOutputType(operation, mapper, fieldName, unsupported);
+        var (outputType, successStatus, fileContentType, responseContentType) =
+            ResolveOutputType(operation, mapper, fieldName, unsupported);
 
         // File endpoint: binary content type on a GET endpoint → Define.File()
         // Non-GET binary endpoints (e.g. POST → PDF) keep Define.{Method}().ProducesFile()
@@ -123,7 +124,7 @@ internal static class ContractBuilder
             && httpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase);
 
         // Error responses
-        var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, unsupported);
+        var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, unsupported, successStatus);
         var requestExamples = ResolveRequestExamples(operation, unsupported, componentExamples);
         var responseExamples = ResolveResponseExamples(operation, unsupported, componentExamples);
         errorResponses = EnsureExampleStatusesAreDeclared(
@@ -144,7 +145,7 @@ internal static class ContractBuilder
             summary, description, successStatus, errorResponses,
             isAnonymous, securityScheme, unsupported, fileContentType, isFormEncoded,
             requestExamples, responseExamples, isFileEndpoint, queryAuthParameterName,
-            responseHeaders, binaryRequestContentType);
+            responseHeaders, binaryRequestContentType, requestContentType, responseContentType);
     }
 
     /// <summary>
@@ -216,13 +217,13 @@ internal static class ContractBuilder
         return headers;
     }
 
-    private static (string? InputType, bool IsFormEncoded, string? BinaryRequestContentType) ResolveInputType(
+    private static (string? InputType, bool IsFormEncoded, string? BinaryRequestContentType, string? RequestContentType) ResolveInputType(
         OpenApiOperation operation, SchemaMapper mapper, string fieldName, List<string> unsupported)
     {
         var requestBody = operation.RequestBody;
         if (requestBody is null)
         {
-            return (null, false, null);
+            return (null, false, null, null);
         }
 
         // A $ref request body that the library could not resolve has no content —
@@ -231,13 +232,13 @@ internal static class ContractBuilder
         {
             var refId = unresolvedRef.Reference?.Id ?? "unknown";
             unsupported.Add($"body $ref={refId} reason=unresolved-ref");
-            return (null, false, null);
+            return (null, false, null, null);
         }
 
         var content = requestBody.Content;
         if (content is null)
         {
-            return (null, false, null);
+            return (null, false, null, null);
         }
 
         // Try content types in priority order, tracking which one matched
@@ -266,7 +267,7 @@ internal static class ContractBuilder
             // containing them would mutate every loop.
             var context = GetExtensionString(schema, "x-rivet-input-type")
                 ?? $"{Naming.ToPascalCaseFromSegments(fieldName)}Request";
-            return (mapper.ResolveCSharpType(schema, context), isFormEncoded, null);
+            return (mapper.ResolveCSharpType(schema, context), isFormEncoded, null, null);
         }
 
         // Raw binary body: a non-multipart content entry whose schema is
@@ -277,7 +278,7 @@ internal static class ContractBuilder
             && IsRawBinarySchema(entry.Value.Schema));
         if (binaryEntry.Key is not null)
         {
-            return (null, false, binaryEntry.Key);
+            return (null, false, binaryEntry.Key, null);
         }
 
         // Fallback: try binary or text content types with a schema
@@ -287,12 +288,18 @@ internal static class ContractBuilder
             || k.StartsWith("application/x-", StringComparison.OrdinalIgnoreCase));
         if (fallbackType is not null && TryGetSchemaForContentType(content, fallbackType, out schema))
         {
-            return (mapper.ResolveCSharpType(schema!, $"{fieldName}Request"), false, null);
+            // FABLE_ROUNDTRIP #10: a text/* body keeps its media type via
+            // .AcceptsContentType(...) — re-emitting it as application/json
+            // was a silent wire change (the octet-stream bug's sibling).
+            var requestContentType = fallbackType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
+                ? fallbackType
+                : null;
+            return (mapper.ResolveCSharpType(schema!, $"{fieldName}Request"), false, null, requestContentType);
         }
 
         // Request body exists but uses unsupported content type(s)
         unsupported.Add($"body {DescribeUnsupportedContent(content)}");
-        return (null, false, null);
+        return (null, false, null, null);
     }
 
     /// <summary>
@@ -583,7 +590,7 @@ internal static class ContractBuilder
         || contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)
         || contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
 
-    private static (string? OutputType, int? SuccessStatus, string? FileContentType) ResolveOutputType(
+    private static (string? OutputType, int? SuccessStatus, string? FileContentType, string? ResponseContentType) ResolveOutputType(
         OpenApiOperation operation,
         SchemaMapper mapper,
         string fieldName,
@@ -591,12 +598,13 @@ internal static class ContractBuilder
     {
         if (operation.Responses is null)
         {
-            return (null, null, null);
+            return (null, null, null, null);
         }
 
         string? outputType = null;
         int? successCode = null;
         string? fileContentType = null;
+        string? responseContentType = null;
 
         // Collect concrete 2xx responses; a "2XX" range wildcard (I9) maps to 200 but only
         // when no concrete 2xx status is declared — concrete statuses always win.
@@ -637,6 +645,7 @@ internal static class ContractBuilder
             // a typed JSON output AND ProducesFile on the same endpoint.
             outputType = null;
             fileContentType = null;
+            responseContentType = null;
 
             if (response.Content is { Count: > 0 })
             {
@@ -662,7 +671,11 @@ internal static class ContractBuilder
                         if (textType is not null
                             && TryGetSchemaForContentType(response.Content, textType, out schema))
                         {
+                            // FABLE_ROUNDTRIP #10: keep the text/* media type via
+                            // .ProducesContentType(...) — re-emitting it as
+                            // application/json was a silent wire change.
                             outputType = mapper.ResolveCSharpType(schema!, $"{fieldName}Response");
+                            responseContentType = textType;
                         }
                         else
                         {
@@ -678,14 +691,28 @@ internal static class ContractBuilder
             }
         }
 
-        return (outputType, successCode, fileContentType);
+        // FABLE_ROUNDTRIP #8: redirect-only operations declare no 2xx at all.
+        // The lowest concrete 3xx becomes the declared (bodyless) success
+        // status — without one the walker defaults a 200 the API never returns.
+        if (successCode is null && operation.Responses is not null)
+        {
+            successCode = operation.Responses.Keys
+                .Select(status => int.TryParse(status, out var parsed) ? parsed : -1)
+                .Where(parsed => parsed is >= 300 and < 400)
+                .OrderBy(parsed => parsed)
+                .Cast<int?>()
+                .FirstOrDefault();
+        }
+
+        return (outputType, successCode, fileContentType, responseContentType);
     }
 
     private static IReadOnlyList<GeneratedErrorResponse> ResolveErrorResponses(
         OpenApiOperation operation,
         SchemaMapper mapper,
         string fieldName,
-        List<string> unsupported)
+        List<string> unsupported,
+        int? successStatus = null)
     {
         if (operation.Responses is null)
         {
@@ -712,6 +739,13 @@ internal static class ContractBuilder
                 code = 500;
             }
             else if (!int.TryParse(statusStr, out code) || code < 300)
+            {
+                continue;
+            }
+
+            // A 3xx promoted to the declared success status (redirect-only op)
+            // is already carried by .Status(...) — don't double-declare it.
+            if (code == successStatus)
             {
                 continue;
             }
@@ -927,6 +961,15 @@ internal static class ContractBuilder
     /// value at import time, while the source components are still in hand.
     /// Unresolvable or cyclic refs degrade LOUDLY to null + marker.
     /// </summary>
+    /// <summary>
+    /// Microsoft.OpenApi cannot hold a JSON null in its JsonNode-based example
+    /// model — the library substitutes this sentinel string (a fixed constant,
+    /// verified against 2.7.0). Leaking it emitted a GUID string everywhere
+    /// the spec said <c>null</c> (FABLE_ROUNDTRIP #9, 45 corpus occurrences).
+    /// </summary>
+    private const string OpenApiNullSentinel =
+        "\"openapi-json-null-sentinel-value-2BF93600-0FE4-4250-987A-E5DDB203E464\"";
+
     private static string InlineEmbeddedExampleRefs(
         string json,
         IDictionary<string, IOpenApiExample>? componentExamples,
@@ -935,6 +978,8 @@ internal static class ContractBuilder
         string mediaType,
         string? name)
     {
+        json = json.Replace(OpenApiNullSentinel, "null", StringComparison.Ordinal);
+
         if (!json.Contains("#/components/examples/", StringComparison.Ordinal))
         {
             return json;

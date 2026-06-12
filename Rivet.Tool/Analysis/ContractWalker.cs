@@ -206,6 +206,8 @@ public static class ContractWalker
         var isFormEncoded = false;
         string? fileContentType = null;
         string? binaryRequestContentType = null;
+        string? requestContentTypeOverride = null;
+        string? responseContentTypeOverride = null;
         QueryAuthMetadata? queryAuth = null;
 
         for (var i = 1; i < chain.Count; i++)
@@ -226,6 +228,14 @@ public static class ContractWalker
             else if (call.MethodName == "AcceptsBinary")
             {
                 binaryRequestContentType = call.StringArg ?? "application/octet-stream";
+            }
+            else if (call.MethodName == "AcceptsContentType" && call.StringArg is not null)
+            {
+                requestContentTypeOverride = call.StringArg;
+            }
+            else if (call.MethodName == "ProducesContentType" && call.StringArg is not null)
+            {
+                responseContentTypeOverride = call.StringArg;
             }
             else if (call.MethodName == "RequestExampleJson" && call.GetStringArg("json") is not null)
             {
@@ -425,7 +435,9 @@ public static class ContractWalker
             RequestExamples: requestExamples,
             IsFileEndpoint: isFileEndpoint,
             QueryAuth: queryAuth,
-            BinaryRequestContentType: binaryRequestContentType);
+            BinaryRequestContentType: binaryRequestContentType,
+            RequestContentTypeOverride: requestContentTypeOverride,
+            ResponseContentTypeOverride: responseContentTypeOverride);
     }
 
     /// <summary>

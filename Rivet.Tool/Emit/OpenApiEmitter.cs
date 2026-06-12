@@ -449,7 +449,7 @@ public static class OpenApiEmitter
         {
             var bodyContentType = ep.IsFormEncoded
                 ? "application/x-www-form-urlencoded"
-                : "application/json";
+                : ep.RequestContentTypeOverride ?? "application/json";
             operation["requestBody"] = new Dictionary<string, object>
             {
                 // E11: a Nullable body type means the request body is optional
@@ -469,7 +469,7 @@ public static class OpenApiEmitter
         {
             var requestTypeContentType = ep.IsFormEncoded
                 ? "application/x-www-form-urlencoded"
-                : "application/json";
+                : ep.RequestContentTypeOverride ?? "application/json";
             operation["requestBody"] = new Dictionary<string, object>
             {
                 // E11: a Nullable body type means the request body is optional
@@ -523,10 +523,15 @@ public static class OpenApiEmitter
 
             if (resp.DataType is not null)
             {
+                // .ProducesContentType() overrides the SUCCESS response's media
+                // type only — declared error responses stay application/json.
+                var responseContentType = resp.StatusCode is >= 200 and < 300
+                    ? ep.ResponseContentTypeOverride ?? "application/json"
+                    : "application/json";
                 respObj["content"] = WithExamples(
                     new Dictionary<string, object>
                     {
-                        ["application/json"] = new Dictionary<string, object>
+                        [responseContentType] = new Dictionary<string, object>
                         {
                             ["schema"] = MapTsTypeToJsonSchema(resp.DataType, $"response {resp.StatusCode} on endpoint '{ep.ControllerName}.{ep.Name}'"),
                         },
@@ -654,9 +659,10 @@ public static class OpenApiEmitter
                 continue;
             }
 
+            // null is a legal example value (`value: null`) — see ParseJson.
             target[example.ComponentExampleId] = new Dictionary<string, object>
             {
-                ["value"] = ParseJson(example.ResolvedJson),
+                ["value"] = ParseJson(example.ResolvedJson)!,
             };
         }
     }
@@ -700,7 +706,8 @@ public static class OpenApiEmitter
                 && groupedExamples[0].ComponentExampleId is null)
             {
                 var inlineExampleJson = groupedExamples[0].Json;
-                mediaContentDict["example"] = ParseJson(inlineExampleJson!);
+                // null is a legal example value (`example: null`) — see ParseJson.
+                mediaContentDict["example"] = ParseJson(inlineExampleJson!)!;
                 continue;
             }
 
@@ -748,15 +755,19 @@ public static class OpenApiEmitter
             return null;
         }
 
+        // null is a legal example value (`value: null`) — see ParseJson.
         return new Dictionary<string, object>
         {
-            ["value"] = ParseJson(json),
+            ["value"] = ParseJson(json)!,
         };
     }
 
-    private static object ParseJson(string json) =>
-        JsonSerializer.Deserialize<object>(json)
-        ?? throw new InvalidOperationException("Expected example JSON to deserialize.");
+    // Returns null only for the JSON literal `null` — a legal example value
+    // (the importer converts Microsoft.OpenApi's null sentinel back to it);
+    // malformed JSON throws JsonException. Callers store the null in an
+    // object-valued dictionary slot, which System.Text.Json serializes as null.
+    private static object? ParseJson(string json) =>
+        JsonSerializer.Deserialize<object>(json);
 
     public static Dictionary<string, object> MapTsTypeToJsonSchema(TsType type, string? context = null)
     {
