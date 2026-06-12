@@ -7,7 +7,7 @@ required, types, formats, enums, nullability, defaults) between an original
 spec and its import->emit round-trip, resolving $refs on both sides.
 
 Usage:
-    roundtrip-diff.py <original.json> <reemitted.json> [--summary-json <path>]
+    roundtrip-diff.py <original.json> <reemitted.json> [--summary-json <path>] [--details-json <path>]
 
 --summary-json writes machine-readable category counts plus the clean-op
 ratio; RoundTripCorpusGateTests ratchets against a committed baseline of it.
@@ -20,6 +20,9 @@ ORIG, REEMIT = args[0], args[1]
 SUMMARY_PATH = None
 if '--summary-json' in sys.argv:
     SUMMARY_PATH = sys.argv[sys.argv.index('--summary-json') + 1]
+DETAILS_PATH = None
+if '--details-json' in sys.argv:
+    DETAILS_PATH = sys.argv[sys.argv.index('--details-json') + 1]
 
 o = json.load(open(ORIG))
 r = json.load(open(REEMIT))
@@ -183,9 +186,12 @@ for key in shared:
 
 # ---------- component schema comparison ----------
 def norm(s): return re.sub(r'[^a-z0-9]', '', s.lower())
-rn = {norm(n): n for n in r['components']['schemas']}
-pairs = [(n, rn[norm(n)]) for n in o['components']['schemas'] if norm(n) in rn]
-print(f"schemas: orig={len(o['components']['schemas'])} matched={len(pairs)}")
+# Inline-only specs (e.g. notion) have no components section at all.
+o_schemas = o.get('components', {}).get('schemas', {})
+r_schemas = r.get('components', {}).get('schemas', {})
+rn = {norm(n): n for n in r_schemas}
+pairs = [(n, rn[norm(n)]) for n in o_schemas if norm(n) in rn]
+print(f"schemas: orig={len(o_schemas)} matched={len(pairs)}")
 
 def is_nullable(s):
     if s.get('nullable'): return True
@@ -228,14 +234,14 @@ def flatten_allof(s, res, depth=0):
     return merged
 
 for on, rn_ in pairs:
-    osch = flatten_allof(o['components']['schemas'][on], ores)
-    rsch = flatten_allof(r['components']['schemas'][rn_], rres)
+    osch = flatten_allof(o_schemas[on], ores)
+    rsch = flatten_allof(r_schemas[rn_], rres)
     okind = eff_type(osch) or ('object' if 'properties' in osch else None)
     rkind = eff_type(rsch) or ('object' if 'properties' in rsch else None)
     # composition arity
     for comp in ('oneOf', 'anyOf'):
-        oc = o['components']['schemas'][on].get(comp)
-        rc = r['components']['schemas'][rn_].get(comp)
+        oc = o_schemas[on].get(comp)
+        rc = r_schemas[rn_].get(comp)
         if oc and not rc and comp not in ('anyOf',):
             pass
     if okind != rkind:
@@ -333,3 +339,10 @@ if SUMMARY_PATH:
         "schemaFindings": {cat: len(items) for cat, items in schema_findings.items()},
     }
     json.dump(summary, open(SUMMARY_PATH, 'w'), indent=2, sort_keys=True)
+
+if DETAILS_PATH:
+    details = {
+        "opFindings": {cat: [[list(k), repr(d)] for k, d in items] for cat, items in findings.items()},
+        "schemaFindings": {cat: [[list(k) if isinstance(k, tuple) else k, repr(d)] for k, d in items] for cat, items in schema_findings.items()},
+    }
+    json.dump(details, open(DETAILS_PATH, 'w'), indent=1, sort_keys=True)
