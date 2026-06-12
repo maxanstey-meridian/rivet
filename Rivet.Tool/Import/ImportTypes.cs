@@ -18,7 +18,10 @@ internal sealed record GeneratedRecord(
     IReadOnlyList<string>? TypeParameters = null,
     string? Description = null,
     PolymorphismInfo? Polymorphism = null,
-    string? BaseTypeName = null);
+    string? BaseTypeName = null,
+    // Undiscriminated-oneOf wrapper (As* properties) — emitted with [RivetUnion]
+    // so the walker re-emits oneOf and the runtime serializes the bare variant.
+    bool IsUnion = false);
 
 /// <summary>
 /// Reversal of an emitted oneOf + discriminator + mapping union: the record becomes an

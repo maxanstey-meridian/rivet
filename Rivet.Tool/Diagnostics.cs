@@ -44,6 +44,7 @@ public static class Diagnostics
     public const string PolymorphicNoDerivedTypes = "RIV1015";
     public const string PolymorphicUnknownHandlingDropped = "RIV1016";
     public const string ResponseHeaderUndeclaredStatus = "RIV1017";
+    public const string RivetUnionNoVariants = "RIV1018";
 
     // ----- RIV2xxx: emission -----
     public const string TaggedUnionComponentCollision = "RIV2001";
@@ -98,6 +99,7 @@ public static class Diagnostics
         [PolymorphicNoDerivedTypes] = "[JsonPolymorphic] base type has no [JsonDerivedType] registrations — there is no variant set to emit; the type falls back to plain property flattening.",
         [PolymorphicUnknownHandlingDropped] = "[JsonPolymorphic] UnknownDerivedTypeHandling has no spec representation — the emitted oneOf admits only the registered derived types.",
         [ResponseHeaderUndeclaredStatus] = ".WithResponseHeader() targets a status code the contract endpoint does not declare — the header is ignored.",
+        [RivetUnionNoVariants] = "[RivetUnion] wrapper has no variant properties — there is no union to emit; the type falls back to plain property flattening.",
         [TaggedUnionComponentCollision] = "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
         [UndefinedSecurityScheme] = "Endpoint references a security scheme with no definition — a default bearer securityScheme component is emitted.",
         [DuplicateEndpoint] = "Two endpoints share an HTTP method + path — the later definition wins.",

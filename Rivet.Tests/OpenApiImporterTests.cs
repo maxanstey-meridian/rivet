@@ -4942,6 +4942,69 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Import_Marks_Undiscriminated_OneOf_Wrappers_With_RivetUnion()
+    {
+        // D2 (2026-06-12): primitive oneOf used to re-emit as the As* wrapper
+        // OBJECT — wire-shape loss (clients sent {"asString": ...} where the
+        // API wants "..."). The wrapper now carries [RivetUnion]: the walker
+        // re-emits oneOf and the attribute's converter serializes the bare variant.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "title": { "oneOf": [ { "type": "string" }, { "type": "integer" } ] }
+                    }
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var result = CompilationHelper.Import(spec);
+        var wrapper = CompilationHelper.FindFile(result, "DtoTitle.cs");
+        Assert.Contains("[RivetUnion]", wrapper);
+        Assert.Contains("AsString", wrapper);
+        Assert.Contains("AsLong", wrapper);
+    }
+
+    [Fact]
+    public void Undiscriminated_OneOf_Survives_Import_Emit_RoundTrip()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "required": ["title"],
+                    "properties": {
+                        "title": { "oneOf": [ { "type": "string" }, { "type": "integer" } ] }
+                    }
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var compilation = CompilationHelper.CompileImportResult(CompilationHelper.Import(spec));
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emitted = Rivet.Tool.Emit.OpenApiEmitter.Emit(
+            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        using var document = System.Text.Json.JsonDocument.Parse(emitted);
+
+        var wrapperSchema = document.RootElement
+            .GetProperty("components").GetProperty("schemas").GetProperty("DtoTitle");
+        Assert.True(wrapperSchema.TryGetProperty("oneOf", out var oneOf));
+        var variantTypes = oneOf.EnumerateArray()
+            .Select(variant => variant.GetProperty("type").GetString())
+            .ToList();
+        Assert.Contains("string", variantTypes);
+        Assert.Contains("integer", variantTypes);
+        Assert.False(wrapperSchema.TryGetProperty("properties", out _));
+        Assert.False(wrapperSchema.TryGetProperty("discriminator", out _));
+    }
+
+    [Fact]
     public void Import_Inlines_Embedded_Example_Refs()
     {
         // github anti-pattern: an example VALUE that is {"$ref": "#/components/examples/X"}.

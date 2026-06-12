@@ -47,6 +47,12 @@ internal static class CSharpWriter
                 sb.AppendLine($"[JsonDerivedType(typeof({variant.TypeName}), \"{EscapeString(variant.Tag)}\")]");
             }
         }
+        if (record.IsUnion)
+        {
+            // Wire value is the bare variant: the walker re-emits oneOf, the
+            // attribute's converter unwraps/rewraps at runtime.
+            sb.AppendLine("[RivetUnion]");
+        }
         // Derived polymorphic records are not [RivetType] entry points — the walker
         // reaches them through the base's [JsonDerivedType] registrations; attributing
         // them would emit a second, untagged component alongside the union variant.

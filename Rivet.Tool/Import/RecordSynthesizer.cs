@@ -102,7 +102,7 @@ internal sealed class RecordSynthesizer(
             }
         }
 
-        return new GeneratedRecord(name, SchemaClassifier.DeduplicateProperties(properties));
+        return new GeneratedRecord(name, SchemaClassifier.DeduplicateProperties(properties), IsUnion: true);
     }
 
     public List<RecordProperty> ExtractProperties(IOpenApiSchema schema, string context, ISet<string>? inheritedRequired = null)

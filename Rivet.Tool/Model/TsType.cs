@@ -50,6 +50,9 @@ public abstract record TsType
     /// <summary>Discriminated union of object-like variants keyed by a shared string-literal field.</summary>
     public sealed record TaggedUnion(string Discriminator, IReadOnlyList<TaggedUnionVariant> Variants) : TsType;
 
+    /// <summary>An undiscriminated union (oneOf without discriminator) — [RivetUnion] wrappers.</summary>
+    public sealed record Union(IReadOnlyList<TsType> Variants) : TsType;
+
     public sealed record TaggedUnionVariant(string Tag, TsType Type);
 
     /// <summary>
@@ -80,6 +83,7 @@ public abstract record TsType
                     char.ToUpperInvariant(f.Name[0]) + f.Name[1..] + "_" + GetNameSuffix(f.Type)))
                 : "Object",
             TaggedUnion tu => char.ToUpperInvariant(tu.Discriminator[0]) + tu.Discriminator[1..] + "Union",
+            Union u => string.Concat(u.Variants.Select(GetNameSuffix)) + "Union",
             _ => "Unknown",
         };
     }
@@ -110,6 +114,7 @@ public abstract record TsType
             TaggedUnion tu => new TaggedUnion(
                 tu.Discriminator,
                 tu.Variants.Select(v => new TaggedUnionVariant(v.Tag, ResolveTypeParams(v.Type, map))).ToList()),
+            Union u => new Union(u.Variants.Select(v => ResolveTypeParams(v, map)).ToList()),
             _ => type,
         };
     }
@@ -164,6 +169,12 @@ public abstract record TsType
                 foreach (var variant in tu.Variants)
                 {
                     CollectTypeRefs(variant.Type, names);
+                }
+                break;
+            case Union u:
+                foreach (var variant in u.Variants)
+                {
+                    CollectTypeRefs(variant, names);
                 }
                 break;
         }

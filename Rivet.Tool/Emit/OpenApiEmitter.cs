@@ -783,6 +783,15 @@ public static class OpenApiEmitter
 
             TsType.TaggedUnion tu => BuildTaggedUnionSchema(tu, context),
 
+            // Undiscriminated union ([RivetUnion] wrapper): a plain oneOf — no
+            // discriminator, variants may be inline primitive schemas.
+            TsType.Union u => new Dictionary<string, object>
+            {
+                ["oneOf"] = u.Variants
+                    .Select(object (variant) => MapTsTypeToJsonSchema(variant, context))
+                    .ToList(),
+            },
+
             _ => new Dictionary<string, object> { ["type"] = "object" },
         };
     }

@@ -45,6 +45,7 @@ public sealed class TypeWalker
     // base types lower to a TaggedUnion alias instead of silently flattening.
     private readonly INamedTypeSymbol? _jsonPolymorphicType;
     private readonly INamedTypeSymbol? _jsonDerivedTypeType;
+    private readonly INamedTypeSymbol? _rivetUnionType;
 
     public TypeWalker(Compilation compilation)
     {
@@ -98,6 +99,7 @@ public sealed class TypeWalker
         _obsoleteType = compilation.GetTypeByMetadataName("System.ObsoleteAttribute");
         _jsonPolymorphicType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonPolymorphicAttribute");
         _jsonDerivedTypeType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonDerivedTypeAttribute");
+        _rivetUnionType = compilation.GetTypeByMetadataName("Rivet.RivetUnionAttribute");
     }
 
     private static void AddScalar(
@@ -296,6 +298,17 @@ public sealed class TypeWalker
             return;
         }
 
+        // [RivetUnion] wrapper: the wire value is the BARE variant, never the
+        // wrapper object — lower to an undiscriminated union of the property
+        // types (oneOf on emission), mirroring the runtime converter.
+        if (!definition.IsGenericType && TryBuildRivetUnion(definition, name) is { } plainUnion)
+        {
+            _visiting.Remove(name);
+            _definitions[name] = new TsTypeDefinition(name, typeParams, plainUnion, GetTypeDescription(definition));
+            _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
+            return;
+        }
+
         var properties = new List<TsPropertyDefinition>();
 
         // A3: include inherited properties by flattening the BaseType chain
@@ -455,6 +468,41 @@ public sealed class TypeWalker
     /// diagnosed-unsupported (non-string tags, zero registrations) — callers then
     /// fall back to the plain flattening path.
     /// </summary>
+    /// <summary>
+    /// Lowers a [RivetUnion] wrapper record to an undiscriminated union of its
+    /// property types. Nullable wrappers are stripped — every variant property
+    /// is optional by construction (only one is ever set), so nullability is a
+    /// wrapper artifact, not part of the union's wire shape. Returns null when
+    /// the attribute is absent; an attributed record with no usable properties
+    /// is diagnosed and falls back to plain flattening.
+    /// </summary>
+    private TsType.Union? TryBuildRivetUnion(INamedTypeSymbol definition, string name)
+    {
+        if (_rivetUnionType is null
+            || !definition.GetAttributes().Any(attr =>
+                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, _rivetUnionType)))
+        {
+            return null;
+        }
+
+        var variants = new List<TsType>();
+        foreach (var member in GetEffectiveProperties(definition))
+        {
+            var mapped = MapTypeCore(member.Type, $"{name}.{member.Name}");
+            variants.Add(mapped is TsType.Nullable nullable ? nullable.Inner : mapped);
+        }
+
+        if (variants.Count == 0)
+        {
+            Diagnostics.Warn(
+                Diagnostics.RivetUnionNoVariants,
+                $"[RivetUnion] on '{name}' has no variant properties — falling back to plain property flattening");
+            return null;
+        }
+
+        return new TsType.Union(variants);
+    }
+
     private TsType.TaggedUnion? TryBuildPolymorphicUnion(INamedTypeSymbol definition, string name)
     {
         if (_jsonPolymorphicType is null && _jsonDerivedTypeType is null)

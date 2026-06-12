@@ -77,6 +77,11 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                         JsonSerializer.Deserialize<TsType>(e.GetProperty("type").GetRawText(), options)!))
                     .ToArray()),
 
+            "union" => new TsType.Union(
+                root.GetProperty("variants").EnumerateArray()
+                    .Select(e => JsonSerializer.Deserialize<TsType>(e.GetRawText(), options)!)
+                    .ToArray()),
+
             _ => throw new JsonException($"Unknown TsType kind: '{kind}'."),
         };
     }
@@ -186,6 +191,16 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                     writer.WritePropertyName("type");
                     JsonSerializer.Serialize(writer, variant.Type, options);
                     writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+                break;
+
+            case TsType.Union u:
+                writer.WriteString("kind", "union");
+                writer.WriteStartArray("variants");
+                foreach (var variant in u.Variants)
+                {
+                    JsonSerializer.Serialize(writer, variant, options);
                 }
                 writer.WriteEndArray();
                 break;

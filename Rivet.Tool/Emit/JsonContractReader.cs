@@ -145,6 +145,13 @@ public static class JsonContractReader
                 }
 
                 break;
+            case TsType.Union u:
+                foreach (var variant in u.Variants)
+                {
+                    WalkForBrands(variant, brands);
+                }
+
+                break;
         }
     }
 

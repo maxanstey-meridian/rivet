@@ -49,6 +49,7 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1015` | Warning | `[JsonPolymorphic]` base type has no `[JsonDerivedType]` registrations — there is no variant set to emit; the type falls back to plain property flattening. | Register the derived types with `[JsonDerivedType]`, or remove `[JsonPolymorphic]`. |
 | `RIV1016` | Warning | `[JsonPolymorphic]` `UnknownDerivedTypeHandling` has no spec representation — the emitted `oneOf` admits only the registered derived types. | Accept that unknown-type fallback behaviour is invisible to spec consumers. |
 | `RIV1017` | Warning | `.WithResponseHeader()` targets a status code the contract endpoint does not declare — the header is ignored. | Declare the status on the endpoint (`.Returns(...)` / `.Status(...)`) or fix the header's status code. |
+| `RIV1018` | Warning | `[RivetUnion]` wrapper has no variant properties — there is no union to emit; the type falls back to plain property flattening. | Give the wrapper one optional property per variant (the shape the importer generates), or remove the attribute. |
 
 ### Retired IDs
 
