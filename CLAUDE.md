@@ -34,7 +34,8 @@ deliberately narrow (status codes + C# payload types on the typed-results path;
 `Rivet.Attributes/`, `Rivet.Tool/`, `Rivet.Tests/`, `samples/` (ContractApi is
 the contract + runtime-enforcement exemplar; AnnotationApi, TypeShowcase,
 ImportDemo), `docs/` (VitePress, deployed to GitHub Pages), `openapi/` (import
-corpus fixtures), `php-reflector/` (sibling PHP lowerer), Taskfile.yml.
+corpus fixtures), Taskfile.yml. (The PHP lowerer lives in its own repo,
+`rivet-php`.)
 
 ## Build / test
 

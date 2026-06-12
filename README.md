@@ -7,80 +7,25 @@
   </p>
 </p>
 
-**Your C# is the contract.** Rivet reads your C# types and ASP.NET endpoints with Roslyn and
-emits an OpenAPI 3.1 specification — no attributes-on-everything, no runtime
-reflection, no drift between your declared C# types and what the spec says.
+**Your C# is the contract.** Rivet reads your compiled C# with Roslyn and emits an
+OpenAPI 3.1 spec — no runtime reflection, no attributes-on-everything, no drift
+between the code and the spec. The OpenAPI ecosystem does the rest: TypeScript
+types, a typed fetch client, Zod schemas, rendered docs.
 
-> Rivet maps what actually survives the wire boundary. The OpenAPI ecosystem does the rest:
-> TypeScript types via [openapi-typescript](https://github.com/openapi-ts/openapi-typescript),
-> a typed client via [openapi-fetch](https://github.com/openapi-ts/openapi-typescript/tree/main/packages/openapi-fetch),
-> Zod schemas via [openapi-zod-client](https://github.com/astahmer/openapi-zod-client),
-> docs via any OpenAPI renderer.
-
-[oRPC](https://orpc.unnoq.com) gives you this when your server is TypeScript. Rivet gives you the same DX when your server is .NET.
-
-## Install
+[oRPC](https://orpc.unnoq.com) gives you this when your server is TypeScript.
+Rivet gives you the same DX when your server is .NET.
 
 ```bash
 dotnet add package Rivet.Attributes
 dotnet tool install --global dotnet-rivet
 ```
 
-## Generate
+## Two ways in
 
-```bash
-dotnet rivet --project path/to/Api.csproj --output ./generated
-```
+### Already have an ASP.NET API? Annotate it.
 
-This writes `./generated/openapi.json` — an OpenAPI 3.1 spec derived from your compiled
-C# (Roslyn semantic model, not runtime reflection). Omit `--output` to preview the spec
-on stdout. `--title`, `--version`, and `--server` set the spec's `info` and `servers`
-metadata ([CLI reference](https://maxanstey-meridian.github.io/rivet/reference/cli)).
-
-## C# Types → OpenAPI Schemas
-
-```csharp
-public enum WorkItemStatus { Draft, Open, InProgress, Review, Done, Cancelled }
-
-public sealed record Email(string Value);
-
-public sealed record MemberDto(Guid Id, string Name, Email Email, string Role);
-```
-
-```jsonc
-// components/schemas (excerpt)
-{
-  "WorkItemStatus": {
-    "type": "string",
-    "enum": ["draft", "open", "inProgress", "review", "done", "cancelled"]
-  },
-  "Email": { "type": "string", "x-rivet-brand": "Email" },
-  "MemberDto": {
-    "type": "object",
-    "properties": {
-      "id": { "type": "string", "format": "uuid" },
-      "name": { "type": "string" },
-      "email": { "$ref": "#/components/schemas/Email" },
-      "role": { "type": "string" }
-    },
-    "required": ["id", "name", "email", "role"]
-  }
-}
-```
-
-Value-object brands, generics (monomorphised), nullability, validation attributes
-(`[Range]`, `[StringLength]`, `[RegularExpression]`, ...), descriptions, and examples all
-flow into the spec. So do `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies
-(`oneOf` + `discriminator`) and dictionary key types (`propertyNames` for enum, branded,
-and primitive keys) — plus `x-rivet-*` vendor extensions that preserve C#-level fidelity
-(brands, generics, contract names) through the spec
-([vendor extensions reference](https://maxanstey-meridian.github.io/rivet/reference/vendor-extensions),
-[type mapping](https://maxanstey-meridian.github.io/rivet/reference/type-mapping)).
-
-## ASP.NET Endpoints → OpenAPI Operations
-
-Rivet works with ordinary ASP.NET controllers. Mark the endpoints you want surfaced and
-the operation is derived from the real transport shape:
+Mark the endpoints you want surfaced — the operation is derived from the real
+transport shape (routes, params, bodies, response types):
 
 ```csharp
 [ApiController]
@@ -91,21 +36,63 @@ public sealed class TasksController : ControllerBase
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(TaskDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(NotFoundDto), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Get(Guid id, CancellationToken ct)
-    {
-        return Ok(default(TaskDetailDto));
-    }
+    public async Task<IActionResult> Get(Guid id, CancellationToken ct) { ... }
 }
 ```
 
-becomes `GET /api/tasks/{id}` with a typed `200` (TaskDetailDto) and `404` (NotFoundDto)
-response — route constraints normalised, params classified
-(route/query/header/body/form/file — `[FromHeader]` maps to `in: header`),
-multipart and form-encoded bodies handled.
+That becomes `GET /api/tasks/{id}` with a typed `200` and `404` — route
+constraints normalised, params classified, multipart and form bodies handled.
 
-## Consume the Spec (TypeScript)
+### Starting fresh? Write the contract first.
 
-The generated spec plugs straight into the OpenAPI TypeScript ecosystem:
+A contract is plain C#: routes, inputs, outputs, and error responses in one
+place, as data:
+
+```csharp
+[RivetContract]
+public static class MembersContract
+{
+    public static readonly RouteDefinition<PagedResult<MemberDto>> List =
+        Define.Get<PagedResult<MemberDto>>("/api/members");
+
+    public static readonly RouteDefinition<InviteMemberRequest, InviteMemberResponse> Invite =
+        Define.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
+            .Status(201)
+            .Returns<ValidationErrorDto>(422, "Validation failed")
+            .Secure("admin");
+}
+```
+
+Handlers execute the contract, so the compiler enforces that your implementation
+matches the declaration — input type, output type, and (at runtime, on the
+typed-results path) status codes:
+
+```csharp
+[HttpPost]
+public async Task<IActionResult> Invite([FromBody] InviteMemberRequest request, CancellationToken ct)
+    => (await MembersContract.Invite.Invoke(request, async req =>
+    {
+        // req is InviteMemberRequest; must return InviteMemberResponse — compiler-enforced
+        return new InviteMemberResponse(Guid.NewGuid());
+    })).ToActionResult();
+```
+
+Either way — annotated endpoints, contracts, or a mix — the spec comes out the same.
+
+## Generate
+
+```bash
+dotnet rivet --project path/to/Api.csproj --output ./generated
+```
+
+Writes `./generated/openapi.json`, derived from the compiled C# via the Roslyn
+semantic model. Value-object brands, generics, nullability, validation
+attributes, polymorphic hierarchies (`oneOf` + discriminator), dictionary key
+types, headers, descriptions, and examples all flow into the spec.
+
+## Consume
+
+The spec plugs straight into the OpenAPI TypeScript ecosystem:
 
 ```bash
 npx openapi-typescript ./generated/openapi.json -o ./src/api/schema.d.ts
@@ -118,8 +105,8 @@ import type { paths } from "./api/schema";
 
 const api = createClient<paths>({ baseUrl: "https://api.example.com" });
 
-// Fully type-safe: path, params, body, and per-status responses all inferred.
-const { data, error, response } = await api.GET("/api/tasks/{id}", {
+// Path, params, body, and per-status responses all inferred.
+const { data, error } = await api.GET("/api/tasks/{id}", {
   params: { path: { id: taskId } },
 });
 
@@ -129,51 +116,25 @@ if (error) {
 }
 ```
 
-Want runtime validation? Generate Zod schemas from the same spec with
-[openapi-zod-client](https://github.com/astahmer/openapi-zod-client).
+Docs via any OpenAPI renderer; runtime validators via
+[openapi-zod-client](https://github.com/astahmer/openapi-zod-client) if you want them.
 
-## Advanced Features
+## Also in the box
 
-Rivet also supports:
-
-- contract-driven APIs with [`[RivetContract]`](https://maxanstey-meridian.github.io/rivet/guides/contracts) — compiler-enforced single source of truth for routes, inputs, outputs, and error responses, with runtime `Invoke` helpers and [coverage checking](https://maxanstey-meridian.github.io/rivet/guides/contract-coverage)
-- minimal API hosts
-- file endpoints with query-string auth ([file uploads & downloads](https://maxanstey-meridian.github.io/rivet/guides/file-uploads))
-- headers as contract concepts — `[RivetHeader]`/`[FromHeader]` request headers and `.WithResponseHeader(...)` response headers ([attributes](https://maxanstey-meridian.github.io/rivet/reference/attributes), [route definition API](https://maxanstey-meridian.github.io/rivet/reference/endpoint-builder))
-- stable `RIVnnnn` diagnostic IDs on every warning — grep or baseline by ID ([diagnostics reference](https://maxanstey-meridian.github.io/rivet/reference/diagnostics))
-- [OpenAPI import](https://maxanstey-meridian.github.io/rivet/guides/openapi-import) — a one-shot onboarding scaffold for existing APIs: it generates C# contracts once, with loud diagnostics for anything it can't represent ([supported profile](https://maxanstey-meridian.github.io/rivet/reference/import-profile)); the C# then becomes the source of truth
-- [round-trips](https://maxanstey-meridian.github.io/rivet/guides/openapi-round-trips): emit → import → emit produces an equivalent spec (security scheme definitions come from `--security`, not the original spec)
-- the TypeScript-first sibling project [rivet-ts](https://github.com/maxanstey-meridian/rivet-ts) (Hono runtime + the same OpenAPI pipeline via the bundled Rivet binary)
-
-## What Rivet Enforces (and What It Doesn't)
-
-Rivet's guarantees are **spec-time**, not runtime. The C# compiler enforces handler
-input/output types on `.Invoke()`, and contract `Invoke` validates that returned
-status codes (and, for ASP.NET typed results, the payload's C# type) match the
-declaration. Rivet does **not** validate request or response data at runtime:
-
-- constraint attributes (`[Range]`, `[StringLength]`, ...) flow into the spec but are
-  not checked by Rivet at runtime — enforcement is the host framework's job, and the
-  docs have the recipes (`[ApiController]` model validation on controller hosts,
-  `Validator.TryValidateObject` on minimal-API hosts; `[RivetConstraints]` is a
-  `ValidationAttribute` and participates in both)
-- response bodies are not shape-checked — extra properties on a returned object
-  serialize to the wire
-- declared request/response headers are spec-only — Rivet never binds, sets, or
-  validates them
-- `Define.File` endpoints have no runtime enforcement at all
-
-Full statement: [Runtime Validation](https://maxanstey-meridian.github.io/rivet/guides/runtime-validation).
+- [Contract coverage checking](https://maxanstey-meridian.github.io/rivet/guides/contract-coverage) — `--check` verifies every contract field has an implementation on the declared route and method
+- [OpenAPI import](https://maxanstey-meridian.github.io/rivet/guides/openapi-import) — one-shot onboarding for existing APIs: generate C# contracts from a spec, then the C# is the source of truth
+- [File endpoints](https://maxanstey-meridian.github.io/rivet/guides/file-uploads), headers as contract concepts, minimal-API hosts, [round-trippable specs](https://maxanstey-meridian.github.io/rivet/guides/openapi-round-trips)
+- Stable `RIVnnnn` [diagnostic IDs](https://maxanstey-meridian.github.io/rivet/reference/diagnostics) on every warning — grep or baseline by ID
+- A TypeScript-first sibling, [rivet-ts](https://github.com/maxanstey-meridian/rivet-ts) — same pipeline, contracts authored as TS types, Hono runtime
 
 ## Documentation
 
-Start with:
-
-- [Getting Started](https://maxanstey-meridian.github.io/rivet/getting-started)
-- [CLI Reference](https://maxanstey-meridian.github.io/rivet/reference/cli)
-- [OpenAPI Emission](https://maxanstey-meridian.github.io/rivet/guides/openapi-emission)
-- [Contracts](https://maxanstey-meridian.github.io/rivet/guides/contracts)
-- [OpenAPI Import](https://maxanstey-meridian.github.io/rivet/guides/openapi-import) (onboarding scaffold) and the [Import Profile](https://maxanstey-meridian.github.io/rivet/reference/import-profile)
+[Getting Started](https://maxanstey-meridian.github.io/rivet/getting-started) ·
+[Contracts](https://maxanstey-meridian.github.io/rivet/guides/contracts) ·
+[CLI Reference](https://maxanstey-meridian.github.io/rivet/reference/cli) ·
+[Type Mapping](https://maxanstey-meridian.github.io/rivet/reference/type-mapping) ·
+[Runtime Validation](https://maxanstey-meridian.github.io/rivet/guides/runtime-validation)
+(the precise scope of what is and isn't enforced at runtime)
 
 ## License
 
