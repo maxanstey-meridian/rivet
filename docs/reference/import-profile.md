@@ -55,7 +55,11 @@ the scheme *name* survives the import (see Security below).
   cannot declare (e.g. a second 2xx) are dropped with a marker.
 - **Validation metadata on schema properties**: min/max length, pattern,
   ranges, item counts → DataAnnotations / Rivet constraint attributes;
-  defaults, formats, descriptions, examples, readOnly/writeOnly.
+  defaults, formats, descriptions, examples, readOnly/writeOnly. Records
+  whose properties carry a `ValidationAttribute` are scaffolded as
+  non-positional `required`/`init` records — the MVC-safe placement (see the
+  [positional-record gotcha](/guides/runtime-validation#the-positional-record-gotcha));
+  unconstrained records stay positional.
 - **Security**: one global scheme **name** and one scheme **name** per
   operation (`.Secure(...)`), empty `security: []` → `.Anonymous()`. The scheme
   **type** (apiKey / http bearer / oauth2 / …) is erased on import: the contract

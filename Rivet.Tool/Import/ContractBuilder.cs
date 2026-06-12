@@ -362,9 +362,18 @@ internal static class ContractBuilder
                 csharpType += "?";
             }
 
+            var paramPropertyName = Naming.ToPascalCaseFromSegments(param.Name);
+            if (Naming.IsReservedRecordMemberName(paramPropertyName))
+            {
+                // Params bind by member name (not the serializer), so the rename
+                // shifts the spec-visible name — loud marker, not a silent fix.
+                paramPropertyName += "Value";
+                unsupported.Add($"param name={param.Name} in={location} reason=reserved-member-renamed");
+            }
+
             properties.Add(new ParamProperty(
                 new RecordProperty(
-                    Naming.ToPascalCaseFromSegments(param.Name),
+                    paramPropertyName,
                     csharpType,
                     param.Required,
                     HeaderName: param.In is ParameterLocation.Header ? param.Name : null),

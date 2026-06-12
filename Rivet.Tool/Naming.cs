@@ -14,6 +14,16 @@ internal static class Naming
         return JsonNamingPolicy.CamelCase.ConvertName(name);
     }
 
+    /// <summary>
+    /// PascalCased property names that cannot be record members: object/record
+    /// machinery the compiler reserves. A positional parameter with one of
+    /// these names is CS8866 at emit time (it resolves to object.Equals etc.);
+    /// Deconstruct/EqualityContract collide with record-synthesized members.
+    /// </summary>
+    public static bool IsReservedRecordMemberName(string name) =>
+        name is "Equals" or "GetHashCode" or "GetType" or "ToString"
+            or "Deconstruct" or "EqualityContract";
+
     public static string ToPascalCase(string name)
     {
         if (string.IsNullOrEmpty(name) || char.IsUpper(name[0]))

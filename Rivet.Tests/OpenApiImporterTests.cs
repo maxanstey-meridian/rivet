@@ -4848,6 +4848,100 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Import_Renames_Reserved_Record_Member_Names_And_Pins_Wire_Name()
+    {
+        // A schema property named "equals" PascalCases to Equals — a positional
+        // parameter by that name is CS8866 (it resolves to object.Equals). The
+        // member is renamed and the original key pinned via [JsonPropertyName]
+        // so neither the serializer nor the round-tripped spec drift.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "equals": { "type": "string" },
+                        "toString": { "type": "string" }
+                    }
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("[property: JsonPropertyName(\"equals\")]", content);
+        Assert.Contains("string? EqualsValue", content);
+        Assert.Contains("[property: JsonPropertyName(\"toString\")]", content);
+        Assert.Contains("string? ToStringValue", content);
+        Assert.DoesNotContain("string? Equals)", content);
+    }
+
+    [Fact]
+    public void Import_Pins_Wire_Name_When_CamelCase_Of_Member_Differs_From_Key()
+    {
+        // snake_case (and already-PascalCase) keys PascalCase to members whose
+        // camelCase form is NOT the original key — without [JsonPropertyName]
+        // both the runtime serializer and the walker's re-emit silently rename
+        // the wire field. camelCase keys need no pin.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "user_id": { "type": "string" },
+                        "Status": { "type": "string" },
+                        "displayName": { "type": "string" }
+                    },
+                    "required": ["user_id", "Status", "displayName"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("[property: JsonPropertyName(\"user_id\")]", content);
+        Assert.Contains("string UserId", content);
+        Assert.Contains("[property: JsonPropertyName(\"Status\")]", content);
+        Assert.DoesNotContain("JsonPropertyName(\"displayName\")", content);
+        Assert.Contains("string DisplayName", content);
+    }
+
+    [Fact]
+    public void Import_Round_Trips_Snake_Case_Property_Keys()
+    {
+        // End-to-end half of the wire-name pin: re-emitting the imported C#
+        // must reproduce the original property keys, not camelCase(member).
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "user_id": { "type": "string" },
+                        "equals": { "type": "string" }
+                    },
+                    "required": ["user_id"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var compilation = CompilationHelper.CompileImportResult(CompilationHelper.Import(spec));
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emitted = Rivet.Tool.Emit.OpenApiEmitter.Emit(
+            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        using var document = System.Text.Json.JsonDocument.Parse(emitted);
+        var properties = document.RootElement
+            .GetProperty("components").GetProperty("schemas")
+            .GetProperty("Dto").GetProperty("properties");
+        Assert.True(properties.TryGetProperty("user_id", out _));
+        Assert.True(properties.TryGetProperty("equals", out _));
+        Assert.False(properties.TryGetProperty("userId", out _));
+    }
+
+    [Fact]
     public void Import_Keeps_Positional_Record_When_No_Constraints()
     {
         var spec = CompilationHelper.BuildSpec(

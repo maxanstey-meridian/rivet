@@ -99,6 +99,12 @@ constraint attributes on the properties. That single placement is visible to the
 spec, to MVC, and to `Validator.TryValidateObject` — see
 `InviteMemberRequest` in `samples/ContractApi/Models/MemberModels.cs`.
 
+The `--from-openapi` scaffold follows the same rule: any record whose properties
+carry a `ValidationAttribute` (the DataAnnotations constraint set,
+`EmailAddress`/`Url` from formats, or `[RivetConstraints]`) is generated in the
+non-positional `required`/`init` form, so imported DTOs are safe under MVC model
+validation out of the box. Unconstrained records stay positional.
+
 ## Validating at the network boundary
 
 If you want runtime validation of payloads against the contract, generate it from

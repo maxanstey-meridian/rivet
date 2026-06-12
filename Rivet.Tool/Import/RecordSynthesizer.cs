@@ -119,7 +119,7 @@ internal sealed class RecordSynthesizer(
             foreach (var (propKey, propSchema) in schema.Properties)
             {
                 var propName = Naming.ToPascalCaseFromSegments(propKey);
-                if (propName == context)
+                if (propName == context || Naming.IsReservedRecordMemberName(propName))
                 {
                     propName += "Value";
                 }
@@ -170,8 +170,14 @@ internal sealed class RecordSynthesizer(
                 var isReadOnly = propSchema.ReadOnly;
                 var isWriteOnly = propSchema.WriteOnly;
 
+                // Wire fidelity: the walker re-emits camelCase(Name) unless a
+                // [JsonPropertyName] says otherwise, and the runtime serializer
+                // makes the same assumption — snake_case keys, already-PascalCase
+                // keys, and renamed properties all need the original key pinned.
+                var wireName = Naming.ToCamelCase(propName) == propKey ? null : propKey;
+
                 properties.Add(new RecordProperty(propName, csharpType, isRequired, isDeprecated, format, defaultValue, constraints,
-                    description, example, isReadOnly, isWriteOnly));
+                    description, example, isReadOnly, isWriteOnly, WireName: wireName));
             }
         }
 

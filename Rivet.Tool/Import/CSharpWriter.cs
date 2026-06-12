@@ -20,7 +20,8 @@ internal static class CSharpWriter
         {
             sb.AppendLine("using System.ComponentModel.DataAnnotations;");
         }
-        if (record.Polymorphism is not null)
+        if (record.Polymorphism is not null
+            || record.Properties.Any(p => p.WireName is not null))
         {
             sb.AppendLine("using System.Text.Json.Serialization;");
         }
@@ -124,6 +125,10 @@ internal static class CSharpWriter
 
     private static void EmitPropertyAttributes(StringBuilder sb, RecordProperty prop, string target)
     {
+        if (prop.WireName is not null)
+        {
+            sb.AppendLine($"    [{target}JsonPropertyName(\"{EscapeString(prop.WireName)}\")]");
+        }
         if (prop.HeaderName is not null)
         {
             sb.AppendLine($"    [{target}RivetHeader(\"{EscapeString(prop.HeaderName)}\")]");

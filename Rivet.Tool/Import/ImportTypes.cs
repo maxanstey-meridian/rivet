@@ -45,7 +45,12 @@ internal sealed record RecordProperty(
     bool IsWriteOnly = false,
     // P2 wave 5: non-null for request-header properties — the wire header name with its
     // original casing. Written as [property: RivetHeader("...")], never part of JSON.
-    string? HeaderName = null);
+    string? HeaderName = null,
+    // Non-null when camelCase(Name) is not the spec's property key (snake_case keys,
+    // already-PascalCase keys, reserved-member renames). Written as
+    // [property: JsonPropertyName("...")] so both the runtime serializer and the
+    // walker's re-emit keep the original wire name.
+    string? WireName = null);
 
 internal sealed record GeneratedEnumMember(
     string CSharpName,
