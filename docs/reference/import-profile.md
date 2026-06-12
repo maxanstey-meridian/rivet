@@ -87,10 +87,14 @@ the scheme *name* survives the import (see Security below).
   `COLLABORATOR` and `EastUs` survive exactly, not case-mangled.
 - **Responses**: lowest concrete 2xx wins (a `2XX` wildcard maps to 200 when no
   concrete 2xx exists); typed error responses; `default` → 500; `4XX`/`5XX` →
-  400/500; named and `$ref` component examples. A redirect-only operation
-  (3xx and errors, no 2xx) declares its lowest 3xx via `.Status(...)` — no
-  fabricated `200`. JSON `null` example values import as `null` (the
-  Microsoft.OpenApi sentinel string is converted back at import).
+  400/500 — every range projection to a literal status carries a loud
+  `status-range` marker, since the spec never promised that exact code; named
+  and `$ref` component examples. An operation with no 2xx at all declares its
+  lowest non-error status via `.Status(...)` — 3xx redirects and 1xx
+  informational (websocket `101`) alike, no fabricated `200`. A 1xx beside a
+  concrete 2xx has no contract axis and drops with a marker. JSON `null`
+  example values import as `null` (the Microsoft.OpenApi sentinel string is
+  converted back at import).
 - **Response headers** (P2 wave 5): re-emitted as `.WithResponseHeader(status,
   "Name", description, required:)` chain calls — name, description and
   `required` survive. The header schema is string-typed in v1: a non-string
@@ -127,7 +131,10 @@ the scheme *name* survives the import (see Security below).
 | `param name=… in=header reason=reserved-header-dropped` | `Accept`/`Content-Type`/`Authorization` declared as a header parameter — OpenAPI forbids these, the emitter could never re-emit them, so the parameter is dropped. |
 | `header name=… status=… reason=undeclared-status` | Response header sits on a status the contract cannot declare (e.g. a non-lowest 2xx); the header was dropped. |
 | `param-metadata params=… reason=metadata-dropped` | Parameter descriptions / deprecation / validation constraints did not survive into the synthesized input record. |
-| `param name=… in=… reason=dropped-unmergeable-body body-type=…` | Operation has both parameters and a request body whose type is not a plain record — the parameter could not be merged and was dropped. |
+| `param name=… in=… reason=dropped-unmergeable-body body-type=…` | A body-carrying operation (POST/PUT/PATCH) has both parameters and a request body whose type is not a plain record — the body wins (TInput re-emits as the JSON body) and the parameter was dropped. |
+| `body method=… reason=opaque-body-dropped-params-kept body-type=…` | A bodyless-method operation (GET/DELETE) has both parameters and a request body whose type is not a plain record. TInput lowers to route/query params, which an opaque type cannot do — so the parameters win and the body was dropped (its form-encoding/content-type metadata with it). |
+| `response status-range=… projected=…` / `error status-range=… projected=…` | An OpenAPI status range (`2XX`/`4xx`/`5xx`) was projected to a literal status the spec never promised. |
+| `response status=1xx reason=informational-status-dropped` | A 1xx response beside a concrete 2xx — the contract has no informational-status axis, so it was dropped. |
 | `param name=… in=… reason=body-property-shadowed-by-param body-type=…` | A body property shares a parameter's name but not its type; the parameter won, the body property was dropped. |
 | `param name=… in=query reason=location-erased-to-body` | Query parameter merged into a body-carrying operation's input record; it will re-emit inside the JSON body. |
 | `body-location method=DELETE reason=body-lowered-to-query-params` | DELETE request body imported as `.Accepts<T>` — Rivet lowers DELETE inputs to query params, so the body's properties re-emit as required **query** params (never import a secret-carrying DELETE body silently; this marker is why). |

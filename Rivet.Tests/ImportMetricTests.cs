@@ -170,7 +170,12 @@ public sealed class ImportMetricTests
         Assert.True(TypeFiles(r) >= 3060, $"Expected ≥3060 types, got {TypeFiles(r)}");
         Assert.Equal(1, ContractFiles(r)); // single-tag API
         Assert.True(TypedInputCount(r) >= 580, $"Expected ≥580 typed inputs, got {TypedInputCount(r)}");
-        Assert.Equal(0, UnsupportedBody(r));
+        // Ratchet: FABLE_ROUNDTRIP cross-corpus #1 — 287 GET/DELETE ops declare
+        // form-encoded additionalProperties bodies (Stripe's expand-map idiom) that
+        // imported as a Dictionary TInput, which leaked CLR members as invented query
+        // params on emit. The op's real params now win; each unexpressable body is
+        // dropped with an opaque-body marker. May only go down.
+        Assert.True(UnsupportedBody(r) <= 287, $"Expected ≤287 unsupported bodies (ratchet), got {UnsupportedBody(r)}");
         // Ratchet: DELETE-body + optional-body-merged caveats (FABLE_ROUNDTRIP #5/#7),
         // 32 + 168 at introduction — may only go down.
         Assert.True(BodyCaveats(r) <= 200, $"Expected ≤200 body caveats (ratchet), got {BodyCaveats(r)}");

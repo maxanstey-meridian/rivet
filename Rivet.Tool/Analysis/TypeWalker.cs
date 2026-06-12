@@ -1001,6 +1001,43 @@ public sealed class TypeWalker
         return null;
     }
 
+    /// <summary>
+    /// FABLE_ROUNDTRIP cross-corpus #1: a bodyless-method input can only lower to
+    /// route/query params when its JSON surface IS its property surface. Maps,
+    /// collections and scalars serialize as a single value — enumerating their CLR
+    /// properties (Count, Keys, Comparer, Capacity, …) invents wire params.
+    /// </summary>
+    public bool IsParamLowerable(ITypeSymbol type)
+    {
+        if (type is IArrayTypeSymbol || type.TypeKind == TypeKind.Enum)
+        {
+            return false;
+        }
+
+        if (type.SpecialType is not SpecialType.None)
+        {
+            return false; // string, int, bool, object, …
+        }
+
+        if (type is INamedTypeSymbol named)
+        {
+            if (named.OriginalDefinition.SpecialType is SpecialType.System_Nullable_T
+                && named.TypeArguments is [var inner])
+            {
+                return IsParamLowerable(inner);
+            }
+
+            if (_scalarTypes.ContainsKey(named)
+                || IsDictionaryType(named)
+                || IsCollectionType(named))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private bool IsCollectionType(INamedTypeSymbol symbol)
         => _collectionTypes.Contains(symbol.OriginalDefinition);
 

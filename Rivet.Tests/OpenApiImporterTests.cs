@@ -2189,7 +2189,9 @@ public sealed class OpenApiImporterTests
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
 
         Assert.Contains("RouteDefinition<TaskDto>", content);
-        Assert.DoesNotContain("[rivet:unsupported", content);
+        // Cross-corpus #2: the projection to a literal 200 the spec never promised
+        // is kept (dropping loses the typed output) but is no longer silent.
+        Assert.Contains("[rivet:unsupported response status-range=2XX projected=200]", content);
     }
 
     [Fact]

@@ -97,23 +97,15 @@ internal static class ContractBuilder
             ResolveInputType(operation, mapper, fieldName, unsupported);
         var inputTypeFromBody = inputType is not null;
 
-        // FABLE_ROUNDTRIP #5: Rivet lowers DELETE inputs to query params — a
-        // DELETE request body relocates to the query string on re-emit (an
-        // OAuth-style secret in such a body would move into the URL). The
-        // model has no DELETE-body axis; the relocation must at least be loud.
-        if (inputTypeFromBody && httpMethod.Equals("delete", StringComparison.OrdinalIgnoreCase))
-        {
-            unsupported.Add("body-location method=DELETE reason=body-lowered-to-query-params");
-        }
-
         // I14: parameters must be resolved regardless of body presence — they used to be
         // silently discarded whenever the operation had a request body (262 Stripe GETs
         // lost every path+query param). Path/query params merge with the body-derived
         // input record; when a true merge is structurally impossible (opaque body type)
-        // each param is dropped LOUDLY via a named marker — never silently.
+        // the loser is dropped LOUDLY via a named marker — never silently.
         var paramProperties = CollectParamProperties(
             operation, mapper, fieldName, unsupported, queryAuthParameterName);
 
+        var bodyDropped = false;
         if (inputType is null)
         {
             inputType = SynthesizeParamInputType(paramProperties, mapper, fieldName);
@@ -121,7 +113,27 @@ internal static class ContractBuilder
         else if (paramProperties.Count > 0)
         {
             inputType = MergeParamsIntoInputType(
-                httpMethod, inputType, paramProperties, mapper, fieldName, unsupported);
+                httpMethod, inputType, paramProperties, mapper, fieldName, unsupported, out bodyDropped);
+        }
+
+        // FABLE_ROUNDTRIP #5: Rivet lowers DELETE inputs to query params — a
+        // DELETE request body relocates to the query string on re-emit (an
+        // OAuth-style secret in such a body would move into the URL). The
+        // model has no DELETE-body axis; the relocation must at least be loud.
+        // (Skipped when the merge already dropped an opaque body — nothing
+        // relocates in that case, and that drop carries its own marker.)
+        if (inputTypeFromBody && !bodyDropped && httpMethod.Equals("delete", StringComparison.OrdinalIgnoreCase))
+        {
+            unsupported.Add("body-location method=DELETE reason=body-lowered-to-query-params");
+        }
+
+        // A dropped body takes its serialization metadata with it — .FormEncoded()
+        // or a content-type override describing a body that no longer exists would
+        // re-emit a phantom requestBody.
+        if (bodyDropped)
+        {
+            isFormEncoded = false;
+            requestContentType = null;
         }
 
         // FABLE_ROUNDTRIP #7: an optional request body (required:false — the
@@ -522,7 +534,12 @@ internal static class ContractBuilder
     /// model has a single TInput, so the parameters merge with the body-derived record
     /// into a synthesized {Field}Input. When the body type is not a plain record (primitive,
     /// collection, generic, union wrapper, JsonElement, …) a merge is structurally
-    /// impossible — each parameter is then dropped with a loud named marker, never silently.
+    /// impossible. On body-carrying methods the body wins (TInput re-emits as the JSON
+    /// body) and each param is dropped with a loud named marker. On bodyless methods the
+    /// preference INVERTS: TInput lowers to route/query params, which an opaque body type
+    /// cannot do — so the params win and the BODY is dropped loudly (FABLE_ROUNDTRIP
+    /// cross-corpus #1: keeping the opaque body emitted its CLR members as invented
+    /// query params).
     /// </summary>
     private static string MergeParamsIntoInputType(
         string httpMethod,
@@ -530,12 +547,26 @@ internal static class ContractBuilder
         List<ParamProperty> paramProperties,
         SchemaMapper mapper,
         string fieldName,
-        List<string> unsupported)
+        List<string> unsupported,
+        out bool bodyDropped)
     {
+        bodyDropped = false;
         var bodyRecord = mapper.FindRecordByName(bodyInputType);
 
         if (bodyRecord is null || bodyRecord.TypeParameters is { Count: > 0 })
         {
+            if (httpMethod is not ("post" or "put" or "patch"))
+            {
+                var paramInput = SynthesizeParamInputType(paramProperties, mapper, fieldName);
+                if (paramInput is not null)
+                {
+                    bodyDropped = true;
+                    unsupported.Add(
+                        $"body method={httpMethod.ToUpperInvariant()} reason=opaque-body-dropped-params-kept body-type={bodyInputType}");
+                    return paramInput;
+                }
+            }
+
             foreach (var p in paramProperties)
             {
                 unsupported.Add(
@@ -669,6 +700,9 @@ internal static class ContractBuilder
 
         if (successResponses.Count == 0 && rangeWildcard is not null)
         {
+            // Cross-corpus #2 (FABLE_ROUNDTRIP): the projection re-emits a literal
+            // status the API never promised — keep it, but loudly.
+            unsupported.Add("response status-range=2XX projected=200");
             successResponses.Add(rangeWildcard.Value);
         }
 
@@ -733,14 +767,16 @@ internal static class ContractBuilder
             }
         }
 
-        // FABLE_ROUNDTRIP #8: redirect-only operations declare no 2xx at all.
-        // The lowest concrete 3xx becomes the declared (bodyless) success
-        // status — without one the walker defaults a 200 the API never returns.
+        // FABLE_ROUNDTRIP #8 + cross-corpus #3: operations that declare no 2xx at
+        // all. The lowest concrete non-error status — 1xx informational (websocket
+        // upgrades declare only 101) or 3xx redirect — becomes the declared
+        // (bodyless) success status; without one the walker defaults a 200 the API
+        // never returns.
         if (successCode is null && operation.Responses is not null)
         {
             successCode = operation.Responses.Keys
                 .Select(status => int.TryParse(status, out var parsed) ? parsed : -1)
-                .Where(parsed => parsed is >= 300 and < 400)
+                .Where(parsed => parsed is (>= 100 and < 200) or (>= 300 and < 400))
                 .OrderBy(parsed => parsed)
                 .Cast<int?>()
                 .FirstOrDefault();
@@ -774,14 +810,25 @@ internal static class ContractBuilder
             }
             else if (statusStr is "4XX" or "4xx")
             {
+                // Cross-corpus #2: the range projects to a literal status the API
+                // never promised — kept (dropping loses the error type), but loudly.
+                unsupported.Add($"error status-range={statusStr} projected=400");
                 code = 400;
             }
             else if (statusStr is "5XX" or "5xx")
             {
+                unsupported.Add($"error status-range={statusStr} projected=500");
                 code = 500;
             }
             else if (!int.TryParse(statusStr, out code) || code < 300)
             {
+                // Cross-corpus #3: a 1xx that is not the promoted success status has
+                // no contract axis — dropped, but never silently.
+                if (code is >= 100 and < 200 && code != successStatus)
+                {
+                    unsupported.Add($"response status={code} reason=informational-status-dropped");
+                }
+
                 continue;
             }
 

@@ -16,8 +16,64 @@
 > `tools/roundtrip-diff.py` and ratchets every `dotnet test` run via
 > `RoundTripCorpusGateTests` against `Fixtures/roundtrip-baseline.json`;
 > the residual flagged ops are the already-warned/marked content-type,
-> merged-param and status-projection classes. Per-finding detail below is
+> merged-param and status-projection classes. A same-day cross-corpus run
+> (cloudflare/notion, section below) confirmed the fixes generalize and
+> surfaced three new classes — all fixed in wave 2 (RIV1020, loud
+> status-range projection, 1xx promotion). Per-finding detail below is
 > the ORIGINAL audit state, kept as evidence.
+
+## Cross-corpus proof (2026-06-12, post-wave)
+
+Re-ran the audit on cloudflare (1,716 paths / 2,700 ops — largest corpus in
+the repo) and notion (8 paths / 13 ops — components-free, inline-only spec).
+
+**cloudflare: 86% clean once loud and representational classes are netted
+out** — the same figure as github, from a corpus 2.5× the size. Raw clean is
+122/2700 (4.5%) but the gap is two classes: `op-security` 2,403 (model
+carries one scheme per op; every drop has a `[rivet:unsupported security]`
+marker — 2,395 of them) and `response-schema-type` 1,361 (cloudflare's
+allOf response envelope flattens on import; verified property-and-required
+sets identical — representational, not drift). Excluding those:
+2,340/2,700. The fix-wave classes (param pinning, enum pins, nullable
+components) do NOT reappear — the wave's fixes generalize.
+
+**notion: 5/13 clean**, all drift loud except one new bug (below). Its
+quirks (GET endpoints declaring form-urlencoded request bodies) exercise
+paths github never did.
+
+**New findings from the wider net — ALL FIXED same day (fix wave 2):**
+1. **Dictionary inputs leak CLR properties as invented query params**
+   (emit, silent, both corpora — 118 cloudflare DELETE ops + 2 notion GET
+   ops). When TInput is `Dictionary<string, JsonElement>` (imports of
+   untyped/additionalProperties bodies) and the method lowers the body to
+   query, ContractWalker enumerates the CLR members — `comparer`, `count`,
+   `capacity`, `keys` — into the emitted spec. FIXED on both sides:
+   ContractWalker refuses dictionary/collection/scalar inputs on bodyless
+   methods (RIV1020); the importer inverts its unmergeable-body preference
+   on bodyless methods — the expressable params win, the opaque body drops
+   with an `opaque-body-dropped-params-kept` marker. param-invented:
+   cloudflare 121→21 (residual = the marked DELETE body-relocation class),
+   notion 34→0; notion param-dropped 5→1 (the residual is a nameless
+   header param in notion's own spec).
+2. **OpenAPI status ranges (`4xx`/`5xx`) are not modeled** (import,
+   silent-ish). Importer resolves `4xx` to a literal `400`. FIXED loud:
+   the projection stays (dropping loses the error type) but every range
+   now carries a `status-range=… projected=…` marker — 1,857 across the
+   cloudflare contracts.
+3. **1xx responses fall through to a fabricated 200** (import). `101
+   Switching Protocols`-only ops (cloudflare websocket endpoints) lost the
+   101 and gained a default 200 — the redirect-only fix (#8) covered 3xx
+   but not 1xx. FIXED: the no-2xx promotion now takes the lowest non-error
+   status (1xx or 3xx); a 1xx beside a concrete 2xx drops with an
+   `informational-status-dropped` marker. cloudflare status-invented
+   62→48, status-missing 42→28 (residuals are the marked range-projection
+   and unsupported-content classes).
+
+Remaining cloudflare remainder is the already-marked DELETE-body class
+(117 of the 149 `reqbody-dropped`) and the documented optional-body merge.
+Schema-level: `prop-nullable-False->True` 6,841 is #11a at cloudflare
+scale; `prop-enum` 1,399 is the RIV3012-loud single-value-enum class (670
+warnings on import).
 
 **Method:** `openapi/github.json` (732 paths / 1,099 ops) → `--from-openapi` → 3,324 C# files → re-emit → scripted semantic diff of original vs re-emitted spec. Every headline finding re-validated against freshly built HEAD (post-0.37.0) with a minimal probe spec confirming zero stderr warnings — all findings below are **silent at HEAD**. Findings covered by import-profile.md, diagnostics.md, HANDOVER, FABLE_GAPS §2–§3, RIV warnings, or `[rivet:unsupported]` markers were excluded; the loud channels cross-checked honest (every warned class matched a real degradation 1:1; no warned class also occurred silently).
 

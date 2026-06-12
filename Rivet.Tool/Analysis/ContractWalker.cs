@@ -728,7 +728,23 @@ public static class ContractWalker
         {
             // GET/DELETE (and .AcceptsBinary() bodies): TInput properties matched by name
             // to route → Route, remaining → Query — never a JSON body param
-            if (tInput is not null)
+            if (tInput is not null && !typeWalker.IsParamLowerable(tInput))
+            {
+                // FABLE_ROUNDTRIP cross-corpus #1: walking a dictionary/collection/scalar
+                // input here enumerated its CLR members (Count, Keys, Comparer, …) into
+                // the emitted spec as invented query params. Drop the input LOUDLY and
+                // keep the route tokens as untyped path params.
+                Diagnostics.Warn(
+                    Diagnostics.InputTypeNotParamLowerable,
+                    $"input type '{tInput.ToDisplayString()}' on {httpMethod} {route} has no property surface " +
+                    "to lower to query params (dictionary/collection/scalar) — input dropped; " +
+                    "route tokens emitted as untyped string path params.");
+                foreach (var paramName in routeParamNames)
+                {
+                    parameters.Add(new TsEndpointParam(paramName, new TsType.Primitive("string"), ParamSource.Route));
+                }
+            }
+            else if (tInput is not null)
             {
                 inputTypeName = tInput.Name;
                 var matchedRouteParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
