@@ -16,7 +16,7 @@
     "addprops-false->absent": 20,
     "addprops-true->absent": 6,
     "prop-default-present->absent": 3,
-    "prop-enum": 544,
+    "prop-enum": 513,
     "prop-format-None->double": 44,
     "prop-format-None->int64": 595,
     "prop-format-uri->None": 21,

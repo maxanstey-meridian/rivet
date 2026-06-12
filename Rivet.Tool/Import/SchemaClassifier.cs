@@ -446,8 +446,15 @@ internal static class SchemaClassifier
             else
             {
                 seen[sanitized] = 1;
-                // Only store original name if it differs from the C# name
-                var originalName = string.Equals(sanitized, original, StringComparison.Ordinal) ? null : original;
+                // Pin when the EMITTED wire value would differ from the original.
+                // The emitter camelCases unpinned member names (TypeWalker), so the
+                // comparison must be against ToCamelCase(sanitized), not sanitized:
+                // 'Ready' (Pascal == original, old check skipped the pin) still
+                // emits as 'ready' — a silent case-mangle both directions
+                // (FABLE_ROUNDTRIP #3, 63 properties on the github corpus).
+                var originalName = string.Equals(Naming.ToCamelCase(sanitized), original, StringComparison.Ordinal)
+                    ? null
+                    : original;
                 members.Add(new GeneratedEnumMember(sanitized, originalName));
             }
         }

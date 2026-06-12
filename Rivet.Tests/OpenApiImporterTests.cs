@@ -3224,8 +3224,11 @@ public sealed class OpenApiImporterTests
         Assert.Contains("Inactive", enumContent);
         Assert.Contains("Pending", enumContent);
 
-        // Original names preserved via [JsonStringEnumMemberName]
-        Assert.Contains("[JsonStringEnumMemberName(\"active\")]", enumContent);
+        // No pin needed: the emitted wire value for member 'Active' is already
+        // 'active' (camelCase) — pins exist only where the wire value would
+        // otherwise change (FABLE_ROUNDTRIP #3 broadened the trigger to
+        // emitted-value inequality, which also dropped redundant pins like this)
+        Assert.DoesNotContain("JsonStringEnumMemberName", enumContent);
 
         // Should compile
         var compilation = CompilationHelper.CompileImportResult(result);
