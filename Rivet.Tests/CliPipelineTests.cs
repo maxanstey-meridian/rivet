@@ -15,6 +15,7 @@ namespace Rivet.Tests;
 /// import → write to disk → compile via the CLI → re-emit openapi.json →
 /// resolve every $ref in the result.
 /// </summary>
+[Trait("Category", "Local")] // needs the gitignored openapi/ corpus on disk
 public sealed class CliPipelineTests
 {
     private static string SpecPath(string name) =>
