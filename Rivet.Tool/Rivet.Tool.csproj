@@ -36,7 +36,7 @@
     <PackAsTool>true</PackAsTool>
     <PackRelease>true</PackRelease>
     <PackageId>dotnet-rivet</PackageId>
-    <Version>0.36.0</Version>
+    <Version>0.36.1</Version>
     <Authors>Max Anstey</Authors>
     <Description>Roslyn-powered CLI for generating OpenAPI 3.1 specifications from .NET applications.</Description>
     <PackageTags>dotnet-tool;openapi;roslyn;codegen;aspnetcore</PackageTags>

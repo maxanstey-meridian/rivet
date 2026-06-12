@@ -1,12 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <!-- net8.0 floor: Azure Functions isolated-worker consumers sit on the .NET 8 LTS. -->
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
     <PackageId>Rivet.Attributes</PackageId>
-    <Version>0.36.0</Version>
+    <Version>0.36.1</Version>
     <Authors>Max Anstey</Authors>
     <Description>Marker attributes for Rivet — end-to-end .NET to TypeScript type safety</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
