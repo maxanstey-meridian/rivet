@@ -34,7 +34,8 @@ public static class OpenApiImporter
 
         // Parse paths → contracts
         var contracts = doc.Paths is { Count: > 0 }
-            ? ContractBuilder.BuildContracts(doc.Paths, mapper, globalSecurityScheme, warnings)
+            ? ContractBuilder.BuildContracts(
+                doc.Paths, mapper, globalSecurityScheme, warnings, doc.Components?.Examples)
             : [];
 
         // Emit type files (records → Types/, enums → Types/, brands → Domain/)

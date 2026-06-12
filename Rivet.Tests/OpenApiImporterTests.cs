@@ -4942,6 +4942,61 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Import_Inlines_Embedded_Example_Refs()
+    {
+        // github anti-pattern: an example VALUE that is {"$ref": "#/components/examples/X"}.
+        // It resolves in the source document, but a round-trip only re-registers examples
+        // attached to surviving operations — the embedded ref would dangle and hard-fail
+        // openapi-typescript. The importer inlines the referenced value instead.
+        var spec = """
+            {
+                "openapi": "3.1.0",
+                "info": { "title": "Test", "version": "1.0.0" },
+                "components": {
+                    "examples": {
+                        "widget": { "value": { "id": "w1", "name": "Widget" } }
+                    },
+                    "schemas": {
+                        "Dto": { "type": "object", "properties": { "id": { "type": "string" } } }
+                    }
+                },
+                "paths": {
+                    "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" }, "examples": { "default": { "value": { "$ref": "#/components/examples/widget" } }, "nested": { "value": { "items": [ { "$ref": "#/components/examples/widget" } ] } } } } } } } } }
+                }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "Contract.cs");
+        Assert.DoesNotContain("#/components/examples/widget", contract);
+        Assert.Contains("Widget", contract);
+    }
+
+    [Fact]
+    public void Import_Marks_Unresolvable_Embedded_Example_Refs_Loudly()
+    {
+        var spec = """
+            {
+                "openapi": "3.1.0",
+                "info": { "title": "Test", "version": "1.0.0" },
+                "components": {
+                    "schemas": {
+                        "Dto": { "type": "object", "properties": { "id": { "type": "string" } } }
+                    }
+                },
+                "paths": {
+                    "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" }, "examples": { "default": { "value": { "$ref": "#/components/examples/missing" } } } } } } } } }
+                }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "Contract.cs");
+        Assert.DoesNotContain("#/components/examples/missing", contract);
+        Assert.Contains("unresolvable-embedded-example-ref", contract);
+    }
+
+    [Fact]
     public void Import_Deduplicates_Schema_Names_That_Collide_Case_Insensitively()
     {
         // Emitted names become Types/{Name}.cs files; on APFS/NTFS two names

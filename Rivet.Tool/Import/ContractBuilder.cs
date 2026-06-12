@@ -20,7 +20,8 @@ internal static class ContractBuilder
         OpenApiPaths paths,
         SchemaMapper mapper,
         string? globalSecurityScheme,
-        List<string> warnings)
+        List<string> warnings,
+        IDictionary<string, IOpenApiExample>? componentExamples = null)
     {
         var groups = new Dictionary<string, List<GeneratedEndpointField>>();
 
@@ -48,7 +49,7 @@ internal static class ContractBuilder
                     ? Naming.StripInvalidIdentifierChars(contractExt)
                     : tag;
 
-                var field = BuildEndpointField(
+                var field = BuildEndpointField(componentExamples, 
                     httpMethod, route, operation, tag, globalSecurityScheme, mapper);
 
                 if (!groups.TryGetValue(contractKey, out var list))
@@ -68,6 +69,7 @@ internal static class ContractBuilder
     }
 
     private static GeneratedEndpointField BuildEndpointField(
+        IDictionary<string, IOpenApiExample>? componentExamples,
         string httpMethod,
         string route,
         OpenApiOperation operation,
@@ -121,8 +123,8 @@ internal static class ContractBuilder
 
         // Error responses
         var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, unsupported);
-        var requestExamples = ResolveRequestExamples(operation, unsupported);
-        var responseExamples = ResolveResponseExamples(operation, unsupported);
+        var requestExamples = ResolveRequestExamples(operation, unsupported, componentExamples);
+        var responseExamples = ResolveResponseExamples(operation, unsupported, componentExamples);
         errorResponses = EnsureExampleStatusesAreDeclared(
             operation,
             successStatus,
@@ -724,19 +726,21 @@ internal static class ContractBuilder
 
     private static IReadOnlyList<TsEndpointExample> ResolveRequestExamples(
         OpenApiOperation operation,
-        List<string> unsupported)
+        List<string> unsupported,
+        IDictionary<string, IOpenApiExample>? componentExamples)
     {
         if (operation.RequestBody?.Content is not { Count: > 0 } content)
         {
             return [];
         }
 
-        return ResolveMediaExamples(content, unsupported, "request-example");
+        return ResolveMediaExamples(content, unsupported, "request-example", componentExamples);
     }
 
     private static IReadOnlyList<GeneratedEndpointResponseExample> ResolveResponseExamples(
         OpenApiOperation operation,
-        List<string> unsupported)
+        List<string> unsupported,
+        IDictionary<string, IOpenApiExample>? componentExamples)
     {
         if (operation.Responses is null)
         {
@@ -756,7 +760,8 @@ internal static class ContractBuilder
             foreach (var example in ResolveMediaExamples(
                 content,
                 unsupported,
-                $"response-example status={statusCode.Value}"))
+                $"response-example status={statusCode.Value}",
+                componentExamples))
             {
                 responseExamples.Add(new GeneratedEndpointResponseExample(statusCode.Value, example));
             }
@@ -812,7 +817,8 @@ internal static class ContractBuilder
     private static IReadOnlyList<TsEndpointExample> ResolveMediaExamples(
         IDictionary<string, OpenApiMediaType> content,
         List<string> unsupported,
-        string markerPrefix)
+        string markerPrefix,
+        IDictionary<string, IOpenApiExample>? componentExamples = null)
     {
         var examples = new List<TsEndpointExample>();
 
@@ -822,7 +828,8 @@ internal static class ContractBuilder
             {
                 examples.Add(new TsEndpointExample(
                     mediaType,
-                    Json: media.Example.ToJsonString()));
+                    Json: InlineEmbeddedExampleRefs(
+                        media.Example.ToJsonString(), componentExamples, unsupported, markerPrefix, mediaType, null)));
             }
 
             if (media.Examples is null)
@@ -832,7 +839,7 @@ internal static class ContractBuilder
 
             foreach (var (name, example) in media.Examples)
             {
-                var endpointExample = ResolveExample(mediaType, name, example, out var reason);
+                var endpointExample = ResolveExample(mediaType, name, example, componentExamples, unsupported, markerPrefix, out var reason);
                 if (endpointExample is not null)
                 {
                     examples.Add(endpointExample);
@@ -858,10 +865,18 @@ internal static class ContractBuilder
         string mediaType,
         string? name,
         IOpenApiExample example,
+        IDictionary<string, IOpenApiExample>? componentExamples,
+        List<string> unsupported,
+        string markerPrefix,
         out string? reason)
     {
         var componentExampleId = TryGetComponentExampleId(example);
         var resolvedJson = TryGetExampleJson(example);
+        if (resolvedJson is not null)
+        {
+            resolvedJson = InlineEmbeddedExampleRefs(
+                resolvedJson, componentExamples, unsupported, markerPrefix, mediaType, name);
+        }
 
         if (componentExampleId is not null)
         {
@@ -879,6 +894,119 @@ internal static class ContractBuilder
         return resolvedJson is not null
             ? new TsEndpointExample(mediaType, name, Json: resolvedJson)
             : null;
+    }
+
+    /// <summary>
+    /// github anti-pattern: example VALUES containing
+    /// {"$ref": "#/components/examples/X"}. In the source document X exists;
+    /// after a round-trip only the examples attached to surviving operations
+    /// are re-registered, so the embedded ref dangles and downstream
+    /// generators (openapi-typescript) hard-fail on it. Inline the referenced
+    /// value at import time, while the source components are still in hand.
+    /// Unresolvable or cyclic refs degrade LOUDLY to null + marker.
+    /// </summary>
+    private static string InlineEmbeddedExampleRefs(
+        string json,
+        IDictionary<string, IOpenApiExample>? componentExamples,
+        List<string> unsupported,
+        string markerPrefix,
+        string mediaType,
+        string? name)
+    {
+        if (!json.Contains("#/components/examples/", StringComparison.Ordinal))
+        {
+            return json;
+        }
+
+        JsonNode? parsed;
+        try
+        {
+            parsed = JsonNode.Parse(json);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return json;
+        }
+
+        var changed = false;
+        var inlined = InlineExampleRefNode(
+            parsed,
+            componentExamples,
+            new HashSet<string>(StringComparer.Ordinal),
+            () => changed = true,
+            unresolved => unsupported.Add(BuildExampleUnsupportedMarker(
+                markerPrefix, mediaType, name, unresolved, "unresolvable-embedded-example-ref")));
+
+        return changed ? inlined?.ToJsonString() ?? "null" : json;
+    }
+
+    private static JsonNode? InlineExampleRefNode(
+        JsonNode? node,
+        IDictionary<string, IOpenApiExample>? componentExamples,
+        HashSet<string> resolving,
+        Action markChanged,
+        Action<string> markUnresolved)
+    {
+        const string examplesPrefix = "#/components/examples/";
+
+        switch (node)
+        {
+            case JsonObject obj:
+                if (obj.TryGetPropertyValue("$ref", out var refNode)
+                    && refNode is JsonValue refValue
+                    && refValue.TryGetValue<string>(out var reference)
+                    && reference.StartsWith(examplesPrefix, StringComparison.Ordinal))
+                {
+                    markChanged();
+                    var componentName = reference[examplesPrefix.Length..];
+
+                    if (componentExamples is not null
+                        && componentExamples.TryGetValue(componentName, out var component)
+                        && resolving.Add(componentName)
+                        && TryGetExampleJson(component) is { } componentJson)
+                    {
+                        var componentNode = JsonNode.Parse(componentJson);
+                        var resolved = InlineExampleRefNode(
+                            componentNode, componentExamples, resolving, markChanged, markUnresolved);
+                        resolving.Remove(componentName);
+                        return resolved;
+                    }
+
+                    resolving.Remove(componentName);
+                    markUnresolved(componentName);
+                    return null;
+                }
+
+                foreach (var key in obj.Select(property => property.Key).ToList())
+                {
+                    var child = obj[key];
+                    var replaced = InlineExampleRefNode(
+                        child, componentExamples, resolving, markChanged, markUnresolved);
+                    if (!ReferenceEquals(child, replaced))
+                    {
+                        obj[key] = replaced;
+                    }
+                }
+
+                return obj;
+
+            case JsonArray array:
+                for (var index = 0; index < array.Count; index++)
+                {
+                    var child = array[index];
+                    var replaced = InlineExampleRefNode(
+                        child, componentExamples, resolving, markChanged, markUnresolved);
+                    if (!ReferenceEquals(child, replaced))
+                    {
+                        array[index] = replaced;
+                    }
+                }
+
+                return array;
+
+            default:
+                return node;
+        }
     }
 
     private static string BuildExampleUnsupportedMarker(
