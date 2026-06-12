@@ -6,6 +6,10 @@
 
 **Gap classes:** **(a) bug** · **(b) unsupported-but-diagnosed** · **(c) unsupported-and-SILENT** (worst) · **(d) deliberate out-of-scope, should be documented**.
 
+> **Status ledger (2026-06-12)** — this register is the audit snapshot; the rows below describe 2026-06-11 HEAD and are NOT individually updated. Since then, on `v2`:
+> **P0 fixed** `d69cb08` (+ rivet-ts `e1bd060`) · **P2 fully shipped** `d693a5e..9701370` · **inbound constraints shipped** `cd5caba` · **importer [property:] crash fixed** `0cc45e3` · **disk-pipeline B-series fixed with a new e2e CLI gate** `06eb9b4..3f183b0` (loose-file refs, reserved names + wire-name pinning, case-insensitive name registries + directory args, embedded example-ref inlining, `[RivetUnion]` oneOf round-trip) · docs passes `51259c8`/`c4b51f9`/`083db9c`.
+> **Still open:** the P1 enforcement-honesty tier (§7.4/6/7 — outbound leakage, escape hatches, envelope alignment), parts of P3 (§7.14–15), and the cosmetics listed in `HANDOVER.md`, which is the current-state document.
+
 ---
 
 ## 0. Architecture facts that frame everything
