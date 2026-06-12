@@ -1,8 +1,8 @@
 {
-  "cleanOps": 685,
+  "cleanOps": 948,
   "opFindings": {
-    "param-dropped": 372,
-    "param-invented": 388,
+    "param-dropped": 9,
+    "param-invented": 25,
     "reqbody-content-types": 20,
     "reqbody-dropped": 17,
     "reqbody-invented": 3,

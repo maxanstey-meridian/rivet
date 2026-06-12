@@ -432,12 +432,24 @@ internal static class ContractBuilder
                 unsupported.Add($"param name={param.Name} in={location} reason=reserved-member-renamed");
             }
 
+            // FABLE_ROUNDTRIP #1, the query half: pin the wire name whenever the
+            // emitted name (camelCase of the property) differs from the original
+            // — `per_page` no longer drifts to `perPage` (263 github query
+            // params). Headers carry their original name via [RivetHeader]
+            // instead; path params match route tokens by NAME (normalized), and
+            // a pin equal to the token is inert by the A14 rule.
+            var wireName = param.In is ParameterLocation.Header
+                || string.Equals(Naming.ToCamelCase(paramPropertyName), param.Name, StringComparison.Ordinal)
+                    ? null
+                    : param.Name;
+
             properties.Add(new ParamProperty(
                 new RecordProperty(
                     paramPropertyName,
                     csharpType,
                     param.Required,
-                    HeaderName: param.In is ParameterLocation.Header ? param.Name : null),
+                    HeaderName: param.In is ParameterLocation.Header ? param.Name : null,
+                    WireName: wireName),
                 param.Name,
                 location));
         }

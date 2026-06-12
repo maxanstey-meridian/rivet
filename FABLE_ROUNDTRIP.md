@@ -1,5 +1,24 @@
 # FABLE_ROUNDTRIP — silent-drift audit of the import→emit round-trip (2026-06-12)
 
+> **STATUS (2026-06-12, fix wave complete): 32% → 86% round-trip clean
+> (948/1099 ops).** Every finding below is fixed or loud. #1/#2/#4: param
+> wire-name pinning (route-token normalized matching + query-param
+> `[JsonPropertyName]` pins + RIV1019). #3: enum pins trigger on
+> emitted-value inequality. #6: nullable components propagate to $ref
+> use-sites; required+nullable scaffolds as `required T?` (also killed
+> #11b's 188 inline cases). #7: optional bodies import as nullable TInput
+> (merge case marked). #8: redirect-only ops declare their 3xx. #9: the
+> sentinel converts back to null. #10: `.AcceptsContentType()` /
+> `.ProducesContentType()`. #5: loud `body-location` marker (model still
+> lowers DELETE inputs to query). #11a (optional widens to nullable,
+> 2261 props) is the one remaining conflation — documented in
+> import-profile.md, not fixed. The audit script is committed as
+> `tools/roundtrip-diff.py` and ratchets every `dotnet test` run via
+> `RoundTripCorpusGateTests` against `Fixtures/roundtrip-baseline.json`;
+> the residual flagged ops are the already-warned/marked content-type,
+> merged-param and status-projection classes. Per-finding detail below is
+> the ORIGINAL audit state, kept as evidence.
+
 **Method:** `openapi/github.json` (732 paths / 1,099 ops) → `--from-openapi` → 3,324 C# files → re-emit → scripted semantic diff of original vs re-emitted spec. Every headline finding re-validated against freshly built HEAD (post-0.37.0) with a minimal probe spec confirming zero stderr warnings — all findings below are **silent at HEAD**. Findings covered by import-profile.md, diagnostics.md, HANDOVER, FABLE_GAPS §2–§3, RIV warnings, or `[rivet:unsupported]` markers were excluded; the loud channels cross-checked honest (every warned class matched a real degradation 1:1; no warned class also occurred silently).
 
 ## New silent findings, worst first

@@ -190,6 +190,48 @@ public sealed class ParamWireNamePinningTests
     }
 
     [Fact]
+    public void Imported_SnakeCase_Query_Params_Are_Pinned_To_Their_Wire_Name()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "ItemDto": { "type": "object", "properties": { "id": { "type": "string" } } }
+                """,
+            paths: """
+                "/api/items": {
+                    "get": {
+                        "operationId": "listItems",
+                        "parameters": [
+                            {"name": "per_page", "in": "query", "required": false, "schema": {"type": "integer"}},
+                            {"name": "page", "in": "query", "required": false, "schema": {"type": "integer"}}
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "ok",
+                                "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemDto"}}}
+                            }
+                        }
+                    }
+                }
+                """,
+            title: "API");
+
+        var result = CompilationHelper.Import(spec);
+        var input = CompilationHelper.FindFile(result, "ListItemsInput.cs");
+
+        // FABLE_ROUNDTRIP #1's query half: per_page must not drift to perPage
+        Assert.Contains("[property: JsonPropertyName(\"per_page\")]", input);
+        // page -> Page -> camelCase 'page' is already wire-true: no pin
+        Assert.DoesNotContain("[property: JsonPropertyName(\"page\")]", input);
+
+        // and the wire name survives to the re-emitted spec
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var ep = Assert.Single(endpoints);
+        Assert.Contains(ep.Params, p => p is { Name: "per_page", Source: ParamSource.Query });
+    }
+
+    [Fact]
     public void NormalizeForMatching_Strips_Separators_And_Case()
     {
         Assert.Equal("thingid", RouteParser.NormalizeForMatching("thing_id"));
