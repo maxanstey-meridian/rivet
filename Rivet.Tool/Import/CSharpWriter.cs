@@ -57,6 +57,39 @@ internal static class CSharpWriter
             ? $"<{string.Join(", ", record.TypeParameters)}>"
             : "";
         var modifier = record.Polymorphism is not null ? "abstract" : "sealed";
+
+        // The positional-record gotcha (docs/guides/runtime-validation.md): under an
+        // [ApiController] host, MVC model validation throws InvalidOperationException at
+        // request time when a positional record parameter's *property* carries a
+        // ValidationAttribute — which is exactly where [property:]-targeted attributes
+        // land. Records carrying any ValidationAttribute are therefore emitted in the
+        // non-positional required/init form, where the single property-level placement
+        // is visible to MVC, Validator.TryValidateObject, and the Rivet walker alike.
+        if (CarriesValidationAttribute(record))
+        {
+            var baseSuffix = record.BaseTypeName is null ? "" : $" : {record.BaseTypeName}";
+            sb.AppendLine($"public {modifier} record {record.Name}{typeParamSuffix}{baseSuffix}");
+            sb.AppendLine("{");
+            for (var i = 0; i < record.Properties.Count; i++)
+            {
+                if (i > 0)
+                {
+                    sb.AppendLine();
+                }
+                var prop = record.Properties[i];
+                EmitPropertyAttributes(sb, prop, target: "");
+                var requiredKeyword = prop.IsRequired ? "required " : "";
+                // Optional non-nullable properties need a suppressed default — there is
+                // no constructor parameter to satisfy the nullable analysis anymore.
+                var initializer = !prop.IsRequired && !prop.CSharpType.EndsWith('?')
+                    ? " = default!;"
+                    : "";
+                sb.AppendLine($"    public {requiredKeyword}{prop.CSharpType} {prop.Name} {{ get; init; }}{initializer}");
+            }
+            sb.AppendLine("}");
+            return sb.ToString();
+        }
+
         var closeSuffix = record.BaseTypeName is null ? ");" : $") : {record.BaseTypeName};";
         sb.Append($"public {modifier} record {record.Name}{typeParamSuffix}(");
 
@@ -72,58 +105,73 @@ internal static class CSharpWriter
         {
             var prop = record.Properties[i];
             var separator = i < record.Properties.Count - 1 ? "," : closeSuffix;
-            if (prop.HeaderName is not null)
-            {
-                sb.AppendLine($"    [property: RivetHeader(\"{EscapeString(prop.HeaderName)}\")]");
-            }
-            if (!prop.IsRequired)
-            {
-                sb.AppendLine("    [property: RivetOptional]");
-            }
-            if (prop.Format is "email")
-            {
-                sb.AppendLine("    [property: EmailAddress]");
-            }
-            else if (prop.Format is "uri")
-            {
-                sb.AppendLine("    [property: Url]");
-            }
-            else if (prop.Format is not null)
-            {
-                sb.AppendLine($"    [property: RivetFormat(\"{prop.Format}\")]");
-            }
-            if (prop.IsDeprecated)
-            {
-                sb.AppendLine("    [property: Obsolete]");
-            }
-            if (prop.Description is not null)
-            {
-                sb.AppendLine($"    [property: RivetDescription(\"{EscapeString(prop.Description)}\")]");
-            }
-            if (prop.DefaultValue is not null)
-            {
-                sb.AppendLine($"    [property: RivetDefault(\"{EscapeString(prop.DefaultValue)}\")]");
-            }
-            if (prop.Example is not null)
-            {
-                sb.AppendLine($"    [property: RivetExample(\"{EscapeString(prop.Example)}\")]");
-            }
-            if (prop.IsReadOnly)
-            {
-                sb.AppendLine("    [property: RivetReadOnly]");
-            }
-            if (prop.IsWriteOnly)
-            {
-                sb.AppendLine("    [property: RivetWriteOnly]");
-            }
-            if (prop.Constraints is { HasAny: true } c)
-            {
-                EmitConstraintAttributes(sb, c);
-            }
+            EmitPropertyAttributes(sb, prop, target: "property: ");
             sb.AppendLine($"    {prop.CSharpType} {prop.Name}{separator}");
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// True when any property would carry a ValidationAttribute: the DataAnnotations
+    /// constraint set (StringLength/MinLength/MaxLength/Range/RegularExpression),
+    /// EmailAddress/Url from formats, or [RivetConstraints] (a ValidationAttribute
+    /// since the inbound-enforcement work).
+    /// </summary>
+    private static bool CarriesValidationAttribute(GeneratedRecord record)
+        => record.Properties.Any(p =>
+            p.Format is "email" or "uri" || p.Constraints is { HasAny: true });
+
+    private static void EmitPropertyAttributes(StringBuilder sb, RecordProperty prop, string target)
+    {
+        if (prop.HeaderName is not null)
+        {
+            sb.AppendLine($"    [{target}RivetHeader(\"{EscapeString(prop.HeaderName)}\")]");
+        }
+        if (!prop.IsRequired)
+        {
+            sb.AppendLine($"    [{target}RivetOptional]");
+        }
+        if (prop.Format is "email")
+        {
+            sb.AppendLine($"    [{target}EmailAddress]");
+        }
+        else if (prop.Format is "uri")
+        {
+            sb.AppendLine($"    [{target}Url]");
+        }
+        else if (prop.Format is not null)
+        {
+            sb.AppendLine($"    [{target}RivetFormat(\"{prop.Format}\")]");
+        }
+        if (prop.IsDeprecated)
+        {
+            sb.AppendLine($"    [{target}Obsolete]");
+        }
+        if (prop.Description is not null)
+        {
+            sb.AppendLine($"    [{target}RivetDescription(\"{EscapeString(prop.Description)}\")]");
+        }
+        if (prop.DefaultValue is not null)
+        {
+            sb.AppendLine($"    [{target}RivetDefault(\"{EscapeString(prop.DefaultValue)}\")]");
+        }
+        if (prop.Example is not null)
+        {
+            sb.AppendLine($"    [{target}RivetExample(\"{EscapeString(prop.Example)}\")]");
+        }
+        if (prop.IsReadOnly)
+        {
+            sb.AppendLine($"    [{target}RivetReadOnly]");
+        }
+        if (prop.IsWriteOnly)
+        {
+            sb.AppendLine($"    [{target}RivetWriteOnly]");
+        }
+        if (prop.Constraints is { HasAny: true } c)
+        {
+            EmitConstraintAttributes(sb, c, target);
+        }
     }
 
     public static string WriteEnum(GeneratedEnum enumDef, string ns)
@@ -498,41 +546,41 @@ internal static class CSharpWriter
         => c.MinLength.HasValue || c.MaxLength.HasValue || c.Pattern is not null
            || c.Minimum.HasValue || c.Maximum.HasValue;
 
-    private static void EmitConstraintAttributes(StringBuilder sb, TsPropertyConstraints c)
+    private static void EmitConstraintAttributes(StringBuilder sb, TsPropertyConstraints c, string target)
     {
         // StringLength when both min and max length are present
         if (c.MinLength.HasValue && c.MaxLength.HasValue)
         {
-            sb.AppendLine($"    [property: StringLength({c.MaxLength}, MinimumLength = {c.MinLength})]");
+            sb.AppendLine($"    [{target}StringLength({c.MaxLength}, MinimumLength = {c.MinLength})]");
         }
         else if (c.MinLength.HasValue)
         {
-            sb.AppendLine($"    [property: MinLength({c.MinLength})]");
+            sb.AppendLine($"    [{target}MinLength({c.MinLength})]");
         }
         else if (c.MaxLength.HasValue)
         {
-            sb.AppendLine($"    [property: MaxLength({c.MaxLength})]");
+            sb.AppendLine($"    [{target}MaxLength({c.MaxLength})]");
         }
 
         // Range when minimum or maximum are present
         // Use RangeAttribute (not Range) to disambiguate from System.Range
         if (c.Minimum.HasValue && c.Maximum.HasValue)
         {
-            sb.AppendLine($"    [property: RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]");
+            sb.AppendLine($"    [{target}RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]");
         }
         else if (c.Minimum.HasValue)
         {
-            sb.AppendLine($"    [property: RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, double.MaxValue)]");
+            sb.AppendLine($"    [{target}RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, double.MaxValue)]");
         }
         else if (c.Maximum.HasValue)
         {
-            sb.AppendLine($"    [property: RangeAttribute(double.MinValue, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]");
+            sb.AppendLine($"    [{target}RangeAttribute(double.MinValue, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]");
         }
 
         // Pattern
         if (c.Pattern is not null)
         {
-            sb.AppendLine($"    [property: RegularExpression(\"{EscapeString(c.Pattern)}\")]");
+            sb.AppendLine($"    [{target}RegularExpression(\"{EscapeString(c.Pattern)}\")]");
         }
 
         // Exotic constraints → RivetConstraints
@@ -552,7 +600,7 @@ internal static class CSharpWriter
 
         if (exoticParts.Count > 0)
         {
-            sb.AppendLine($"    [property: RivetConstraints({string.Join(", ", exoticParts)})]");
+            sb.AppendLine($"    [{target}RivetConstraints({string.Join(", ", exoticParts)})]");
         }
     }
 

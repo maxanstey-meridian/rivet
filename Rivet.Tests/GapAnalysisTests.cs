@@ -220,20 +220,8 @@ public sealed class GapAnalysisTests
     [Trait("Category", "Slow")]
     public void Full_Gap_Analysis_Report_Includes_Endpoint_Example_Fidelity_Block()
     {
-        var originalOut = Console.Out;
-        using var writer = new StringWriter();
-
-        try
-        {
-            Console.SetOut(writer);
-            RunFullGapAnalysis("openapi-github.json", "GitHub");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
-
-        var output = writer.ToString();
+        var output = CompilationHelper.CaptureStdOut(() =>
+            RunFullGapAnalysis("openapi-github.json", "GitHub"));
         Assert.Contains("ENDPOINT EXAMPLE FIDELITY:", output);
         Assert.Contains("Request example loss:", output);
         Assert.Contains("Response example loss:", output);
@@ -270,19 +258,8 @@ public sealed class GapAnalysisTests
         var emittedDoc = JsonSerializer.Deserialize<JsonElement>(emittedJson);
         var fidelity = AnalyzeEndpointExampleFidelity(originalDoc, emittedDoc);
 
-        var originalOut = Console.Out;
-        using var writer = new StringWriter();
-        try
-        {
-            Console.SetOut(writer);
-            RunFullGapAnalysis("openapi-github.json", "GitHub");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
-
-        var output = writer.ToString();
+        var output = CompilationHelper.CaptureStdOut(() =>
+            RunFullGapAnalysis("openapi-github.json", "GitHub"));
         Assert.Contains($"Request example loss:    {fidelity.RequestExampleLoss}", output);
         Assert.Contains($"Response example loss:   {fidelity.ResponseExampleLoss}", output);
         Assert.Contains($"Named example loss:      {fidelity.NamedExampleLoss}", output);

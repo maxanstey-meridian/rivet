@@ -4613,9 +4613,9 @@ public sealed class OpenApiImporterTests
                 """);
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
-        Assert.Contains("[property: StringLength(50, MinimumLength = 3)]", content);
+        Assert.Contains("[StringLength(50, MinimumLength = 3)]", content);
         Assert.DoesNotContain("MinLength", content.Replace("MinimumLength", ""));
-        Assert.DoesNotContain("[property: MaxLength", content);
+        Assert.DoesNotContain("[MaxLength", content);
     }
 
     [Fact]
@@ -4636,7 +4636,7 @@ public sealed class OpenApiImporterTests
                 """);
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
-        Assert.Contains("[property: MinLength(1)]", content);
+        Assert.Contains("[MinLength(1)]", content);
         Assert.DoesNotContain("StringLength", content);
     }
 
@@ -4658,7 +4658,7 @@ public sealed class OpenApiImporterTests
                 """);
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
-        Assert.Contains("[property: MaxLength(100)]", content);
+        Assert.Contains("[MaxLength(100)]", content);
         Assert.DoesNotContain("StringLength", content);
     }
 
@@ -4680,7 +4680,7 @@ public sealed class OpenApiImporterTests
                 """);
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
-        Assert.Contains("[property: RangeAttribute(0, 100)]", content);
+        Assert.Contains("[RangeAttribute(0, 100)]", content);
         Assert.DoesNotContain("RivetConstraints", content);
     }
 
@@ -4702,7 +4702,7 @@ public sealed class OpenApiImporterTests
                 """);
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
-        Assert.Contains("[property: RegularExpression(\"^[A-Z]{3}$\")]", content);
+        Assert.Contains("[RegularExpression(\"^[A-Z]{3}$\")]", content);
         Assert.DoesNotContain("RivetConstraints", content);
     }
 
@@ -4792,7 +4792,7 @@ public sealed class OpenApiImporterTests
                 """);
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
-        Assert.Contains("[property: RangeAttribute(0, double.MaxValue)]", content);
+        Assert.Contains("[RangeAttribute(0, double.MaxValue)]", content);
         Assert.DoesNotContain("RivetConstraints(Minimum", content);
     }
 
@@ -4814,8 +4814,58 @@ public sealed class OpenApiImporterTests
                 """);
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
-        Assert.Contains("[property: RangeAttribute(double.MinValue, 100)]", content);
+        Assert.Contains("[RangeAttribute(double.MinValue, 100)]", content);
         Assert.DoesNotContain("RivetConstraints(Maximum", content);
+    }
+
+    [Fact]
+    public void Import_Emits_NonPositional_Record_When_Constraints_Present()
+    {
+        // The positional-record gotcha: [property:]-targeted ValidationAttributes on a
+        // positional record crash MVC model validation at request time under an
+        // [ApiController] host. Constraint-carrying records must use the required/init
+        // property form instead (docs/guides/runtime-validation.md).
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "minLength": 3, "maxLength": 50 },
+                        "nickname": { "type": "string" }
+                    },
+                    "required": ["name"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.DoesNotContain("[property:", content);
+        Assert.Contains("public sealed record Dto\n{", content.Replace("\r\n", "\n"));
+        Assert.Contains("public required string Name { get; init; }", content);
+        Assert.Contains("[RivetOptional]", content);
+    }
+
+    [Fact]
+    public void Import_Keeps_Positional_Record_When_No_Constraints()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "Dto": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" }
+                    },
+                    "required": ["name"]
+                }
+                """,
+            paths: """
+                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+                """);
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        Assert.Contains("public sealed record Dto(", content);
     }
 
     // ══════════ Phase 4 importer demotion (FABLE_REVIEW I4/I5/I7/I8/I10/I12/I13) ══════════

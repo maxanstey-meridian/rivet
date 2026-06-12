@@ -176,6 +176,35 @@ public static class CompilationHelper
         }
     }
 
+    private static readonly object StdOutLock = new();
+
+    /// <summary>
+    /// Captures everything written to Console.Out while <paramref name="action"/> runs.
+    /// Serialized behind a process-wide lock because Console.SetOut is global —
+    /// an unguarded swap can leave a disposed writer installed for a concurrent test
+    /// to write to (or restore), poisoning Console.Out for the rest of the run.
+    /// Assert with Contains (other tests may print unrelated output concurrently).
+    /// </summary>
+    public static string CaptureStdOut(Action action)
+    {
+        lock (StdOutLock)
+        {
+            var original = Console.Out;
+            using var writer = new StringWriter();
+            try
+            {
+                Console.SetOut(writer);
+                action();
+            }
+            finally
+            {
+                Console.SetOut(original);
+            }
+
+            return writer.ToString();
+        }
+    }
+
     /// <summary>
     /// Creates a compilation where domainSource lives in a separate "project" (CompilationReference),
     /// simulating types from a referenced project assembly.

@@ -35,24 +35,14 @@ public sealed class CliParserTests
     [InlineData("--jsonschema")]
     public void ParseArgs_RemovedFlag_Fails_With_RemovedInV2_Error(string flag)
     {
-        var originalError = Console.Error;
-        try
-        {
-            using var sw = new StringWriter();
-            Console.SetError(sw);
+        RivetOptions? options = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            options = CliParser.ParseArgs(["--from", "contracts.json", "--output", "./out", flag]));
 
-            var options = CliParser.ParseArgs(["--from", "contracts.json", "--output", "./out", flag]);
-
-            Assert.Null(options);
-            var stderr = sw.ToString();
-            Assert.Contains($"'{flag}' was removed in v2", stderr);
-            Assert.Contains("openapi-typescript", stderr);
-            Assert.DoesNotContain("unknown flag", stderr);
-        }
-        finally
-        {
-            Console.SetError(originalError);
-        }
+        Assert.Null(options);
+        Assert.Contains($"'{flag}' was removed in v2", stderr);
+        Assert.Contains("openapi-typescript", stderr);
+        Assert.DoesNotContain("unknown flag", stderr);
     }
 
     [Fact]
@@ -100,41 +90,22 @@ public sealed class CliParserTests
     [InlineData("--server")]
     public void ParseArgs_ValueTakingFlag_WithoutValue_Fails_With_Loud_Error(string flag)
     {
-        var originalError = Console.Error;
-        try
-        {
-            using var sw = new StringWriter();
-            Console.SetError(sw);
+        RivetOptions? options = null;
+        var stderr = CompilationHelper.CaptureStdErr(() => options = CliParser.ParseArgs([flag]));
 
-            var options = CliParser.ParseArgs([flag]);
-
-            Assert.Null(options);
-            Assert.Contains($"flag '{flag}' requires a value", sw.ToString());
-        }
-        finally
-        {
-            Console.SetError(originalError);
-        }
+        Assert.Null(options);
+        Assert.Contains($"flag '{flag}' requires a value", stderr);
     }
 
     [Fact]
     public void ParseArgs_DanglingFlag_After_Valid_Args_Fails_With_Loud_Error()
     {
-        var originalError = Console.Error;
-        try
-        {
-            using var sw = new StringWriter();
-            Console.SetError(sw);
+        RivetOptions? options = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            options = CliParser.ParseArgs(["--project", "app.csproj", "--output"]));
 
-            var options = CliParser.ParseArgs(["--project", "app.csproj", "--output"]);
-
-            Assert.Null(options);
-            Assert.Contains("flag '--output' requires a value", sw.ToString());
-        }
-        finally
-        {
-            Console.SetError(originalError);
-        }
+        Assert.Null(options);
+        Assert.Contains("flag '--output' requires a value", stderr);
     }
 
     // ========== C7: unknown flags ==========
@@ -145,21 +116,11 @@ public sealed class CliParserTests
     [InlineData("--from-openapi-typo")]
     public void ParseArgs_UnknownFlag_Fails_With_Loud_Error(string flag)
     {
-        var originalError = Console.Error;
-        try
-        {
-            using var sw = new StringWriter();
-            Console.SetError(sw);
+        RivetOptions? options = null;
+        var stderr = CompilationHelper.CaptureStdErr(() => options = CliParser.ParseArgs([flag, "file.cs"]));
 
-            var options = CliParser.ParseArgs([flag, "file.cs"]);
-
-            Assert.Null(options);
-            Assert.Contains($"unknown flag '{flag}'", sw.ToString());
-        }
-        finally
-        {
-            Console.SetError(originalError);
-        }
+        Assert.Null(options);
+        Assert.Contains($"unknown flag '{flag}'", stderr);
     }
 
     [Fact]
@@ -219,21 +180,12 @@ public sealed class CliParserTests
     [InlineData("example.com")]
     public void ParseArgs_Server_GarbageUrl_Fails_With_Loud_Error(string url)
     {
-        var originalError = Console.Error;
-        try
-        {
-            using var sw = new StringWriter();
-            Console.SetError(sw);
+        RivetOptions? options = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            options = CliParser.ParseArgs(["--project", "app.csproj", "--server", url]));
 
-            var options = CliParser.ParseArgs(["--project", "app.csproj", "--server", url]);
-
-            Assert.Null(options);
-            Assert.Contains($"'--server' value '{url}' is not a valid URL", sw.ToString());
-        }
-        finally
-        {
-            Console.SetError(originalError);
-        }
+        Assert.Null(options);
+        Assert.Contains($"'--server' value '{url}' is not a valid URL", stderr);
     }
 
     [Fact]
@@ -256,42 +208,18 @@ public sealed class CliParserTests
     [Fact]
     public void PrintUsage_IncludesMetadataFlags()
     {
-        var originalError = Console.Error;
-        try
-        {
-            using var sw = new StringWriter();
-            Console.SetError(sw);
+        var output = CompilationHelper.CaptureStdErr(CliParser.PrintUsage);
 
-            CliParser.PrintUsage();
-
-            var output = sw.ToString();
-            Assert.Contains("--title", output);
-            Assert.Contains("--version", output);
-            Assert.Contains("--server", output);
-        }
-        finally
-        {
-            Console.SetError(originalError);
-        }
+        Assert.Contains("--title", output);
+        Assert.Contains("--version", output);
+        Assert.Contains("--server", output);
     }
 
     [Fact]
     public void PrintUsage_IncludesFromFlag()
     {
-        var originalError = Console.Error;
-        try
-        {
-            using var sw = new StringWriter();
-            Console.SetError(sw);
+        var output = CompilationHelper.CaptureStdErr(CliParser.PrintUsage);
 
-            CliParser.PrintUsage();
-
-            var output = sw.ToString();
-            Assert.Contains("--from", output);
-        }
-        finally
-        {
-            Console.SetError(originalError);
-        }
+        Assert.Contains("--from", output);
     }
 }
