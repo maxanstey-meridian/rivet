@@ -55,6 +55,11 @@ public sealed class CliPipelineTests
             throw new TimeoutException("Rivet CLI did not exit within 5 minutes.");
         }
 
+        // The timeout overload returns on process exit WITHOUT draining the async
+        // readers — the last buffered lines can land after we read the builders.
+        // The parameterless overload waits for stream EOF.
+        process.WaitForExit();
+
         return (process.ExitCode, stdOut.ToString(), stdErr.ToString());
     }
 
