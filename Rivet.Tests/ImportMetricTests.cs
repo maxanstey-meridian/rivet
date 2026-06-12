@@ -109,7 +109,12 @@ public sealed class ImportMetricTests
     private static int TypeFiles(ImportResult r) => r.Files.Count(f => f.FileName.StartsWith("Types/"));
     private static int ContractFiles(ImportResult r) => r.Files.Count(f => f.FileName.StartsWith("Contracts/"));
     private static int TypedInputs(ImportResult r) => CountPattern(r, "Contracts/", "RouteDefinition<") - CountPattern(r, "Contracts/", "RouteDefinition<>") + CountPattern(r, "Contracts/", "InputRouteDefinition<");
-    private static int UnsupportedBody(ImportResult r) => CountPattern(r, "Contracts/", "[rivet:unsupported body");
+    // Trailing space matters: "body " markers mean the body was DROPPED;
+    // "body-location"/"body-optionality" markers (FABLE_ROUNDTRIP #5/#7)
+    // describe bodies that imported WITH the body intact but a caveat about
+    // how it re-emits — a different severity, ratcheted separately.
+    private static int UnsupportedBody(ImportResult r) => CountPattern(r, "Contracts/", "[rivet:unsupported body ");
+    private static int BodyCaveats(ImportResult r) => CountPattern(r, "Contracts/", "[rivet:unsupported body-");
     private static int UnsupportedResponse(ImportResult r) => CountPattern(r, "Contracts/", "[rivet:unsupported response");
     private static int UnsupportedError(ImportResult r) => CountPattern(r, "Contracts/", "[rivet:unsupported error");
 
@@ -166,6 +171,9 @@ public sealed class ImportMetricTests
         Assert.Equal(1, ContractFiles(r)); // single-tag API
         Assert.True(TypedInputCount(r) >= 580, $"Expected ≥580 typed inputs, got {TypedInputCount(r)}");
         Assert.Equal(0, UnsupportedBody(r));
+        // Ratchet: DELETE-body + optional-body-merged caveats (FABLE_ROUNDTRIP #5/#7),
+        // 32 + 168 at introduction — may only go down.
+        Assert.True(BodyCaveats(r) <= 200, $"Expected ≤200 body caveats (ratchet), got {BodyCaveats(r)}");
         // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
         // "enum-constraint-dropped" added deliberately with I.A-15: Stripe's `object:
         // {"enum": ["account"]}` discriminator constants are single-value enums that degrade
@@ -186,7 +194,11 @@ public sealed class ImportMetricTests
         Assert.True(TypeFiles(r) >= 1800, $"Expected ≥1800 types, got {TypeFiles(r)}");
         Assert.True(ContractFiles(r) >= 40, $"Expected ≥40 contracts, got {ContractFiles(r)}");
         Assert.True(TypedInputCount(r) >= 300, $"Expected ≥300 typed inputs, got {TypedInputCount(r)}");
-        Assert.True(UnsupportedBody(r) <= 5, $"Expected ≤5 unsupported bodies, got {UnsupportedBody(r)}");
+        // Down from 5: text/* bodies now import via .AcceptsContentType (FABLE_ROUNDTRIP #10).
+        Assert.True(UnsupportedBody(r) <= 1, $"Expected ≤1 unsupported bodies (ratchet, was 5), got {UnsupportedBody(r)}");
+        // Ratchet: DELETE-body + optional-body-merged caveats (FABLE_ROUNDTRIP #5/#7),
+        // 16 + 44 at introduction — may only go down.
+        Assert.True(BodyCaveats(r) <= 60, $"Expected ≤60 body caveats (ratchet), got {BodyCaveats(r)}");
         // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
         // "enum-constraint-dropped" added deliberately with I.A-15: GitHub's single-value
         // permission enums ({"enum": ["read"]} etc.) degrade to string — previously silent,
@@ -209,6 +221,9 @@ public sealed class ImportMetricTests
         // Ratchet (counts may only go DOWN): CBOR/YAML/json-patch operations.
         // 26 at last audit — if a new content type becomes supported this shrinks; it must not grow.
         Assert.True(UnsupportedBody(r) <= 26, $"Expected ≤26 unsupported bodies (ratchet, was 26), got {UnsupportedBody(r)}");
+        // Ratchet: every kubernetes DELETE carries an options body (FABLE_ROUNDTRIP #5),
+        // 29 at introduction — may only go down.
+        Assert.True(BodyCaveats(r) <= 29, $"Expected ≤29 body caveats (ratchet), got {BodyCaveats(r)}");
         Assert.Equal(0, UnsupportedError(r));
         // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
         // "operation-method-dropped" added deliberately with I15 (FABLE_GAPS §2): the
@@ -263,6 +278,9 @@ public sealed class ImportMetricTests
         Assert.True(typedOutputs >= 330, $"Expected ≥330 typed outputs, got {typedOutputs}");
 
         Assert.Equal(0, UnsupportedBody(r));
+        // Ratchet: DELETE-body + optional-body-merged caveats (FABLE_ROUNDTRIP #5/#7),
+        // 32 + 140 at introduction — may only go down.
+        Assert.True(BodyCaveats(r) <= 172, $"Expected ≤172 body caveats (ratchet), got {BodyCaveats(r)}");
         // Image responses are now file endpoints, not unsupported
         Assert.True(UnsupportedResponse(r) <= 1, $"Expected ≤1 unsupported response, got {UnsupportedResponse(r)}");
         // Ratchet (counts may only go DOWN): 12 at last audit — must not grow.
@@ -287,6 +305,9 @@ public sealed class ImportMetricTests
         // Ratchet (counts may only go DOWN): 142 at last audit — must not grow.
         Assert.True(UnsupportedError(r) <= 142, $"Expected ≤142 unsupported errors (ratchet, was 142), got {UnsupportedError(r)}");
         Assert.Equal(0, UnsupportedBody(r));
+        // Ratchet: DELETE-body + optional-body-merged caveats (FABLE_ROUNDTRIP #5/#7),
+        // 2 + 3 at introduction — may only go down.
+        Assert.True(BodyCaveats(r) <= 5, $"Expected ≤5 body caveats (ratchet), got {BodyCaveats(r)}");
 
         // P2 wave 4: Jira's CustomFieldContextDefaultValue + WorkflowCondition unions
         // carry complete discriminator mappings — now reversed to [JsonPolymorphic]
@@ -309,6 +330,9 @@ public sealed class ImportMetricTests
         Assert.True(TypeFiles(r) >= 170, $"Expected ≥170 types, got {TypeFiles(r)}");
         Assert.True(TypedInputCount(r) >= 22, $"Expected ≥22 typed inputs, got {TypedInputCount(r)}");
         Assert.Equal(0, UnsupportedBody(r));
+        // Ratchet: optional-body-merged caveats (FABLE_ROUNDTRIP #7),
+        // 9 at introduction — may only go down.
+        Assert.True(BodyCaveats(r) <= 9, $"Expected ≤9 body caveats (ratchet), got {BodyCaveats(r)}");
         // Ratchet (counts may only go DOWN): 17 at last audit — must not grow.
         Assert.True(UnsupportedError(r) <= 17, $"Expected ≤17 unsupported errors (ratchet, was 17), got {UnsupportedError(r)}");
     }

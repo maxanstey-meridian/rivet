@@ -23,7 +23,14 @@ the scheme *name* survives the import (see Security below).
 - **Bodies**: `application/json` (typed records), `application/x-www-form-urlencoded`
   (form-encoded inputs), `multipart/form-data` (incl. `IFormFile` /
   `List<IFormFile>`), binary content types (file endpoints / `ProducesFile`),
-  `text/*` and `*/*` fallbacks.
+  `text/*` and `*/*` fallbacks. A `text/*` body or success response keeps its
+  media type via `.AcceptsContentType(...)` / `.ProducesContentType(...)` — it
+  no longer re-emits as `application/json`. An **optional** body
+  (`required: false`, the OpenAPI default) imports as a nullable `TInput`
+  (`.Accepts<T?>()`) and re-emits `required: false` — except when path/query
+  params merged into the body record, where whole-input nullability would be
+  a lie; that case keeps `required: true` with a marker
+  (`body-optionality … optional-body-merged-with-required-params`).
 - **Property names**: spec keys PascalCase into C# members; whenever
   `camelCase(member)` is not the original key (snake_case keys,
   already-PascalCase keys), the original is pinned with
@@ -61,12 +68,29 @@ the scheme *name* survives the import (see Security below).
 - **Schemas**: named objects → sealed records; `allOf` inheritance chains —
   including middle layers' own properties and top-level `required` tightening;
   `oneOf`/`anyOf` → `As*` wrapper union records; string/int enums; single-value
-  branded primitives (`x-rivet-brand`); generics (`x-rivet-generic`); nullable
-  in both 3.0 (`nullable: true`) and 3.1 (`type` arrays, null branches) forms;
+  branded primitives (`x-rivet-brand`); generics (`x-rivet-generic`);
   dictionaries via `additionalProperties`; `$ref` aliases (resolved to targets).
+- **Nullability and requiredness — independent axes, both preserved.**
+  3.0 (`nullable: true`) and 3.1 (`type` arrays, null branches) forms import on
+  inline properties AND on components: a `$ref` to a component that is itself
+  nullable resolves nullable at every use-site. A property that is required
+  AND nullable scaffolds in the non-positional form with the C# `required`
+  keyword (`public required T? X { get; init; }`) — must be present, may be
+  null — and re-emits with both axes intact. Optional non-nullable properties
+  still WIDEN to nullable on import (`T?` is the only optionality spelling on
+  positional records) — an under-claim, the one residual conflation. A null
+  branch inside a 3+-variant `oneOf` union is also still dropped (the `As*`
+  wrapper has no nullability slot; the `{"type": "null"}` degradation marker
+  covers the 2-variant case).
+- **Enum wire values**: pinned with `[JsonStringEnumMemberName]` whenever the
+  emitted value (`camelCase(member)`) differs from the original — `Ready`,
+  `COLLABORATOR` and `EastUs` survive exactly, not case-mangled.
 - **Responses**: lowest concrete 2xx wins (a `2XX` wildcard maps to 200 when no
   concrete 2xx exists); typed error responses; `default` → 500; `4XX`/`5XX` →
-  400/500; named and `$ref` component examples.
+  400/500; named and `$ref` component examples. A redirect-only operation
+  (3xx and errors, no 2xx) declares its lowest 3xx via `.Status(...)` — no
+  fabricated `200`. JSON `null` example values import as `null` (the
+  Microsoft.OpenApi sentinel string is converted back at import).
 - **Response headers** (P2 wave 5): re-emitted as `.WithResponseHeader(status,
   "Name", description, required:)` chain calls — name, description and
   `required` survive. The header schema is string-typed in v1: a non-string
@@ -106,6 +130,8 @@ the scheme *name* survives the import (see Security below).
 | `param name=… in=… reason=dropped-unmergeable-body body-type=…` | Operation has both parameters and a request body whose type is not a plain record — the parameter could not be merged and was dropped. |
 | `param name=… in=… reason=body-property-shadowed-by-param body-type=…` | A body property shares a parameter's name but not its type; the parameter won, the body property was dropped. |
 | `param name=… in=query reason=location-erased-to-body` | Query parameter merged into a body-carrying operation's input record; it will re-emit inside the JSON body. |
+| `body-location method=DELETE reason=body-lowered-to-query-params` | DELETE request body imported as `.Accepts<T>` — Rivet lowers DELETE inputs to query params, so the body's properties re-emit as required **query** params (never import a secret-carrying DELETE body silently; this marker is why). |
+| `body-optionality required=false reason=optional-body-merged-with-required-params` | Optional request body merged with required path/query params into one input record — whole-input nullability would be a lie, so the body re-emits `required: true`. |
 
 ### Warnings (stderr / `ImportResult.Warnings`)
 

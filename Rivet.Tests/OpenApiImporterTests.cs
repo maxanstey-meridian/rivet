@@ -1733,8 +1733,10 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "SettingsContract.cs");
 
-        Assert.Contains("InputRouteDefinition<UpdateRequest>", content);
-        Assert.Contains(".Accepts<UpdateRequest>()", content);
+        // The fixture body has no `required: true` — optional per the OpenAPI
+        // default, so the input is nullable (FABLE_ROUNDTRIP #7)
+        Assert.Contains("InputRouteDefinition<UpdateRequest?>", content);
+        Assert.Contains(".Accepts<UpdateRequest?>()", content);
     }
 
     [Fact]
@@ -2768,9 +2770,10 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
-        // Should wire input as type arg (not .Accepts<T>())
-        Assert.Contains("RouteDefinition<CreateRequest, ItemDto>", contract);
-        Assert.Contains("Define.Post<CreateRequest, ItemDto>", contract);
+        // Should wire input as type arg (not .Accepts<T>()); the fixture body
+        // has no `required: true`, so the input is nullable (FABLE_ROUNDTRIP #7)
+        Assert.Contains("RouteDefinition<CreateRequest?, ItemDto>", contract);
+        Assert.Contains("Define.Post<CreateRequest?, ItemDto>", contract);
     }
 
     // ========== Header/Cookie parameter synthesis ==========

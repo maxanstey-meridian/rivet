@@ -95,6 +95,16 @@ internal static class ContractBuilder
         // Resolve input type (requestBody — $ref resolved by library)
         var (inputType, isFormEncoded, binaryRequestContentType, requestContentType) =
             ResolveInputType(operation, mapper, fieldName, unsupported);
+        var inputTypeFromBody = inputType is not null;
+
+        // FABLE_ROUNDTRIP #5: Rivet lowers DELETE inputs to query params — a
+        // DELETE request body relocates to the query string on re-emit (an
+        // OAuth-style secret in such a body would move into the URL). The
+        // model has no DELETE-body axis; the relocation must at least be loud.
+        if (inputTypeFromBody && httpMethod.Equals("delete", StringComparison.OrdinalIgnoreCase))
+        {
+            unsupported.Add("body-location method=DELETE reason=body-lowered-to-query-params");
+        }
 
         // I14: parameters must be resolved regardless of body presence — they used to be
         // silently discarded whenever the operation had a request body (262 Stripe GETs
@@ -112,6 +122,26 @@ internal static class ContractBuilder
         {
             inputType = MergeParamsIntoInputType(
                 httpMethod, inputType, paramProperties, mapper, fieldName, unsupported);
+        }
+
+        // FABLE_ROUNDTRIP #7: an optional request body (required:false — the
+        // OpenAPI default) is modeled by a nullable TInput; the emitter's E11
+        // rule re-emits it as required:false. Only for pure-body inputs on
+        // body-carrying methods: a record that merged required path/query
+        // params cannot be nullable as a whole, so that case stays loud.
+        var bodyIsOptional = inputTypeFromBody
+            && httpMethod is "post" or "put" or "patch"
+            && operation.RequestBody is { Required: false };
+        if (bodyIsOptional && inputType is not null && !inputType.EndsWith('?'))
+        {
+            if (paramProperties.Count == 0)
+            {
+                inputType += "?";
+            }
+            else
+            {
+                unsupported.Add("body-optionality required=false reason=optional-body-merged-with-required-params");
+            }
         }
 
         // Resolve output type (lowest 2xx response with JSON content)

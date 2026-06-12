@@ -37,6 +37,8 @@ All return the definition for chaining.
 | `.AcceptsBinary(contentType = "application/octet-stream")` | Request body is the raw bytes (`type: string, format: binary`). **Spec-only** — host code reads the stream; `TInput` properties lower to route/query params instead of a JSON body. Mutually exclusive with `.AcceptsFile()` / `.FormEncoded()`. |
 | `.ProducesFile(contentType = "application/octet-stream")` | Response is a binary download. |
 | `.ContentType(mediaType)` | `FileRouteDefinition` alias for `ProducesFile`. |
+| `.AcceptsContentType(mediaType)` | Declared media type for a non-JSON request body (e.g. `"text/plain"` for a `string` body). The body SCHEMA is unchanged — only the content-type key. **Spec-only.** Mutually exclusive with `.FormEncoded()` / `.AcceptsBinary()`. |
+| `.ProducesContentType(mediaType)` | Declared media type for a non-JSON success response (e.g. `"text/html"`). Schema unchanged; error responses stay `application/json`. **Spec-only.** Mutually exclusive with `.ProducesFile()`. |
 | `.RequestExampleJson(json, ...)` / `.ResponseExampleJson(status, json, ...)` | Attach examples. **Runtime no-ops** — read by Roslyn only. The `...Ref` variants reference component examples. |
 | `.SkipValidation()` | Disable typed-result validation for framework results without a status code (`ChallengeHttpResult`, `SignOutHttpResult`). |
 
