@@ -21,7 +21,7 @@ Most detail is deliberately NOT here — it lives where it's verifiable. This do
 - **Types-only TS clients.** No Zod client generation; openapi-zod-client is opt-in only.
 - **Hono outbound response stripping: deprioritized.** "As soon as it gets to just-MVP it's a TS backend."
 - **rivet-ts richness parity with .NET: deferred** — rivet-ts is a plaything.
-- **D1 (2026-06-12): TS scaffold goes module-local**, mirroring golden .NET — `src/modules/quotes/quotes-routes.ts` (↔ `NotesEndpoints.cs`) + `quotes.module.ts` (↔ `NotesModule.cs`); top-level `src/interface/` dies. **Ruled, NOT yet implemented** (see next steps).
+- **D1 (2026-06-12): TS scaffold goes module-local**, mirroring golden .NET — `src/modules/quotes/quotes-routes.ts` (↔ `NotesEndpoints.cs`) + `quotes.module.ts` (↔ `NotesModule.cs`); top-level `src/interface/` dies. **SHIPPED same day** (rivet-ts `efc8c59`, tag `v0.11.1`; doctrine = FABLE_CONTRACT §9.10; `.module.ts` only where the module has wiring to own — scaffold-mock emits none).
 - **D2 (2026-06-12): undiscriminated oneOf re-emits from the As\* wrappers** — shipped (`3f183b0`).
 - **Observability is edge-only** (plumb FABLE_CONTRACT §9.9, prose-only rule).
 - File naming is suffix-free (§9.1, `.handler.ts` included); HTTP registration filename is `<module>-routes.ts`.
@@ -30,14 +30,18 @@ Most detail is deliberately NOT here — it lives where it's verifiable. This do
 
 Authoritative list: `docs/reference/import-profile.md` (kept honest by tests). Highlights: HEAD/OPTIONS/TRACE dropped with named warnings; cookie params location-erased with markers; `{"type":"null"}` oneOf variants degrade to a permissive `{}`; constraints on params don't survive into synthesized input records (marker per param); reserved-name *params* are renamed with a loud marker (they bind by member name — pinning is impossible).
 
+## Done since this doc was written (2026-06-12, same day)
+
+1. **The release act — DONE.** rivet 0.35.0 shipped off `v2` (tag `v0.35.0`: GitHub release binaries ×4 + NuGet `Rivet.Attributes`/`dotnet-rivet`). Two CI gaps fixed en route: `publish.yml` now `npm ci`s `Rivet.Tests/js`, and `CliPipelineTests` is `[Category=Local]` (the `openapi/` corpus is gitignored — CI can never run the disk gate; local `dotnet test` still runs it). rivet-ts `scaffolder` merged → `v0.11.0` tagged; cold install + `task dev` smoke verified.
+2. **Pin bumps — DONE.** rivet-ts default binary pin → 0.35.0; golden + showcase `Rivet.Attributes` → 0.35.0 (RV-026 clears everywhere); golden SDK pin 10.0.301 → 10.0.300 (brew ceiling on the new machine).
+3. **rivet-ts polish batch — DONE** (tag `v0.11.1`): D1 module-local reshape (§9.10 + backend-pa-vsa synced, lifecycle gates assert the new shape); `result.data` forwarded when the synthesized schema is exact; peer warnings chased to source (rivet-ts vite peer widened to `^6 || ^7`; `openapi-typescript>typescript` allowedVersions rule in the emitted `pnpm-workspace.yaml`; the eslint warn is upstream `@nuxt/eslint-config`); routes-catch-domain-error recorded in rivet-ts AGENTS.md; meridian's TEMPORARY Rivet.Tool-checkout hack retired (dotnet flavor `task generate` = `dotnet tool restore` + published `dotnet-rivet`, e2e-verified); golden-meridian regenerated (all four flavors, plumb 0 everywhere). The one-time 2/200 vitest failure on this machine's first cold run is attributed to cold-pnpm-store timeouts in two lifecycle files (120s limit; 186s cold vs 52s warm total) — not reproduced since.
+
 ## Remaining / deferred
 
-1. **The release act (Max):** merge rivet-ts `scaffolder` → push tag `v0.11.0` (scaffolds pin it; cold `pnpm install` fails until then). Ship rivet **0.35** off `v2` (no published .NET binary satisfies the v2 contract yet — RV-026 warns until the rivet-ts pin bumps). Then one networked `task install && task dev` smoke on a fresh scaffold.
-2. **rivet-ts polish batch** (agreed, queued behind the release act): the D1 module-local reshape (emitters + lifecycle tests + FABLE_CONTRACT §9.1 wording + skill reference + showcase regen, ~half-day); forward `result.data` when the synthesized schema is exact; chase the `typescript ^5` peer warning to its source; record routes-catch-domain-error as the accepted TS idiom.
-3. **P1 enforcement honesty (rivet, open tier):** outbound body validation / extra-field leakage on .NET (Hono half deprioritized by decision); the `Define.File`/body-on-void escape hatches; runtime failure-envelope alignment between stacks. `docs/guides/runtime-validation.md` is the scope statement.
-4. **IR→Zod for the dotnet/no-api scaffold flavors** — blocked on a FluentValidation→constraints channel; own project.
-5. **Residual cosmetics (known, deliberately left):** cloudflare ~20% description loss on round-trip (mostly already-warned degradations); the misleading `unsupported body content-type` marker on schema-less bodies; snake_case *query-param* name fidelity (binding-semantics design question).
-6. **P3 hygiene leftovers** from FABLE_GAPS §7.14–15: drift-detection story for .NET consumers; `php-reflector/` deletion + rivet-php composer pointer.
+1. **P1 enforcement honesty (rivet, open tier) — THE NEXT TIER:** outbound body validation / extra-field leakage on .NET (Hono half deprioritized by decision); the `Define.File`/body-on-void escape hatches; runtime failure-envelope alignment between stacks. `docs/guides/runtime-validation.md` is the scope statement.
+2. **IR→Zod for the dotnet/no-api scaffold flavors** — blocked on a FluentValidation→constraints channel; own project.
+3. **Residual cosmetics (known, deliberately left):** cloudflare ~20% description loss on round-trip (mostly already-warned degradations); the misleading `unsupported body content-type` marker on schema-less bodies; snake_case *query-param* name fidelity (binding-semantics design question).
+4. **P3 hygiene leftovers** from FABLE_GAPS §7.14–15: drift-detection story for .NET consumers; `php-reflector/` deletion + rivet-php composer pointer.
 
 ## How to verify everything
 
