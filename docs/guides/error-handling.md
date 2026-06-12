@@ -32,9 +32,12 @@ var result = await route.Invoke<Created<ItemDto>, Conflict<ErrorDto>>(
 ```
 
 At request time Rivet validates that the returned status code is declared and that
-the payload's C# type matches the declaration — an undeclared status or wrong
-payload type throws `InvalidOperationException`. That is the extent of runtime
-checking: see [Runtime Validation](/guides/runtime-validation).
+the payload's runtime type matches the declaration — an undeclared status, a wrong
+or derived payload type, a body where none is declared, or a non-JSON content type
+throws `RivetContractViolationException`. Register `RivetContractViolationHandler`
+to surface violations as `500 { "code": "contract_violation", "message": ... }`
+instead of an empty 500. For the exact scope, see
+[Runtime Validation](/guides/runtime-validation).
 
 ## On the consumer side
 

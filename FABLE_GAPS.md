@@ -8,7 +8,9 @@
 
 > **Status ledger (2026-06-12)** — this register is the audit snapshot; the rows below describe 2026-06-11 HEAD and are NOT individually updated. Since then, on `v2`:
 > **P0 fixed** `d69cb08` (+ rivet-ts `e1bd060`) · **P2 fully shipped** `d693a5e..9701370` · **inbound constraints shipped** `cd5caba` · **importer [property:] crash fixed** `0cc45e3` · **disk-pipeline B-series fixed with a new e2e CLI gate** `06eb9b4..3f183b0` (loose-file refs, reserved names + wire-name pinning, case-insensitive name registries + directory args, embedded example-ref inlining, `[RivetUnion]` oneOf round-trip) · docs passes `51259c8`/`c4b51f9`/`083db9c`.
-> **Still open:** the P1 enforcement-honesty tier (§7.4/6/7 — outbound leakage, escape hatches, envelope alignment), parts of P3 (§7.14–15), and the cosmetics listed in `HANDOVER.md`, which is the current-state document.
+> **P1 enforcement honesty shipped (2026-06-12, .NET side):** the §4.1 extra-field leak (derived AND upcast instances rejected via value-runtime-type check; `[JsonPolymorphic]`/interface/abstract exempt), body-on-void (content-bearing results caught), content-type conformance, `Define.File` opt-in `Invoke` (file content + declared content type + declared error statuses), and the failure envelope (`RivetContractViolationException` + `RivetContractViolationHandler` → `500 {code,message}`, aligned with Hono's shape). The Hono outbound half (§4.2) stays unbuilt **by decision** ("as soon as it gets to just-MVP it's a TS backend"). Constraint *values* are still host-enforced, not Rivet-enforced — that's the documented design, not a gap.
+> **P3 hygiene shipped (2026-06-12):** `--verify` drift gate for committed specs (§7.14); `php-reflector/` deleted + rivet-php composer pointer fixed + `samples/ContractApi/README` CLI docs corrected (§7.15).
+> **Still open:** the residual §7.14 dev-loop nits (watchedFiles race, artifacts-on-error-exit; rivet-ts now HAS test CI) and the cosmetics listed in `HANDOVER.md`, which is the current-state document.
 
 ---
 

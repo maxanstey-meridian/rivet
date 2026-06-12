@@ -42,13 +42,17 @@ All return the definition for chaining.
 ## Invoke
 
 - `RouteDefinition<TInput, TOutput>.Invoke(input, handler)` →
-  `RivetResult<TOutput>` with the declared success status.
+  `RivetResult<TOutput>` with the declared success status (no runtime checks —
+  compile-time types only).
 - Typed-results overloads (`Invoke<T1..T6>` returning ASP.NET `Results<...>`)
-  validate at request time that the returned status and payload C# type match the
-  declaration, and throw `InvalidOperationException` otherwise. See
+  validate at request time that the returned status, payload runtime type, body
+  presence, and content type match the declaration, and throw
+  `RivetContractViolationException` otherwise (map it to the structured envelope
+  with `RivetContractViolationHandler`). See
   [Runtime Validation](/guides/runtime-validation) for the exact scope.
-- `FileRouteDefinition` has **no** `Invoke` — file endpoints are unenforced at
-  runtime.
+- `FileRouteDefinition.Invoke<TResult>(handler)` (and the `<TInput>` variant)
+  validates that the success branch carries file content matching the declared
+  content type and that error statuses are declared.
 
 ## Immutability
 

@@ -42,6 +42,19 @@ requests.
 
 ## Enforcement note
 
-`Define.File` definitions have **no runtime enforcement**: there is no `Invoke`, so
-content type, stream contents, and status codes are entirely your handler's
-responsibility. See [Runtime Validation](/guides/runtime-validation).
+`Define.File` definitions have an opt-in `Invoke`: the success branch must carry
+file content matching the declared content type (a JSON result on an `image/jpeg`
+contract throws `RivetContractViolationException`), and error statuses must be
+declared via `.Returns(...)`:
+
+```csharp
+[HttpGet("{id}/avatar")]
+public async Task<IResult> Avatar(Guid id)
+    => await MembersContract.Avatar.Invoke<FileContentHttpResult>(
+        async () => TypedResults.File(await store.Load(id), "image/jpeg"));
+```
+
+File results write their own status (200, or 206 under range processing), so the
+status of the success branch is not checked. Stream *contents* are never inspected,
+and handlers that bypass `Invoke` are unchecked. See
+[Runtime Validation](/guides/runtime-validation).

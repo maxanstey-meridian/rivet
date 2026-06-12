@@ -23,32 +23,70 @@ When controllers execute contracts through `.Invoke()`:
 - **Input/output types are compiler-enforced.** The handler's parameter and return
   types are the contract's generic type arguments; a mismatch is a compile error.
 - **Status codes are validated on the typed-results path.** When the handler returns
-  ASP.NET `Results<...>`, Rivet throws `InvalidOperationException` at request time if
-  the returned status code is neither the declared success status nor a status
-  declared via `.Returns(...)`, or if the returned payload's **C# type** is not
-  assignable to the type declared for that status. `.SkipValidation()` opts an
-  endpoint out (needed for framework results like `ChallengeHttpResult` that carry
-  no status code). Note the failure mode: the exception propagates through ASP.NET's
-  normal unhandled-exception path, which in production means a 500 with no body.
+  ASP.NET `Results<...>`, Rivet throws `RivetContractViolationException` at request
+  time if the returned status code is neither the declared success status nor a
+  status declared via `.Returns(...)`. `.SkipValidation()` opts an endpoint out
+  (needed for framework results like `ChallengeHttpResult` that carry no status
+  code).
+- **Payload runtime types are validated on the typed-results path.** The returned
+  payload's C# type must be assignable to the declared type — and, because
+  System.Text.Json serializes the **value's runtime type**, a derived instance where
+  the contract declares a concrete type is rejected, whether the handler returned
+  `Ok<Derived>` or upcast the instance into `Ok<Declared>`. This closes the
+  extra-field leak: undeclared members on a subtype can no longer reach the wire
+  silently. Declared types that are interfaces, abstract, or `[JsonPolymorphic]`
+  (where the spec declares the hierarchy as `oneOf`) accept their subtypes.
+- **Bodies and content types must match the declaration.** A content-bearing result
+  (`Results.Text`, `Results.Content`, file results) on a status that declares no
+  payload is a violation, as is serving a declared JSON payload with a non-JSON
+  content type (`TypedResults.Json(..., contentType: "text/csv")`).
+- **File endpoints validate via their own opt-in `Invoke`.** The success branch must
+  carry file content whose content type matches the declared one (a JSON result on
+  an `image/jpeg` contract is a violation), and error statuses must be declared.
+  File results write their own status (200, or 206 under range processing), so
+  status is not checked on that branch.
 - **The plain `Invoke` path fixes the status code.** `RivetResult`/`RivetResult<T>`
   carry the declared success status; the payload type is checked only by the
-  compiler.
+  compiler — none of the runtime checks above run on this path.
+
+### The failure envelope
+
+Every runtime check above throws `RivetContractViolationException` (a subclass of
+`InvalidOperationException`, so existing catch blocks keep working). Unhandled,
+that surfaces as ASP.NET's default 500 with no body. Register the bundled handler
+to emit the structured Rivet envelope instead — the same `{ code, message }` shape
+the rivet-ts Hono adapter uses for its enforcement failures, so both runtimes
+report violations identically on the wire:
+
+```csharp
+builder.Services.AddExceptionHandler<RivetContractViolationHandler>();
+builder.Services.AddProblemDetails(); // fallback for everything else
+// ...
+app.UseExceptionHandler();
+```
+
+A violation then returns
+`500 { "code": "contract_violation", "message": "Route '/api/items/{id}' returned undeclared status code 409. ..." }`.
 
 ## What is NOT enforced at runtime
 
 Do not rely on Rivet for any of the following — none of it happens:
 
-- **Response body shape.** Rivet never inspects or filters serialized output. If the
-  object you return has extra properties (e.g. you return a derived type, or your
-  serializer includes members the spec does not declare), those properties go to the
-  wire. The typed-results check is C# type assignability, not JSON shape validation.
+- **Serialized JSON shape.** The runtime checks are type-identity checks on the CLR
+  value, never inspection of serialized output. A derived instance is rejected (see
+  above), but members your *serializer configuration* adds, renames, or drops on the
+  declared type itself (custom converters, `[JsonExtensionData]`, contract
+  customization) go to the wire unchecked, and `null` in a required member is not
+  caught. The `RivetResult` bridge path performs no runtime checks at all.
 - **Validation constraints.** Rivet's `Invoke` performs no constraint validation on
   requests or responses. Enforcement is the host framework's job — see
   [Enforcing constraints at runtime](#enforcing-constraints-at-runtime) below for
   the recipes.
-- **`Define.File` endpoints.** `FileRouteDefinition` has no `Invoke` and therefore no
-  runtime enforcement: content type, stream contents, and status codes are entirely
-  up to your handler.
+- **`Define.File` handlers that bypass `Invoke`.** The file-endpoint checks only run
+  when the handler executes through `FileRouteDefinition.Invoke`; nothing forces
+  handlers through it (true of every endpoint kind — contract↔route binding is
+  `--check`'s job, not the runtime's). Stream *contents* are never inspected either
+  way.
 - **Request parsing and binding.** Done by ASP.NET (or whatever host you bridge to),
   not by Rivet.
 - **Examples.** `.RequestExampleJson(...)` / `.ResponseExampleJson(...)` are runtime

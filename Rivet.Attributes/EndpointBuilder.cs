@@ -640,6 +640,22 @@ public sealed class FileRouteDefinition : RouteDefinitionBase<FileRouteDefinitio
     public FileRouteDefinition ContentType(string mediaType)
         => ProducesFile(mediaType);
 
+    /// <summary>
+    /// Execute the endpoint handler with runtime contract validation: the success
+    /// branch must carry file content matching the declared content type, error
+    /// statuses must be declared. File results write their own status (200, or 206
+    /// under range processing), so only their content type is checked.
+    /// </summary>
+    public async Task<TResult> Invoke<TResult>(Func<Task<TResult>> handler)
+        where TResult : IResult
+    {
+        MarkPublished();
+        var result = await handler();
+        TypedResultValidator.ValidateFile(
+            Route, SuccessStatus, FileContentType, RouteErrorResponses, result, ShouldSkipValidation);
+        return result;
+    }
+
     public static implicit operator Define(FileRouteDefinition _) => default!;
 }
 
@@ -661,6 +677,22 @@ public sealed class FileRouteDefinition<TInput> : RouteDefinitionBase<FileRouteD
     /// </summary>
     public FileRouteDefinition<TInput> ContentType(string mediaType)
         => ProducesFile(mediaType);
+
+    /// <summary>
+    /// Execute the endpoint handler with runtime contract validation: the success
+    /// branch must carry file content matching the declared content type, error
+    /// statuses must be declared. File results write their own status (200, or 206
+    /// under range processing), so only their content type is checked.
+    /// </summary>
+    public async Task<TResult> Invoke<TResult>(TInput input, Func<TInput, Task<TResult>> handler)
+        where TResult : IResult
+    {
+        MarkPublished();
+        var result = await handler(input);
+        TypedResultValidator.ValidateFile(
+            Route, SuccessStatus, FileContentType, RouteErrorResponses, result, ShouldSkipValidation);
+        return result;
+    }
 
     public static implicit operator Define(FileRouteDefinition<TInput> _) => default!;
 }

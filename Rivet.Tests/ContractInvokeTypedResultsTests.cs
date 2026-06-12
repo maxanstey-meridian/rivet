@@ -121,7 +121,7 @@ public sealed class ContractInvokeTypedResultsTests
         var route = Define.Get<ItemDto>("/api/items/{id}")
             .Returns<NotFoundDto>(StatusCodes.Status404NotFound, "Not found");
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
             route.Invoke<Ok<ItemDto>, Conflict<ErrorDto>>(
                 () => Task.FromResult<Results<Ok<ItemDto>, Conflict<ErrorDto>>>(
                     TypedResults.Conflict(new ErrorDto("duplicate")))));
@@ -135,7 +135,7 @@ public sealed class ContractInvokeTypedResultsTests
         var route = Define.Get<ItemDto>("/api/items/{id}")
             .Returns(StatusCodes.Status404NotFound, "Not found");
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
             route.Invoke<Ok<ItemDto>, NotFound<NotFoundDto>>(
                 () => Task.FromResult<Results<Ok<ItemDto>, NotFound<NotFoundDto>>>(
                     TypedResults.NotFound(new NotFoundDto("Missing item")))));
@@ -149,7 +149,7 @@ public sealed class ContractInvokeTypedResultsTests
         var route = Define.Get<ItemDto>("/api/items/{id}")
             .Returns<NotFoundDto>(StatusCodes.Status404NotFound, "Not found");
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
             route.Invoke<Ok<ItemDto>, NotFound>(
                 () => Task.FromResult<Results<Ok<ItemDto>, NotFound>>(TypedResults.NotFound())));
 
@@ -162,7 +162,7 @@ public sealed class ContractInvokeTypedResultsTests
         var route = Define.Get<ItemDto>("/api/items/{id}")
             .Returns<NotFoundDto>(StatusCodes.Status404NotFound, "Not found");
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
             route.Invoke<Ok<ItemDto>, NotFound<ErrorDto>>(
                 () => Task.FromResult<Results<Ok<ItemDto>, NotFound<ErrorDto>>>(
                     TypedResults.NotFound(new ErrorDto("wrong")))));
