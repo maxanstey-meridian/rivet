@@ -358,11 +358,13 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         using var process = Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start node {script}");
 
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
+        // Drain both pipes concurrently — sequential ReadToEnd deadlocks when the
+        // child fills the other pipe's buffer (same family as RunProcessAsync).
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
         process.WaitForExit();
 
-        return (process.ExitCode, stdout, stderr);
+        return (process.ExitCode, stdoutTask.Result, stderrTask.Result);
     }
 
     private static async Task<(int ExitCode, string Output)> RunProcessAsync(
@@ -378,14 +380,19 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        SampleProjectTests.MakeBuildHermetic(psi);
 
         using var process = Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start {fileName}");
 
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
-
+        // Drain both pipes CONCURRENTLY: reading stdout to EOF before touching
+        // stderr deadlocks when the child fills the stderr pipe buffer and blocks
+        // on write — stdout then never EOFs (CliPipelineTests' flake, same family).
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
         await process.WaitForExitAsync(ct);
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
 
         var output = string.Join("\n",
             new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s)));
@@ -405,6 +412,7 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        SampleProjectTests.MakeBuildHermetic(psi);
 
         var process = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start sample server");

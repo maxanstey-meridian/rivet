@@ -271,14 +271,19 @@ public sealed class PublishFixture : IAsyncLifetime
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        SampleProjectTests.MakeBuildHermetic(psi);
 
         using var process = Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start {fileName}");
 
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
-
+        // Drain both pipes CONCURRENTLY: reading stdout to EOF before touching
+        // stderr deadlocks when the child fills the stderr pipe buffer and blocks
+        // on write — stdout then never EOFs (CliPipelineTests' flake, same family).
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
         await process.WaitForExitAsync(ct);
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
 
         var output = string.Join("\n",
             new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s)));

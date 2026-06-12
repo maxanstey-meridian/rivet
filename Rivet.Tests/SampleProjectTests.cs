@@ -252,6 +252,20 @@ public sealed class SampleProjectTests : IDisposable
         return dir ?? throw new InvalidOperationException("Could not find repo root (Rivet.slnx)");
     }
 
+    /// <summary>
+    /// Child dotnet builds must not share MSBuild node-reuse workers or the Roslyn
+    /// compiler server with the outer `dotnet test` (itself an MSBuild build) —
+    /// sharing them deadlocked the testhost under load (hangdumps fingered
+    /// SampleProject_Builds / ImportDemo_Builds, which pass instantly in isolation).
+    /// MSBuild reads environment variables as global properties, so this covers
+    /// `dotnet build` and `dotnet run` alike without argument-parsing risk.
+    /// </summary>
+    internal static void MakeBuildHermetic(ProcessStartInfo psi)
+    {
+        psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+        psi.Environment["UseSharedCompilation"] = "false";
+    }
+
     private static async Task<(int ExitCode, string Output)> RunProcessAsync(
         string fileName, string arguments, string? workingDir = null, CancellationToken ct = default)
     {
@@ -265,14 +279,19 @@ public sealed class SampleProjectTests : IDisposable
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        MakeBuildHermetic(psi);
 
         using var process = Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start {fileName}");
 
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
-
+        // Drain both pipes CONCURRENTLY: reading stdout to EOF before touching
+        // stderr deadlocks when the child fills the stderr pipe buffer and blocks
+        // on write — stdout then never EOFs (CliPipelineTests' flake, same family).
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
         await process.WaitForExitAsync(ct);
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
 
         var output = string.Join("\n",
             new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s)));
@@ -292,6 +311,7 @@ public sealed class SampleProjectTests : IDisposable
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        MakeBuildHermetic(psi);
 
         var process = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start sample server");
