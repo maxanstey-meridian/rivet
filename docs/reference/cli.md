@@ -8,6 +8,7 @@ omit it to preview the spec on stdout.
 ```bash
 dotnet rivet --project path/to/Api.csproj --output ./generated
 dotnet rivet Contracts.cs Types.cs --output ./generated
+dotnet rivet ./src/generated --output ./generated   # a directory = every .cs under it
 ```
 
 ### Explicit spec path

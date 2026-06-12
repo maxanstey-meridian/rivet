@@ -24,6 +24,25 @@ the scheme *name* survives the import (see Security below).
   (form-encoded inputs), `multipart/form-data` (incl. `IFormFile` /
   `List<IFormFile>`), binary content types (file endpoints / `ProducesFile`),
   `text/*` and `*/*` fallbacks.
+- **Property names**: spec keys PascalCase into C# members; whenever
+  `camelCase(member)` is not the original key (snake_case keys,
+  already-PascalCase keys), the original is pinned with
+  `[JsonPropertyName("original_key")]` so neither the runtime serializer nor
+  the re-emitted spec drift. Keys that PascalCase into reserved record
+  machinery (`Equals`, `ToString`, `GetHashCode`, `GetType`, `Deconstruct`,
+  `EqualityContract`) are renamed with a `Value` suffix — the pin keeps the
+  wire name intact. Schema names that collide case-insensitively after
+  sanitization are numeric-suffixed (emitted files live on case-insensitive
+  filesystems).
+- **Undiscriminated `oneOf`** (no discriminator — e.g. `string | integer`):
+  imported as an `As*` wrapper record carrying `[RivetUnion]`. The attribute
+  doubles as a `JsonConverter`: the wire value is the BARE variant, and the
+  walker re-emits the wrapper as a plain `oneOf` — round-trip faithful.
+  A `{"type": "null"}` variant degrades to a permissive empty schema.
+- **Example values**: embedded `{"$ref": "#/components/examples/X"}` example
+  VALUES (the github anti-pattern) are inlined at import time, while the
+  source components are in hand — a round-trip can never dangle them.
+  Unresolvable refs degrade loudly (`unresolvable-embedded-example-ref`).
 - **Parameters**: path, query and header parameters → synthesized input records.
   Header parameters KEEP their location (P2 wave 5): the synthesized property
   carries `[RivetHeader("Original-Name")]` — original casing included — and
