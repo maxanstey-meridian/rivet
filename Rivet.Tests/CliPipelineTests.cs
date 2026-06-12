@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 
 namespace Rivet.Tests;
@@ -19,49 +17,12 @@ namespace Rivet.Tests;
 public sealed class CliPipelineTests
 {
     private static string SpecPath(string name) =>
-        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "openapi", $"{name}.json");
-
-    private static string ToolDllPath =>
-        Path.Combine(AppContext.BaseDirectory, "Rivet.Tool.dll");
+        CliRunner.RepoPath("openapi", $"{name}.json");
 
     private static (int ExitCode, string StdOut, string StdErr) RunCli(
         string workingDirectory,
-        IReadOnlyList<string> args)
-    {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        startInfo.ArgumentList.Add("exec");
-        startInfo.ArgumentList.Add(ToolDllPath);
-        foreach (var arg in args)
-        {
-            startInfo.ArgumentList.Add(arg);
-        }
-
-        using var process = Process.Start(startInfo)!;
-        var stdOut = new StringBuilder();
-        var stdErr = new StringBuilder();
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) { stdOut.AppendLine(e.Data); } };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) { stdErr.AppendLine(e.Data); } };
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        if (!process.WaitForExit(TimeSpan.FromMinutes(5)))
-        {
-            process.Kill(entireProcessTree: true);
-            throw new TimeoutException("Rivet CLI did not exit within 5 minutes.");
-        }
-
-        // The timeout overload returns on process exit WITHOUT draining the async
-        // readers — the last buffered lines can land after we read the builders.
-        // The parameterless overload waits for stream EOF.
-        process.WaitForExit();
-
-        return (process.ExitCode, stdOut.ToString(), stdErr.ToString());
-    }
+        IReadOnlyList<string> args) =>
+        CliRunner.RunCli(workingDirectory, args);
 
     [Theory]
     [InlineData("notion")]

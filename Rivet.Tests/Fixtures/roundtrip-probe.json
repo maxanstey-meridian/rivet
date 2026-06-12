@@ -1,0 +1,77 @@
+{
+  "openapi": "3.0.3",
+  "info": {"title": "Probe", "version": "1.0.0"},
+  "paths": {
+    "/things/{thing_id}": {
+      "get": {
+        "operationId": "getThing",
+        "parameters": [{"name": "thing_id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "ok", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Thing"}}}}}
+      },
+      "put": {
+        "operationId": "suspendThing",
+        "parameters": [{"name": "thing_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
+        "responses": {"204": {"description": "done"}}
+      }
+    },
+    "/groups/{group}/teams/{group-team}": {
+      "get": {
+        "operationId": "getGroupTeam",
+        "parameters": [
+          {"name": "group", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "group-team", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"204": {"description": "ok"}}
+      }
+    },
+    "/echo": {
+      "post": {
+        "operationId": "echo",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"x": {"type": "string"}}}, "examples": {"default": {"value": null}}}}},
+        "responses": {"200": {"description": "ok"}}
+      }
+    },
+    "/notes": {
+      "post": {
+        "operationId": "createNote",
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"text": {"type": "string"}}}}}},
+        "responses": {"201": {"description": "created"}}
+      }
+    },
+    "/grants/revoke": {
+      "delete": {
+        "operationId": "revokeGrant",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["access_token"], "properties": {"access_token": {"type": "string"}}}}}},
+        "responses": {"204": {"description": "revoked"}}
+      }
+    },
+    "/download/{artifact_id}": {
+      "get": {
+        "operationId": "downloadArtifact",
+        "parameters": [{"name": "artifact_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
+        "responses": {"302": {"description": "redirect to blob storage"}}
+      }
+    },
+    "/render/raw": {
+      "post": {
+        "operationId": "renderRaw",
+        "requestBody": {"required": true, "content": {"text/plain": {"schema": {"type": "string"}}}},
+        "responses": {"200": {"description": "rendered", "content": {"text/html": {"schema": {"type": "string"}}}}}
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Thing": {
+        "type": "object",
+        "required": ["state", "owner", "name"],
+        "properties": {
+          "state": {"type": "string", "enum": ["Ready", "FLAT_RATE", "EastUs", "ALLCAPS"]},
+          "owner": {"$ref": "#/components/schemas/nullable-owner"},
+          "name": {"type": "string", "nullable": true}
+        }
+      },
+      "nullable-owner": {"type": "object", "nullable": true, "properties": {"id": {"type": "integer"}}}
+    }
+  }
+}
