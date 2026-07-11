@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Text.Json;
 
 namespace Rivet.Tool.Model;
 
@@ -31,6 +32,9 @@ public abstract record TsType
 
     /// <summary>1 | 2 | 3 — int enum rendered as numeric literal union.</summary>
     public sealed record IntUnion(IReadOnlyList<int> Members) : TsType;
+
+    /// <summary>A JSON scalar literal type represented with OpenAPI 3.1 const.</summary>
+    public sealed record Literal(JsonElement Value) : TsType;
 
     /// <summary>Reference to another emitted type by name.</summary>
     public sealed record TypeRef(string Name) : TsType;
@@ -75,6 +79,7 @@ public abstract record TsType
                 ? string.Concat(su.Members.Select(s => char.ToUpperInvariant(s[0]) + s[1..]))
                 : "Enum",
             IntUnion => "Enum",
+            Literal literal => LiteralNameSuffix(literal.Value),
             // Field TYPES are part of the suffix: naming by field names alone made
             // Wrapper<{value:string}> and Wrapper<{value:number}> collide on "Wrapper_Value"
             // and silently overwrite each other's component schema (E2).
@@ -155,6 +160,7 @@ public abstract record TsType
                 break;
             case StringUnion:
             case IntUnion:
+            case Literal:
             case Primitive:
             case TypeParam:
                 // No type refs to collect
@@ -179,4 +185,13 @@ public abstract record TsType
                 break;
         }
     }
+
+    private static string LiteralNameSuffix(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => "Literal" + value.GetString(),
+        JsonValueKind.Number => "Literal" + value.GetRawText().Replace("-", "Negative", StringComparison.Ordinal),
+        JsonValueKind.True => "LiteralTrue",
+        JsonValueKind.False => "LiteralFalse",
+        _ => "Literal",
+    };
 }

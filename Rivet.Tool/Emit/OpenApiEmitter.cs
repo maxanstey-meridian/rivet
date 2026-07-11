@@ -793,6 +793,11 @@ public static class OpenApiEmitter
                 ["enum"] = iu.Members.ToList(),
             },
 
+            TsType.Literal literal => new Dictionary<string, object>
+            {
+                ["const"] = JsonElementValue(literal.Value),
+            },
+
             TsType.TypeRef r => new Dictionary<string, object>
             {
                 ["$ref"] = $"#/components/schemas/{r.Name}",
@@ -826,6 +831,16 @@ public static class OpenApiEmitter
             _ => new Dictionary<string, object> { ["type"] = "object" },
         };
     }
+
+    private static object JsonElementValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString()!,
+        JsonValueKind.Number when value.TryGetInt64(out var integer) => integer,
+        JsonValueKind.Number => value.GetDouble(),
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        _ => throw new InvalidOperationException($"Unsupported scalar literal kind '{value.ValueKind}'."),
+    };
 
     private static Dictionary<string, object> BuildInlineObjectSchema(TsType.InlineObject obj, string? context = null)
     {

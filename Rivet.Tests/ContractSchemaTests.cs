@@ -345,6 +345,20 @@ public sealed class ContractSchemaTests
     }
 
     [Fact]
+    public void Heterogeneous_Scalar_Union_Is_Accepted()
+    {
+        var json = """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"union","variants":[{"kind":"primitive","type":"number"},{"kind":"literal","value":false}]},"optional":false}]}],"enums":[],"endpoints":[]}""";
+        Assert.True(Validate(json).IsValid);
+    }
+
+    [Fact]
+    public void Empty_Generic_Union_Is_Rejected()
+    {
+        var json = """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"union","variants":[]},"optional":false}]}],"enums":[],"endpoints":[]}""";
+        Assert.False(Validate(json).IsValid);
+    }
+
+    [Fact]
     public void Invalid_ParamSource_Rejected()
     {
         // "header" became a valid source in P2 wave 5 — "cookie" remains unrepresentable.

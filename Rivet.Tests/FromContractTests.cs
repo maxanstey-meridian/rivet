@@ -8,6 +8,60 @@ namespace Rivet.Tests;
 public sealed class FromContractTests
 {
     [Fact]
+    public async Task FromContract_HeterogeneousScalarUnion_EmitsOneOfWithConst()
+    {
+        var repoRoot = PublishFixture.FindRepoRoot();
+        var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
+        var tempDir = Path.Combine(Path.GetTempPath(), $"rivet-scalar-union-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var contractPath = Path.Combine(tempDir, "contract.json");
+        var outputDir = Path.Combine(tempDir, "generated");
+        await File.WriteAllTextAsync(contractPath, """
+            {
+              "types": [{
+                "name": "SettingsDto",
+                "typeParameters": [],
+                "properties": [{
+                  "name": "idleTimeoutMs",
+                  "type": {
+                    "kind": "union",
+                    "variants": [
+                      { "kind": "primitive", "type": "number" },
+                      { "kind": "literal", "value": false }
+                    ]
+                  },
+                  "optional": false
+                }]
+              }],
+              "enums": [],
+              "endpoints": []
+            }
+            """);
+
+        try
+        {
+            var (exitCode, output) = await PublishFixture.RunProcessAsync(
+                "dotnet",
+                $"run --project \"{csproj}\" -- --from \"{contractPath}\" --output \"{outputDir}\"",
+                repoRoot);
+            Assert.True(exitCode == 0, $"--from failed (exit {exitCode}):\n{output}");
+
+            using var document = System.Text.Json.JsonDocument.Parse(
+                await File.ReadAllTextAsync(Path.Combine(outputDir, "openapi.json")));
+            var property = document.RootElement
+                .GetProperty("components").GetProperty("schemas").GetProperty("SettingsDto")
+                .GetProperty("properties").GetProperty("idleTimeoutMs");
+            var oneOf = property.GetProperty("oneOf");
+            Assert.Equal("number", oneOf[0].GetProperty("type").GetString());
+            Assert.False(oneOf[1].GetProperty("const").GetBoolean());
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task FromContract_PreviewToStdout_EmitsOpenApi()
     {
         var repoRoot = PublishFixture.FindRepoRoot();

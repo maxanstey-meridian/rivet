@@ -110,6 +110,15 @@
         {
           "type": "object",
           "properties": {
+            "kind": { "const": "literal" },
+            "value": { "type": ["string", "number", "boolean"] }
+          },
+          "required": ["kind", "value"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
             "kind": { "const": "inlineObject" },
             "properties": {
               "type": "array",
@@ -147,6 +156,19 @@
             }
           },
           "required": ["kind", "discriminator", "variants"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "union" },
+            "variants": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/tsType" },
+              "minItems": 1
+            }
+          },
+          "required": ["kind", "variants"],
           "additionalProperties": false
         }
       ]

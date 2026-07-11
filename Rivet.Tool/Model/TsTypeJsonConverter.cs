@@ -47,6 +47,9 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 root.GetProperty("values").EnumerateArray()
                     .Select(e => e.GetInt32()).ToArray()),
 
+            "literal" => new TsType.Literal(
+                root.GetProperty("value").Clone()),
+
             "ref" => new TsType.TypeRef(
                 root.GetProperty("name").GetString()!),
 
@@ -138,6 +141,12 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 foreach (var member in iu.Members)
                     writer.WriteNumberValue(member);
                 writer.WriteEndArray();
+                break;
+
+            case TsType.Literal literal:
+                writer.WriteString("kind", "literal");
+                writer.WritePropertyName("value");
+                literal.Value.WriteTo(writer);
                 break;
 
             case TsType.TypeRef tr:

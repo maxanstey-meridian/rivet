@@ -133,6 +133,26 @@ public sealed class TsTypeSerializationTests
     }
 
     [Fact]
+    public void Scalar_Literal_And_Union_RoundTrip()
+    {
+        using var falseDocument = JsonDocument.Parse("false");
+        var original = new TsType.Union([
+            new TsType.Primitive("number"),
+            new TsType.Literal(falseDocument.RootElement.Clone()),
+        ]);
+
+        var json = JsonSerializer.Serialize<TsType>(original, Options);
+        using var document = JsonDocument.Parse(json);
+        Assert.Equal("union", document.RootElement.GetProperty("kind").GetString());
+        Assert.False(document.RootElement.GetProperty("variants")[1].GetProperty("value").GetBoolean());
+
+        var result = Assert.IsType<TsType.Union>(JsonSerializer.Deserialize<TsType>(json, Options));
+        Assert.IsType<TsType.Primitive>(result.Variants[0]);
+        var literal = Assert.IsType<TsType.Literal>(result.Variants[1]);
+        Assert.Equal(JsonValueKind.False, literal.Value.ValueKind);
+    }
+
+    [Fact]
     public void TypeRef_RoundTrips()
     {
         var original = new TsType.TypeRef("UserDto");

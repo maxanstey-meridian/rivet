@@ -7,6 +7,38 @@ namespace Rivet.Tests;
 public sealed class JsonContractReaderTests
 {
     [Fact]
+    public void Read_Preserves_Heterogeneous_Scalar_Union()
+    {
+        var json = """
+            {
+                "types": [{
+                    "name": "Settings",
+                    "typeParameters": [],
+                    "properties": [{
+                        "name": "timeout",
+                        "type": {
+                            "kind": "union",
+                            "variants": [
+                                { "kind": "primitive", "type": "number" },
+                                { "kind": "literal", "value": false }
+                            ]
+                        },
+                        "optional": false
+                    }]
+                }],
+                "enums": [],
+                "endpoints": []
+            }
+            """;
+
+        var result = JsonContractReader.Read(json);
+        var settings = Assert.Single(result.Types);
+        var union = Assert.IsType<TsType.Union>(Assert.Single(settings.Properties).Type);
+        Assert.IsType<TsType.Primitive>(union.Variants[0]);
+        Assert.Equal(JsonValueKind.False, Assert.IsType<TsType.Literal>(union.Variants[1]).Value.ValueKind);
+    }
+
+    [Fact]
     public void Read_Returns_Endpoints_From_Contract_Json()
     {
         var json = """
