@@ -157,24 +157,85 @@ public sealed class OpenApiRoundTripTests
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var securitySchemes = endpoints.Select(endpoint => endpoint.Security?.Scheme)
+            .Where(scheme => scheme is not null).Distinct().Select(scheme => $"{scheme}=bearer");
+        var security = SecurityParser.ParseMany(securitySchemes);
+        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, security);
         return JsonSerializer.Deserialize<JsonElement>(emittedJson);
     }
 
+    [Fact]
+    public void Imported_Path_And_Body_Properties_With_Same_Name_Remain_Independent()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "UpdateMember": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" },
+                        "role": { "type": "string" }
+                    },
+                    "required": ["id", "role"]
+                }
+                """,
+            paths: """
+                "/members/{id}": {
+                    "put": {
+                        "operationId": "updateMember",
+                        "tags": ["Members"],
+                        "parameters": [
+                            { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                        ],
+                        "requestBody": {
+                            "required": false,
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/UpdateMember" }
+                                }
+                            }
+                        },
+                        "responses": { "204": { "description": "No Content" } }
+                    }
+                }
+                """);
+
+        var firstEmission = ImportCompileWalkAndEmit(spec, "SameNameRoundTripFirst");
+        var emitted = ImportCompileWalkAndEmit(firstEmission.GetRawText(), "SameNameRoundTripSecond");
+        var operation = emitted.GetProperty("paths").GetProperty("/members/{id}").GetProperty("put");
+        Assert.False(operation.GetProperty("requestBody").GetProperty("required").GetBoolean());
+        var bodyProperties = emitted.GetProperty("components").GetProperty("schemas")
+            .GetProperty("UpdateMember").GetProperty("properties");
+
+        Assert.True(bodyProperties.TryGetProperty("id", out _));
+        Assert.True(bodyProperties.TryGetProperty("role", out _));
+
+        var imported = CompilationHelper.Import(spec, "SameNameRuntimeInput");
+        var input = CompilationHelper.FindFile(imported, "UpdateMemberInput.cs");
+        Assert.Contains("string Id", input);
+        Assert.Contains("UpdateMember? Body", input);
+        Assert.Contains("[RivetRequestBody(typeof(UpdateMember), false)]", CompilationHelper.FindFile(imported, "MembersContract.cs"));
+    }
+
     private static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker) RoundTrip(
-        string csharpSource, string? security = null)
+        string csharpSource,
+        string? security = null,
+        string? importedSecurityScheme = null)
     {
         // Forward: C# → OpenAPI JSON
         var compilation = CompilationHelper.CreateCompilation(csharpSource);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var securityConfig = security is not null ? SecurityParser.Parse(security) : null;
+        var securityConfig = security is null
+            ? null
+            : security.Contains('=')
+                ? SecurityParser.ParseMany(["bearer", security])
+                : SecurityParser.Parse(security);
         var openApiJson = OpenApiEmitter.Emit(
             endpoints, walker.Definitions, walker.Brands, walker.Enums, securityConfig);
 
         // Reverse: OpenAPI → import → compile → walk
         var importResult = OpenApiImporter.Import(
-            openApiJson, new ImportOptions("RoundTrip", security));
+            openApiJson, new ImportOptions("RoundTrip", importedSecurityScheme));
         var recompilation = CompilationHelper.CreateCompilationFromMultiple(
             importResult.Files.Select(f => f.Content).ToArray());
         var (reDiscovered, rewalker) = CompilationHelper.DiscoverAndWalk(recompilation);
@@ -1004,7 +1065,7 @@ public sealed class OpenApiRoundTripTests
             }
             """;
 
-        var (endpoints, _) = RoundTrip(source, "bearer");
+        var (endpoints, _) = RoundTrip(source, "admin=bearer", importedSecurityScheme: "bearer");
 
         // Anonymous endpoint
         var health = endpoints.First(e => e.RouteTemplate == "/api/health");
@@ -2053,7 +2114,7 @@ public sealed class OpenApiRoundTripTests
             }
             """;
 
-        var (endpoints, walker) = RoundTrip(source, "bearer");
+        var (endpoints, walker) = RoundTrip(source, "admin=bearer", importedSecurityScheme: "bearer");
 
         // --- Endpoint count (6 Items + 1 Health + 1 Admin + 1 Users) ---
         Assert.Equal(9, endpoints.Count);
@@ -2442,7 +2503,7 @@ public sealed class OpenApiRoundTripTests
             }
             """;
 
-        const string security = "bearer";
+        const string security = "admin=bearer";
 
         // ───── Pipeline: C# → OpenAPI → C# → OpenAPI → C# → OpenAPI ─────
 
@@ -2450,11 +2511,11 @@ public sealed class OpenApiRoundTripTests
         var comp0 = CompilationHelper.CreateCompilation(source);
         var (disc0, wlk0) = CompilationHelper.DiscoverAndWalk(comp0);
         var eps0 = CompilationHelper.WalkContracts(comp0, disc0, wlk0);
-        var secCfg = SecurityParser.Parse(security);
+        var secCfg = SecurityParser.ParseMany(["bearer", security]);
         var json0 = OpenApiEmitter.Emit(eps0, wlk0.Definitions, wlk0.Brands, wlk0.Enums, secCfg);
 
         // Step 1 (round 1): OpenAPI → import → compile → walk → OpenAPI
-        var import1 = OpenApiImporter.Import(json0, new ImportOptions("RoundTrip", security));
+        var import1 = OpenApiImporter.Import(json0, new ImportOptions("RoundTrip", secCfg!.SchemeName));
 
         var comp1 = CompilationHelper.CreateCompilationFromMultiple(
             import1.Files.Select(f => f.Content).ToArray());
@@ -2463,7 +2524,7 @@ public sealed class OpenApiRoundTripTests
         var json1 = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, secCfg);
 
         // Step 2 (round 2): OpenAPI → import → compile → walk → OpenAPI
-        var import2 = OpenApiImporter.Import(json1, new ImportOptions("RoundTrip", security));
+        var import2 = OpenApiImporter.Import(json1, new ImportOptions("RoundTrip", secCfg!.SchemeName));
         var comp2 = CompilationHelper.CreateCompilationFromMultiple(
             import2.Files.Select(f => f.Content).ToArray());
         var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(comp2);
@@ -2913,20 +2974,14 @@ public sealed class OpenApiRoundTripTests
             $"Optional cursor should be Nullable(string), got {cursorParam.Type}");
     }
 
-    /// <summary>
-    /// Verifies that nullable fields inside inline objects (InlineObject TsType)
-    /// are NOT marked as required in the emitted OpenAPI schema.
-    /// Bug: BuildInlineObjectSchema unconditionally adds all fields to required[].
-    /// </summary>
     [Fact]
-    public void InlineObject_NullableFields_NotMarkedRequired()
+    public void InlineObject_Requiredness_And_Nullability_Are_Independent()
     {
-        // Create an endpoint with an InlineObject return type that has nullable fields
         var inlineType = new TsType.InlineObject([
-            ("name", new TsType.Primitive("string")),
-            ("description", new TsType.Nullable(new TsType.Primitive("string"))),
-            ("count", new TsType.Primitive("number", "int32")),
-            ("limit", new TsType.Nullable(new TsType.Primitive("number", "int32"))),
+            new("requiredNonNullable", new TsType.Primitive("string")),
+            new("requiredNullable", new TsType.Nullable(new TsType.Primitive("string"))),
+            new("optionalNonNullable", new TsType.Primitive("string"), Optional: true),
+            new("optionalNullable", new TsType.Nullable(new TsType.Primitive("string")), Optional: true),
         ]);
 
         var endpoints = new List<TsEndpointDefinition>
@@ -2961,16 +3016,22 @@ public sealed class OpenApiRoundTripTests
             .GetProperty("application/json")
             .GetProperty("schema");
 
-        // Check the required array — should only contain non-nullable fields
         var requiredArray = responseSchema.GetProperty("required")
             .EnumerateArray()
             .Select(e => e.GetString()!)
             .ToList();
+        var properties = responseSchema.GetProperty("properties");
 
-        Assert.Contains("name", requiredArray);
-        Assert.Contains("count", requiredArray);
-        Assert.DoesNotContain("description", requiredArray);
-        Assert.DoesNotContain("limit", requiredArray);
+        Assert.Contains("requiredNonNullable", requiredArray);
+        Assert.Contains("requiredNullable", requiredArray);
+        Assert.DoesNotContain("optionalNonNullable", requiredArray);
+        Assert.DoesNotContain("optionalNullable", requiredArray);
+        Assert.Equal("string", properties.GetProperty("requiredNonNullable").GetProperty("type").GetString());
+        Assert.Equal("string", properties.GetProperty("optionalNonNullable").GetProperty("type").GetString());
+        Assert.Equal(["string", "null"], properties.GetProperty("requiredNullable")
+            .GetProperty("type").EnumerateArray().Select(type => type.GetString()));
+        Assert.Equal(["string", "null"], properties.GetProperty("optionalNullable")
+            .GetProperty("type").EnumerateArray().Select(type => type.GetString()));
     }
 
     /// <summary>

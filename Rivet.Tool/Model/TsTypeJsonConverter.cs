@@ -67,9 +67,16 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
 
             "inlineObject" => new TsType.InlineObject(
                 root.GetProperty("properties").EnumerateArray()
-                    .Select(e => (
-                        e.GetProperty("name").GetString()!,
-                        JsonSerializer.Deserialize<TsType>(e.GetProperty("type").GetRawText(), options)!))
+                    .Select(e =>
+                    {
+                        var type = JsonSerializer.Deserialize<TsType>(
+                            e.GetProperty("type").GetRawText(), options)!;
+                        var optional = e.TryGetProperty("optional", out var optionalElement)
+                            ? optionalElement.GetBoolean()
+                            : type is TsType.Nullable;
+                        return new TsType.InlineObjectField(
+                            e.GetProperty("name").GetString()!, type, optional);
+                    })
                     .ToArray()),
 
             "taggedUnion" => new TsType.TaggedUnion(
@@ -178,12 +185,13 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
             case TsType.InlineObject obj:
                 writer.WriteString("kind", "inlineObject");
                 writer.WriteStartArray("properties");
-                foreach (var (name, fieldType) in obj.Fields)
+                foreach (var field in obj.Fields)
                 {
                     writer.WriteStartObject();
-                    writer.WriteString("name", name);
+                    writer.WriteString("name", field.Name);
                     writer.WritePropertyName("type");
-                    JsonSerializer.Serialize(writer, fieldType, options);
+                    JsonSerializer.Serialize(writer, field.Type, options);
+                    writer.WriteBoolean("optional", field.Optional);
                     writer.WriteEndObject();
                 }
                 writer.WriteEndArray();

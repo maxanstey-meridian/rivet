@@ -399,23 +399,26 @@ internal static class SchemaClassifier
 
     internal static List<RecordProperty> DeduplicateProperties(List<RecordProperty> properties)
     {
-        var seen = new Dictionary<string, int>();
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        var nextSuffix = new Dictionary<string, int>(StringComparer.Ordinal);
         var result = new List<RecordProperty>(properties.Count);
 
         foreach (var prop in properties)
         {
             var name = prop.Name;
-            if (seen.TryGetValue(name, out var count))
+            if (!used.Add(name))
             {
-                count++;
-                seen[name] = count;
-                result.Add(prop with { Name = $"{name}_{count}" });
+                var suffix = nextSuffix.GetValueOrDefault(name, 2);
+                do
+                {
+                    name = $"{prop.Name}_{suffix++}";
+                }
+                while (!used.Add(name));
+
+                nextSuffix[prop.Name] = suffix;
             }
-            else
-            {
-                seen[name] = 1;
-                result.Add(prop);
-            }
+
+            result.Add(prop with { Name = name });
         }
 
         return result;

@@ -893,6 +893,56 @@ public sealed class JsonContractReaderTests
     }
 
     [Fact]
+    public void Duplicate_Response_Status_In_Contract_Json_Keeps_First_Metadata_And_Sorts()
+    {
+        var json = """
+            {
+              "types": [],
+              "enums": [],
+              "endpoints": [{
+                "name": "getUser",
+                "httpMethod": "GET",
+                "routeTemplate": "/api/users/{id}",
+                "params": [],
+                "controllerName": "UsersController",
+                "responses": [
+                  { "statusCode": 500, "description": "server error" },
+                  {
+                    "statusCode": 404,
+                    "dataType": { "kind": "primitive", "type": "string" },
+                    "description": "first",
+                    "examples": [{ "mediaType": "application/json", "name": "first", "json": "{}" }],
+                    "headers": [{ "name": "X-First", "description": "first header", "required": true }]
+                  },
+                  { "statusCode": 404, "dataType": { "kind": "primitive", "type": "number" }, "description": "second" },
+                  { "statusCode": 200, "description": "success" }
+                ]
+              }]
+            }
+            """;
+
+        IReadOnlyList<TsEndpointDefinition>? endpoints = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+        {
+            var result = JsonContractReader.Read(json);
+            endpoints = result.Endpoints;
+            ContractEmitter.Emit(
+                result.Types.ToDictionary(type => type.Name),
+                result.Enums,
+                result.Endpoints);
+        });
+
+        var responses = Assert.Single(endpoints!).Responses;
+        Assert.Equal([200, 404, 500], responses.Select(response => response.StatusCode));
+        var response404 = responses[1];
+        Assert.Equal(new TsType.Primitive("string"), response404.DataType);
+        Assert.Equal("first", response404.Description);
+        Assert.Equal("first", Assert.Single(response404.Examples!).Name);
+        Assert.Equal("X-First", Assert.Single(response404.Headers!).Name);
+        Assert.Equal(1, stderr.Split("warning RIV2010:").Length - 1);
+    }
+
+    [Fact]
     public void Param_IsOptional_Survives_Emit_And_Read_RoundTrip_And_Surfaces_In_OpenApi()
     {
         // N1 (reader side): a non-nullable but optional query param — optionality must not
@@ -948,5 +998,39 @@ public sealed class JsonContractReaderTests
 
         var limitQueryParam = parameters.EnumerateArray().Single(p => p.GetProperty("name").GetString() == "limit");
         Assert.False(limitQueryParam.GetProperty("required").GetBoolean());
+    }
+
+    [Fact]
+    public void Route_Body_Property_Association_Survives_Emit_And_Read_RoundTrip()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "updateRole",
+            "PUT",
+            "/api/members/{id}/role",
+            [
+                new TsEndpointParam(
+                    "id",
+                    new TsType.Primitive("string"),
+                    ParamSource.Route,
+                    BodyPropertyName: "member_key"),
+                new TsEndpointParam("body", new TsType.TypeRef("UpdateRoleInput"), ParamSource.Body),
+            ],
+            null,
+            "members",
+            []);
+
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]);
+
+        using (var contractDoc = JsonDocument.Parse(json))
+        {
+            Assert.Equal("member_key", contractDoc.RootElement.GetProperty("endpoints")[0]
+                .GetProperty("params")[0].GetProperty("bodyPropertyName").GetString());
+        }
+
+        var roundTripped = Assert.Single(JsonContractReader.Read(json).Endpoints);
+        Assert.Equal("member_key", roundTripped.Params[0].BodyPropertyName);
     }
 }

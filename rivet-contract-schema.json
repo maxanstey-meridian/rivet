@@ -46,7 +46,8 @@
           "type": "object",
           "properties": {
             "kind": { "const": "dictionary" },
-            "value": { "$ref": "#/$defs/tsType" }
+            "value": { "$ref": "#/$defs/tsType" },
+            "key": { "$ref": "#/$defs/tsType" }
           },
           "required": ["kind", "value"],
           "additionalProperties": false
@@ -126,7 +127,8 @@
                 "type": "object",
                 "properties": {
                   "name": { "type": "string" },
-                  "type": { "$ref": "#/$defs/tsType" }
+                  "type": { "$ref": "#/$defs/tsType" },
+                  "optional": { "type": "boolean" }
                 },
                 "required": ["name", "type"],
                 "additionalProperties": false
@@ -252,7 +254,8 @@
         "name": { "type": "string" },
         "type": { "$ref": "#/$defs/tsType" },
         "source": { "type": "string", "enum": ["route", "body", "query", "file", "formField", "header"] },
-        "isOptional": { "type": "boolean" }
+        "isOptional": { "type": "boolean" },
+        "bodyPropertyName": { "type": "string" }
       },
       "required": ["name", "type", "source"],
       "additionalProperties": false
@@ -342,7 +345,10 @@
         "requestType": { "$ref": "#/$defs/tsType" },
         "requestExamples": { "type": "array", "items": { "$ref": "#/$defs/endpointExample" } },
         "isFileEndpoint": { "type": "boolean" },
-        "queryAuth": { "$ref": "#/$defs/queryAuth" }
+        "queryAuth": { "$ref": "#/$defs/queryAuth" },
+        "binaryRequestContentType": { "type": "string" },
+        "requestContentTypeOverride": { "type": "string" },
+        "responseContentTypeOverride": { "type": "string" }
       },
       "required": ["name", "httpMethod", "routeTemplate", "params", "controllerName", "responses"],
       "additionalProperties": false

@@ -734,7 +734,8 @@ public sealed class KitchenSinkImportTests
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         // Emit → OpenAPI JSON
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums,
+            SecurityParser.ParseMany(["bearer", "admin=bearer"]));
 
         // Verify emitted JSON is well-formed and all $refs resolve
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
@@ -819,7 +820,8 @@ public sealed class KitchenSinkImportTests
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums,
+            SecurityParser.ParseMany(["bearer", "admin=bearer"]));
         var emitted = JsonSerializer.Deserialize<JsonElement>(emittedJson);
 
         var emittedSchemas = emitted.GetProperty("components").GetProperty("schemas");
@@ -891,7 +893,8 @@ public sealed class KitchenSinkImportTests
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums,
+            SecurityParser.ParseMany(["bearer", "admin=bearer"]));
         var emitted = JsonSerializer.Deserialize<JsonElement>(emittedJson);
         var paths = emitted.GetProperty("paths");
 

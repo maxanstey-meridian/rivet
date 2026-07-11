@@ -98,13 +98,24 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         target._errorResponses = _errorResponses?.ToList();
         target._responseHeaders = _responseHeaders?.ToList();
         target._skipValidation = _skipValidation;
+        target._statusSet = _statusSet;
     }
 
     /// <summary>
     /// R3: marks this definition as published. Called by every Invoke overload —
     /// after this, all builder mutators throw.
     /// </summary>
-    protected void MarkPublished() => _published = true;
+    protected void MarkPublished()
+    {
+        if (_errorResponses?.Any(response => response.StatusCode == _successStatus) is true)
+        {
+            throw new InvalidOperationException(
+                $"Status {_successStatus} is declared as both the success status and via .Returns() — " +
+                "success and error responses cannot share a status.");
+        }
+
+        _published = true;
+    }
 
     private void EnsureMutable()
     {
@@ -137,6 +148,12 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         if (_statusSet)
         {
             throw new InvalidOperationException($"Status already set to {_successStatus} — cannot set to {statusCode}. Call .Status() only once.");
+        }
+
+        if (_errorResponses?.Any(response => response.StatusCode == statusCode) is true)
+        {
+            throw new InvalidOperationException(
+                $"Status {statusCode} is already declared via .Returns() — success and error responses cannot share a status.");
         }
 
         _successStatus = statusCode;
@@ -227,10 +244,17 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         EnsureMutable();
         _errorResponses ??= [];
 
+        if (_statusSet && response.StatusCode == _successStatus)
+        {
+            throw new InvalidOperationException(
+                $"Status {response.StatusCode} is already declared as the success status — success and error responses cannot share a status.");
+        }
+
         if (_errorResponses.Any(existing => existing.StatusCode == response.StatusCode))
         {
             throw new InvalidOperationException(
-                $"Status {response.StatusCode} is already declared via .Returns() — declare each status only once.");
+                $"Status {response.StatusCode} is already declared via .Returns() — a status carries a single response shape. " +
+                "For multiple shapes at one status, declare a [RivetUnion] type and return it once.");
         }
 
         _errorResponses.Add(response);

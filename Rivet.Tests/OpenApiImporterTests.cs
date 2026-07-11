@@ -1,5 +1,7 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.CodeAnalysis;
+using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
 using Rivet.Tool.Model;
 
@@ -7,6 +9,18 @@ namespace Rivet.Tests;
 
 public sealed class OpenApiImporterTests
 {
+    [Fact]
+    public void Record_Property_Deduplication_Skips_Naturally_Occurring_Suffixes()
+    {
+        var properties = SchemaClassifier.DeduplicateProperties([
+            new RecordProperty("Value", "string", true),
+            new RecordProperty("Value_2", "string", true),
+            new RecordProperty("Value", "string", true),
+        ]);
+
+        Assert.Equal(["Value", "Value_2", "Value_3"], properties.Select(property => property.Name));
+    }
+
     // ========== SchemaMapper Tests ==========
 
     [Fact]
@@ -890,7 +904,7 @@ public sealed class OpenApiImporterTests
                         "operationId": "messages_create",
                         "tags": ["Messages"],
                         "requestBody": {
-                            "required": true,
+                            "required": false,
                             "content": {
                                 "text/plain": {
                                     "example": "hello world"
@@ -5634,6 +5648,81 @@ public sealed class OpenApiImporterTests
 
         // ...and the query param's location erasure is marked loudly.
         Assert.Contains("// [rivet:unsupported param name=notify in=query reason=location-erased-to-body]", contract);
+    }
+
+    [Fact]
+    public void Request_Body_Provenance_Belongs_To_Each_Endpoint_Not_The_Deduplicated_Input_Record()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+                "AlphaBody": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                },
+                "BetaBody": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                }
+                """,
+            paths: """
+                "/alpha/{id}": {
+                    "post": {
+                        "operationId": "update",
+                        "tags": ["Alpha"],
+                        "parameters": [
+                            { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                        ],
+                        "requestBody": {
+                            "required": false,
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AlphaBody" } } }
+                        },
+                        "responses": { "204": { "description": "No Content" } }
+                    }
+                },
+                "/beta/{id}": {
+                    "post": {
+                        "operationId": "update",
+                        "tags": ["Beta"],
+                        "parameters": [
+                            { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                        ],
+                        "requestBody": {
+                            "required": true,
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BetaBody" } } }
+                        },
+                        "responses": { "204": { "description": "No Content" } }
+                    }
+                }
+                """);
+
+        var result = CompilationHelper.Import(spec);
+        var alphaContract = CompilationHelper.FindFile(result, "AlphaContract.cs");
+        var betaContract = CompilationHelper.FindFile(result, "BetaContract.cs");
+
+        Assert.Contains("[RivetRequestBody(typeof(AlphaBody), false)]", alphaContract);
+        Assert.Contains("[RivetRequestBody(typeof(BetaBody))]", betaContract);
+        Assert.DoesNotContain(
+            result.Files.Where(file => file.FileName.Contains("Types/", StringComparison.Ordinal)),
+            file => file.Content.Contains("RivetRequestBody", StringComparison.Ordinal));
+
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emitted = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var document = JsonSerializer.Deserialize<JsonElement>(emitted);
+
+        var alphaBody = document.GetProperty("paths").GetProperty("/alpha/{id}").GetProperty("post")
+            .GetProperty("requestBody");
+        Assert.False(alphaBody.GetProperty("required").GetBoolean());
+        Assert.Contains("AlphaBody", alphaBody.GetProperty("content").GetProperty("application/json")
+            .GetProperty("schema").GetRawText());
+        Assert.EndsWith(
+            "/BetaBody",
+            document.GetProperty("paths").GetProperty("/beta/{id}").GetProperty("post")
+                .GetProperty("requestBody").GetProperty("content").GetProperty("application/json")
+                .GetProperty("schema").GetProperty("$ref").GetString());
     }
 
     [Fact]

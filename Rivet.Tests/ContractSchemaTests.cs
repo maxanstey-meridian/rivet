@@ -57,7 +57,9 @@ public sealed class ContractSchemaTests
                 new("primFmt", new TsType.Primitive("string", Format: "uuid", CSharpType: "Guid"), false),
                 new("nullable", new TsType.Nullable(new TsType.Primitive("number")), true),
                 new("arr", new TsType.Array(new TsType.TypeRef("ItemDto")), false),
-                new("dict", new TsType.Dictionary(new TsType.Primitive("string")), false),
+                new("dict", new TsType.Dictionary(
+                    new TsType.Primitive("string"),
+                    new TsType.Primitive("number")), false),
                 new("strUnion", new TsType.StringUnion(["a", "b"]), false),
                 new("typeRef", new TsType.TypeRef("Other"), false),
                 new("generic", new TsType.Generic("Page", [new TsType.TypeRef("ItemDto")]), false),
@@ -186,6 +188,26 @@ public sealed class ContractSchemaTests
             "BuyersController",
             [new TsResponseType(202, null)],
             RequestType: new TsType.TypeRef("CreateBuyerRequest"));
+
+        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var result = Validate(json);
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    [Fact]
+    public void Endpoint_With_Binary_And_ContentType_Metadata_Validates()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "render",
+            "POST",
+            "/render",
+            [],
+            new TsType.Primitive("string"),
+            "RenderController",
+            [new TsResponseType(200, new TsType.Primitive("string"))],
+            BinaryRequestContentType: "application/pdf",
+            RequestContentTypeOverride: "text/plain",
+            ResponseContentTypeOverride: "text/html");
 
         var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
         var result = Validate(json);

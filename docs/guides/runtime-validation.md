@@ -7,9 +7,10 @@ its runtime helpers enforce, and — just as important — what they do **not** 
 
 These hold whenever you regenerate the spec (`dotnet rivet --project … --output …`):
 
-- The emitted OpenAPI 3.1 spec is derived from the compiled C# via the Roslyn
-  semantic model — types, routes, nullability, and status codes cannot drift from
-  the code without the spec changing too.
+- The emitted OpenAPI 3.1 spec is deterministically derived from the transport
+  shape declared in compiled C# via the Roslyn semantic model. Custom serializer
+  settings, middleware and other runtime behaviour outside that declaration are
+  not visible; known fidelity loss produces diagnostics where Rivet can detect it.
 - Constraint attributes (`[Range]`, `[StringLength]`, `[MinLength]`, `[MaxLength]`,
   `[RegularExpression]`, `[RivetConstraints]`, ...) are emitted as JSON Schema
   constraints (`minimum`, `maxLength`, `pattern`, `multipleOf`, ...).

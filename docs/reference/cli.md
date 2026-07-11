@@ -40,8 +40,19 @@ dotnet rivet --project path/to/Api.csproj --output ./generated \
 - `--server <url>` — adds a `servers` entry; repeat for multiple. Accepts absolute
   `http(s)` URLs or paths starting with `/`. With no `--server`, no `servers`
   block is emitted at all.
-- `--security <spec>` — accepted forms: `bearer`, `bearer:jwt`, `cookie:<name>`,
-  `apikey:<in>:<name>`.
+- `--security <[name=]spec>` — accepted forms: `bearer`, `bearer:jwt`,
+  `cookie:<name>`, and `apikey:<in>:<name>`, where `<in>` is `query`, `header`,
+  or `cookie`. Scheme kinds and API-key locations are case-insensitive and are
+  emitted in canonical lowercase. Prefix a form with an explicit
+  component name when contracts use `.Secure("...")`, for example
+  `--security admin=bearer` or `--security internal=apikey:header:X-API-Key`.
+  Explicit component names retain their casing.
+  Repeat `--security` to define multiple schemes; the first is the document-wide
+  default and the remaining schemes are available to endpoint-level `.Secure()` calls.
+
+With `--from-openapi`, `--security` retains its importer override behavior and
+accepts one existing OpenAPI component name, such as `--security admin`. Emit-time
+definitions (`admin=bearer`) and repeated values are rejected in import mode.
 
 ## From Contract JSON
 
@@ -53,6 +64,11 @@ public output:
 ```bash
 dotnet rivet --from contract.json --output ./generated
 ```
+
+Inline-object properties written by current runtimes always include an explicit
+`optional` flag, independently of whether their value type is nullable. For
+compatibility with older contract IR, the reader still treats a missing
+`optional` flag as optional when the property's type is nullable.
 
 ## Checks And Listing
 

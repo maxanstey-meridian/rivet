@@ -1,3 +1,5 @@
+using Rivet.Tool.Emit;
+
 namespace Rivet.Tool;
 
 internal static class CliParser
@@ -15,7 +17,7 @@ internal static class CliParser
         string? projectPath = null;
         string? outputDir = null;
         string? openApiPath = null;
-        string? defaultSecurity = null;
+        var securitySchemes = new List<string>();
         string? fromOpenApiPath = null;
         string? fromContractPath = null;
         string? importNamespace = null;
@@ -48,7 +50,7 @@ internal static class CliParser
                         : "openapi.json";
                     break;
                 case "--security" when i + 1 < args.Length:
-                    defaultSecurity = args[++i];
+                    securitySchemes.Add(args[++i]);
                     break;
                 case "--from-openapi" when i + 1 < args.Length:
                     fromOpenApiPath = args[++i];
@@ -128,7 +130,7 @@ internal static class CliParser
         {
             return new RivetOptions(
                 fromContractPath, outputDir, files.ToArray(),
-                OpenApiPath: openApiPath, DefaultSecurity: defaultSecurity,
+                OpenApiPath: openApiPath, DefaultSecurity: securitySchemes.FirstOrDefault(), SecuritySchemes: securitySchemes,
                 Quiet: quiet, FromContractPath: fromContractPath,
                 Title: title, Version: version, Servers: servers, Verify: verify);
         }
@@ -136,9 +138,18 @@ internal static class CliParser
         // Import mode doesn't need a project path
         if (fromOpenApiPath is not null)
         {
+            if (securitySchemes.Count > 1
+                || securitySchemes is [var importSecurity]
+                    && !SecurityParser.IsValidSchemeName(importSecurity))
+            {
+                Console.Error.WriteLine(
+                    "error: --security with --from-openapi accepts one security scheme name, not an emit-time scheme definition");
+                return null;
+            }
+
             return new RivetOptions(
                 fromOpenApiPath, outputDir, files.ToArray(),
-                openApiPath, defaultSecurity, FromOpenApiPath: fromOpenApiPath, ImportNamespace: importNamespace, Check: check, Quiet: quiet, Routes: routes, Title: title, Version: version, Servers: servers);
+                openApiPath, securitySchemes.FirstOrDefault(), FromOpenApiPath: fromOpenApiPath, ImportNamespace: importNamespace, Check: check, Quiet: quiet, Routes: routes, Title: title, Version: version, Servers: servers, SecuritySchemes: securitySchemes);
         }
 
         projectPath ??= files.FirstOrDefault();
@@ -148,7 +159,7 @@ internal static class CliParser
             return null;
         }
 
-        return new RivetOptions(projectPath, outputDir, files.ToArray(), openApiPath, defaultSecurity, Check: check, Quiet: quiet, Routes: routes, Title: title, Version: version, Servers: servers, Verify: verify);
+        return new RivetOptions(projectPath, outputDir, files.ToArray(), openApiPath, securitySchemes.FirstOrDefault(), Check: check, Quiet: quiet, Routes: routes, Title: title, Version: version, Servers: servers, Verify: verify, SecuritySchemes: securitySchemes);
     }
 
     // OpenAPI server URLs are either absolute (http/https) or paths relative to the
@@ -176,7 +187,7 @@ internal static class CliParser
         Console.Error.WriteLine("  -p, --project <path>       Path to .csproj file");
         Console.Error.WriteLine("  -o, --output <dir>         Output directory for openapi.json (omit for stdout preview)");
         Console.Error.WriteLine("  --openapi [file]           Explicit spec path override (relative paths resolve against --output)");
-        Console.Error.WriteLine("  --security <spec>          Default security scheme (bearer, bearer:jwt, cookie:name, apikey:in:name)");
+        Console.Error.WriteLine("  --security <[name=]spec>   Emit security scheme (repeatable); import accepts one scheme name");
         Console.Error.WriteLine("  --title <text>             Spec info.title (default: API)");
         Console.Error.WriteLine("  --version <text>           Spec info.version (default: 1.0.0) — there is no print-tool-version flag");
         Console.Error.WriteLine("  --server <url>             Spec servers entry (repeatable; omitted entirely when not given)");
@@ -204,4 +215,5 @@ sealed record RivetOptions(
     string? Title = null,
     string? Version = null,
     IReadOnlyList<string>? Servers = null,
-    bool Verify = false);
+    bool Verify = false,
+    IReadOnlyList<string>? SecuritySchemes = null);

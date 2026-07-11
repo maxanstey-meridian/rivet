@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -5,6 +6,32 @@ namespace Rivet.Tests;
 
 public sealed class InlineTypeExtractorTests
 {
+    [Fact]
+    public void Literal_Values_Hash_Deterministically()
+    {
+        using var firstDocument = JsonDocument.Parse("\"active\"");
+        using var secondDocument = JsonDocument.Parse("\"active\"");
+        using var differentDocument = JsonDocument.Parse("\"inactive\"");
+
+        var first = new TsType.Literal(firstDocument.RootElement.Clone());
+        var second = new TsType.Literal(secondDocument.RootElement.Clone());
+        var different = new TsType.Literal(differentDocument.RootElement.Clone());
+
+        Assert.Equal(InlineTypeExtractor.CanonicalHash(first), InlineTypeExtractor.CanonicalHash(second));
+        Assert.NotEqual(InlineTypeExtractor.CanonicalHash(first), InlineTypeExtractor.CanonicalHash(different));
+    }
+
+    [Fact]
+    public void Primitive_CSharpType_Participates_In_Canonical_Identity()
+    {
+        var dateTime = new TsType.Primitive("string", "date-time", "System.DateTime");
+        var dateTimeOffset = new TsType.Primitive("string", "date-time", "System.DateTimeOffset");
+
+        Assert.NotEqual(
+            InlineTypeExtractor.CanonicalHash(dateTime),
+            InlineTypeExtractor.CanonicalHash(dateTimeOffset));
+    }
+
     [Fact]
     public void TypeRef_HashesByName()
     {
@@ -724,14 +751,14 @@ public sealed class InlineTypeExtractorTests
     {
         var inline = new TsType.InlineObject([
             ("name", new TsType.Primitive("string")),
-            ("nickname", new TsType.Nullable(new TsType.Primitive("string"))),
+            new("nickname", new TsType.Nullable(new TsType.Primitive("string")), Optional: true),
         ]);
         var endpoints = new[]
         {
             MakeEndpoint("Buyers", "find", returnType: inline),
             MakeEndpoint("Buyers", "list", returnType: new TsType.InlineObject([
                 ("name", new TsType.Primitive("string")),
-                ("nickname", new TsType.Nullable(new TsType.Primitive("string"))),
+                new("nickname", new TsType.Nullable(new TsType.Primitive("string")), Optional: true),
             ])),
         };
 
@@ -748,8 +775,7 @@ public sealed class InlineTypeExtractorTests
 
         // ...and a Nullable(string) source field must NOT be rewritten to an optional plain
         // string (`T | null` → `T?` conflates absent with null on the wire). The extracted
-        // property keeps the Nullable wrapper; IsOptional mirrors the inline-object emission
-        // convention (nullable fields are omitted from `required`).
+        // property keeps the Nullable wrapper and its explicitly declared optionality.
         var nicknameProp = extracted.Properties.First(p => p.Name == "nickname");
         Assert.True(nicknameProp.IsOptional);
         var nullable = Assert.IsType<TsType.Nullable>(nicknameProp.Type);
@@ -1412,7 +1438,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void Extract_LargeSharedShape_TruncatesName()
     {
-        var fields = new (string, TsType)[]
+        TsType.InlineObjectField[] fields =
         {
             ("id", new TsType.Primitive("number")),
             ("name", new TsType.Primitive("string")),

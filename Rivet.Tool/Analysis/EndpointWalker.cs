@@ -83,7 +83,9 @@ public static class EndpointWalker
 
         var parameters = ExtractParams(wkt, method, typeWalker, fullRoute);
         var responses = ExtractAllResponseTypes(wkt, method, typeWalker).ToList();
-        var returnType = ExtractReturnType(wkt, method, typeWalker);
+        var successResponse = responses.FirstOrDefault(response => response.StatusCode is >= 200 and < 300);
+        var returnType = successResponse?.DataType
+            ?? (responses.Count == 0 ? ExtractReturnType(wkt, method, typeWalker) : null);
         var isFormEncoded = HasFromFormBody(method, wkt);
         var requestExamples = ExtractRequestExamples(wkt, method, parameters, isFormEncoded);
         ApplyResponseExamples(responses, ExtractResponseExamples(wkt, method), Naming.ToCamelCase(method.Name));
@@ -747,7 +749,8 @@ public static class EndpointWalker
     internal static IReadOnlyList<TsResponseType> ExtractAllResponseTypes(
         WellKnownTypes wkt,
         IMethodSymbol method,
-        TypeWalker typeWalker)
+        TypeWalker typeWalker,
+        bool normalize = true)
     {
         var responses = new List<TsResponseType>();
 
@@ -806,8 +809,12 @@ public static class EndpointWalker
             }
         }
 
-        // Sort by status code for consistent output
-        responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
+        if (normalize)
+        {
+            responses = ResponseStatusValidation.NormalizeIrKeepingFirst(
+                responses,
+                Naming.ToCamelCase(method.Name));
+        }
 
         return responses;
     }

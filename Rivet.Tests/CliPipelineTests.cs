@@ -69,9 +69,29 @@ public sealed class CliPipelineTests
             //    its own cooking via its own front door. The directory form is
             //    load-bearing: 11k individual paths overflow ARG_MAX.
             var outDir = Path.Combine(workDir.FullName, "out");
+            using var sourceDocument = JsonDocument.Parse(File.ReadAllText(SpecPath(spec)));
+            var emitArgs = new List<string> { srcDir, "--openapi", "--output", outDir };
+            var securitySchemeNames = new HashSet<string>(StringComparer.Ordinal);
+            var sourceSecuritySchemes = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            if (sourceDocument.RootElement.TryGetProperty("components", out var components)
+                && components.TryGetProperty("securitySchemes", out var securitySchemes))
+            {
+                foreach (var securityScheme in securitySchemes.EnumerateObject())
+                {
+                    securitySchemeNames.Add(securityScheme.Name);
+                    sourceSecuritySchemes[securityScheme.Name] = securityScheme.Value;
+                }
+            }
+            CollectSecuritySchemeNames(sourceDocument.RootElement, securitySchemeNames);
+            var degradedSchemes = new List<string>();
+            foreach (var securitySchemeName in securitySchemeNames.Order(StringComparer.Ordinal))
+            {
+                emitArgs.Add("--security");
+                emitArgs.Add(ToCliSecuritySpec(securitySchemeName, sourceSecuritySchemes, degradedSchemes));
+            }
             var emit = RunCli(
                 workDir.FullName,
-                [srcDir, "--openapi", "--output", outDir]);
+                emitArgs);
             Assert.True(emit.ExitCode == 0, $"compile/emit failed:\n{emit.StdErr}");
 
             // 4. The round-tripped spec must be internally consistent: every
@@ -80,6 +100,13 @@ public sealed class CliPipelineTests
             var specPath = Path.Combine(outDir, "openapi.json");
             Assert.True(File.Exists(specPath), $"expected {specPath} to exist");
             using var document = JsonDocument.Parse(File.ReadAllText(specPath));
+            foreach (var degradedScheme in degradedSchemes)
+            {
+                var emittedScheme = document.RootElement.GetProperty("components")
+                    .GetProperty("securitySchemes").GetProperty(degradedScheme);
+                Assert.Equal("http", emittedScheme.GetProperty("type").GetString());
+                Assert.Equal("bearer", emittedScheme.GetProperty("scheme").GetString());
+            }
             var danglingRefs = new List<string>();
             CollectDanglingRefs(document.RootElement, document.RootElement, danglingRefs);
             Assert.Empty(danglingRefs);
@@ -87,6 +114,69 @@ public sealed class CliPipelineTests
         finally
         {
             workDir.Delete(recursive: true);
+        }
+    }
+
+    private static string ToCliSecuritySpec(
+        string name,
+        IReadOnlyDictionary<string, JsonElement> sourceSchemes,
+        List<string> degradedSchemes)
+    {
+        if (sourceSchemes.TryGetValue(name, out var scheme)
+            && scheme.TryGetProperty("type", out var type))
+        {
+            if (type.GetString() == "http"
+                && scheme.TryGetProperty("scheme", out var httpScheme)
+                && httpScheme.GetString() == "bearer")
+            {
+                return $"{name}=bearer";
+            }
+
+            if (type.GetString() == "apiKey"
+                && scheme.TryGetProperty("in", out var location)
+                && scheme.TryGetProperty("name", out var parameterName))
+            {
+                return $"{name}=apikey:{location.GetString()}:{parameterName.GetString()}";
+            }
+        }
+
+        // The public CLI cannot express OAuth2, OpenID Connect, or HTTP basic definitions.
+        // Keep the reference resolvable and pin the deliberate loss instead of claiming fidelity.
+        degradedSchemes.Add(name);
+        return $"{name}=bearer";
+    }
+
+    private static void CollectSecuritySchemeNames(JsonElement node, HashSet<string> names)
+    {
+        if (node.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in node.EnumerateObject())
+            {
+                if (property.NameEquals("security") && property.Value.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var requirement in property.Value.EnumerateArray())
+                    {
+                        if (requirement.ValueKind != JsonValueKind.Object)
+                        {
+                            continue;
+                        }
+
+                        foreach (var scheme in requirement.EnumerateObject())
+                        {
+                            names.Add(scheme.Name);
+                        }
+                    }
+                }
+
+                CollectSecuritySchemeNames(property.Value, names);
+            }
+        }
+        else if (node.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in node.EnumerateArray())
+            {
+                CollectSecuritySchemeNames(item, names);
+            }
         }
     }
 

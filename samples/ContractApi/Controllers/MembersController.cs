@@ -6,10 +6,9 @@ using ContractApi.Models;
 namespace ContractApi.Controllers;
 
 [ApiController]
-[Route("api/members")]
 public sealed class MembersController : ControllerBase
 {
-    [HttpGet]
+    [HttpGet(MembersContract.ListRoute)]
     public async Task<IActionResult> List(CancellationToken ct)
         => (await MembersContract.List.Invoke(async () =>
         {
@@ -18,7 +17,7 @@ public sealed class MembersController : ControllerBase
             return new PagedResult<MemberDto>(members, members.Count);
         })).ToActionResult();
 
-    [HttpPost]
+    [HttpPost(MembersContract.InviteRoute)]
     public async Task<IActionResult> Invite(
         [FromBody] InviteMemberRequest request, CancellationToken ct)
         => (await MembersContract.Invite.Invoke(request, async req =>
@@ -27,22 +26,22 @@ public sealed class MembersController : ControllerBase
             return new InviteMemberResponse(Guid.NewGuid());
         })).ToActionResult();
 
-    [HttpDelete("{id:guid}")]
+    [HttpDelete(MembersContract.RemoveRoute)]
     public async Task<IActionResult> Remove(Guid id, CancellationToken ct)
-        => (await MembersContract.Remove.Invoke(async () =>
+        => (await MembersContract.Remove.Invoke(new RemoveMemberInput(id), async input =>
         {
             // void endpoint — no return value
         })).ToActionResult();
 
-    [HttpPut("{id:guid}/role")]
+    [HttpPut(MembersContract.UpdateRoleRoute)]
     public async Task<IActionResult> UpdateRole(
         Guid id, [FromBody] UpdateRoleRequest request, CancellationToken ct)
-        => (await MembersContract.UpdateRole.Invoke(request, async req =>
+        => (await MembersContract.UpdateRole.Invoke(new UpdateRoleInput { Id = id, Role = request.Role }, async input =>
         {
             // void — input only, 204
         })).ToActionResult();
 
-    [HttpGet("/api/health")]
+    [HttpGet(MembersContract.HealthRoute)]
     public async Task<IActionResult> Health(CancellationToken ct)
         => (await MembersContract.Health.Invoke(async () =>
         {

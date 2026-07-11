@@ -99,6 +99,77 @@ public sealed class ContractInvokeTypedResultsTests
     }
 
     [Fact]
+    public void Returns_Rejects_Existing_Success_Status()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            Define.Get<ItemDto>("/api/items/{id}")
+                .Status(StatusCodes.Status202Accepted)
+                .Returns<ErrorDto>(StatusCodes.Status202Accepted));
+
+        Assert.Contains("success and error responses cannot share", exception.Message);
+    }
+
+    [Fact]
+    public void Status_Rejects_Existing_Returns_Status()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            Define.Get<ItemDto>("/api/items/{id}")
+                .Returns<ErrorDto>(StatusCodes.Status202Accepted)
+                .Status(StatusCodes.Status202Accepted));
+
+        Assert.Contains("success and error responses cannot share", exception.Message);
+    }
+
+    [Fact]
+    public void Accepts_Preserves_Explicit_Status_State()
+    {
+        var route = Define.Put("/api/items/{id}")
+            .Status(StatusCodes.Status202Accepted)
+            .Accepts<UpdateItemRequest>();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            route.Status(StatusCodes.Status203NonAuthoritative));
+
+        Assert.Contains("Status already set", exception.Message);
+    }
+
+    [Fact]
+    public void Accepts_Preserves_Success_Status_Collision_Check()
+    {
+        var route = Define.Put("/api/items/{id}")
+            .Status(StatusCodes.Status202Accepted)
+            .Accepts<UpdateItemRequest>();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            route.Returns<ErrorDto>(StatusCodes.Status202Accepted));
+
+        Assert.Contains("success and error responses cannot share", exception.Message);
+    }
+
+    [Fact]
+    public void Returns_DefaultSuccessStatus_Can_Precede_Status_Override()
+    {
+        var route = Define.Post<ItemDto>("/api/items")
+            .Returns<ErrorDto>(StatusCodes.Status201Created)
+            .Status(StatusCodes.Status202Accepted);
+
+        Assert.Equal(StatusCodes.Status202Accepted, route.SuccessStatusCode);
+        Assert.Equal(StatusCodes.Status201Created, Assert.Single(route.RouteErrorResponses!).StatusCode);
+    }
+
+    [Fact]
+    public async Task Returns_DefaultSuccessStatus_Without_Override_Throws_On_Publish()
+    {
+        var route = Define.Post<ItemDto>("/api/items")
+            .Returns<ErrorDto>(StatusCodes.Status201Created);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            route.Invoke(() => Task.FromResult(new ItemDto("1", "item"))));
+
+        Assert.Contains("success and error responses cannot share", exception.Message);
+    }
+
+    [Fact]
     public async Task Invoke_InputOnlyContract_WithTypedResultsErrorBranch_ReturnsNativeResult()
     {
         var route = Define.Put("/api/items/{id}")

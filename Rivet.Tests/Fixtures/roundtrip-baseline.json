@@ -1,13 +1,13 @@
 {
-  "cleanOps": 948,
+  "cleanOps": 995,
   "opFindings": {
     "param-dropped": 9,
     "param-invented": 25,
     "reqbody-content-types": 20,
     "reqbody-dropped": 17,
     "reqbody-invented": 3,
-    "reqbody-required-flag": 49,
-    "reqbody-schema-type": 10,
+    "reqbody-required-flag": 1,
+    "reqbody-schema-type": 1,
     "response-content-types": 59,
     "response-schema-type": 25,
     "response-status-invented": 20

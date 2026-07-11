@@ -996,6 +996,40 @@ public sealed class ContractEmitterTests
     }
 
     [Fact]
+    public void Duplicate_Response_Status_Keeps_First_Metadata_And_Sorts()
+    {
+        var firstExamples = new[] { new TsEndpointExample("application/json", "first", "{\"message\":\"first\"}") };
+        var firstHeaders = new[] { new TsResponseHeader("X-First", "first header", true) };
+        var endpoint = new TsEndpointDefinition(
+            "getUser",
+            "GET",
+            "/api/users/{id}",
+            [],
+            null,
+            "UsersController",
+            [
+                new TsResponseType(500, null, "server error"),
+                new TsResponseType(404, new TsType.Primitive("string"), "first", firstExamples, firstHeaders),
+                new TsResponseType(404, new TsType.Primitive("number"), "second"),
+                new TsResponseType(200, null, "success"),
+            ]);
+
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]);
+
+        using var doc = JsonDocument.Parse(json);
+        var responses = doc.RootElement.GetProperty("endpoints")[0].GetProperty("responses");
+        Assert.Equal([200, 404, 500], responses.EnumerateArray().Select(r => r.GetProperty("statusCode").GetInt32()));
+        var response404 = responses[1];
+        Assert.Equal("first", response404.GetProperty("description").GetString());
+        Assert.Equal("string", response404.GetProperty("dataType").GetProperty("type").GetString());
+        Assert.Equal("first", response404.GetProperty("examples")[0].GetProperty("name").GetString());
+        Assert.Equal("X-First", response404.GetProperty("headers")[0].GetProperty("name").GetString());
+    }
+
+    [Fact]
     public void File_Endpoint_With_QueryAuth_Serializes_All_Fields()
     {
         var endpoint = new TsEndpointDefinition(

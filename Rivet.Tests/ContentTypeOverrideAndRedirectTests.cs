@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -37,6 +39,31 @@ public sealed class ContentTypeOverrideAndRedirectTests
 
         Assert.Equal("text/plain", ep.RequestContentTypeOverride);
         Assert.Equal("text/html", ep.ResponseContentTypeOverride);
+    }
+
+    [Fact]
+    public void ContentType_Overrides_Survive_Contract_And_OpenApi_RoundTrip()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "renderRaw", "POST", "/render/raw", [], new TsType.Primitive("string"),
+            "RenderController", [new TsResponseType(200, new TsType.Primitive("string"))],
+            RequestType: new TsType.Primitive("string"),
+            RequestContentTypeOverride: "text/plain",
+            ResponseContentTypeOverride: "text/html");
+
+        var contractJson = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var readEndpoint = Assert.Single(JsonContractReader.Read(contractJson).Endpoints);
+        Assert.Equal("text/plain", readEndpoint.RequestContentTypeOverride);
+        Assert.Equal("text/html", readEndpoint.ResponseContentTypeOverride);
+
+        var openApiJson = OpenApiEmitter.Emit(
+            [readEndpoint], new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>(), null);
+        using var document = JsonDocument.Parse(openApiJson);
+        var operation = document.RootElement.GetProperty("paths").GetProperty("/render/raw").GetProperty("post");
+        Assert.True(operation.GetProperty("requestBody").GetProperty("content").TryGetProperty("text/plain", out _));
+        Assert.True(operation.GetProperty("responses").GetProperty("200").GetProperty("content").TryGetProperty("text/html", out _));
     }
 
     [Fact]

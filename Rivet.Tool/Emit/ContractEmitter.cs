@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Emit;
@@ -51,7 +52,9 @@ public static class ContractEmitter
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ContractEndpointExample>? RequestExamples = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFileEndpoint = false,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContractQueryAuth? QueryAuth = null,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BinaryRequestContentType = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BinaryRequestContentType = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RequestContentTypeOverride = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResponseContentTypeOverride = null);
 
     internal sealed record ContractResponseType(
         int StatusCode,
@@ -96,7 +99,9 @@ public static class ContractEmitter
             endpoint.Params,
             endpoint.ReturnType,
             endpoint.ControllerName,
-            endpoint.Responses.Select(ToContractResponseType).ToList(),
+            ResponseStatusValidation.NormalizeIrKeepingFirst(endpoint.Responses, endpoint.Name)
+                .Select(ToContractResponseType)
+                .ToList(),
             endpoint.Summary,
             endpoint.Description,
             endpoint.Security,
@@ -107,7 +112,9 @@ public static class ContractEmitter
             endpoint.RequestExamples?.Select(ToContractEndpointExample).ToList(),
             endpoint.IsFileEndpoint,
             endpoint.QueryAuth is { } qa ? new ContractQueryAuth(qa.ParameterName) : null,
-            endpoint.BinaryRequestContentType);
+            endpoint.BinaryRequestContentType,
+            endpoint.RequestContentTypeOverride,
+            endpoint.ResponseContentTypeOverride);
     }
 
     internal static ContractResponseType ToContractResponseType(TsResponseType response)

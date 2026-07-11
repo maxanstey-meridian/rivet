@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Emit;
@@ -132,9 +133,9 @@ public static class JsonContractReader
 
                 break;
             case TsType.InlineObject obj:
-                foreach (var (_, fieldType) in obj.Fields)
+                foreach (var field in obj.Fields)
                 {
-                    WalkForBrands(fieldType, brands);
+                    WalkForBrands(field.Type, brands);
                 }
 
                 break;
@@ -157,6 +158,10 @@ public static class JsonContractReader
 
     private static TsEndpointDefinition ToEndpointDefinition(ContractEmitter.ContractEndpoint endpoint)
     {
+        var responses = ResponseStatusValidation.NormalizeIrKeepingFirst(
+            endpoint.Responses.Select(ToResponseType),
+            endpoint.Name);
+
         return new TsEndpointDefinition(
             endpoint.Name,
             endpoint.HttpMethod,
@@ -164,7 +169,7 @@ public static class JsonContractReader
             endpoint.Params,
             endpoint.ReturnType,
             endpoint.ControllerName,
-            endpoint.Responses.Select(ToResponseType).ToList(),
+            responses,
             endpoint.Summary,
             endpoint.Description,
             endpoint.Security,
@@ -179,7 +184,9 @@ public static class JsonContractReader
             endpoint.QueryAuth is { } qa ? new QueryAuthMetadata(qa.ParameterName) : null,
             // Raw-binary request bodies (rivet-ts pipeline) must survive the
             // contract-JSON round-trip like IsFileEndpoint/QueryAuth above.
-            endpoint.BinaryRequestContentType);
+            endpoint.BinaryRequestContentType,
+            endpoint.RequestContentTypeOverride,
+            endpoint.ResponseContentTypeOverride);
     }
 
     private static TsResponseType ToResponseType(ContractEmitter.ContractResponseType response)

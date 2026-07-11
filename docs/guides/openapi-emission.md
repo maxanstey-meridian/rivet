@@ -26,7 +26,8 @@ generics, enums, nullability as 3.1 type arrays, validation constraints, descrip
 examples), operations for every contract/controller endpoint (params classified as
 route/query/body/form/file, per-status typed responses, multipart and form-encoded
 bodies, file endpoints with `x-rivet-file`), security schemes, and the `x-rivet-*`
-[vendor extensions](/reference/vendor-extensions) that make the spec losslessly
-re-importable.
+[vendor extensions](/reference/vendor-extensions) that preserve supported Rivet
+metadata across re-import. Shapes outside the importer profile degrade with
+diagnostics or structured unsupported markers rather than being presented as lossless.
 
 See the [CLI Reference](/reference/cli) for the current command set.

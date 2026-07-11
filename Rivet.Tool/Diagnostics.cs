@@ -1,9 +1,9 @@
 namespace Rivet.Tool;
 
 /// <summary>
-/// Stable diagnostic IDs for every warning Rivet writes to stderr.
-/// Canonical format: <c>warning RIV1001: &lt;message&gt;</c> (MSBuild-ish, machine-parseable;
-/// the leading "warning " token is the suite's long-standing grep convention).
+/// Stable diagnostic IDs for warnings and fatal errors Rivet writes to stderr.
+/// Canonical formats are <c>warning RIV1001: &lt;message&gt;</c> and
+/// <c>error RIV2002: &lt;message&gt;</c> (MSBuild-ish and machine-parseable).
 ///
 /// ID ranges by pipeline stage:
 ///   RIV1xxx — extraction (Roslyn walkers, Rivet.Tool/Analysis)
@@ -14,8 +14,8 @@ namespace Rivet.Tool;
 /// The prefix is RIV, deliberately not "RV" — the sibling tool plumb owns the
 /// RV-xxx rule namespace.
 ///
-/// IDs are observability, not severity reform: every entry is a warning and the
-/// exit-code policy is unchanged. Every ID must have a row in
+/// Most entries are non-fatal warnings. Fatal error diagnostics abort the operation
+/// and return a non-zero exit code. Every ID must have a row in
 /// docs/reference/diagnostics.md — DiagnosticsTests cross-checks the registry
 /// against that page in both directions.
 /// </summary>
@@ -47,6 +47,8 @@ public static class Diagnostics
     public const string RivetUnionNoVariants = "RIV1018";
     public const string RouteTokenWithoutInputProperty = "RIV1019";
     public const string InputTypeNotParamLowerable = "RIV1020";
+    public const string DuplicateResponseStatus = "RIV1021";
+    public const string InvalidRequestBodyProvenance = "RIV1022";
 
     // ----- RIV2xxx: emission -----
     public const string TaggedUnionComponentCollision = "RIV2001";
@@ -58,6 +60,8 @@ public static class Diagnostics
     public const string GenericTemplateMissing = "RIV2007";
     public const string BrandConflictingUnderlyingTypes = "RIV2008";
     public const string ReservedHeaderParameterSkipped = "RIV2009";
+    public const string DuplicateResponseStatusInIr = "RIV2010";
+    public const string DuplicateSecuritySchemeDefinition = "RIV2011";
 
     // ----- RIV3xxx: import -----
     public const string ImportAliasCycleBroken = "RIV3001";
@@ -104,8 +108,10 @@ public static class Diagnostics
         [RivetUnionNoVariants] = "[RivetUnion] wrapper has no variant properties — there is no union to emit; the type falls back to plain property flattening.",
         [RouteTokenWithoutInputProperty] = "Route token has no matching property on the endpoint's input type (after normalized matching: case-insensitive, '_'/'-' stripped) — emitted as an untyped string path param.",
         [InputTypeNotParamLowerable] = "The input type on a bodyless method (GET/DELETE/.AcceptsBinary) is a dictionary, collection or scalar — it has no property surface to lower to query params, so the input is dropped (route tokens still emit as untyped path params).",
+        [DuplicateResponseStatus] = "An authored contract declares the same response status more than once; generation fails because the contract cannot execute as declared.",
+        [InvalidRequestBodyProvenance] = "A [RivetRequestBody] type is not represented independently by the endpoint input type.",
         [TaggedUnionComponentCollision] = "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
-        [UndefinedSecurityScheme] = "Endpoint references a security scheme with no definition — a default bearer securityScheme component is emitted.",
+        [UndefinedSecurityScheme] = "Endpoint references a security scheme with no definition — generation fails rather than inventing security semantics.",
         [DuplicateEndpoint] = "Two endpoints share an HTTP method + path — the later definition wins.",
         [MultipartInputTypeMissing] = "Multipart input type is absent from the contract's type definitions — the request schema is built inline from the endpoint's params.",
         [UnknownTypeUntypedSchema] = "'unknown' type (JsonElement/JsonNode or an unmapped C# type) in the OpenAPI schema — emitted as untyped.",
@@ -113,6 +119,8 @@ public static class Diagnostics
         [GenericTemplateMissing] = "Generic template is absent from the contract's type definitions — a free-form object schema is emitted for the instantiation.",
         [BrandConflictingUnderlyingTypes] = "Brand declared with conflicting underlying types — the first declaration wins.",
         [ReservedHeaderParameterSkipped] = "Header parameter named Accept, Content-Type or Authorization — OpenAPI forbids these as header parameters; the parameter is omitted from the spec.",
+        [DuplicateResponseStatusInIr] = "External contract IR declares the same response status more than once; the duplicate is dropped and the first declaration is kept.",
+        [DuplicateSecuritySchemeDefinition] = "A security scheme name is configured as both the primary and an additional definition.",
         [ImportAliasCycleBroken] = "Alias schema is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object.",
         [ImportSecuritySchemesDropped] = "Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented.",
         [ImportOperationMethodDropped] = "HEAD/OPTIONS/TRACE operation dropped — the HTTP method has no contract representation.",

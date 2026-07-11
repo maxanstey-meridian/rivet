@@ -7,10 +7,11 @@
   </p>
 </p>
 
-**Your C# is the contract.** Rivet reads your compiled C# with Roslyn and emits an
-OpenAPI 3.1 spec — no runtime reflection, no attributes-on-everything, no drift
-between the code and the spec. The OpenAPI ecosystem does the rest: TypeScript
-types, a typed fetch client, Zod schemas, rendered docs.
+**Your C# is the contract.** Rivet reads your compiled C# with Roslyn and
+deterministically emits an OpenAPI 3.1 spec from its declared transport shape,
+with diagnostics for known fidelity loss. There is no runtime reflection and no
+need for attributes on every member. The OpenAPI ecosystem does the rest:
+TypeScript types, a typed fetch client, Zod schemas, rendered docs.
 
 [oRPC](https://orpc.unnoq.com) gives you this when your server is TypeScript.
 Rivet gives you the same DX when your server is .NET.
@@ -82,7 +83,7 @@ Either way — annotated endpoints, contracts, or a mix — the spec comes out t
 ## Generate
 
 ```bash
-dotnet rivet --project path/to/Api.csproj --output ./generated
+dotnet rivet --project path/to/Api.csproj --output ./generated --security admin=bearer
 ```
 
 Writes `./generated/openapi.json`, derived from the compiled C# via the Roslyn

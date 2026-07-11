@@ -1585,6 +1585,39 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void Controller_Duplicate_Success_Status_Keeps_Response_And_ReturnType_Aligned()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [ApiController]
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                [RivetEndpoint]
+                [ProducesResponseType(200)]
+                [ProducesResponseType(typeof(TaskDto), 200)]
+                public IActionResult Get() => Ok();
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
+        var endpoint = Assert.Single(endpoints);
+
+        Assert.Null(endpoint.ReturnType);
+        Assert.Null(Assert.Single(endpoint.Responses).DataType);
+    }
+
+    [Fact]
     public void AbstractContract_Post_WithBodyAndRouteParams()
     {
         var source = """

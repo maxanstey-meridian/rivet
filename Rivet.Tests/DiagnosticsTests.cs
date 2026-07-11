@@ -254,4 +254,231 @@ public sealed class DiagnosticsTests
         // emitted property, not the C# member.
         Assert.Contains("'PayloadDto.data'", stderr);
     }
+
+    // ---------------------------------------------------------------
+    // RIV1021 — a status carries one response shape. The runtime builder throws
+    // on a duplicate .Returns(); the generator (a syntax walker, which never runs
+    // the throwing initializer) must reject the same contradiction at generation time.
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public void Duplicate_Response_Status_Fails_With_RIV1021()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType] public sealed record ThingRequest(string Id);
+            [RivetType] public sealed record FirstError(string Message);
+            [RivetType] public sealed record SecondError(string Message);
+
+            [RivetContract]
+            public static class DupContract
+            {
+                public static readonly RouteDefinition<ThingRequest, ThingRequest> MakeThing =
+                    Define.Post<ThingRequest, ThingRequest>("/api/things")
+                        .Returns<FirstError>(422, "first")
+                        .Returns<SecondError>(422, "second");
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(
+            () => CompilationHelper.WalkContract(source));
+
+        Assert.Contains("error RIV1021:", exception.Message);
+        Assert.Contains("422", exception.Message);
+    }
+
+    [Fact]
+    public void Duplicate_Success_Status_Fails_With_RIV1021()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class DupContract
+            {
+                public static readonly RouteDefinition MakeThing =
+                    Define.Post("/api/things")
+                        .Status(202)
+                        .Status(203);
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(
+            () => CompilationHelper.WalkContract(source));
+
+        Assert.Contains("error RIV1021:", exception.Message);
+        Assert.Contains("calls .Status() more than once", exception.Message);
+    }
+
+    [Fact]
+    public void Default_Success_And_Returns_Collision_Fails_With_RIV1021()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record Item(string Id);
+            public sealed record Error(string Message);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly RouteDefinition<Item> Create =
+                    Define.Post<Item>("/api/items")
+                        .Returns<Error>(201);
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(
+            () => CompilationHelper.WalkContract(source));
+
+        Assert.Contains("error RIV1021:", exception.Message);
+        Assert.Contains("201", exception.Message);
+    }
+
+    [Fact]
+    public void Abstract_Contract_Duplicate_Response_Status_Fails_With_RIV1021()
+    {
+        var source = """
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record FirstError(string Message);
+            public sealed record SecondError(string Message);
+
+            [RivetContract]
+            [Route("api/items")]
+            public abstract class ItemsContract : ControllerBase
+            {
+                [HttpGet]
+                [ProducesResponseType(typeof(FirstError), 422)]
+                [ProducesResponseType(typeof(SecondError), 422)]
+                public abstract Task<IActionResult> Get();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(
+            () => CompilationHelper.WalkContract(source));
+
+        Assert.Contains("error RIV1021:", exception.Message);
+        Assert.Contains("422", exception.Message);
+    }
+
+    [Fact]
+    public void Request_Body_Provenance_Must_Name_An_Input_Property()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record UpdateInput(string Id, string Role);
+            public sealed record Unrelated(string Value);
+
+            [RivetContract]
+            public static class UpdateContract
+            {
+                [RivetRequestBody(typeof(Unrelated))]
+                public static readonly RouteDefinition<UpdateInput> Update =
+                    Define.Put<UpdateInput>("/api/items/{id}");
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(
+            () => CompilationHelper.WalkContract(source));
+
+        Assert.Contains("error RIV1022:", exception.Message);
+        Assert.Contains("Unrelated", exception.Message);
+    }
+
+    [Fact]
+    public void Request_Body_Provenance_Holder_Cannot_Also_Be_Route_Bound()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record Body(string Value);
+            public sealed record UpdateInput(Body Body);
+
+            [RivetContract]
+            public static class UpdateContract
+            {
+                [RivetRequestBody(typeof(Body))]
+                public static readonly RouteDefinition<UpdateInput> Update =
+                    Define.Put<UpdateInput>("/api/items/{body}");
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(
+            () => CompilationHelper.WalkContract(source));
+
+        Assert.Contains("error RIV1022:", exception.Message);
+    }
+
+    [Fact]
+    public void Request_Body_Provenance_Uses_Serialized_Property_Names()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record UpdateInput(
+                string Id,
+                [property: JsonPropertyName("input_value")] string Value);
+            public sealed record Body(
+                [property: JsonPropertyName("body_value")] string Value);
+
+            [RivetContract]
+            public static class UpdateContract
+            {
+                [RivetRequestBody(typeof(Body))]
+                public static readonly RouteDefinition<UpdateInput> Update =
+                    Define.Put<UpdateInput>("/api/items/{id}");
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(
+            () => CompilationHelper.WalkContract(source));
+
+        Assert.Contains("error RIV1022:", exception.Message);
+    }
+
+    [Fact]
+    public void Empty_Request_Body_Type_Is_Not_A_Valid_Flattened_Projection()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record UpdateInput(string Id, string Value);
+            public sealed record EmptyBody;
+
+            [RivetContract]
+            public static class UpdateContract
+            {
+                [RivetRequestBody(typeof(EmptyBody))]
+                public static readonly RouteDefinition<UpdateInput> Update =
+                    Define.Put<UpdateInput>("/api/items/{id}");
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(
+            () => CompilationHelper.WalkContract(source));
+
+        Assert.Contains("error RIV1022:", exception.Message);
+    }
 }

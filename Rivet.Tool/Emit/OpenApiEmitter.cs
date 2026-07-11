@@ -1,7 +1,10 @@
 using System.Text.Json;
+using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Emit;
+
+internal sealed class OpenApiEmissionException(string message) : InvalidOperationException(message);
 
 /// <summary>
 /// Emits an OpenAPI 3.1 JSON spec from the Rivet model.
@@ -29,6 +32,9 @@ public static class OpenApiEmitter
         /// <summary>Canonical shape hash → base component name for tagged unions.</summary>
         public Dictionary<string, string> TaggedUnionNames { get; } = [];
 
+        /// <summary>Controller/endpoint/shape identity → assigned route-filtered body component name.</summary>
+        public Dictionary<string, string> FilteredBodyNames { get; } = [];
+
         /// <summary>Variant component schemas synthesized for tagged unions.</summary>
         public Dictionary<string, object> ExtraComponents { get; } = [];
     }
@@ -47,8 +53,12 @@ public static class OpenApiEmitter
         _ctx = new EmitContext();
         try
         {
-            AssignComponentNames(endpoints, definitions, brands, enums, _ctx);
-            return EmitCore(endpoints, definitions, brands, enums, security, documentInfo ?? new OpenApiDocumentInfo());
+            var normalizedEndpoints = endpoints.Select(endpoint => endpoint with
+            {
+                Responses = ResponseStatusValidation.NormalizeIrKeepingFirst(endpoint.Responses, endpoint.Name),
+            }).ToList();
+            AssignComponentNames(normalizedEndpoints, definitions, brands, enums, _ctx);
+            return EmitCore(normalizedEndpoints, definitions, brands, enums, security, documentInfo ?? new OpenApiDocumentInfo());
         }
         finally
         {
@@ -133,6 +143,20 @@ public static class OpenApiEmitter
         if (security is not null)
         {
             securitySchemes[security.SchemeName] = security.SchemeDefinition;
+            if (security.AdditionalSchemeDefinitions is not null)
+            {
+                foreach (var (name, definition) in security.AdditionalSchemeDefinitions)
+                {
+                    if (name == security.SchemeName)
+                    {
+                        throw new OpenApiEmissionException(
+                            $"error {Diagnostics.DuplicateSecuritySchemeDefinition}: security scheme '{name}' " +
+                            "is configured as both the primary and an additional definition");
+                    }
+
+                    securitySchemes[name] = definition;
+                }
+            }
 
             doc["security"] = new List<object>
             {
@@ -140,9 +164,8 @@ public static class OpenApiEmitter
             };
         }
 
-        // W1: every scheme referenced by an endpoint-level .Secure(name) override must have a
-        // matching securitySchemes component — a security requirement naming an undefined
-        // scheme is rejected by consumers (oas3-operation-security-defined).
+        // Every endpoint security requirement must reference the configured scheme. Its type
+        // cannot be inferred from a name, so generation fails rather than inventing semantics.
         var endpointSchemes = endpoints
             .Select(ep => ep.Security?.Scheme)
             .Where(scheme => scheme is not null)
@@ -156,15 +179,9 @@ public static class OpenApiEmitter
                 continue;
             }
 
-            Diagnostics.Warn(
-                Diagnostics.UndefinedSecurityScheme,
-                $"security scheme '{scheme}' is referenced by an endpoint's .Secure(\"{scheme}\") but has no definition — emitting a default bearer securityScheme component");
-
-            securitySchemes[scheme!] = new Dictionary<string, object>
-            {
-                ["type"] = "http",
-                ["scheme"] = "bearer",
-            };
+            throw new OpenApiEmissionException(
+                $"error {Diagnostics.UndefinedSecurityScheme}: security scheme '{scheme}' is referenced by " +
+                $"an endpoint's .Secure(\"{scheme}\") but has no definition; define the same scheme with --security");
         }
 
         if (securitySchemes.Count > 0)
@@ -459,7 +476,7 @@ public static class OpenApiEmitter
                     {
                         [bodyContentType] = new Dictionary<string, object>
                         {
-                            ["schema"] = BuildBodySchema(bodyParam.Type, ep),
+                            ["schema"] = BuildBodySchema(bodyParam.Type, ep, definitions),
                         },
                     },
                     ep.RequestExamples)
@@ -479,7 +496,7 @@ public static class OpenApiEmitter
                     {
                         [requestTypeContentType] = new Dictionary<string, object>
                         {
-                            ["schema"] = BuildBodySchema(ep.RequestType, ep),
+                            ["schema"] = BuildBodySchema(ep.RequestType, ep, definitions),
                         },
                     },
                     ep.RequestExamples)
@@ -615,8 +632,19 @@ public static class OpenApiEmitter
     /// <c>x-rivet-input-type</c> so the importer synthesizes the same record name
     /// every loop ($ref bodies carry their name in the reference itself).
     /// </summary>
-    private static Dictionary<string, object> BuildBodySchema(TsType bodyType, TsEndpointDefinition ep)
+    private static Dictionary<string, object> BuildBodySchema(
+        TsType bodyType,
+        TsEndpointDefinition ep,
+        IReadOnlyDictionary<string, TsTypeDefinition> definitions)
     {
+        if (TryBuildRouteFilteredBodySchema(bodyType, ep, definitions, out var inputTypeName, out _))
+        {
+            var filteredType = new TsType.TypeRef(inputTypeName);
+            return MapTsTypeToJsonSchema(
+                bodyType is TsType.Nullable ? new TsType.Nullable(filteredType) : filteredType,
+                $"request body on endpoint '{ep.ControllerName}.{ep.Name}'");
+        }
+
         var schema = MapTsTypeToJsonSchema(bodyType, $"request body on endpoint '{ep.ControllerName}.{ep.Name}'");
         if (bodyType is TsType.InlineObject && !schema.ContainsKey("$ref"))
         {
@@ -624,6 +652,124 @@ public static class OpenApiEmitter
         }
 
         return schema;
+    }
+
+    private static bool TryBuildRouteFilteredBodySchema(
+        TsType bodyType,
+        TsEndpointDefinition ep,
+        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
+        out string inputTypeName,
+        out Dictionary<string, object> schema)
+    {
+        inputTypeName = null!;
+        schema = null!;
+        if (!TryResolveBodyProperties(bodyType, definitions, out _, out var sourceTypeName))
+        {
+            return false;
+        }
+
+        if (!TryGetRouteFilteredBodyProperties(bodyType, ep, definitions, out var bodyProperties))
+        {
+            return false;
+        }
+
+        var identity = FilteredBodyIdentity(ep, bodyProperties);
+        if (_ctx is null || !_ctx.FilteredBodyNames.TryGetValue(identity, out var assignedName))
+        {
+            throw new OpenApiEmissionException(
+                $"route-filtered request body name was not allocated for endpoint '{ep.ControllerName}.{ep.Name}'");
+        }
+
+        inputTypeName = assignedName;
+        schema = BuildObjectSchema(bodyProperties, typeName: sourceTypeName);
+        return true;
+    }
+
+    private static string FilteredBodyIdentity(
+        TsEndpointDefinition endpoint,
+        IReadOnlyList<TsPropertyDefinition> properties)
+    {
+        var shape = new TsType.InlineObject(properties.Select(property =>
+            new TsType.InlineObjectField(property.Name, property.Type, property.IsOptional)).ToList());
+        return endpoint.ControllerName + "\0" + endpoint.Name + "\0" + InlineTypeExtractor.CanonicalHash(shape);
+    }
+
+    private static bool TryGetRouteFilteredBodyProperties(
+        TsType? bodyType,
+        TsEndpointDefinition ep,
+        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
+        out IReadOnlyList<TsPropertyDefinition> bodyProperties)
+    {
+        bodyProperties = [];
+        if (!TryResolveBodyProperties(bodyType, definitions, out var sourceProperties, out _))
+        {
+            return false;
+        }
+
+        var matchedBodyNames = ep.Params
+            .Where(param => param.Source == ParamSource.Route)
+            .Select(param => param.BodyPropertyName)
+            .Where(name => name is not null).ToHashSet(StringComparer.Ordinal);
+        if (matchedBodyNames.Count == 0)
+        {
+            return false;
+        }
+
+        bodyProperties = sourceProperties
+            .Where(prop => !matchedBodyNames.Contains(prop.Name))
+            .ToList();
+        return bodyProperties.Count != sourceProperties.Count;
+    }
+
+    private static bool TryResolveBodyProperties(
+        TsType? bodyType,
+        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
+        out IReadOnlyList<TsPropertyDefinition> properties,
+        out string typeName)
+    {
+        properties = [];
+        typeName = null!;
+        var unwrapped = bodyType is TsType.Nullable nullable ? nullable.Inner : bodyType;
+        string definitionName;
+        IReadOnlyList<TsType>? typeArguments = null;
+
+        switch (unwrapped)
+        {
+            case TsType.TypeRef typeRef:
+                definitionName = typeRef.Name;
+                break;
+            case TsType.Generic generic:
+                definitionName = generic.Name;
+                typeArguments = generic.TypeArguments;
+                break;
+            default:
+                return false;
+        }
+
+        if (!definitions.TryGetValue(definitionName, out var definition) || definition.Type is not null)
+        {
+            return false;
+        }
+
+        typeName = definition.Name;
+        if (typeArguments is null)
+        {
+            properties = definition.Properties;
+            return true;
+        }
+
+        if (definition.TypeParameters.Count != typeArguments.Count)
+        {
+            return false;
+        }
+
+        var substitutions = definition.TypeParameters
+            .Select((name, index) => (name, typeArguments[index]))
+            .ToDictionary(pair => pair.name, pair => pair.Item2, StringComparer.Ordinal);
+        properties = definition.Properties
+            .Select(property => property with { Type = TsType.ResolveTypeParams(property.Type, substitutions) })
+            .ToList();
+        return true;
     }
 
     private static Dictionary<string, object> BuildComponentExamples(IReadOnlyList<TsEndpointDefinition> endpoints)
@@ -847,12 +993,12 @@ public static class OpenApiEmitter
         var properties = new Dictionary<string, object>();
         var required = new List<string>();
 
-        foreach (var (name, fieldType) in obj.Fields)
+        foreach (var field in obj.Fields)
         {
-            properties[name] = MapTsTypeToJsonSchema(fieldType, context);
-            if (fieldType is not TsType.Nullable)
+            properties[field.Name] = MapTsTypeToJsonSchema(field.Type, context);
+            if (!field.Optional)
             {
-                required.Add(name);
+                required.Add(field.Name);
             }
         }
 
@@ -1130,7 +1276,7 @@ public static class OpenApiEmitter
                     break;
                 case TsType.Brand b: Walk(b.Inner); break;
                 case TsType.InlineObject obj:
-                    foreach (var (_, fieldType) in obj.Fields) Walk(fieldType);
+                    foreach (var field in obj.Fields) Walk(field.Type);
                     break;
             }
         }
@@ -1186,7 +1332,48 @@ public static class OpenApiEmitter
             if (ctx.TaggedUnionNames.ContainsKey(hash)) continue;
             ctx.TaggedUnionNames[hash] = ClaimName(TsType.GetNameSuffix(tu), usedNames);
         }
+
+        foreach (var endpoint in endpoints)
+        {
+            var bodyType = endpoint.Params.FirstOrDefault(param => param.Source == ParamSource.Body)?.Type
+                ?? endpoint.RequestType;
+            if (!TryGetRouteFilteredBodyProperties(bodyType, endpoint, definitions, out var properties))
+            {
+                continue;
+            }
+
+            var identity = FilteredBodyIdentity(endpoint, properties);
+            if (ctx.FilteredBodyNames.ContainsKey(identity))
+            {
+                continue;
+            }
+
+            var endpointName = Naming.ToPascalCaseFromSegments(endpoint.Name) + "Request";
+            var controllerName = Naming.ToPascalCaseFromSegments(endpoint.ControllerName) + endpointName;
+            var matchingDefinitionName = definitions
+                .Where(pair => pair.Value.TypeParameters.Count == 0 && pair.Value.Type is null)
+                .Where(pair => SchemasEqual(
+                    BuildDefinitionSchema(pair.Value),
+                    BuildObjectSchema(properties)))
+                .OrderByDescending(pair => pair.Key == endpointName)
+                .ThenBy(pair => pair.Key, StringComparer.Ordinal)
+                .Select(pair => pair.Key)
+                .FirstOrDefault();
+            if (matchingDefinitionName is not null)
+            {
+                ctx.FilteredBodyNames[identity] = matchingDefinitionName;
+            }
+            else
+            {
+                ctx.FilteredBodyNames[identity] = usedNames.Add(endpointName)
+                    ? endpointName
+                    : ClaimName(controllerName, usedNames);
+            }
+        }
     }
+
+    private static bool SchemasEqual(Dictionary<string, object> left, Dictionary<string, object> right)
+        => JsonSerializer.Serialize(left) == JsonSerializer.Serialize(right);
 
     private static string ClaimName(string pureName, HashSet<string> usedNames)
     {
@@ -1218,6 +1405,34 @@ public static class OpenApiEmitter
             }
 
             schemas[name] = BuildDefinitionSchema(def);
+        }
+
+        foreach (var endpoint in endpoints)
+        {
+            var bodyType = endpoint.Params.FirstOrDefault(param => param.Source == ParamSource.Body)?.Type
+                ?? endpoint.RequestType;
+            if (bodyType is not null
+                && TryBuildRouteFilteredBodySchema(bodyType, endpoint, definitions, out var inputTypeName, out var schema))
+            {
+                if (!TryGetRouteFilteredBodyProperties(bodyType, endpoint, definitions, out _))
+                {
+                    throw new OpenApiEmissionException("route-filtered request body shape changed during emission");
+                }
+
+                if (schemas.TryGetValue(inputTypeName, out var existingSchema))
+                {
+                    if (existingSchema is not Dictionary<string, object> existingSchemaDictionary
+                        || !SchemasEqual(existingSchemaDictionary, schema))
+                    {
+                        throw new OpenApiEmissionException(
+                            $"route-filtered request body component '{inputTypeName}' collides with a different schema");
+                    }
+                }
+                else
+                {
+                    schemas.Add(inputTypeName, schema);
+                }
+            }
         }
 
         // Monomorphised generics: find all Generic type refs used across definitions and endpoints
@@ -1579,9 +1794,9 @@ public static class OpenApiEmitter
                 }
                 break;
             case TsType.InlineObject obj:
-                foreach (var (_, fieldType) in obj.Fields)
+                foreach (var field in obj.Fields)
                 {
-                    CollectGenericsFromType(fieldType, instances);
+                    CollectGenericsFromType(field.Type, instances);
                 }
                 break;
             case TsType.TaggedUnion tu:

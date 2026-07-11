@@ -1,17 +1,18 @@
 # Diagnostics Reference
 
-Every diagnostic Rivet writes to stderr carries a stable ID in the canonical,
+Every diagnostic Rivet writes to stderr carries a stable ID in a canonical,
 machine-parseable format:
 
 ```
 warning RIV1001: <message>
+error RIV2002: <message>
 ```
 
 IDs are stable across releases — grep, baseline, or suppress by ID, never by
-message text. Every diagnostic is a **warning**: IDs are observability, not
-severity reform, and the exit-code policy is unchanged (`--check` without
-`--output` still exits `1` on any coverage warning; everything else warns and
-continues).
+message text. Most diagnostics are **warnings** and allow processing to continue.
+Diagnostics marked **Error** are fatal and exit `1`; currently this applies to
+`RIV1021`, `RIV1022`, `RIV2002`, and `RIV2011`. Coverage warnings also exit `1` when `--check` is used without
+`--output`; other warnings do not change the exit code.
 
 The ID ranges follow the pipeline stages:
 
@@ -52,6 +53,8 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1018` | Warning | `[RivetUnion]` wrapper has no variant properties — there is no union to emit; the type falls back to plain property flattening. | Give the wrapper one optional property per variant (the shape the importer generates), or remove the attribute. |
 | `RIV1019` | Warning | Route token has no matching property on the endpoint's input type (after normalized matching: case-insensitive, `_`/`-` stripped) — emitted as an untyped string path param. | Add a matching property to the input type (any casing of the token's words), or accept the untyped string param. |
 | `RIV1020` | Warning | The input type on a bodyless method (GET/DELETE/`.AcceptsBinary()`) is a dictionary, collection or scalar — it has no property surface to lower to query params, so the input is dropped (route tokens still emit as untyped path params). | Model the query string as a record with one property per param, or remove the input type. |
+| `RIV1021` | Error | An authored contract declares the same response status more than once, including a `.Returns(...)` collision with the success status. Such a contract fails at runtime and generation therefore aborts. | Declare a `[RivetUnion]` type if the status genuinely returns multiple shapes and return it once; otherwise remove the duplicate (often one `.Returns(...)` is mistyped). |
+| `RIV1022` | Error | `[RivetRequestBody]` names a body type that is not represented independently by the endpoint input type. | Use the importer-generated marker and composite input, or remove the invalid hand-authored override. |
 
 ### Retired IDs
 
@@ -75,7 +78,7 @@ Retired IDs are never reused; they keep a tombstone here instead of a table row.
 | ID | Severity | Trigger | Remediation |
 |---|---|---|---|
 | `RIV2001` | Warning | Synthesized tagged-union variant component collides with an existing schema — the existing schema wins. | Rename the colliding type or the union variant so component names stay distinct. |
-| `RIV2002` | Warning | Endpoint references a security scheme with no definition — a default bearer `securityScheme` component is emitted. | Define the scheme via `--security`, or fix the `.Secure("...")` name. |
+| `RIV2002` | Error | Endpoint references a security scheme with no definition; generation fails rather than inventing security semantics. | Define the same scheme via `--security`, or fix the `.Secure("...")` name. |
 | `RIV2003` | Warning | Two endpoints share an HTTP method + path — the later definition wins. | Remove or re-route the duplicate endpoint. |
 | `RIV2004` | Warning | Multipart input type is absent from the contract's type definitions — the request schema is built inline from the endpoint's params. | Fix the upstream producer (rivet-ts/rivet-php lowerer) to include the input type definition. |
 | `RIV2005` | Warning | `unknown` type (`JsonElement`/`JsonNode` or an unmapped C# type) in the OpenAPI schema — emitted as untyped. The message names the offending type/property or endpoint site. | Replace the named property/param type with a concrete supported type, or accept the untyped schema. |
@@ -83,6 +86,8 @@ Retired IDs are never reused; they keep a tombstone here instead of a table row.
 | `RIV2007` | Warning | Generic template is absent from the contract's type definitions — a free-form object schema is emitted for the instantiation. | Fix the upstream producer to include the generic template definition. |
 | `RIV2008` | Warning | Brand declared with conflicting underlying types — the first declaration wins. | Align every declaration of the brand on one underlying type. |
 | `RIV2009` | Warning | Header parameter named `Accept`, `Content-Type` or `Authorization` — OpenAPI forbids these as header parameters; the parameter is omitted from the spec. | Describe content negotiation via media types and auth via security schemes; use a custom header name for anything else. |
+| `RIV2010` | Warning | External contract IR declares the same response status more than once — the duplicate is dropped and the first declaration, including its metadata, is kept. | Fix the producer to emit one response per status; use a union schema when one status genuinely has multiple payload shapes. |
+| `RIV2011` | Error | A programmatic security configuration defines the primary scheme name again in its additional definitions. | Keep each scheme name unique; the CLI already rejects duplicate `--security` names. |
 
 ## RIV3xxx — import
 

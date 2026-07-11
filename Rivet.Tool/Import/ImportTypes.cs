@@ -94,7 +94,9 @@ internal sealed record GeneratedEndpointField(
     IReadOnlyList<GeneratedResponseHeader>? ResponseHeaders = null,
     string? BinaryRequestContentType = null,
     string? RequestContentType = null,
-    string? ResponseContentType = null)
+    string? ResponseContentType = null,
+    string? RequestBodyType = null,
+    bool? RequestBodyRequired = null)
 {
     public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
     public IReadOnlyList<TsEndpointExample> RequestExamples { get; init; } = RequestExamples ?? [];

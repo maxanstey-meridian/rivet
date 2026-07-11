@@ -61,7 +61,16 @@ static async Task<int> Run(string[] args)
 
     var wkt = new WellKnownTypes(compilation);
     var endpoints = EndpointWalker.Walk(wkt, walker, discovered.EndpointMethods, discovered.ClientTypes);
-    var contractEndpoints = ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
+    IReadOnlyList<TsEndpointDefinition> contractEndpoints;
+    try
+    {
+        contractEndpoints = ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
+    }
+    catch (ContractAnalysisException exception)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 1;
+    }
 
     if (options.Check)
     {
@@ -187,4 +196,3 @@ static int RunImport(RivetOptions options)
 
     return 0;
 }
-

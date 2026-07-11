@@ -110,10 +110,48 @@ internal static class ContractBuilder
         {
             inputType = SynthesizeParamInputType(paramProperties, mapper, fieldName);
         }
-        else if (paramProperties.Count > 0)
+        string? requestBodyType = null;
+        if (inputTypeFromBody && paramProperties.Count > 0 && inputType is not null)
         {
-            inputType = MergeParamsIntoInputType(
-                httpMethod, inputType, paramProperties, mapper, fieldName, unsupported, out bodyDropped);
+            var originalBodyType = inputType.EndsWith('?') ? inputType[..^1] : inputType;
+            inputType = originalBodyType;
+            var bodyRecord = mapper.FindRecordByName(originalBodyType);
+            var hasPropertyCollision = bodyRecord is not null
+                && bodyRecord.Properties.Any(bodyProperty =>
+                    paramProperties.Any(parameter => parameter.Property.Name == bodyProperty.Name));
+            var hasJsonBody = operation.RequestBody?.Content?.Keys.Any(contentType =>
+                contentType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
+                || contentType.StartsWith("application/json;", StringComparison.OrdinalIgnoreCase)) is true;
+            if ((hasJsonBody || isFormEncoded)
+                && hasPropertyCollision
+                && paramProperties.Any(parameter => parameter.Location == "path")
+                && paramProperties.All(parameter => parameter.Location is "path" or "header")
+                && bodyRecord is not null)
+            {
+                var bodyPropertyName = UniqueBodyPropertyName(paramProperties);
+                var compositeBodyType = operation.RequestBody is { Required: false }
+                    ? originalBodyType + "?"
+                    : originalBodyType;
+                var compositeProperties = paramProperties.Select(parameter => parameter.Property).ToList();
+                compositeProperties.Add(new RecordProperty(
+                    bodyPropertyName,
+                    compositeBodyType,
+                    IsRequired: !compositeBodyType.EndsWith('?')));
+                inputType = SynthesizeInputRecord(compositeProperties, mapper, fieldName) ?? originalBodyType;
+                requestBodyType = originalBodyType;
+            }
+            else
+            {
+                inputType = MergeParamsIntoInputType(
+                    httpMethod, inputType, paramProperties, mapper, fieldName, unsupported, out bodyDropped);
+                if (!bodyDropped
+                    && inputType != originalBodyType
+                    && !hasPropertyCollision
+                    && paramProperties.All(parameter => parameter.Location is "path" or "header"))
+                {
+                    requestBodyType = originalBodyType;
+                }
+            }
         }
 
         // FABLE_ROUNDTRIP #5: Rivet lowers DELETE inputs to query params — a
@@ -150,7 +188,7 @@ internal static class ContractBuilder
             {
                 inputType += "?";
             }
-            else
+            else if (requestBodyType is null)
             {
                 unsupported.Add("body-optionality required=false reason=optional-body-merged-with-required-params");
             }
@@ -187,7 +225,21 @@ internal static class ContractBuilder
             summary, description, successStatus, errorResponses,
             isAnonymous, securityScheme, unsupported, fileContentType, isFormEncoded,
             requestExamples, responseExamples, isFileEndpoint, queryAuthParameterName,
-            responseHeaders, binaryRequestContentType, requestContentType, responseContentType);
+            responseHeaders, binaryRequestContentType, requestContentType, responseContentType,
+            requestBodyType,
+            requestBodyType is null ? null : operation.RequestBody?.Required is true);
+    }
+
+    private static string UniqueBodyPropertyName(IReadOnlyList<ParamProperty> parameters)
+    {
+        var names = parameters.Select(parameter => parameter.Property.Name).ToHashSet(StringComparer.Ordinal);
+        var name = "Body";
+        while (names.Contains(name))
+        {
+            name = "Request" + name;
+        }
+
+        return name;
     }
 
     /// <summary>
@@ -483,7 +535,9 @@ internal static class ContractBuilder
     }
 
     private static string? SynthesizeInputRecord(
-        List<RecordProperty> properties, SchemaMapper mapper, string fieldName)
+        List<RecordProperty> properties,
+        SchemaMapper mapper,
+        string fieldName)
     {
         if (properties.Count == 0)
         {
@@ -577,7 +631,9 @@ internal static class ContractBuilder
         }
 
         var merged = paramProperties.Select(p => p.Property).ToList();
-        var paramsByName = paramProperties.ToDictionary(p => p.Property.Name, StringComparer.Ordinal);
+        var paramsByName = paramProperties
+            .GroupBy(parameter => parameter.Property.Name, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
         foreach (var bodyProp in bodyRecord.Properties)
         {

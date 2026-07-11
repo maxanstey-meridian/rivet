@@ -121,7 +121,8 @@ public sealed class RealWorldImportTests
         var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
 
         // Emit OpenAPI from walked model
-        var emittedJson = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, null);
+        var security = ImportedSecurity(json, eps1);
+        var emittedJson = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, security);
 
         // Pass 2: Re-import emitted OpenAPI → compile → walk
         var import2 = CompilationHelper.Import(emittedJson, ns);
@@ -155,7 +156,8 @@ public sealed class RealWorldImportTests
 
         var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
         var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
-        var emittedJson = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, null);
+        var security = ImportedSecurity(json, eps1);
+        var emittedJson = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, security);
 
         // Pass 2
         var import2 = CompilationHelper.Import(emittedJson, ns);
@@ -173,6 +175,36 @@ public sealed class RealWorldImportTests
         var eps2 = CompilationHelper.WalkContracts(comp2, disc2, wlk2);
 
         return new(import1, eps1, wlk1, emittedJson, import2, eps2, wlk2);
+    }
+
+    private static SecurityConfig? ImportedSecurity(
+        string sourceJson,
+        IReadOnlyList<TsEndpointDefinition> endpoints)
+    {
+        using var document = JsonDocument.Parse(sourceJson);
+        if (!document.RootElement.TryGetProperty("components", out var components)
+            || !components.TryGetProperty("securitySchemes", out var sourceSchemes))
+        {
+            return null;
+        }
+
+        var referenced = endpoints.Select(endpoint => endpoint.Security?.Scheme)
+            .Where(name => name is not null)
+            .ToHashSet(StringComparer.Ordinal);
+        var definitions = sourceSchemes.EnumerateObject()
+            .Where(scheme => referenced.Contains(scheme.Name))
+            .ToDictionary(
+                scheme => scheme.Name,
+                scheme => JsonSerializer.Deserialize<Dictionary<string, object>>(scheme.Value.GetRawText())!,
+                StringComparer.Ordinal);
+        if (definitions.Count == 0)
+        {
+            return null;
+        }
+
+        var primary = definitions.First();
+        definitions.Remove(primary.Key);
+        return new SecurityConfig(primary.Key, primary.Value, definitions);
     }
 
     /// <summary>

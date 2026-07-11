@@ -189,6 +189,27 @@ public sealed class EmitPipelineTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_outputDir, "openapi.json")), "--verify must never write");
     }
 
+    [Theory]
+    [InlineData(new[] { "bearer", "oauth2" }, "invalid --security value")]
+    [InlineData(new[] { "apikey:path:X-API-Key" }, "invalid --security value")]
+    [InlineData(new[] { "bad name=bearer" }, "invalid --security value")]
+    [InlineData(new[] { "a/b=bearer" }, "invalid --security value")]
+    [InlineData(new[] { "admin=bearer", "admin=cookie:sid" }, "duplicate --security scheme name")]
+    public void Invalid_Security_Returns_Controlled_Error(string[] securitySchemes, string expectedError)
+    {
+        var input = BuildEmitInput(DuplicateInlineEndpoints());
+        var result = -1;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            result = EmitPipeline.RunAsync(
+                input,
+                new RivetOptions(".", _outputDir, [], SecuritySchemes: securitySchemes))
+                .GetAwaiter().GetResult());
+
+        Assert.Equal(1, result);
+        Assert.Contains(expectedError, stderr);
+        Assert.DoesNotContain("Exception", stderr);
+    }
+
     [Fact]
     public async Task OpenApiOverride_Is_Sole_Writer_When_Both_Given()
     {

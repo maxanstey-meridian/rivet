@@ -49,6 +49,311 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void Contract_Input_Route_Property_Is_Not_Repeated_In_Request_Body()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UpdateRoleInput(Guid Id, string Role);
+
+            [RivetContract]
+            public static class MembersContract
+            {
+                public static readonly InputRouteDefinition<UpdateRoleInput> UpdateRole =
+                    Define.Put("/api/members/{id}/role")
+                        .Accepts<UpdateRoleInput>()
+                        .Status(204);
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var operation = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/members/{id}/role").GetProperty("put");
+        var routeParameter = operation.GetProperty("parameters")[0];
+        var bodySchema = operation.GetProperty("requestBody").GetProperty("content")
+            .GetProperty("application/json").GetProperty("schema");
+        var bodyComponent = doc.RootElement.GetProperty("components").GetProperty("schemas")
+            .GetProperty("UpdateRoleRequest");
+
+        Assert.Equal("string", routeParameter.GetProperty("schema").GetProperty("type").GetString());
+        Assert.Equal("uuid", routeParameter.GetProperty("schema").GetProperty("format").GetString());
+        Assert.Equal("#/components/schemas/UpdateRoleRequest", bodySchema.GetProperty("$ref").GetString());
+        Assert.False(bodyComponent.GetProperty("properties").TryGetProperty("id", out _));
+        Assert.True(bodyComponent.GetProperty("properties").TryGetProperty("role", out _));
+    }
+
+    [Fact]
+    public void Nullable_Contract_Input_Remains_Nullable_After_Route_Property_Is_Filtered()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UpdateRoleInput(string Id, string Role);
+
+            [RivetContract]
+            public static class MembersContract
+            {
+                public static readonly InputRouteDefinition<UpdateRoleInput?> UpdateRole =
+                    Define.Patch("/api/members/{id}/role")
+                        .Accepts<UpdateRoleInput?>();
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var bodySchema = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/members/{id}/role").GetProperty("patch")
+            .GetProperty("requestBody").GetProperty("content")
+            .GetProperty("application/json").GetProperty("schema");
+        var oneOf = bodySchema.GetProperty("oneOf");
+
+        Assert.Equal("#/components/schemas/UpdateRoleRequest", oneOf[0].GetProperty("$ref").GetString());
+        Assert.Equal("null", oneOf[1].GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public void JsonPropertyName_Route_Property_Is_Excluded_By_Wire_Name_Without_Renaming_Route_Param()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UpdateRoleInput(
+                [property: JsonPropertyName("member_key")] string Id,
+                string Role);
+
+            [RivetContract]
+            public static class MembersContract
+            {
+                public static readonly InputRouteDefinition<UpdateRoleInput> UpdateRole =
+                    Define.Put("/api/members/{id}/role")
+                        .Accepts<UpdateRoleInput>();
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var operation = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/members/{id}/role").GetProperty("put");
+        var bodyComponent = doc.RootElement.GetProperty("components").GetProperty("schemas")
+            .GetProperty("UpdateRoleRequest");
+
+        Assert.Equal("id", operation.GetProperty("parameters")[0].GetProperty("name").GetString());
+        Assert.False(bodyComponent.GetProperty("properties").TryGetProperty("member_key", out _));
+        Assert.True(bodyComponent.GetProperty("properties").TryGetProperty("role", out _));
+    }
+
+    [Fact]
+    public void Unmatched_Route_Token_Does_Not_Filter_Unrelated_Body_Wire_Name()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UpdateRoleInput(
+                [property: JsonPropertyName("id")] string CorrelationId,
+                string Role);
+
+            [RivetContract]
+            public static class MembersContract
+            {
+                public static readonly InputRouteDefinition<UpdateRoleInput> UpdateRole =
+                    Define.Put("/api/members/{id}/role")
+                        .Accepts<UpdateRoleInput>();
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var operation = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/members/{id}/role").GetProperty("put");
+        var bodySchema = operation.GetProperty("requestBody").GetProperty("content")
+            .GetProperty("application/json").GetProperty("schema");
+        var bodyComponent = doc.RootElement.GetProperty("components").GetProperty("schemas")
+            .GetProperty("UpdateRoleInput");
+
+        Assert.Equal("string", operation.GetProperty("parameters")[0]
+            .GetProperty("schema").GetProperty("type").GetString());
+        Assert.Equal("#/components/schemas/UpdateRoleInput", bodySchema.GetProperty("$ref").GetString());
+        Assert.True(bodyComponent.GetProperty("properties").TryGetProperty("id", out _));
+        Assert.True(bodyComponent.GetProperty("properties").TryGetProperty("role", out _));
+    }
+
+    [Fact]
+    public void Json_Contract_Unassociated_Route_Param_Does_Not_Filter_SameNamed_Body_Property()
+    {
+        const string json = """
+            {
+              "types": [{
+                "name": "UpdateRoleInput",
+                "typeParameters": [],
+                "properties": [
+                  { "name": "id", "type": { "kind": "primitive", "type": "string" } },
+                  { "name": "role", "type": { "kind": "primitive", "type": "string" } }
+                ]
+              }],
+              "enums": [],
+              "endpoints": [{
+                "name": "updateRole",
+                "httpMethod": "PUT",
+                "routeTemplate": "/api/members/{id}/role",
+                "params": [
+                  { "name": "id", "type": { "kind": "primitive", "type": "string" }, "source": "route" },
+                  { "name": "body", "type": { "kind": "ref", "name": "UpdateRoleInput" }, "source": "body" }
+                ],
+                "controllerName": "members",
+                "responses": []
+              }]
+            }
+            """;
+
+        using var doc = EmitOpenApiFromJsonContract(json);
+        var bodySchema = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/members/{id}/role").GetProperty("put")
+            .GetProperty("requestBody").GetProperty("content")
+            .GetProperty("application/json").GetProperty("schema");
+        var bodyComponent = doc.RootElement.GetProperty("components").GetProperty("schemas")
+            .GetProperty("UpdateRoleInput");
+
+        Assert.Equal("#/components/schemas/UpdateRoleInput", bodySchema.GetProperty("$ref").GetString());
+        Assert.True(bodyComponent.GetProperty("properties").TryGetProperty("id", out _));
+        Assert.True(bodyComponent.GetProperty("properties").TryGetProperty("role", out _));
+    }
+
+    [Fact]
+    public void Controller_Route_And_Body_Properties_With_The_Same_Name_Remain_Independent()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record UpdateRequest(string Id, string Role);
+
+            [ApiController]
+            public sealed class MembersController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpPut("/api/members/{id}")]
+                public IActionResult Update(string id, [FromBody] UpdateRequest request) => Ok();
+            }
+            """;
+
+        using var doc = EmitOpenApiFromController(source);
+        var bodySchema = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/members/{id}").GetProperty("put")
+            .GetProperty("requestBody").GetProperty("content")
+            .GetProperty("application/json").GetProperty("schema");
+
+        Assert.Equal("#/components/schemas/UpdateRequest", bodySchema.GetProperty("$ref").GetString());
+        Assert.True(doc.RootElement.GetProperty("components").GetProperty("schemas")
+            .GetProperty("UpdateRequest").GetProperty("properties").TryGetProperty("id", out _));
+    }
+
+    [Fact]
+    public void Generic_Contract_Input_Excludes_Route_Property_From_Request_Body()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UpdateInput<T>(string Id, T Value);
+
+            [RivetContract]
+            public static class MembersContract
+            {
+                public static readonly InputRouteDefinition<UpdateInput<string>> Update =
+                    Define.Put("/api/members/{id}").Accepts<UpdateInput<string>>();
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var bodyRef = doc.RootElement.GetProperty("paths")
+            .GetProperty("/api/members/{id}").GetProperty("put")
+            .GetProperty("requestBody").GetProperty("content")
+            .GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString()!;
+        var body = doc.RootElement.GetProperty("components").GetProperty("schemas")
+            .GetProperty(bodyRef.Split('/')[^1]);
+
+        Assert.False(body.GetProperty("properties").TryGetProperty("id", out _));
+        Assert.Equal("string", body.GetProperty("properties").GetProperty("value").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public void Route_To_Body_Property_Provenance_Serializes_In_Contract_Ir()
+    {
+        var parameter = new TsEndpointParam(
+            "id",
+            new TsType.Primitive("string"),
+            ParamSource.Route,
+            BodyPropertyName: "member_key");
+
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        options.Converters.Add(new TsTypeJsonConverter());
+        options.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+        var json = JsonSerializer.Serialize(parameter, options);
+
+        Assert.Equal("member_key", JsonDocument.Parse(json).RootElement
+            .GetProperty("bodyPropertyName").GetString());
+    }
+
+    [Fact]
+    public void RouteFiltered_Body_Names_Avoid_Definitions_And_SameNamed_Endpoints()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType] public sealed record UpdateRequest(string Existing);
+            [RivetType] public sealed record MemberInput(string Id, string Role);
+            [RivetType] public sealed record TeamInput(string Id, string Name);
+
+            [RivetContract]
+            public static class MembersContract
+            {
+                public static readonly InputRouteDefinition<MemberInput> Update =
+                    Define.Put("/members/{id}").Accepts<MemberInput>();
+            }
+
+            [RivetContract]
+            public static class TeamsContract
+            {
+                public static readonly InputRouteDefinition<TeamInput> Update =
+                    Define.Put("/teams/{id}").Accepts<TeamInput>();
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        var memberRef = doc.RootElement.GetProperty("paths").GetProperty("/members/{id}").GetProperty("put")
+            .GetProperty("requestBody").GetProperty("content").GetProperty("application/json")
+            .GetProperty("schema").GetProperty("$ref").GetString();
+        var teamRef = doc.RootElement.GetProperty("paths").GetProperty("/teams/{id}").GetProperty("put")
+            .GetProperty("requestBody").GetProperty("content").GetProperty("application/json")
+            .GetProperty("schema").GetProperty("$ref").GetString();
+
+        Assert.Equal("#/components/schemas/MembersUpdateRequest", memberRef);
+        Assert.Equal("#/components/schemas/TeamsUpdateRequest", teamRef);
+        Assert.True(schemas.GetProperty("UpdateRequest").GetProperty("properties").TryGetProperty("existing", out _));
+        Assert.True(schemas.GetProperty("MembersUpdateRequest").GetProperty("properties").TryGetProperty("role", out _));
+        Assert.True(schemas.GetProperty("TeamsUpdateRequest").GetProperty("properties").TryGetProperty("name", out _));
+    }
+
+    [Fact]
     public void Get_Endpoint_Path_OperationId_Tags_Parameters_Response()
     {
         var source = """
@@ -187,6 +492,65 @@ public sealed class OpenApiEmitterTests
         Assert.Equal("#/components/schemas/NotFoundDto",
             resp404.GetProperty("content").GetProperty("application/json")
                 .GetProperty("schema").GetProperty("$ref").GetString());
+    }
+
+    [Fact]
+    public void Direct_Emission_Normalizes_Duplicate_Response_Statuses_First_Wins()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "getTask",
+            "GET",
+            "/api/tasks/{id}",
+            [],
+            null,
+            "tasks",
+            [
+                new TsResponseType(200, new TsType.Primitive("string"), "first"),
+                new TsResponseType(
+                    200,
+                    new TsType.Primitive("number"),
+                    "second",
+                    [new TsEndpointExample("application/json", "discarded", ComponentExampleId: "discarded", ResolvedJson: "123")]),
+            ]);
+
+        string? json = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            json = OpenApiEmitter.Emit(
+                [endpoint],
+                new Dictionary<string, TsTypeDefinition>(),
+                new Dictionary<string, TsType.Brand>(),
+                new Dictionary<string, TsType>(),
+                null));
+
+        using var document = JsonDocument.Parse(json!);
+        var response = document.RootElement.GetProperty("paths").GetProperty("/api/tasks/{id}")
+            .GetProperty("get").GetProperty("responses").GetProperty("200");
+
+        Assert.Equal("first", response.GetProperty("description").GetString());
+        Assert.Equal("string", response.GetProperty("content").GetProperty("application/json")
+            .GetProperty("schema").GetProperty("type").GetString());
+        Assert.Contains("warning RIV2010:", stderr);
+        Assert.DoesNotContain("discarded", json);
+    }
+
+    [Fact]
+    public void Direct_Emission_Rejects_Duplicate_Primary_Security_Definition()
+    {
+        var primary = new Dictionary<string, object> { ["type"] = "http", ["scheme"] = "bearer" };
+        var replacement = new Dictionary<string, object> { ["type"] = "apiKey", ["in"] = "header", ["name"] = "X-Key" };
+        var security = new SecurityConfig(
+            "bearer",
+            primary,
+            new Dictionary<string, Dictionary<string, object>> { ["bearer"] = replacement });
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => OpenApiEmitter.Emit(
+            [],
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            security));
+
+        Assert.Contains("error RIV2011:", exception.Message);
     }
 
     [Fact]
@@ -1541,7 +1905,13 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        var security = new SecurityConfig("admin", new Dictionary<string, object>
+        {
+            ["type"] = "http",
+            ["scheme"] = "bearer",
+        });
+
+        using var doc = EmitOpenApi(source, security);
         var delete = doc.RootElement.GetProperty("paths")
             .GetProperty("/api/admin/tasks")
             .GetProperty("delete");
@@ -1552,12 +1922,8 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
-    public void Security_PerEndpoint_Secure_Emits_SecurityScheme_Component()
+    public void Security_PerEndpoint_Undefined_Scheme_Fails_Generation()
     {
-        // W1: a .Secure("admin") override references the scheme by name — without a matching
-        // components.securitySchemes entry the requirement is rejected by consumers
-        // (oas3-operation-security-defined). No definition is available for endpoint-level
-        // names, so a default bearer scheme is synthesized with a loud diagnostic.
         var source = """
             using Rivet;
 
@@ -1582,22 +1948,10 @@ public sealed class OpenApiEmitterTests
             ["scheme"] = "bearer",
         });
 
-        JsonDocument? doc = null;
-        var stderr = CompilationHelper.CaptureStdErr(() => doc = EmitOpenApi(source, security));
-        using var docGuard = doc;
+        var exception = Assert.Throws<OpenApiEmissionException>(() => EmitOpenApi(source, security));
 
-        Assert.Contains("security scheme 'admin'", stderr);
-
-        var schemes = doc!.RootElement
-            .GetProperty("components").GetProperty("securitySchemes");
-
-        // The CLI-level scheme is still present...
-        Assert.True(schemes.TryGetProperty("bearer", out _));
-
-        // ...and the endpoint-level scheme now has a definition.
-        var admin = schemes.GetProperty("admin");
-        Assert.Equal("http", admin.GetProperty("type").GetString());
-        Assert.Equal("bearer", admin.GetProperty("scheme").GetString());
+        Assert.Contains("RIV2002", exception.Message);
+        Assert.Contains("security scheme 'admin'", exception.Message);
     }
 
     [Fact]
@@ -1709,9 +2063,14 @@ public sealed class OpenApiEmitterTests
 
     [Theory]
     [InlineData("bearer", "bearer", "http", "bearer")]
+    [InlineData("Bearer", "bearer", "http", "bearer")]
     [InlineData("bearer:jwt", "bearer", "http", "bearer")]
     [InlineData("cookie:sid", "cookieAuth", "apiKey", "cookie")]
     [InlineData("apikey:header:X-API-Key", "apiKeyAuth", "apiKey", "header")]
+    [InlineData("admin=bearer", "admin", "http", "bearer")]
+    [InlineData("session=cookie:sid", "session", "apiKey", "cookie")]
+    [InlineData("internal=apikey:header:X-API-Key", "internal", "apiKey", "header")]
+    [InlineData("Internal=APIKEY:HEADER:X-API-Key", "Internal", "apiKey", "header")]
     public void SecurityParser_Parse_Formats(string spec, string expectedName, string expectedType, string expectedSchemeOrIn)
     {
         var result = SecurityParser.Parse(spec);
@@ -1765,6 +2124,56 @@ public sealed class OpenApiEmitterTests
     public void SecurityParser_Unknown_Returns_Null()
     {
         Assert.Null(SecurityParser.Parse("oauth2"));
+    }
+
+    [Theory]
+    [InlineData("admin scheme=bearer")]
+    [InlineData("admin/auth=bearer")]
+    [InlineData("admin:auth=bearer")]
+    public void SecurityParser_Invalid_Explicit_Component_Name_Returns_Null(string spec)
+    {
+        Assert.Null(SecurityParser.Parse(spec));
+    }
+
+    [Theory]
+    [InlineData("admin.scheme=bearer", "admin.scheme")]
+    [InlineData("admin_scheme=bearer", "admin_scheme")]
+    [InlineData("admin-scheme=bearer", "admin-scheme")]
+    public void SecurityParser_Valid_Explicit_Component_Name_Is_Preserved(
+        string spec,
+        string expectedName)
+    {
+        Assert.Equal(expectedName, SecurityParser.Parse(spec)?.SchemeName);
+    }
+
+    [Theory]
+    [InlineData("apikey:path:X-API-Key")]
+    [InlineData("apikey::X-API-Key")]
+    [InlineData("apikey:header:")]
+    [InlineData("cookie:")]
+    [InlineData("bearer:")]
+    [InlineData("admin=other=bearer")]
+    public void SecurityParser_Malformed_Returns_Null(string spec)
+    {
+        Assert.Null(SecurityParser.Parse(spec));
+    }
+
+    [Fact]
+    public void SecurityParser_ParseMany_Rejects_Malformed_Explicit_Value()
+    {
+        var exception = Assert.Throws<SecurityConfigurationException>(() =>
+            SecurityParser.ParseMany(["bearer", "oauth2"]));
+
+        Assert.Contains("invalid --security value 'oauth2'", exception.Message);
+    }
+
+    [Fact]
+    public void SecurityParser_ParseMany_Rejects_Duplicate_Scheme_Name()
+    {
+        var exception = Assert.Throws<SecurityConfigurationException>(() =>
+            SecurityParser.ParseMany(["admin=bearer", "admin=cookie:sid"]));
+
+        Assert.Contains("duplicate --security scheme name 'admin'", exception.Message);
     }
 
     [Fact]

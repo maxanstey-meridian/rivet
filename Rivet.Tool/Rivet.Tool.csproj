@@ -18,7 +18,8 @@
     <PackageReference Include="Microsoft.Build.Framework" Version="17.*" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Build" Version="17.*" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Build.Tasks.Core" Version="17.*" ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.OpenApi" Version="2.7.0" />
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="9.0.15" />
     <PackageReference Include="System.Text.Json" Version="9.*" />
   </ItemGroup>
 
@@ -36,7 +37,7 @@
     <PackAsTool>true</PackAsTool>
     <PackRelease>true</PackRelease>
     <PackageId>dotnet-rivet</PackageId>
-    <Version>0.39.0</Version>
+    <Version>0.40.0</Version>
     <Authors>Max Anstey</Authors>
     <Description>Roslyn-powered CLI for generating OpenAPI 3.1 specifications from .NET applications.</Description>
     <PackageTags>dotnet-tool;openapi;roslyn;codegen;aspnetcore</PackageTags>

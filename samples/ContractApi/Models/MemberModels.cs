@@ -30,9 +30,20 @@ public sealed record InviteMemberRequest
 [RivetType]
 public sealed record InviteMemberResponse(Guid Id);
 
-[RivetType]
 public sealed record UpdateRoleRequest
 {
+    [Required, StringLength(20, MinimumLength = 3)]
+    public required string Role { get; init; }
+}
+
+[RivetType]
+public sealed record RemoveMemberInput(Guid Id);
+
+[RivetType]
+public sealed record UpdateRoleInput
+{
+    public required Guid Id { get; init; }
+
     [Required, StringLength(20, MinimumLength = 3)]
     public required string Role { get; init; }
 }

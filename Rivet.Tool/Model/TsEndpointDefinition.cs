@@ -57,7 +57,12 @@ public sealed record TsResponseHeader(
 /// <summary>
 /// A parameter to a client function.
 /// </summary>
-public sealed record TsEndpointParam(string Name, TsType Type, ParamSource Source, bool IsOptional = false);
+public sealed record TsEndpointParam(
+    string Name,
+    TsType Type,
+    ParamSource Source,
+    bool IsOptional = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BodyPropertyName = null);
 
 public enum ParamSource
 {

@@ -48,8 +48,15 @@ public abstract record TsType
     /// <summary>Branded primitive: string &amp; { readonly __brand: "Email" }.</summary>
     public sealed record Brand(string Name, TsType Inner) : TsType;
 
-    /// <summary>Inline object: { key: string; value: number }. Used for tuples.</summary>
-    public sealed record InlineObject(IReadOnlyList<(string Name, TsType Type)> Fields) : TsType;
+    /// <summary>Inline object: { key: string; value?: number }. Used for tuples and union variants.</summary>
+    public sealed record InlineObject(IReadOnlyList<InlineObjectField> Fields) : TsType;
+
+    public sealed record InlineObjectField(string Name, TsType Type, bool Optional = false)
+    {
+        // Keep concise tuple syntax without conflating a nullable value with an absent field.
+        public static implicit operator InlineObjectField((string Name, TsType Type) field) =>
+            new(field.Name, field.Type, Optional: false);
+    }
 
     /// <summary>Discriminated union of object-like variants keyed by a shared string-literal field.</summary>
     public sealed record TaggedUnion(string Discriminator, IReadOnlyList<TaggedUnionVariant> Variants) : TsType;
@@ -115,7 +122,8 @@ public abstract record TsType
                 ResolveTypeParams(d.Value, map),
                 d.Key is null ? null : ResolveTypeParams(d.Key, map)),
             Generic g => new Generic(g.Name, g.TypeArguments.Select(a => ResolveTypeParams(a, map)).ToList()),
-            InlineObject obj => new InlineObject(obj.Fields.Select(f => (f.Name, ResolveTypeParams(f.Type, map))).ToList()),
+            InlineObject obj => new InlineObject(obj.Fields.Select(f =>
+                new InlineObjectField(f.Name, ResolveTypeParams(f.Type, map), f.Optional)).ToList()),
             TaggedUnion tu => new TaggedUnion(
                 tu.Discriminator,
                 tu.Variants.Select(v => new TaggedUnionVariant(v.Tag, ResolveTypeParams(v.Type, map))).ToList()),
@@ -166,9 +174,9 @@ public abstract record TsType
                 // No type refs to collect
                 break;
             case InlineObject obj:
-                foreach (var (_, fieldType) in obj.Fields)
+                foreach (var field in obj.Fields)
                 {
-                    CollectTypeRefs(fieldType, names);
+                    CollectTypeRefs(field.Type, names);
                 }
                 break;
             case TaggedUnion tu:

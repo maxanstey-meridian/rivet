@@ -11,27 +11,31 @@ public static class InlineTypeExtractor
 {
     private const int CrossControllerThreshold = 3;
 
+    private static string Encode(string value) => $"{value.Length}:{value}";
+
     public static string CanonicalHash(TsType type)
     {
         return type switch
         {
-            TsType.Primitive p => p.Format is not null ? $"P:{p.Name}:{p.Format}" : $"P:{p.Name}",
+            TsType.Primitive p => $"P:{Encode(p.Name)}F:{Encode(p.Format ?? "")}C:{Encode(p.CSharpType ?? "")}",
             TsType.Nullable n => $"N:{CanonicalHash(n.Inner)}",
             TsType.Array a => $"A:{CanonicalHash(a.Element)}",
             // Keyless dictionaries keep the historical hash so existing names stay stable
             TsType.Dictionary d => d.Key is null
                 ? $"D:{CanonicalHash(d.Value)}"
                 : $"D[{CanonicalHash(d.Key)}]:{CanonicalHash(d.Value)}",
-            TsType.StringUnion su => "SU:" + string.Join(",", su.Members.OrderBy(m => m)),
+            TsType.StringUnion su => "SU:" + string.Concat(su.Members.OrderBy(m => m).Select(Encode)),
             TsType.IntUnion iu => "IU:" + string.Join(",", iu.Members.OrderBy(m => m)),
-            TsType.TypeRef r => $"R:{r.Name}",
-            TsType.Generic g => $"G:{g.Name}<{string.Join(",", g.TypeArguments.Select(CanonicalHash))}>",
-            TsType.TypeParam tp => $"TP:{tp.Name}",
-            TsType.Brand b => $"B:{b.Name}({CanonicalHash(b.Inner)})",
+            TsType.Literal literal => $"L:{literal.Value.ValueKind}:{Encode(literal.Value.ToString())}",
+            TsType.TypeRef r => $"R:{Encode(r.Name)}",
+            TsType.Generic g => $"G:{Encode(g.Name)}<{string.Join(",", g.TypeArguments.Select(CanonicalHash))}>",
+            TsType.TypeParam tp => $"TP:{Encode(tp.Name)}",
+            TsType.Brand b => $"B:{Encode(b.Name)}({CanonicalHash(b.Inner)})",
             TsType.InlineObject obj => "IO:{" + string.Join(",",
-                obj.Fields.OrderBy(f => f.Name).Select(f => $"{f.Name}:{CanonicalHash(f.Type)}")) + "}",
-            TsType.TaggedUnion tu => "TU:" + tu.Discriminator + "[" + string.Join(",",
-                tu.Variants.OrderBy(v => v.Tag).Select(v => $"{v.Tag}:{CanonicalHash(v.Type)}")) + "]",
+                obj.Fields.OrderBy(f => f.Name)
+                    .Select(f => $"N:{Encode(f.Name)}O:{(f.Optional ? 1 : 0)}T:{CanonicalHash(f.Type)}")) + "}",
+            TsType.TaggedUnion tu => "TU:" + Encode(tu.Discriminator) + "[" + string.Join(",",
+                tu.Variants.OrderBy(v => v.Tag).Select(v => $"{Encode(v.Tag)}:{CanonicalHash(v.Type)}")) + "]",
             TsType.Union u => "U:[" + string.Join(",", u.Variants.Select(CanonicalHash).OrderBy(h => h)) + "]",
             _ => throw new NotSupportedException($"Unknown TsType variant: {type.GetType().Name}"),
         };
@@ -201,8 +205,8 @@ public static class InlineTypeExtractor
             // Strategy: same field names but different optionality → Ref for the more-optional variant
             if (type.Fields.Count == existing.Fields.Count)
             {
-                var typeOptional = type.Fields.Count(f => f.Type is TsType.Nullable);
-                var existingOptional = existing.Fields.Count(f => f.Type is TsType.Nullable);
+                var typeOptional = type.Fields.Count(f => f.Optional);
+                var existingOptional = existing.Fields.Count(f => f.Optional);
                 if (typeOptional > existingOptional)
                 {
                     var candidate = baseName + "Ref" + suffix;
@@ -350,7 +354,10 @@ public static class InlineTypeExtractor
         {
             var representative = collected.First(c => CanonicalHash(c.Type) == hash).Type;
             var properties = representative.Fields
-                .Select(f => BuildPropertyDefinition(f.Name, ReplaceInType(f.Type, replacements)))
+                .Select(f => new TsPropertyDefinition(
+                    f.Name,
+                    ReplaceInType(f.Type, replacements),
+                    IsOptional: f.Optional))
                 .ToList();
 
             extractedTypes.Add(new TsTypeDefinition(typeRef.Name, [], properties));
@@ -360,15 +367,6 @@ public static class InlineTypeExtractor
         var updatedEndpoints = endpoints.Select(e => ReplaceInEndpoint(e, replacements)).ToList();
 
         return new ExtractionResult(updatedEndpoints, extractedTypes, typeNamespaces);
-    }
-
-    private static TsPropertyDefinition BuildPropertyDefinition(string name, TsType type)
-    {
-        // Semantics-preserving extraction (E4): a Nullable source field stays Nullable so the
-        // wire format (`prop: T | null`, `nullable: true`) is unchanged by extraction.
-        // IsOptional mirrors the inline-object emission convention: nullable fields are not
-        // listed in `required`, all other fields are.
-        return new TsPropertyDefinition(name, type, IsOptional: type is TsType.Nullable);
     }
 
     private static TsEndpointDefinition ReplaceInEndpoint(
@@ -411,7 +409,8 @@ public static class InlineTypeExtractor
                 if (replacements.TryGetValue(hash, out var typeRef))
                     return typeRef;
                 var replacedFields = io.Fields
-                    .Select(f => (f.Name, Type: ReplaceInType(f.Type, replacements)))
+                    .Select(f => new TsType.InlineObjectField(
+                        f.Name, ReplaceInType(f.Type, replacements), f.Optional))
                     .ToList();
                 return new TsType.InlineObject(replacedFields);
 
@@ -470,8 +469,8 @@ public static class InlineTypeExtractor
                 CollectArrayElements(a.Element, hashes);
                 break;
             case TsType.InlineObject obj:
-                foreach (var (_, fieldType) in obj.Fields)
-                    CollectArrayElements(fieldType, hashes);
+                foreach (var field in obj.Fields)
+                    CollectArrayElements(field.Type, hashes);
                 break;
             case TsType.Nullable n:
                 CollectArrayElements(n.Inner, hashes);
@@ -504,8 +503,8 @@ public static class InlineTypeExtractor
         {
             case TsType.InlineObject io:
                 results.Add((io, context));
-                foreach (var (fieldName, fieldType) in io.Fields)
-                    CollectFromType(fieldType, $"{context}.field.{fieldName}", results);
+                foreach (var field in io.Fields)
+                    CollectFromType(field.Type, $"{context}.field.{field.Name}", results);
                 break;
             case TsType.Array a:
                 CollectFromType(a.Element, context, results);

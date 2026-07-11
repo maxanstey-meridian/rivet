@@ -60,7 +60,7 @@ public sealed class OpenApiConformanceTests : IDisposable
 
     public static string EmitSpec(string fixtureName) => fixtureName switch
     {
-        "maximal-contract" => EmitFromSources([MaximalContractSource], "bearer"),
+        "maximal-contract" => EmitFromSources([MaximalContractSource], "bearer,admin=bearer"),
         "controller-annotations" => EmitFromSources([ControllerAnnotationsSource], null),
         "typed-results" => EmitFromSources([TypedResultsSource], null),
         "mixed-contracts-controllers" => EmitFromSources([MixedContractsControllersSource], null),
@@ -87,7 +87,7 @@ public sealed class OpenApiConformanceTests : IDisposable
         var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var annotationEndpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var merged = EndpointMerger.Merge(contractEndpoints, annotationEndpoints);
-        var securityConfig = security is null ? null : SecurityParser.Parse(security);
+        var securityConfig = security is null ? null : SecurityParser.ParseMany(security.Split(','));
         return OpenApiEmitter.Emit(merged, walker.Definitions, walker.Brands, walker.Enums, securityConfig, FixtureDocumentInfo);
     }
 
@@ -275,7 +275,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     [InlineData("contractapi-sample")]
     public void SelfLoop_Emit_Import_Emit_Is_Stable(string fixtureName)
     {
-        const string security = "bearer";
+        var security = fixtureName == "maximal-contract" ? "bearer,admin=bearer" : "bearer";
 
         var json0 = EmitSpec(fixtureName);
         var json1 = ReEmitThroughImporter(json0, security);
@@ -291,12 +291,13 @@ public sealed class OpenApiConformanceTests : IDisposable
 
     private static string ReEmitThroughImporter(string openApiJson, string security)
     {
-        var result = CompilationHelper.Import(openApiJson, ns: "ConformanceLoop", security);
+        var securityConfig = SecurityParser.ParseMany(security.Split(','));
+        var result = CompilationHelper.Import(openApiJson, ns: "ConformanceLoop", securityConfig?.SchemeName);
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         return OpenApiEmitter.Emit(
-            endpoints, walker.Definitions, walker.Brands, walker.Enums, SecurityParser.Parse(security));
+            endpoints, walker.Definitions, walker.Brands, walker.Enums, securityConfig);
     }
 
     // ═══════════════════════════ Process plumbing ═══════════════════════════

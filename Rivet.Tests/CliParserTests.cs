@@ -266,4 +266,33 @@ public sealed class CliParserTests
 
         Assert.Contains("--from", output);
     }
+
+    [Fact]
+    public void ParseArgs_FromOpenApi_Rejects_Generation_Security_Configuration()
+    {
+        string[][] invalidArguments =
+        [
+            ["--from-openapi", "spec.json", "--security", "admin=bearer"],
+            ["--from-openapi", "spec.json", "--security", "admin", "--security", "internal"],
+        ];
+
+        foreach (var args in invalidArguments)
+        {
+            RivetOptions? options = null;
+            var stderr = CompilationHelper.CaptureStdErr(() => options = CliParser.ParseArgs(args));
+
+            Assert.Null(options);
+            Assert.Contains("--security with --from-openapi accepts one security scheme name", stderr);
+        }
+    }
+
+    [Fact]
+    public void ParseArgs_FromOpenApi_Accepts_Single_Security_Scheme_Name()
+    {
+        var options = CliParser.ParseArgs(
+            ["--from-openapi", "spec.json", "--security", "admin"]);
+
+        Assert.NotNull(options);
+        Assert.Equal("admin", options!.DefaultSecurity);
+    }
 }

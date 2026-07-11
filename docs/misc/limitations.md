@@ -4,15 +4,16 @@ Verified limits of the current tool, so you don't discover them in production.
 
 ## Runtime
 
-- Rivet performs **no runtime data validation**: response body shape is not
-  checked (extra properties on returned objects reach the wire), constraint
-  attributes (`[Range]`, ...) are not checked by Rivet — enforcement is the host
-  framework's job ([recipes](/guides/runtime-validation#enforcing-constraints-at-runtime);
-  `[RivetConstraints]` is a `ValidationAttribute` and participates) — and
-  `Define.File` endpoints have no runtime enforcement at all. Full statement:
-  [Runtime Validation](/guides/runtime-validation).
-- Typed-result validation checks C# type assignability and declared status codes —
-  it is not JSON Schema validation.
+- Rivet does not perform JSON Schema validation at runtime. Constraint attributes
+  (`[Range]`, ...) are enforced by the host framework, not Rivet
+  ([recipes](/guides/runtime-validation#enforcing-constraints-at-runtime);
+  `[RivetConstraints]` is a `ValidationAttribute` and participates).
+- The typed-results `Invoke` path validates declared statuses, payload CLR types,
+  derived-instance extra-field leakage, and JSON content types. File `Invoke`
+  validates file content types and declared error statuses. The plain
+  `RivetResult` path fixes the success status but performs no runtime payload
+  validation. None of these paths inspect serialized JSON against its schema.
+  Full statement: [Runtime Validation](/guides/runtime-validation).
 - Framework results without a status code (`ChallengeHttpResult`,
   `SignOutHttpResult`) cannot be validated; use `.SkipValidation()`.
 
@@ -28,7 +29,7 @@ Verified limits of the current tool, so you don't discover them in production.
   `string` property (ISO 8601 for `TimeSpan`, digits for `BigInteger`) or as a number
   when the range allows.
 - Security scheme definitions come from the `--security` flag; `.Secure("name")`
-  with no matching definition emits a default bearer scheme with a warning.
+  with no matching definition fails generation (`RIV2002`).
 - The spec reflects *declared* C# types and the default System.Text.Json
   conventions. `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies emit as
   `oneOf` + `discriminator`; runtime polymorphism *without* those registrations,

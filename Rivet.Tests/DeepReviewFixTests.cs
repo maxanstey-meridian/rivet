@@ -501,14 +501,12 @@ public sealed class DeepReviewFixTests
         using var doc = EmitOpenApi(source);
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
-        // The inline object tuple should not have "value" in required
+        // Tuple elements remain structurally required even when their values are nullable.
         var pairProp = schemas.GetProperty("WithNullableTuple").GetProperty("properties").GetProperty("pair");
-        if (pairProp.TryGetProperty("required", out var required))
-        {
-            var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
-            Assert.Contains("key", requiredNames);
-            Assert.DoesNotContain("value", requiredNames);
-        }
+        var required = pairProp.GetProperty("required");
+        var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("key", requiredNames);
+        Assert.Contains("value", requiredNames);
     }
 
     // --- Fix 10: Empty object schema round-trip ---

@@ -119,9 +119,12 @@ public static class ContractWalker
         fullRoute = RouteParser.StripRouteConstraints(fullRoute);
 
         var parameters = EndpointWalker.ExtractParams(wkt, method, typeWalker, fullRoute);
-        var responses = EndpointWalker.ExtractAllResponseTypes(wkt, method, typeWalker);
-        var returnType = EndpointWalker.ExtractReturnType(wkt, method, typeWalker);
+        var responses = EndpointWalker.ExtractAllResponseTypes(wkt, method, typeWalker, normalize: false).ToList();
         var name = Naming.ToCamelCase(method.Name);
+        ResponseStatusValidation.RejectContractDuplicates(responses, name);
+        responses.Sort((left, right) => left.StatusCode.CompareTo(right.StatusCode));
+        var returnType = responses.FirstOrDefault(response => response.StatusCode is >= 200 and < 300)?.DataType
+            ?? (responses.Count == 0 ? EndpointWalker.ExtractReturnType(wkt, method, typeWalker) : null);
 
         return new TsEndpointDefinition(name, httpMethod, fullRoute, parameters, returnType, controllerName, responses);
     }
@@ -280,7 +283,15 @@ public static class ContractWalker
             }
             else if (call.MethodName == "Status" && call.StatusCodeArg is not null)
             {
-                successStatusOverride = call.StatusCodeArg.Value;
+                if (successStatusOverride is not null)
+                {
+                    throw new ContractAnalysisException(
+                        $"error {Diagnostics.DuplicateResponseStatus}: endpoint '{name}' calls .Status() more than once");
+                }
+                else
+                {
+                    successStatusOverride = call.StatusCodeArg.Value;
+                }
             }
             else if (call.MethodName == "Summary" && call.StringArg is not null)
             {
@@ -386,7 +397,7 @@ public static class ContractWalker
 
         // Build params based on HTTP method and TInput
         var (parameters, inputTypeName) = BuildParams(
-            wkt, httpMethod, route, tInput, typeWalker, acceptsFile, binaryRequestContentType);
+            wkt, httpMethod, route, tInput, field, compilation, typeWalker, acceptsFile, binaryRequestContentType);
 
         // Add success response to responses list
         // Void endpoints with typed error responses also need a success entry
@@ -404,6 +415,7 @@ public static class ContractWalker
             responses.Insert(0, new TsResponseType(successCode, null));
         }
 
+        ResponseStatusValidation.RejectContractDuplicates(responses, name);
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
         ApplyResponseExamples(responses, responseExampleCalls, fileContentType, name);
         ApplyResponseHeaders(
@@ -570,6 +582,8 @@ public static class ContractWalker
         string httpMethod,
         string route,
         ITypeSymbol? tInput,
+        IFieldSymbol field,
+        Compilation compilation,
         TypeWalker typeWalker,
         bool acceptsFile = false,
         string? binaryContentType = null)
@@ -615,11 +629,14 @@ public static class ContractWalker
 
         if (lowersBody)
         {
+            var requestBodyType = GetRequestBodyType(field, compilation, tInput, route, typeWalker);
+
             // Route params from template — try to match types from TInput properties
             var routeMatchedProps = new HashSet<string>(StringComparer.Ordinal);
             foreach (var paramName in routeParamNames)
             {
                 TsType paramType = new TsType.Primitive("string");
+                string? bodyPropertyName = null;
                 if (tInput is not null)
                 {
                     // A3: match against the flattened property surface (incl. inherited)
@@ -630,6 +647,11 @@ public static class ContractWalker
                     {
                         paramType = typeWalker.MapType(matchingProp.Type);
                         routeMatchedProps.Add(matchingProp.Name);
+                        if (requestBodyType is null)
+                        {
+                            bodyPropertyName = typeWalker.GetJsonPropertyName(matchingProp)
+                                ?? Naming.ToCamelCase(matchingProp.Name);
+                        }
                     }
                     else
                     {
@@ -639,7 +661,11 @@ public static class ContractWalker
                             $"on input type '{tInput.Name}' — emitted as an untyped string path param.");
                     }
                 }
-                parameters.Add(new TsEndpointParam(paramName, paramType, ParamSource.Route));
+                parameters.Add(new TsEndpointParam(
+                    paramName,
+                    paramType,
+                    ParamSource.Route,
+                    BodyPropertyName: bodyPropertyName));
             }
 
             // .AcceptsFile() on the contract — add a File param
@@ -718,7 +744,7 @@ public static class ContractWalker
                     if (bodyProps.Count == 0 || bodyProps.Any(p => !routeMatchedProps.Contains(p.Name)))
                     {
                         // Normal body param
-                        var tsType = typeWalker.MapType(tInput);
+                        var tsType = requestBodyType ?? typeWalker.MapType(tInput);
                         parameters.Add(new TsEndpointParam("body", tsType, ParamSource.Body));
                     }
                 }
@@ -794,7 +820,11 @@ public static class ContractWalker
                                 $"is ignored for route interpolation — the contract param keeps the route name '{routeName}'.");
                         }
 
-                        parameters.Add(new TsEndpointParam(routeName, tsType, ParamSource.Route));
+                        parameters.Add(new TsEndpointParam(
+                            routeName,
+                            tsType,
+                            ParamSource.Route,
+                            BodyPropertyName: tsName));
                         continue;
                     }
 
@@ -831,6 +861,94 @@ public static class ContractWalker
         }
 
         return (parameters, inputTypeName);
+    }
+
+    private static TsType? GetRequestBodyType(
+        IFieldSymbol field,
+        Compilation compilation,
+        ITypeSymbol? inputType,
+        string route,
+        TypeWalker typeWalker)
+    {
+        var attributeType = compilation.GetTypeByMetadataName("Rivet.RivetRequestBodyAttribute");
+        if (attributeType is null)
+        {
+            return null;
+        }
+
+        var attribute = field.GetAttributes()
+            .FirstOrDefault(candidate => SymbolEqualityComparer.Default.Equals(
+                candidate.AttributeClass,
+                attributeType));
+        if (attribute?.ConstructorArguments is not [{ Value: ITypeSymbol bodyType }, ..])
+        {
+            return null;
+        }
+
+        if (inputType is null || !IsCompatibleRequestBodyType(bodyType, inputType, route, typeWalker))
+        {
+            throw new ContractAnalysisException(
+                $"error {Diagnostics.InvalidRequestBodyProvenance}: endpoint '{field.ContainingType.Name}.{field.Name}' " +
+                $"declares request body type '{bodyType.Name}', which is not represented independently by its input type '{inputType?.Name}'");
+        }
+
+        var mappedType = typeWalker.MapType(bodyType);
+        var isRequired = attribute.ConstructorArguments.Length < 2
+            || attribute.ConstructorArguments[1].Value is not false;
+        return isRequired || mappedType is TsType.Nullable
+            ? mappedType
+            : new TsType.Nullable(mappedType);
+    }
+
+    private static bool IsCompatibleRequestBodyType(
+        ITypeSymbol bodyType,
+        ITypeSymbol inputType,
+        string route,
+        TypeWalker typeWalker)
+    {
+        var routeNames = RouteParser.ParseRouteParamNames(route)
+            .Select(RouteParser.NormalizeForMatching)
+            .ToHashSet(StringComparer.Ordinal);
+        if (typeWalker.GetEffectiveProperties(inputType).Any(property =>
+            !typeWalker.IsJsonIgnored(property)
+            && TypeWalker.GetHeaderName(property) is null
+            && !routeNames.Contains(RouteParser.NormalizeForMatching(property.Name))
+            && SymbolEqualityComparer.Default.Equals(property.Type, bodyType)))
+        {
+            return true;
+        }
+
+        var inputProperties = typeWalker.GetEffectiveProperties(inputType)
+            .Where(property => !typeWalker.IsJsonIgnored(property) && TypeWalker.GetHeaderName(property) is null)
+            .GroupBy(property => typeWalker.GetJsonPropertyName(property) ?? Naming.ToCamelCase(property.Name), StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var bodyProperties = typeWalker.GetEffectiveProperties(bodyType)
+            .Where(property => !typeWalker.IsJsonIgnored(property) && TypeWalker.GetHeaderName(property) is null)
+            .ToList();
+        if (bodyProperties.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var bodyProperty in bodyProperties)
+        {
+            var wireName = typeWalker.GetJsonPropertyName(bodyProperty) ?? Naming.ToCamelCase(bodyProperty.Name);
+            if (!inputProperties.TryGetValue(wireName, out var matches)
+                || matches.Count != 1)
+            {
+                return false;
+            }
+
+            var inputProperty = matches[0];
+            if (routeNames.Contains(RouteParser.NormalizeForMatching(inputProperty.Name))
+                || !SymbolEqualityComparer.Default.Equals(bodyProperty.Type, inputProperty.Type)
+                || TypeWalker.IsOptionalProperty(bodyProperty) != TypeWalker.IsOptionalProperty(inputProperty))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsFormFileType(WellKnownTypes wkt, ITypeSymbol type) =>

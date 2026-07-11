@@ -590,9 +590,9 @@ public sealed class TypeWalker
             // Synthesized discriminator property first — a single-member StringUnion,
             // required (non-Nullable), mirroring the TS lowerer's variant shape —
             // then the derived type's full flattened property surface.
-            var fields = new List<(string Name, TsType Type)>
+            var fields = new List<TsType.InlineObjectField>
             {
-                (discriminator, new TsType.StringUnion([tag])),
+                new(discriminator, new TsType.StringUnion([tag])),
             };
 
             foreach (var member in GetEffectiveProperties(derivedType))
@@ -605,15 +605,8 @@ public sealed class TypeWalker
                 var fieldName = GetJsonPropertyName(member) ?? Naming.ToCamelCase(member.Name);
                 var fieldType = MapTypeCore(member.Type, $"{name}.{tag}.{member.Name}");
 
-                // InlineObject has no optionality slot: required = non-Nullable.
-                // Optional-but-non-nullable properties widen to Nullable so they
-                // stay out of the variant's required array.
-                if (IsOptionalProperty(member) && fieldType is not TsType.Nullable)
-                {
-                    fieldType = new TsType.Nullable(fieldType);
-                }
-
-                fields.Add((fieldName, fieldType));
+                fields.Add(new TsType.InlineObjectField(
+                    fieldName, fieldType, IsOptionalProperty(member)));
             }
 
             variants.Add(new TsType.TaggedUnionVariant(tag, new TsType.InlineObject(fields)));
@@ -818,7 +811,12 @@ public sealed class TypeWalker
         if (symbol is INamedTypeSymbol { IsTupleType: true } tupleType)
         {
             var fields = tupleType.TupleElements
-                .Select(e => (Naming.ToCamelCase(e.Name), MapTypeCore(e.Type, context)))
+                .Select(e =>
+                {
+                    var fieldType = MapTypeCore(e.Type, context);
+                    return new TsType.InlineObjectField(
+                        Naming.ToCamelCase(e.Name), fieldType);
+                })
                 .ToList();
             return new TsType.InlineObject(fields);
         }
