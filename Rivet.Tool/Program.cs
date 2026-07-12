@@ -137,9 +137,11 @@ static async Task<int> Run(string[] args)
     var definitions = walker.Definitions.Values.ToList();
     var brands = walker.Brands.Values.ToList();
     ContractSecurityMetadata? securityMetadata;
+    OpenApiDocumentProvenance? documentProvenance;
     try
     {
         securityMetadata = SecurityMetadataWalker.Walk(compilation);
+        documentProvenance = OpenApiProvenanceWalker.Walk(compilation, walker);
     }
     catch (ContractAnalysisException exception)
     {
@@ -155,7 +157,8 @@ static async Task<int> Run(string[] args)
         walker.TypeNamespaces,
         walker.Definitions,
         walker.Brands,
-        securityMetadata
+        securityMetadata,
+        documentProvenance
     );
 
     return await EmitPipeline.RunAsync(emitInput, options);

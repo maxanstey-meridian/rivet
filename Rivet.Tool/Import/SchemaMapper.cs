@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Import;
 
@@ -20,7 +21,9 @@ internal sealed class SchemaMapper
     // chasing the library's reference proxies.
     private readonly Dictionary<string, string> _aliasTargets = new(StringComparer.Ordinal);
     private readonly HashSet<string> _unresolvableAliases = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _skippedComponentTypes = new(StringComparer.Ordinal);
     private IDictionary<string, IOpenApiSchema>? _componentSchemas;
+    private readonly HashSet<string> _unsupportedNamedScalarsWarned = new(StringComparer.Ordinal);
 
     // P2 wave 4: oneOf + discriminator + usable mapping reverses to an abstract
     // [JsonPolymorphic] base record with [JsonDerivedType] registrations. Bases are
@@ -49,7 +52,8 @@ internal sealed class SchemaMapper
             _ctx,
             ResolveCSharpType,
             ResolveFormat,
-            ResolveSchemaType
+            ResolveSchemaType,
+            ResolveScalarReferenceName
         );
     }
 
@@ -268,6 +272,7 @@ internal sealed class SchemaMapper
         var records = new List<GeneratedRecord>();
         var enums = new List<GeneratedEnum>();
         var brands = new List<GeneratedBrand>();
+        var scalarSchemas = new List<GeneratedScalarSchema>();
         // Case-INSENSITIVE: emitted type names become Types/{Name}.cs files, and on
         // APFS/NTFS two names differing only by case clobber each other at write time
         // (cloudflare: ...CustomHostname vs ...Customhostname left a dangling type).
@@ -277,6 +282,13 @@ internal sealed class SchemaMapper
         // members — a cyclic alias would overflow the stack inside the library's proxy)
         _componentSchemas = schemas;
         ResolveAliasTargets(schemas);
+        foreach (var (componentId, schema) in schemas)
+        {
+            DiagnoseNonObjectAdditionalProperties(
+                schema,
+                $"#/components/schemas/{EscapeJsonPointerToken(componentId)}"
+            );
+        }
 
         // Pre-scan: collect generic template info from x-rivet-generic extensions
         var genericTemplates = new Dictionary<string, GenericTemplateInfo>();
@@ -353,6 +365,23 @@ internal sealed class SchemaMapper
                 continue;
             }
 
+            if (TryGetScalarAliasTarget(key, schemas, out _, out _))
+            {
+                var name = SanitizeName(key);
+                if (!usedNames.Add(name))
+                {
+                    var suffix = 2;
+                    while (!usedNames.Add($"{name}_{suffix}"))
+                    {
+                        suffix++;
+                    }
+                    name = $"{name}_{suffix}";
+                }
+                _ctx.SchemaNameMap[key] = name;
+                _ctx.ReservedTypeNames.Add(name);
+                continue;
+            }
+
             if (
                 _aliasTargets.TryGetValue(key, out var finalKey)
                 && _ctx.SchemaNameMap.TryGetValue(finalKey, out var targetName)
@@ -365,6 +394,23 @@ internal sealed class SchemaMapper
         // P2 wave 4: detect reversible polymorphic unions BEFORE mapping so variant
         // schemas can be generated as derived records regardless of iteration order.
         DetectPolymorphicUnions(schemas);
+
+        // A single-ref allOf around a union has no record property surface. Mark these
+        // before mapping so earlier consumers resolve through the wrapper instead of
+        // naming a C# record that MapSchemas will intentionally skip.
+        foreach (var (key, schema) in schemas)
+        {
+            if (
+                schema is not OpenApiSchemaReference
+                && schema.AllOf is [OpenApiSchemaReference { Reference.Id: { } onlyId }]
+                && schema.Properties is not { Count: > 0 }
+                && schemas.TryGetValue(DecodeComponentId(onlyId)!, out var onlyTarget)
+                && (onlyTarget.OneOf is { Count: > 0 } || onlyTarget.AnyOf is { Count: > 1 })
+            )
+            {
+                _skippedComponentTypes.Add(key);
+            }
+        }
 
         foreach (var (key, schema) in schemas)
         {
@@ -380,6 +426,16 @@ internal sealed class SchemaMapper
             // Skip monomorphised schemas handled by generic templates
             if (handledByGeneric.Contains(key))
             {
+                continue;
+            }
+
+            if (TryMapNamedScalar(name, key, schema, out var scalarSchema))
+            {
+                scalarSchemas.Add(scalarSchema);
+            }
+            else if (TryMapNamedUntyped(name, key, schema, out var untypedSchema))
+            {
+                scalarSchemas.Add(untypedSchema);
                 continue;
             }
 
@@ -448,10 +504,12 @@ internal sealed class SchemaMapper
                     inheritedRequired: schema.Required
                 );
                 record = _synth.MergeWithSiblingProperties(record, schema, name);
+                record = record with { SchemaMetadata = CollectGeneratedSchemaMetadata(schema) };
 
                 // Skip empty allOf records — resolved inline via $ref
                 if (record.Properties.Count == 0 && schema.Properties is not { Count: > 0 })
                 {
+                    _skippedComponentTypes.Add(key);
                     continue;
                 }
 
@@ -534,13 +592,21 @@ internal sealed class SchemaMapper
 
             if (SchemaClassifier.IsObject(schema))
             {
-                // Object with no properties → resolved inline as Dictionary, not as a record
-                // Unless marked with x-rivet-empty-record extension
+                // A named empty object is still a component identity. Generate an empty
+                // record so import→emit does not erase the component key; anonymous empty
+                // objects continue to resolve as dictionaries in ResolveObjectType.
                 if (schema.Properties is not { Count: > 0 })
                 {
-                    if (SchemaClassifier.HasExtension(schema, "x-rivet-empty-record"))
+                    if (schema.AdditionalProperties is null)
                     {
-                        records.Add(new GeneratedRecord(name, []));
+                        records.Add(
+                            new GeneratedRecord(
+                                name,
+                                [],
+                                Description: schemaDescription,
+                                SchemaMetadata: CollectGeneratedSchemaMetadata(schema)
+                            )
+                        );
                     }
                     continue;
                 }
@@ -577,13 +643,347 @@ internal sealed class SchemaMapper
             // Primitive aliases (e.g. { "type": "string", "format": "date-time" }) — skip, resolved inline
         }
 
+        foreach (var (key, schema) in schemas)
+        {
+            if (
+                schema is not OpenApiSchemaReference { Reference.Id: { } directId }
+                || !TryGetScalarAliasTarget(key, schemas, out var targetKey, out var target)
+                || !_ctx.SchemaNameMap.TryGetValue(key, out var aliasName)
+                || !_ctx.SchemaNameMap.TryGetValue(DecodeComponentId(directId)!, out var directName)
+                || !TryMapNamedScalar("_", targetKey, target, out var targetScalar)
+            )
+            {
+                continue;
+            }
+
+            scalarSchemas.Add(
+                new GeneratedScalarSchema(
+                    aliasName,
+                    key,
+                    targetScalar.SchemaType,
+                    null,
+                    false,
+                    new TsScalarMetadata(),
+                    SchemaRef: directName
+                )
+            );
+        }
+
         // Register component records for shape-checked reuse (I3 residual)
+        var componentIdsByName = _ctx
+            .SchemaNameMap.Where(pair => schemas[pair.Key] is not OpenApiSchemaReference)
+            .GroupBy(pair => pair.Value, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Key, StringComparer.Ordinal);
+
+        for (var i = 0; i < records.Count; i++)
+        {
+            if (componentIdsByName.TryGetValue(records[i].Name, out var componentId))
+            {
+                records[i] = records[i] with { ComponentId = componentId, IsSynthetic = false };
+            }
+        }
+        for (var i = 0; i < enums.Count; i++)
+        {
+            if (componentIdsByName.TryGetValue(enums[i].Name, out var componentId))
+            {
+                enums[i] = enums[i] with { ComponentId = componentId, IsSynthetic = false };
+            }
+        }
+        for (var i = 0; i < brands.Count; i++)
+        {
+            if (componentIdsByName.TryGetValue(brands[i].Name, out var componentId))
+            {
+                brands[i] = brands[i] with { ComponentId = componentId, IsSynthetic = false };
+            }
+        }
+
         foreach (var record in records)
         {
             _ctx.MappedComponentRecords[record.Name] = record;
         }
 
-        return new SchemaMapResult(records, enums, brands);
+        return new SchemaMapResult(records, enums, brands, scalarSchemas);
+    }
+
+    private bool TryMapNamedScalar(
+        string name,
+        string componentId,
+        IOpenApiSchema schema,
+        out GeneratedScalarSchema scalar
+    )
+    {
+        scalar = null!;
+        if (schema.Type is not { } declared)
+        {
+            return false;
+        }
+
+        var nonNull = declared & ~JsonSchemaType.Null;
+        var schemaType = nonNull switch
+        {
+            JsonSchemaType.String => "string",
+            JsonSchemaType.Integer => "integer",
+            JsonSchemaType.Number => "number",
+            JsonSchemaType.Boolean => "boolean",
+            _ => null,
+        };
+        if (schemaType is null)
+        {
+            if (
+                nonNull.HasFlag(JsonSchemaType.String)
+                || nonNull.HasFlag(JsonSchemaType.Integer)
+                || nonNull.HasFlag(JsonSchemaType.Number)
+                || nonNull.HasFlag(JsonSchemaType.Boolean)
+            )
+            {
+                WarnUnsupportedNamedScalar(
+                    componentId,
+                    "heterogeneous leaf types; only one primitive leaf plus optional null is supported"
+                );
+            }
+            return false;
+        }
+
+        if (
+            schema.AllOf is { Count: > 0 }
+            || schema.OneOf is { Count: > 0 }
+            || schema.AnyOf is { Count: > 0 }
+            || schema.Const is not null
+        )
+        {
+            WarnUnsupportedNamedScalar(
+                componentId,
+                "const or schema composition; only primitive leaves and flat string/Int32 enums are supported"
+            );
+            return false;
+        }
+
+        if (
+            schema.Properties is { Count: > 0 }
+            || schema.Items is not null
+            || schema.AdditionalProperties is not null
+        )
+        {
+            return false;
+        }
+
+        if (
+            schema.Enum is { Count: > 0 }
+            && !SchemaClassifier.IsStringEnum(schema)
+            && !SchemaClassifier.IsIntEnum(schema)
+        )
+        {
+            WarnUnsupportedNamedScalar(
+                componentId,
+                "a heterogeneous or unsupported enum; only flat string and Int32 integer enums are supported"
+            );
+            return false;
+        }
+
+        var metadata = BuildScalarMetadata(schema, declared.HasFlag(JsonSchemaType.Null));
+        scalar = new GeneratedScalarSchema(
+            name,
+            componentId,
+            schemaType,
+            schema.Format,
+            declared.HasFlag(JsonSchemaType.Null),
+            metadata,
+            IsEnum: schema.Enum is { Count: > 0 }
+        );
+        return true;
+    }
+
+    private static bool TryMapNamedUntyped(
+        string name,
+        string componentId,
+        IOpenApiSchema schema,
+        out GeneratedScalarSchema untyped
+    )
+    {
+        untyped = null!;
+        if (
+            schema.Type.HasValue
+            || schema.Properties is { Count: > 0 }
+            || schema.Items is not null
+            || schema.AdditionalProperties is not null
+            || schema.AllOf is { Count: > 0 }
+            || schema.OneOf is { Count: > 0 }
+            || schema.AnyOf is { Count: > 0 }
+            || schema.Const is not null
+            || schema.Enum is { Count: > 0 }
+        )
+        {
+            return false;
+        }
+
+        untyped = new GeneratedScalarSchema(
+            name,
+            componentId,
+            SchemaType: null,
+            Format: null,
+            IsNullable: false,
+            Metadata: BuildScalarMetadata(schema, isNullable: false)
+        );
+        return true;
+    }
+
+    internal static TsScalarMetadata BuildScalarMetadata(IOpenApiSchema schema, bool isNullable) =>
+        new(
+            Description: schema.Description,
+            DefaultValue: schema.Default?.ToJsonString(),
+            Example: schema.Example?.ToJsonString(),
+            Examples: schema.Examples is { Count: > 0 }
+                ? new JsonArray(
+                    schema.Examples.Select(example => example?.DeepClone()).ToArray()
+                ).ToJsonString()
+                : null,
+            IsDeprecated: schema.Deprecated,
+            IsReadOnly: schema.ReadOnly,
+            IsWriteOnly: schema.WriteOnly,
+            Constraints: RecordSynthesizer.ExtractConstraints(schema),
+            IsNullable: isNullable || HasExplicitNullBranch(schema),
+            Title: schema.Title,
+            Xml: schema.Xml is null
+                ? null
+                : new TsSchemaXmlMetadata(
+                    schema.Xml.Name,
+                    schema.Xml.Namespace?.ToString(),
+                    schema.Xml.Prefix,
+                    schema.Xml.Attribute,
+                    schema.Xml.Wrapped
+                ),
+            Format: schema.Format,
+            IsFormatSpecified: schema.Format is not null
+                || (schema.Type & ~JsonSchemaType.Null)
+                    is JsonSchemaType.Integer
+                        or JsonSchemaType.Number,
+            Required: schema.Required is { Count: > 0 } ? schema.Required.ToList() : null
+        );
+
+    private static bool HasExplicitNullBranch(IOpenApiSchema schema) =>
+        new[] { schema.OneOf, schema.AnyOf }.Any(branches =>
+            branches is { Count: 2 } && branches.Any(branch => branch.Type == JsonSchemaType.Null)
+        );
+
+    internal static IReadOnlyList<GeneratedSchemaMetadata> CollectGeneratedSchemaMetadata(
+        IOpenApiSchema schema
+    )
+    {
+        if (schema is OpenApiSchemaReference)
+        {
+            return [];
+        }
+        var result = new List<GeneratedSchemaMetadata>();
+        CollectGeneratedSchemaMetadata(schema, "", result, new HashSet<IOpenApiSchema>());
+        return result;
+    }
+
+    private static void CollectGeneratedSchemaMetadata(
+        IOpenApiSchema schema,
+        string pointer,
+        List<GeneratedSchemaMetadata> result,
+        HashSet<IOpenApiSchema> visited
+    )
+    {
+        if (!visited.Add(schema))
+        {
+            return;
+        }
+
+        var metadata = BuildScalarMetadata(
+            schema,
+            schema.Type?.HasFlag(JsonSchemaType.Null) == true
+        );
+        if (HasGeneratedSchemaMetadata(metadata))
+        {
+            result.Add(new GeneratedSchemaMetadata(pointer, metadata));
+        }
+
+        if (schema.Items is not null)
+        {
+            CollectGeneratedSchemaMetadata(schema.Items, pointer + "/items", result, visited);
+        }
+        if (schema.AdditionalProperties is not null)
+        {
+            CollectGeneratedSchemaMetadata(
+                schema.AdditionalProperties,
+                pointer + "/additionalProperties",
+                result,
+                visited
+            );
+        }
+        visited.Remove(schema);
+    }
+
+    private static bool HasGeneratedSchemaMetadata(TsScalarMetadata metadata) =>
+        metadata.Description is not null
+        || metadata.Title is not null
+        || metadata.DefaultValue is not null
+        || metadata.Example is not null
+        || metadata.Examples is not null
+        || metadata.IsDeprecated
+        || metadata.IsReadOnly
+        || metadata.IsWriteOnly
+        || metadata.IsNullable
+        || metadata.IsFormatSpecified
+        || metadata.Required is { Count: > 0 }
+        || metadata.Constraints is { HasAny: true }
+        || metadata.Xml is not null;
+
+    private void WarnUnsupportedNamedScalar(string componentId, string reason)
+    {
+        if (!_unsupportedNamedScalarsWarned.Add(componentId))
+        {
+            return;
+        }
+
+        _ctx.Warnings.Add(
+            Diagnostics.Prefix(
+                Diagnostics.ImportNamedScalarAlgebraUnsupported,
+                $"Named scalar component '{componentId}' uses {reason}. Existing fallback mapping retained."
+            )
+        );
+    }
+
+    internal string? ResolveScalarReferenceName(IOpenApiSchema schema)
+    {
+        if (schema is not OpenApiSchemaReference { Reference.Id: { } rawId })
+        {
+            return null;
+        }
+
+        var componentId = DecodeComponentId(rawId);
+        if (
+            componentId is null
+            || _componentSchemas is null
+            || !TryGetScalarAliasTarget(componentId, _componentSchemas, out _, out _)
+        )
+        {
+            return null;
+        }
+
+        return _ctx.SchemaNameMap.GetValueOrDefault(componentId);
+    }
+
+    private bool TryGetScalarAliasTarget(
+        string componentId,
+        IDictionary<string, IOpenApiSchema> schemas,
+        out string targetKey,
+        out IOpenApiSchema target
+    )
+    {
+        targetKey = _aliasTargets.GetValueOrDefault(componentId, componentId);
+        if (
+            !schemas.TryGetValue(targetKey, out target!)
+            || target is OpenApiSchemaReference
+            || !TryMapNamedScalar("_", targetKey, target, out _)
+        )
+        {
+            target = null!;
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1013,7 +1413,7 @@ internal sealed class SchemaMapper
     {
         result = "";
 
-        var refId = schemaRef.Reference.Id;
+        var refId = DecodeComponentId(schemaRef.Reference.Id);
 
         // I1: refs to unresolvable aliases (cycle/missing target) — loud fallback,
         // and never touch the proxy (a cyclic chain overflows the stack)
@@ -1034,6 +1434,14 @@ internal sealed class SchemaMapper
         var effectiveId = refId;
         if (
             refId is not null
+            && _componentSchemas is not null
+            && _componentSchemas.TryGetValue(refId, out var directTarget)
+        )
+        {
+            effective = directTarget;
+        }
+        if (
+            refId is not null
             && _aliasTargets.TryGetValue(refId, out var finalKey)
             && _componentSchemas is not null
             && _componentSchemas.TryGetValue(finalKey, out var finalSchema)
@@ -1043,14 +1451,30 @@ internal sealed class SchemaMapper
             effectiveId = finalKey;
         }
 
-        // If the target is a property-less object schema, resolve to Dictionary
-        // (no record was generated for it in MapSchemas) — unless marked as empty record
         if (
-            SchemaClassifier.IsObject(effective)
-            && effective.Properties is not { Count: > 0 }
-            && !SchemaClassifier.HasExtension(effective, "x-rivet-empty-record")
+            effectiveId is not null
+            && _skippedComponentTypes.Contains(effectiveId)
+            && effective.AllOf is [var skippedTarget]
         )
         {
+            result = ResolveCSharpType(skippedTarget, context);
+            return true;
+        }
+
+        // If the target is a property-less object schema, resolve to Dictionary
+        // (no record was generated for it in MapSchemas) — unless marked as empty record
+        if (SchemaClassifier.IsObject(effective) && effective.Properties is not { Count: > 0 })
+        {
+            if (
+                effective.AdditionalProperties is null
+                && effectiveId is not null
+                && _ctx.SchemaNameMap.TryGetValue(effectiveId, out var emptyRecordName)
+            )
+            {
+                result = emptyRecordName;
+                return true;
+            }
+
             result = ResolveObjectType(effective, context);
             return true;
         }
@@ -1089,6 +1513,60 @@ internal sealed class SchemaMapper
         // Primitive alias — fall through to type resolution on the resolved schema
         return false;
     }
+
+    private static string? DecodeComponentId(string? value) =>
+        value
+            ?.Replace("~1", "/", StringComparison.Ordinal)
+            .Replace("~0", "~", StringComparison.Ordinal);
+
+    private void DiagnoseNonObjectAdditionalProperties(IOpenApiSchema schema, string pointer)
+    {
+        if (schema is OpenApiSchemaReference)
+        {
+            return;
+        }
+
+        var nonNullType = schema.Type & ~JsonSchemaType.Null;
+        if (
+            schema.AdditionalProperties is not null
+            && nonNullType.HasValue
+            && nonNullType.Value != JsonSchemaType.Object
+        )
+        {
+            _ctx.Warnings.Add(
+                Diagnostics.Prefix(
+                    Diagnostics.ImportUnsupportedSchemaType,
+                    $"Invalid additionalProperties at '{pointer}/additionalProperties': containing schema declares non-object type '{nonNullType.Value}'. The construct is classified as a source defect and is not reinterpreted."
+                )
+            );
+        }
+
+        foreach (
+            var (name, property) in schema.Properties ?? new Dictionary<string, IOpenApiSchema>()
+        )
+        {
+            DiagnoseNonObjectAdditionalProperties(
+                property,
+                $"{pointer}/properties/{EscapeJsonPointerToken(name)}"
+            );
+        }
+        if (schema.Items is not null)
+        {
+            DiagnoseNonObjectAdditionalProperties(schema.Items, pointer + "/items");
+        }
+        if (schema.AdditionalProperties is not null)
+        {
+            DiagnoseNonObjectAdditionalProperties(
+                schema.AdditionalProperties,
+                pointer + "/additionalProperties"
+            );
+        }
+    }
+
+    private static string EscapeJsonPointerToken(string value) =>
+        value
+            .Replace("~", "~0", StringComparison.Ordinal)
+            .Replace("/", "~1", StringComparison.Ordinal);
 
     private bool TryResolveNullableType(IOpenApiSchema schema, string? context, out string result)
     {
@@ -1524,7 +2002,29 @@ internal sealed class SchemaMapper
             }
 
             var name = context ?? $"Synthetic{++_ctx.SyntheticCounter}";
+            // Nullable and format are use-site facets for an inline helper. Stamping
+            // them on the helper as well applies them twice when the helper is inlined;
+            // other root metadata (title, required, constraints) still belongs to the
+            // object shape and must remain on its generated definition.
             var record = _synth.MapRecord(name, schema);
+            record = record with
+            {
+                SchemaMetadata = record
+                    .SchemaMetadata?.Select(metadata =>
+                        metadata.Pointer == ""
+                            ? metadata with
+                            {
+                                Metadata = metadata.Metadata with
+                                {
+                                    Format = null,
+                                    IsFormatSpecified = false,
+                                    IsNullable = false,
+                                },
+                            }
+                            : metadata
+                    )
+                    .ToList(),
+            };
             var finalName = _ctx.AddOrReuseExtraRecord(record);
             _ctx.SchemaFingerprints[fingerprint] = finalName;
             return finalName;

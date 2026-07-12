@@ -37,7 +37,8 @@
           "type": "object",
           "properties": {
             "kind": { "const": "array" },
-            "element": { "$ref": "#/$defs/tsType" }
+            "element": { "$ref": "#/$defs/tsType" },
+            "elementMetadata": { "$ref": "#/$defs/scalarMetadata" }
           },
           "required": ["kind", "element"],
           "additionalProperties": false
@@ -47,7 +48,8 @@
           "properties": {
             "kind": { "const": "dictionary" },
             "value": { "$ref": "#/$defs/tsType" },
-            "key": { "$ref": "#/$defs/tsType" }
+            "key": { "$ref": "#/$defs/tsType" },
+            "valueMetadata": { "$ref": "#/$defs/scalarMetadata" }
           },
           "required": ["kind", "value"],
           "additionalProperties": false
@@ -56,7 +58,11 @@
           "type": "object",
           "properties": {
             "kind": { "const": "stringUnion" },
-            "values": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            "values": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "format": { "type": "string" },
+            "description": { "type": "string" },
+            "metadata": { "$ref": "#/$defs/typeMetadata" },
+            "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
           },
           "required": ["kind", "values"],
           "additionalProperties": false
@@ -94,7 +100,9 @@
           "properties": {
             "kind": { "const": "brand" },
             "name": { "type": "string" },
-            "underlying": { "$ref": "#/$defs/tsType" }
+            "underlying": { "$ref": "#/$defs/tsType" },
+            "description": { "type": "string" },
+            "metadata": { "$ref": "#/$defs/typeMetadata" }
           },
           "required": ["kind", "name", "underlying"],
           "additionalProperties": false
@@ -103,7 +111,11 @@
           "type": "object",
           "properties": {
             "kind": { "const": "intUnion" },
-            "values": { "type": "array", "items": { "type": "integer" }, "minItems": 1 }
+            "values": { "type": "array", "items": { "type": "integer" }, "minItems": 1 },
+            "format": { "type": "string" },
+            "description": { "type": "string" },
+            "metadata": { "$ref": "#/$defs/typeMetadata" },
+            "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
           },
           "required": ["kind", "values"],
           "additionalProperties": false
@@ -148,9 +160,10 @@
               "minItems": 1,
               "items": {
                 "type": "object",
-                "properties": {
-                  "tag": { "type": "string" },
-                  "type": { "$ref": "#/$defs/tsType" }
+                  "properties": {
+                    "tag": { "type": "string" },
+                    "type": { "$ref": "#/$defs/tsType" },
+                    "metadata": { "$ref": "#/$defs/typeMetadata" }
                 },
                 "required": ["tag", "type"],
                 "additionalProperties": false
@@ -175,6 +188,15 @@
         }
       ]
     },
+    "typeMetadata": {
+      "type": "object",
+      "properties": {
+        "componentId": { "type": ["string", "null"] },
+        "provenance": { "type": "string", "enum": ["component", "synthetic"] }
+      },
+      "required": ["provenance"],
+      "additionalProperties": false
+    },
     "tsPropertyConstraints": {
       "type": "object",
       "properties": {
@@ -192,6 +214,34 @@
       },
       "additionalProperties": false
     },
+    "scalarMetadata": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "defaultValue": { "type": "string" },
+        "example": { "type": "string" },
+        "examples": { "type": "string" },
+        "isDeprecated": { "type": "boolean" },
+        "isReadOnly": { "type": "boolean" },
+        "isWriteOnly": { "type": "boolean" },
+        "constraints": { "$ref": "#/$defs/tsPropertyConstraints" },
+        "isNullable": { "type": "boolean" },
+        "title": { "type": "string" },
+        "xml": { "$ref": "#/$defs/schemaXmlMetadata" }
+      },
+      "additionalProperties": false
+    },
+    "schemaXmlMetadata": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "namespace": { "type": "string" },
+        "prefix": { "type": "string" },
+        "isAttribute": { "type": "boolean" },
+        "isWrapped": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
     "tsPropertyDefinition": {
       "type": "object",
       "properties": {
@@ -205,7 +255,8 @@
         "description": { "type": "string" },
         "example": { "type": "string" },
         "readOnly": { "type": "boolean" },
-        "writeOnly": { "type": "boolean" }
+        "writeOnly": { "type": "boolean" },
+        "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
       },
       "required": ["name", "type", "optional"],
       "additionalProperties": false
@@ -217,7 +268,9 @@
         "typeParameters": { "type": "array", "items": { "type": "string" } },
         "properties": { "type": "array", "items": { "$ref": "#/$defs/tsPropertyDefinition" } },
         "type": { "$ref": "#/$defs/tsType" },
-        "description": { "type": "string" }
+        "description": { "type": "string" },
+        "metadata": { "$ref": "#/$defs/typeMetadata" },
+        "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
       },
       "required": ["name", "typeParameters"],
       "oneOf": [
@@ -232,7 +285,11 @@
           "type": "object",
           "properties": {
             "name": { "type": "string" },
-            "values": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            "values": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "format": { "type": "string" },
+            "description": { "type": "string" },
+            "metadata": { "$ref": "#/$defs/typeMetadata" },
+            "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
           },
           "required": ["name", "values"],
           "additionalProperties": false
@@ -241,7 +298,11 @@
           "type": "object",
           "properties": {
             "name": { "type": "string" },
-            "intValues": { "type": "array", "items": { "type": "integer" }, "minItems": 1 }
+            "intValues": { "type": "array", "items": { "type": "integer" }, "minItems": 1 },
+            "format": { "type": "string" },
+            "description": { "type": "string" },
+            "metadata": { "$ref": "#/$defs/typeMetadata" },
+            "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
           },
           "required": ["name", "intValues"],
           "additionalProperties": false
@@ -255,7 +316,19 @@
         "type": { "$ref": "#/$defs/tsType" },
         "source": { "type": "string", "enum": ["route", "body", "query", "file", "formField", "header"] },
         "isOptional": { "type": "boolean" },
-        "bodyPropertyName": { "type": "string" }
+        "bodyPropertyName": { "type": "string" },
+        "description": { "type": "string" },
+        "deprecated": { "type": "boolean" },
+        "defaultValue": { "type": "string" },
+        "constraints": { "$ref": "#/$defs/tsPropertyConstraints" },
+        "schemaExamples": {},
+        "example": {},
+        "examples": {},
+        "style": { "type": "string", "enum": ["matrix", "label", "form", "simple", "spaceDelimited", "pipeDelimited", "deepObject"] },
+        "explode": { "type": "boolean" },
+        "schemaType": { "type": "string", "enum": ["string", "integer", "number", "boolean"] },
+        "format": { "type": "string" },
+        "isFormatSpecified": { "type": "boolean" }
       },
       "required": ["name", "type", "source"],
       "additionalProperties": false
@@ -267,7 +340,11 @@
         "name": { "type": "string" },
         "json": { "type": "string" },
         "componentExampleId": { "type": "string" },
-        "resolvedJson": { "type": "string" }
+        "resolvedJson": { "type": "string" },
+        "referencedComponents": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
       },
       "required": ["mediaType"],
       "additionalProperties": false,
@@ -291,22 +368,37 @@
       "type": "object",
       "properties": {
         "statusCode": { "type": "integer" },
+        "statusKey": { "type": "string", "pattern": "^(default|[1-5](?:[0-9]{2}|XX))$" },
         "dataType": { "$ref": "#/$defs/tsType" },
         "description": { "type": "string" },
         "examples": { "type": "array", "items": { "$ref": "#/$defs/endpointExample" } },
-        "headers": { "type": "array", "items": { "$ref": "#/$defs/responseHeader" } }
+        "headers": { "type": "array", "items": { "$ref": "#/$defs/responseHeader" } },
+        "contents": { "type": "array", "items": { "$ref": "#/$defs/mediaTypeContent" } }
       },
-      "required": ["statusCode"],
+      "anyOf": [
+        { "required": ["statusCode"] },
+        { "required": ["statusKey"] }
+      ],
       "additionalProperties": false
     },
     "responseHeader": {
       "type": "object",
       "properties": {
         "name": { "type": "string" },
+        "type": { "$ref": "#/$defs/tsType" },
         "description": { "type": "string" },
-        "required": { "type": "boolean" }
+        "required": { "type": "boolean" },
+        "deprecated": { "type": "boolean" },
+        "schemaExamples": {},
+        "example": {},
+        "examples": {},
+        "style": { "type": "string", "enum": ["matrix", "label", "form", "simple", "spaceDelimited", "pipeDelimited", "deepObject"] },
+        "explode": { "type": "boolean" },
+        "allowReserved": { "type": "boolean" },
+        "allowEmptyValue": { "type": "boolean" },
+        "contentType": { "type": "string" }
       },
-      "required": ["name"],
+      "required": ["name", "type"],
       "additionalProperties": false
     },
     "endpointSecurity": {
@@ -318,6 +410,83 @@
       "required": ["isAnonymous"],
       "additionalProperties": false
     },
+    "securityRequirements": {
+      "type": "object",
+      "properties": {
+        "alternatives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "schemes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "scopes": { "type": "array", "items": { "type": "string" } }
+                  },
+                  "required": ["name", "scopes"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["schemes"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["alternatives"],
+      "additionalProperties": false
+    },
+    "operationProvenance": {
+      "type": "object",
+      "properties": {
+        "operationIdPresent": { "type": "boolean" },
+        "operationId": { "type": ["string", "null"] },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "deprecated": { "type": "boolean" },
+        "serverOverride": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string" },
+              "description": { "type": ["string", "null"] },
+              "variables": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "defaultValue": { "type": "string" },
+                    "allowedValues": { "type": "array", "items": { "type": "string" } },
+                    "description": { "type": ["string", "null"] }
+                  },
+                  "required": ["name", "defaultValue", "allowedValues", "description"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["url", "variables"],
+            "additionalProperties": false
+          }
+        },
+        "requestBodyDescription": { "type": ["string", "null"] },
+        "requestBodyComponentId": { "type": ["string", "null"] },
+        "rivetIdentity": {
+          "type": ["object", "null"],
+          "properties": {
+            "contract": { "type": ["string", "null"] },
+            "endpoint": { "type": ["string", "null"] }
+          },
+          "required": ["contract", "endpoint"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["operationIdPresent", "tags", "deprecated"],
+      "additionalProperties": false
+    },
     "queryAuth": {
       "type": "object",
       "properties": {
@@ -326,11 +495,24 @@
       "required": ["parameterName"],
       "additionalProperties": false
     },
+    "mediaTypeContent": {
+      "type": "object",
+      "properties": {
+        "mediaType": { "type": "string" },
+        "schema": { "$ref": "#/$defs/tsType" },
+        "isBinary": { "type": "boolean" },
+        "schemaType": { "type": "string", "enum": ["string", "integer", "number", "boolean"] },
+        "format": { "type": "string" },
+        "isFormatSpecified": { "type": "boolean" }
+      },
+      "required": ["mediaType"],
+      "additionalProperties": false
+    },
     "endpointDefinition": {
       "type": "object",
       "properties": {
         "name": { "type": "string" },
-        "httpMethod": { "type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"] },
+        "httpMethod": { "type": "string", "enum": ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"] },
         "routeTemplate": { "type": "string" },
         "params": { "type": "array", "items": { "$ref": "#/$defs/endpointParam" } },
         "returnType": { "$ref": "#/$defs/tsType" },
@@ -348,7 +530,12 @@
         "queryAuth": { "$ref": "#/$defs/queryAuth" },
         "binaryRequestContentType": { "type": "string" },
         "requestContentTypeOverride": { "type": "string" },
-        "responseContentTypeOverride": { "type": "string" }
+        "responseContentTypeOverride": { "type": "string" },
+        "securityRequirements": { "$ref": "#/$defs/securityRequirements" },
+        "requestContents": { "type": "array", "items": { "$ref": "#/$defs/mediaTypeContent" } },
+        "requestBodyRequired": { "type": "boolean" },
+        "requestBodyPresent": { "type": "boolean" },
+        "provenance": { "$ref": "#/$defs/operationProvenance" }
       },
       "required": ["name", "httpMethod", "routeTemplate", "params", "controllerName", "responses"],
       "additionalProperties": false

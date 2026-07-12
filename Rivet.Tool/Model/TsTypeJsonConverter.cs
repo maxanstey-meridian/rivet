@@ -40,23 +40,50 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
 
             "nullable" => new TsType.Nullable(DeserializeInner(root, "inner", options)),
 
-            "array" => new TsType.Array(DeserializeInner(root, "element", options)),
+            "array" => new TsType.Array(
+                DeserializeInner(root, "element", options),
+                ReadScalarMetadata(root, "elementMetadata", options)
+            ),
 
             // "key" is optional — the TS lowerer's contract JSON never emits it
             "dictionary" => new TsType.Dictionary(
                 DeserializeInner(root, "value", options),
                 root.TryGetProperty("key", out var k)
                     ? JsonSerializer.Deserialize<TsType>(k.GetRawText(), options)
-                    : null
+                    : null,
+                ReadScalarMetadata(root, "valueMetadata", options)
             ),
 
             "stringUnion" => new TsType.StringUnion(
-                root.GetProperty("values").EnumerateArray().Select(e => e.GetString()!).ToArray()
+                root.GetProperty("values").EnumerateArray().Select(e => e.GetString()!).ToArray(),
+                ReadMetadata(root, options),
+                root.TryGetProperty("format", out var stringFormat)
+                    ? stringFormat.GetString()
+                    : null,
+                root.TryGetProperty("description", out var stringDescription)
+                    ? stringDescription.GetString()
+                    : null,
+                root.TryGetProperty("scalarMetadata", out var stringScalarMetadata)
+                    ? JsonSerializer.Deserialize<TsScalarMetadata>(
+                        stringScalarMetadata.GetRawText(),
+                        options
+                    )
+                    : null
             ),
 
             "intUnion" => new TsType.IntUnion(
                 root.GetProperty("values").EnumerateArray().Select(e => e.GetInt32()).ToArray(),
-                root.TryGetProperty("format", out var intFormat) ? intFormat.GetString() : null
+                root.TryGetProperty("format", out var intFormat) ? intFormat.GetString() : null,
+                ReadMetadata(root, options),
+                root.TryGetProperty("description", out var intDescription)
+                    ? intDescription.GetString()
+                    : null,
+                root.TryGetProperty("scalarMetadata", out var intScalarMetadata)
+                    ? JsonSerializer.Deserialize<TsScalarMetadata>(
+                        intScalarMetadata.GetRawText(),
+                        options
+                    )
+                    : null
             ),
 
             "literal" => new TsType.Literal(root.GetProperty("value").Clone()),
@@ -75,7 +102,11 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
 
             "brand" => new TsType.Brand(
                 root.GetProperty("name").GetString()!,
-                DeserializeInner(root, "underlying", options)
+                DeserializeInner(root, "underlying", options),
+                ReadMetadata(root, options),
+                root.TryGetProperty("description", out var brandDescription)
+                    ? brandDescription.GetString()
+                    : null
             ),
 
             "inlineObject" => new TsType.InlineObject(
@@ -108,7 +139,8 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                         JsonSerializer.Deserialize<TsType>(
                             e.GetProperty("type").GetRawText(),
                             options
-                        )!
+                        )!,
+                        ReadMetadata(e, options)
                     ))
                     .ToArray()
             ),
@@ -122,6 +154,35 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
 
             _ => throw new JsonException($"Unknown TsType kind: '{kind}'."),
         };
+    }
+
+    private static TsTypeMetadata? ReadMetadata(JsonElement root, JsonSerializerOptions options) =>
+        root.TryGetProperty("metadata", out var metadata)
+            ? JsonSerializer.Deserialize<TsTypeMetadata>(metadata.GetRawText(), options)
+            : null;
+
+    private static TsScalarMetadata? ReadScalarMetadata(
+        JsonElement root,
+        string propertyName,
+        JsonSerializerOptions options
+    ) =>
+        root.TryGetProperty(propertyName, out var metadata)
+            ? JsonSerializer.Deserialize<TsScalarMetadata>(metadata.GetRawText(), options)
+            : null;
+
+    private static void WriteMetadata(
+        Utf8JsonWriter writer,
+        TsTypeMetadata? metadata,
+        JsonSerializerOptions options
+    )
+    {
+        if (metadata is null)
+        {
+            return;
+        }
+
+        writer.WritePropertyName("metadata");
+        JsonSerializer.Serialize(writer, metadata, options);
     }
 
     public override void Write(Utf8JsonWriter writer, TsType value, JsonSerializerOptions options)
@@ -155,6 +216,11 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 writer.WriteString("kind", "array");
                 writer.WritePropertyName("element");
                 JsonSerializer.Serialize(writer, a.Element, options);
+                if (a.ElementMetadata is not null)
+                {
+                    writer.WritePropertyName("elementMetadata");
+                    JsonSerializer.Serialize(writer, a.ElementMetadata, options);
+                }
                 break;
 
             case TsType.Dictionary d:
@@ -165,6 +231,11 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 {
                     writer.WritePropertyName("key");
                     JsonSerializer.Serialize(writer, d.Key, options);
+                }
+                if (d.ValueMetadata is not null)
+                {
+                    writer.WritePropertyName("valueMetadata");
+                    JsonSerializer.Serialize(writer, d.ValueMetadata, options);
                 }
                 break;
 
@@ -177,6 +248,20 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 }
 
                 writer.WriteEndArray();
+                if (su.Format is not null)
+                {
+                    writer.WriteString("format", su.Format);
+                }
+                if (su.Description is not null)
+                {
+                    writer.WriteString("description", su.Description);
+                }
+                WriteMetadata(writer, su.Metadata, options);
+                if (su.ScalarMetadata is not null)
+                {
+                    writer.WritePropertyName("scalarMetadata");
+                    JsonSerializer.Serialize(writer, su.ScalarMetadata, options);
+                }
                 break;
 
             case TsType.IntUnion iu:
@@ -191,6 +276,16 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 if (iu.Format is not null)
                 {
                     writer.WriteString("format", iu.Format);
+                }
+                if (iu.Description is not null)
+                {
+                    writer.WriteString("description", iu.Description);
+                }
+                WriteMetadata(writer, iu.Metadata, options);
+                if (iu.ScalarMetadata is not null)
+                {
+                    writer.WritePropertyName("scalarMetadata");
+                    JsonSerializer.Serialize(writer, iu.ScalarMetadata, options);
                 }
                 break;
 
@@ -227,6 +322,11 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 writer.WriteString("name", b.Name);
                 writer.WritePropertyName("underlying");
                 JsonSerializer.Serialize(writer, b.Inner, options);
+                if (b.Description is not null)
+                {
+                    writer.WriteString("description", b.Description);
+                }
+                WriteMetadata(writer, b.Metadata, options);
                 break;
 
             case TsType.InlineObject obj:
@@ -254,6 +354,7 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                     writer.WriteString("tag", variant.Tag);
                     writer.WritePropertyName("type");
                     JsonSerializer.Serialize(writer, variant.Type, options);
+                    WriteMetadata(writer, variant.Metadata, options);
                     writer.WriteEndObject();
                 }
                 writer.WriteEndArray();

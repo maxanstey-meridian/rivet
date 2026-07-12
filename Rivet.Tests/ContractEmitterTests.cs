@@ -1327,7 +1327,10 @@ public sealed class ContractEmitterTests
         {
             new TsEndpointExample("application/json", "first", "{\"message\":\"first\"}"),
         };
-        var firstHeaders = new[] { new TsResponseHeader("X-First", "first header", true) };
+        var firstHeaders = new[]
+        {
+            new TsResponseHeader("X-First", new TsType.Primitive("string"), "first header", true),
+        };
         var endpoint = new TsEndpointDefinition(
             "getUser",
             "GET",

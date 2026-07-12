@@ -16,6 +16,14 @@ public sealed class Define
 
     public static RouteDefinition Get(string route) => new("GET", route);
 
+    // HEAD
+    public static RouteDefinition<TInput, TOutput> Head<TInput, TOutput>(string route) =>
+        new("HEAD", route);
+
+    public static RouteDefinition<TOutput> Head<TOutput>(string route) => new("HEAD", route);
+
+    public static RouteDefinition Head(string route) => new("HEAD", route);
+
     // POST
     public static RouteDefinition<TInput, TOutput> Post<TInput, TOutput>(string route) =>
         new("POST", route, 201);
@@ -49,6 +57,14 @@ public sealed class Define
     public static RouteDefinition<TOutput> Delete<TOutput>(string route) => new("DELETE", route);
 
     public static RouteDefinition Delete(string route) => new("DELETE", route, 204);
+
+    // OPTIONS
+    public static RouteDefinition<TInput, TOutput> Options<TInput, TOutput>(string route) =>
+        new("OPTIONS", route);
+
+    public static RouteDefinition<TOutput> Options<TOutput>(string route) => new("OPTIONS", route);
+
+    public static RouteDefinition Options(string route) => new("OPTIONS", route);
 
     // FILE (binary/stream endpoints — defaults to GET)
     public static FileRouteDefinition<TInput> File<TInput>(string route) => new(route);

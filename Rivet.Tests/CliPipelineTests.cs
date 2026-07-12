@@ -121,6 +121,122 @@ public sealed class CliPipelineTests
         }
     }
 
+    [Fact]
+    public void Cli_Disk_Pipeline_Preserves_Component_Referenced_By_Schema_Example()
+    {
+        var workDir = Directory.CreateTempSubdirectory("rivet-e2e-component-example-");
+        try
+        {
+            var sourcePath = Path.Combine(workDir.FullName, "source.json");
+            File.WriteAllText(
+                sourcePath,
+                """
+                {
+                  "openapi": "3.1.0",
+                  "info": { "title": "Component examples", "version": "1.0.0" },
+                  "paths": {
+                    "/deployments": {
+                      "get": {
+                        "responses": {
+                          "200": {
+                            "description": "Deployment rules",
+                            "content": {
+                              "application/json": {
+                                "schema": { "$ref": "#/components/schemas/DeploymentRules" }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "components": {
+                    "schemas": {
+                      "DeploymentRules": {
+                        "type": "object",
+                        "properties": {
+                          "rules": {
+                            "type": "array",
+                            "items": { "type": "object" }
+                          }
+                        },
+                        "examples": [
+                          { "$ref": "#/components/examples/deployment-protection-rules" }
+                        ]
+                      }
+                    },
+                    "examples": {
+                      "deployment-protection-rules": {
+                        "summary": "Deployment protection rules",
+                        "description": "The exact authored component example.",
+                        "value": [
+                          { "total_count": 2 },
+                          { "custom_deployment_protection_rules": [{ "id": 3, "enabled": true }] }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """
+            );
+            var srcDir = Path.Combine(workDir.FullName, "src");
+            var import = RunCli(
+                workDir.FullName,
+                ["--from-openapi", sourcePath, "--output", srcDir, "--namespace", "Generated"]
+            );
+            Assert.True(import.ExitCode == 0, $"import failed:\n{import.StdErr}");
+
+            var outDir = Path.Combine(workDir.FullName, "out");
+            var emit = RunCli(workDir.FullName, [srcDir, "--openapi", "--output", outDir]);
+            Assert.True(emit.ExitCode == 0, $"compile/emit failed:\n{emit.StdErr}");
+
+            using var document = JsonDocument.Parse(
+                File.ReadAllText(Path.Combine(outDir, "openapi.json"))
+            );
+            var schemaExample = document
+                .RootElement.GetProperty("components")
+                .GetProperty("schemas")
+                .GetProperty("DeploymentRules")
+                .GetProperty("examples")[0];
+            Assert.Equal(
+                "#/components/examples/deployment-protection-rules",
+                schemaExample.GetProperty("$ref").GetString()
+            );
+            Assert.Single(schemaExample.EnumerateObject());
+
+            var componentExample = document
+                .RootElement.GetProperty("components")
+                .GetProperty("examples")
+                .GetProperty("deployment-protection-rules");
+            Assert.Equal(
+                "Deployment protection rules",
+                componentExample.GetProperty("summary").GetString()
+            );
+            Assert.Equal(
+                "The exact authored component example.",
+                componentExample.GetProperty("description").GetString()
+            );
+            var value = componentExample.GetProperty("value");
+            Assert.Equal(2, value.GetArrayLength());
+            Assert.Equal(2, value[0].GetProperty("total_count").GetInt32());
+            Assert.Equal(
+                3,
+                value[1]
+                    .GetProperty("custom_deployment_protection_rules")[0]
+                    .GetProperty("id")
+                    .GetInt32()
+            );
+
+            var danglingRefs = new List<string>();
+            CollectDanglingRefs(document.RootElement, document.RootElement, danglingRefs);
+            Assert.Empty(danglingRefs);
+        }
+        finally
+        {
+            workDir.Delete(recursive: true);
+        }
+    }
+
     private static string ToCliSecuritySpec(
         string name,
         IReadOnlyDictionary<string, JsonElement> sourceSchemes,

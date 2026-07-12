@@ -1,4 +1,6 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Microsoft.OpenApi;
 using Rivet.Tool.Model;
 
@@ -12,10 +14,12 @@ internal static class ContractBuilder
     private static readonly HashSet<HttpMethod> _supportedMethods =
     [
         HttpMethod.Get,
+        HttpMethod.Head,
         HttpMethod.Post,
         HttpMethod.Put,
         HttpMethod.Patch,
         HttpMethod.Delete,
+        HttpMethod.Options,
     ];
 
     /// <summary>
@@ -26,7 +30,11 @@ internal static class ContractBuilder
         SchemaMapper mapper,
         string? globalSecurityScheme,
         List<string> warnings,
-        IDictionary<string, IOpenApiExample>? componentExamples = null
+        IDictionary<string, IOpenApiExample>? componentExamples = null,
+        IReadOnlyDictionary<
+            (string Path, string Method),
+            OpenApiOperationProvenance
+        >? operationProvenance = null
     )
     {
         var groups = new Dictionary<string, List<GeneratedEndpointField>>();
@@ -37,8 +45,7 @@ internal static class ContractBuilder
             {
                 if (!_supportedMethods.Contains(method))
                 {
-                    // I15: HEAD/OPTIONS/TRACE used to be skipped with zero diagnostics —
-                    // "nothing is dropped silently" demands a named warning per dropped op.
+                    // TRACE has no contract representation; never drop it silently.
                     warnings.Add(
                         Diagnostics.Prefix(
                             Diagnostics.ImportOperationMethodDropped,
@@ -67,7 +74,11 @@ internal static class ContractBuilder
                     MergeParameters(pathItem.Parameters, operation.Parameters),
                     tag,
                     globalSecurityScheme,
-                    mapper
+                    mapper,
+                    operationProvenance is not null
+                    && operationProvenance.TryGetValue((route, httpMethod), out var provenance)
+                        ? provenance
+                        : null
                 );
 
                 if (!groups.TryGetValue(contractKey, out var list))
@@ -98,7 +109,8 @@ internal static class ContractBuilder
         IReadOnlyList<IOpenApiParameter> parameters,
         string tag,
         string? globalSecurityScheme,
-        SchemaMapper mapper
+        SchemaMapper mapper,
+        OpenApiOperationProvenance? provenance
     )
     {
         var operationId = operation.OperationId;
@@ -122,7 +134,7 @@ internal static class ContractBuilder
         // Resolve input type (requestBody — $ref resolved by library)
         var (inputType, isFormEncoded, binaryRequestContentType, requestContentType) =
             ResolveInputType(operation, mapper, fieldName, unsupported);
-        var requestContents = ResolveRequestContents(operation, mapper, fieldName);
+        var requestContents = ResolveRequestContents(operation.RequestBody, mapper, fieldName);
         var inputTypeFromBody = inputType is not null;
 
         // I14: parameters must be resolved regardless of body presence — they used to be
@@ -168,9 +180,14 @@ internal static class ContractBuilder
         var (outputType, successStatus, fileContentType, responseContentType) = ResolveOutputType(
             operation,
             mapper,
-            fieldName,
-            unsupported
+            fieldName
         );
+        var successStatusKey = successStatus?.ToString();
+        var successResponseDescription =
+            successStatusKey is not null
+            && operation.Responses?.TryGetValue(successStatusKey, out var primaryResponse) is true
+                ? primaryResponse.Description
+                : null;
         var responseContents = ResolveResponseContents(operation, mapper, fieldName);
 
         // File endpoint: binary content type on a GET endpoint → Define.File()
@@ -180,33 +197,21 @@ internal static class ContractBuilder
             && httpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase);
 
         // Error responses
-        var errorResponses = ResolveErrorResponses(
-            operation,
-            mapper,
-            fieldName,
-            unsupported,
-            successStatus
-        );
+        var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, successStatus);
         var requestExamples = ResolveRequestExamples(operation, unsupported, componentExamples);
         var responseExamples = ResolveResponseExamples(operation, unsupported, componentExamples);
-        errorResponses = EnsureExampleStatusesAreDeclared(
-            operation,
-            successStatus,
-            errorResponses,
-            responseExamples
-        );
-
         // P2 wave 5: response headers re-emit as .WithResponseHeader(...) chain calls —
         // resolved AFTER the declared-status set is final (success + error responses).
         var responseHeaders = ResolveResponseHeaders(
             operation,
+            mapper,
             successStatus,
             errorResponses,
             unsupported
         );
 
         // Security
-        var (isAnonymous, securityScheme, securityRequirementsJson) = ResolveSecurity(
+        var (isAnonymous, securityScheme, securityRequirements) = ResolveSecurity(
             operation,
             globalSecurityScheme
         );
@@ -220,6 +225,8 @@ internal static class ContractBuilder
             summary,
             description,
             successStatus,
+            successStatusKey,
+            successResponseDescription,
             errorResponses,
             isAnonymous,
             securityScheme,
@@ -236,10 +243,13 @@ internal static class ContractBuilder
             responseContentType,
             requestBodyType,
             operation.RequestBody is null ? null : operation.RequestBody.Required,
-            securityRequirementsJson,
+            operation.RequestBody is not null,
+            securityRequirements,
             requestContents,
             responseContents,
-            explicitParameters
+            explicitParameters,
+            SuppressImplicitResponse: successStatus is null,
+            Provenance: provenance
         );
     }
 
@@ -248,7 +258,8 @@ internal static class ContractBuilder
         IList<IOpenApiParameter>? operationParameters
     )
     {
-        var merged = new Dictionary<(string Name, ParameterLocation? Location), IOpenApiParameter>();
+        var merged =
+            new Dictionary<(string Name, ParameterLocation? Location), IOpenApiParameter>();
         foreach (var parameter in pathParameters ?? [])
         {
             merged[(parameter.Name ?? "", parameter.In)] = parameter;
@@ -273,48 +284,83 @@ internal static class ContractBuilder
                 var sourceParameter = sourceParameters.First(candidate =>
                     candidate.Name == parameter.OriginalName
                     && candidate.In is { } location
-                    && location.ToString().Equals(
-                        parameter.Location,
-                        StringComparison.OrdinalIgnoreCase
-                    )
+                    && location
+                        .ToString()
+                        .Equals(parameter.Location, StringComparison.OrdinalIgnoreCase)
                 );
                 var sourceSchema = sourceParameter.Schema!;
+                var schemaRef = mapper.ResolveScalarReferenceName(sourceSchema);
+                var leaf = schemaRef is null ? ResolveInlineScalarLeaf(sourceSchema) : null;
                 var typeName = mapper.ResolveCSharpType(
                     sourceSchema,
                     $"{fieldName}{Naming.ToPascalCaseFromSegments(parameter.OriginalName)}Parameter"
                 );
-                var format = mapper.ResolveFormat(sourceSchema);
                 return new GeneratedEndpointParameter(
                     parameter.OriginalName,
                     parameter.Location,
                     typeName,
                     parameter.Property.IsRequired,
-                    mapper.ResolveSchemaType(sourceSchema),
-                    format,
-                    format is not null
-                        || typeName.TrimEnd('?')
-                            is "sbyte"
-                                or "byte"
-                                or "short"
-                                or "ushort"
-                                or "int"
-                                or "uint"
-                                or "long"
-                                or "ulong"
-                                or "float"
-                                or "double"
-                                or "decimal"
+                    leaf?.SchemaType,
+                    leaf?.Format,
+                    leaf is not null,
+                    BuildParameterMetadataJson(
+                        sourceParameter,
+                        sourceSchema,
+                        includeSchemaMetadata: schemaRef is null
+                    ),
+                    schemaRef
                 );
             })
             .ToList();
 
+    internal static IReadOnlyList<OpenApiComponentRequestBodyProvenance> BuildRequestBodyComponents(
+        IDictionary<string, IOpenApiRequestBody>? requestBodies,
+        SchemaMapper mapper,
+        List<string> warnings,
+        IDictionary<string, IOpenApiExample>? componentExamples
+    )
+    {
+        if (requestBodies is not { Count: > 0 })
+        {
+            return [];
+        }
+
+        return requestBodies
+            .Select(pair => new OpenApiComponentRequestBodyProvenance(
+                pair.Key,
+                pair.Value.Description,
+                pair.Value.Required,
+                ResolveRequestContents(pair.Value, mapper, $"{pair.Key}Component")
+                    .Select(content => new OpenApiRequestBodyContentProvenance(
+                        content.MediaType,
+                        content.TypeName,
+                        null,
+                        content.IsBinary,
+                        content.SchemaRef,
+                        content.SchemaType,
+                        content.Format,
+                        content.IsFormatSpecified
+                    ))
+                    .ToList(),
+                pair.Value.Content is { Count: > 0 } content
+                    ? ResolveMediaExamples(
+                        content,
+                        warnings,
+                        $"request-body-component name={pair.Key}",
+                        componentExamples
+                    )
+                    : []
+            ))
+            .ToList();
+    }
+
     private static IReadOnlyList<GeneratedMediaTypeContent> ResolveRequestContents(
-        OpenApiOperation operation,
+        IOpenApiRequestBody? requestBody,
         SchemaMapper mapper,
         string fieldName
     )
     {
-        if (operation.RequestBody?.Content is not { Count: > 0 } content)
+        if (requestBody?.Content is not { Count: > 0 } content)
         {
             return [];
         }
@@ -325,6 +371,7 @@ internal static class ContractBuilder
         {
             if (media.Schema is null)
             {
+                result.Add(new GeneratedMediaTypeContent(mediaType, null));
                 continue;
             }
             if (
@@ -332,6 +379,7 @@ internal static class ContractBuilder
                 && !mediaType.Equals("multipart/form-data", StringComparison.OrdinalIgnoreCase)
             )
             {
+                result.Add(new GeneratedMediaTypeContent(mediaType, null, IsBinary: true));
                 continue;
             }
 
@@ -339,7 +387,18 @@ internal static class ContractBuilder
                 media.Schema,
                 $"{Naming.ToPascalCaseFromSegments(fieldName)}RequestContent{index++}"
             );
-            result.Add(new GeneratedMediaTypeContent(mediaType, typeName));
+            var schemaRef = mapper.ResolveScalarReferenceName(media.Schema);
+            var leaf = schemaRef is null ? ResolveInlineScalarLeaf(media.Schema) : null;
+            result.Add(
+                new GeneratedMediaTypeContent(
+                    mediaType,
+                    typeName,
+                    SchemaRef: schemaRef,
+                    SchemaType: leaf?.SchemaType,
+                    Format: leaf?.Format,
+                    IsFormatSpecified: leaf is not null
+                )
+            );
         }
 
         return result;
@@ -355,8 +414,8 @@ internal static class ContractBuilder
         var index = 0;
         foreach (var (status, response) in operation.Responses ?? [])
         {
-            var statusCode = NormalizeStatusCode(status);
-            if (statusCode is null || response.Content is not { Count: > 0 } content)
+            var statusCode = int.TryParse(status, out var parsed) ? parsed : 0;
+            if (response.Content is not { Count: > 0 } content)
             {
                 continue;
             }
@@ -365,19 +424,42 @@ internal static class ContractBuilder
             {
                 if (media.Schema is null)
                 {
+                    result.Add(
+                        new GeneratedResponseMediaTypeContent(statusCode, status, mediaType, null)
+                    );
                     continue;
                 }
                 if (IsRawBinarySchema(media.Schema))
                 {
+                    result.Add(
+                        new GeneratedResponseMediaTypeContent(
+                            statusCode,
+                            status,
+                            mediaType,
+                            null,
+                            IsBinary: true
+                        )
+                    );
                     continue;
                 }
 
                 var typeName = mapper.ResolveCSharpType(
                     media.Schema,
-                    $"{Naming.ToPascalCaseFromSegments(fieldName)}Response{statusCode}Content{index++}"
+                    $"{Naming.ToPascalCaseFromSegments(fieldName)}Response{Naming.ToPascalCaseFromSegments(status)}Content{index++}"
                 );
+                var schemaRef = mapper.ResolveScalarReferenceName(media.Schema);
+                var leaf = schemaRef is null ? ResolveInlineScalarLeaf(media.Schema) : null;
                 result.Add(
-                    new GeneratedResponseMediaTypeContent(statusCode.Value, mediaType, typeName)
+                    new GeneratedResponseMediaTypeContent(
+                        statusCode,
+                        status,
+                        mediaType,
+                        typeName,
+                        SchemaRef: schemaRef,
+                        SchemaType: leaf?.SchemaType,
+                        Format: leaf?.Format,
+                        IsFormatSpecified: leaf is not null
+                    )
                 );
             }
         }
@@ -385,14 +467,42 @@ internal static class ContractBuilder
         return result;
     }
 
+    private static ScalarLeafProvenance? ResolveInlineScalarLeaf(IOpenApiSchema schema)
+    {
+        if (
+            schema is OpenApiSchemaReference
+            || schema.AllOf is { Count: > 0 }
+            || schema.OneOf is { Count: > 0 }
+            || schema.AnyOf is { Count: > 0 }
+            || schema.Not is not null
+            || schema.Const is not null
+            || schema.Enum is { Count: > 0 }
+            || schema.Type is not { } declared
+        )
+        {
+            return null;
+        }
+
+        var schemaType = (declared & ~JsonSchemaType.Null) switch
+        {
+            JsonSchemaType.String => "string",
+            JsonSchemaType.Integer => "integer",
+            JsonSchemaType.Number => "number",
+            JsonSchemaType.Boolean => "boolean",
+            _ => null,
+        };
+        return schemaType is null ? null : new ScalarLeafProvenance(schemaType, schema.Format);
+    }
+
+    private sealed record ScalarLeafProvenance(string SchemaType, string? Format);
+
     /// <summary>
     /// P2 wave 5: response headers (previously out-of-scope) become .WithResponseHeader()
-    /// calls — name, description and required survive; the schema is string-typed in v1,
-    /// so a non-string header schema degrades LOUDLY. Headers on a status the contract
-    /// cannot declare (e.g. a second 2xx) are dropped LOUDLY.
+    /// calls. Headers on a status the contract cannot declare are dropped loudly.
     /// </summary>
     private static IReadOnlyList<GeneratedResponseHeader> ResolveResponseHeaders(
         OpenApiOperation operation,
+        SchemaMapper mapper,
         int? successStatus,
         IReadOnlyList<GeneratedErrorResponse> errorResponses,
         List<string> unsupported
@@ -403,23 +513,23 @@ internal static class ContractBuilder
             return [];
         }
 
-        var declaredStatuses = errorResponses.Select(error => error.StatusCode).ToHashSet();
+        var declaredStatuses = errorResponses
+            .Select(error => error.StatusKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (successStatus is not null)
         {
-            declaredStatuses.Add(successStatus.Value);
+            declaredStatuses.Add(successStatus.Value.ToString());
         }
 
         var headers = new List<GeneratedResponseHeader>();
 
         foreach (var (statusStr, response) in operation.Responses)
         {
-            if (
-                response.Headers is not { Count: > 0 }
-                || NormalizeStatusCode(statusStr) is not { } statusCode
-            )
+            if (response.Headers is not { Count: > 0 })
             {
                 continue;
             }
+            var statusCode = int.TryParse(statusStr, out var parsed) ? parsed : 0;
 
             foreach (var (name, header) in response.Headers)
             {
@@ -428,23 +538,12 @@ internal static class ContractBuilder
                     continue;
                 }
 
-                if (!declaredStatuses.Contains(statusCode))
+                if (!declaredStatuses.Contains(statusStr))
                 {
                     unsupported.Add(
-                        $"header name={name} status={statusCode} reason=undeclared-status"
+                        $"header name={name} status={statusStr} reason=undeclared-status"
                     );
                     continue;
-                }
-
-                if (
-                    header.Schema is { } schema
-                    && schema.Type.HasValue
-                    && !schema.Type.Value.HasFlag(JsonSchemaType.String)
-                )
-                {
-                    unsupported.Add(
-                        $"header name={name} status={statusCode} reason=schema-degraded-to-string"
-                    );
                 }
 
                 if (
@@ -457,12 +556,52 @@ internal static class ContractBuilder
                     continue;
                 }
 
+                var contentEntry = header.Content is { Count: > 0 }
+                    ? header.Content.First()
+                    : default(KeyValuePair<string, OpenApiMediaType>);
+                var contentType = contentEntry.Key;
+                var schema = contentType is null ? header.Schema : contentEntry.Value.Schema;
+                var typeName = schema is null
+                    ? "string"
+                    : mapper.ResolveCSharpType(schema, $"response header {name}");
+                var format = schema is null ? null : mapper.ResolveFormat(schema);
+                var isFormatSpecified =
+                    format is not null
+                    || typeName.TrimEnd('?')
+                        is "sbyte"
+                            or "byte"
+                            or "short"
+                            or "ushort"
+                            or "int"
+                            or "uint"
+                            or "long"
+                            or "ulong"
+                            or "float"
+                            or "double"
+                            or "decimal";
+
                 headers.Add(
                     new GeneratedResponseHeader(
                         statusCode,
+                        statusStr,
                         name,
-                        string.IsNullOrEmpty(header.Description) ? null : header.Description,
-                        header.Required
+                        typeName,
+                        schema is null ? null : mapper.ResolveSchemaType(schema),
+                        format,
+                        isFormatSpecified,
+                        header.Description,
+                        header.Required,
+                        SchemaExamplesJson: BuildSchemaExamplesNode(schema)?.ToJsonString(),
+                        ExampleJson: header.Example?.ToJsonString(),
+                        ExamplesJson: BuildExamplesNode(header.Examples)?.ToJsonString(),
+                        Deprecated: header.Deprecated,
+                        Style: header.Style is { } style && style != ParameterStyle.Simple
+                            ? ParameterStyleName(style)
+                            : null,
+                        Explode: header.Explode is true ? true : null,
+                        AllowReserved: header.AllowReserved,
+                        AllowEmptyValue: header.AllowEmptyValue,
+                        ContentType: contentType
                     )
                 );
             }
@@ -578,8 +717,9 @@ internal static class ContractBuilder
             );
         }
 
-        // Request body exists but uses unsupported content type(s)
-        unsupported.Add($"body {DescribeUnsupportedContent(content)}");
+        // The complete content map is persisted independently of the primary runtime
+        // input type. Schema-less and non-standard media types therefore need no
+        // synthetic TInput and are not degraded here.
         return (null, false, null, null);
     }
 
@@ -617,7 +757,6 @@ internal static class ContractBuilder
         }
 
         var properties = new List<ParamProperty>();
-        var metadataDropped = new List<string>();
 
         foreach (var param in sourceParameters)
         {
@@ -675,17 +814,6 @@ internal static class ContractBuilder
                 continue;
             }
 
-            // I13: description/deprecated/constraints don't survive into the synthesized
-            // input record — aggregated marker below names the affected params.
-            if (
-                !string.IsNullOrEmpty(param.Description)
-                || param.Deprecated
-                || HasParamConstraints(param.Schema)
-            )
-            {
-                metadataDropped.Add(param.Name);
-            }
-
             var csharpType = mapper.ResolveCSharpType(
                 param.Schema,
                 $"{fieldName}{Naming.ToPascalCaseFromSegments(param.Name)}"
@@ -734,13 +862,6 @@ internal static class ContractBuilder
                     param.Name,
                     location
                 )
-            );
-        }
-
-        if (metadataDropped.Count > 0)
-        {
-            unsupported.Add(
-                $"param-metadata params={string.Join(", ", metadataDropped)} reason=metadata-dropped"
             );
         }
 
@@ -821,22 +942,146 @@ internal static class ContractBuilder
         || name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
         || name.Equals("Authorization", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// I13: does the parameter schema carry validation constraints that the synthesized
-    /// input record drops?
-    /// </summary>
-    private static bool HasParamConstraints(IOpenApiSchema schema) =>
-        schema.MinLength.HasValue
-        || schema.MaxLength.HasValue
-        || schema.Pattern is not null
-        || schema.Minimum is not null
-        || schema.Maximum is not null
-        || schema.ExclusiveMinimum is not null
-        || schema.ExclusiveMaximum is not null
-        || schema.MultipleOf is not null
-        || schema.MinItems.HasValue
-        || schema.MaxItems.HasValue
-        || schema.UniqueItems == true;
+    private static string? BuildParameterMetadataJson(
+        IOpenApiParameter parameter,
+        IOpenApiSchema schema,
+        bool includeSchemaMetadata
+    )
+    {
+        var metadata = new JsonObject();
+        if (!string.IsNullOrEmpty(parameter.Description))
+        {
+            metadata["description"] = parameter.Description;
+        }
+        if (parameter.Deprecated)
+        {
+            metadata["deprecated"] = true;
+        }
+        if (includeSchemaMetadata && schema.Default is not null)
+        {
+            metadata["default"] = JsonNode.Parse(schema.Default.ToJsonString());
+        }
+        if (
+            includeSchemaMetadata && RecordSynthesizer.ExtractConstraints(schema) is { } constraints
+        )
+        {
+            metadata["constraints"] = JsonSerializer.SerializeToNode(
+                constraints,
+                new JsonSerializerOptions
+                {
+                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                }
+            );
+        }
+        if (includeSchemaMetadata && BuildSchemaExamplesNode(schema) is { } schemaExamples)
+        {
+            metadata["schemaExamples"] = schemaExamples;
+        }
+        if (includeSchemaMetadata && schema.Items is not null)
+        {
+            var itemMetadata = SchemaMapper.BuildScalarMetadata(
+                schema.Items,
+                schema.Items.Type?.HasFlag(JsonSchemaType.Null) == true
+            );
+            metadata["itemMetadata"] = JsonSerializer.SerializeToNode(itemMetadata);
+        }
+        if (parameter.Example is not null)
+        {
+            metadata["example"] = JsonNode.Parse(parameter.Example.ToJsonString());
+        }
+        if (BuildExamplesNode(parameter.Examples) is { } examples)
+        {
+            metadata["examples"] = examples;
+        }
+        if (parameter.Style is { } style && style != DefaultParameterStyle(parameter.In))
+        {
+            metadata["style"] = style switch
+            {
+                ParameterStyle.SpaceDelimited => "spaceDelimited",
+                ParameterStyle.PipeDelimited => "pipeDelimited",
+                ParameterStyle.DeepObject => "deepObject",
+                _ => ParameterStyleName(style),
+            };
+        }
+        if (parameter.Explode is { } explode && explode != (parameter.Style is ParameterStyle.Form))
+        {
+            metadata["explode"] = explode;
+        }
+
+        return metadata.Count == 0 ? null : metadata.ToJsonString();
+    }
+
+    private static ParameterStyle DefaultParameterStyle(ParameterLocation? location) =>
+        location is ParameterLocation.Query or ParameterLocation.Cookie
+            ? ParameterStyle.Form
+            : ParameterStyle.Simple;
+
+    private static string ParameterStyleName(ParameterStyle style) =>
+        style switch
+        {
+            ParameterStyle.SpaceDelimited => "spaceDelimited",
+            ParameterStyle.PipeDelimited => "pipeDelimited",
+            ParameterStyle.DeepObject => "deepObject",
+            _ => style.ToString().ToLowerInvariant(),
+        };
+
+    private static JsonArray? BuildSchemaExamplesNode(IOpenApiSchema? schema)
+    {
+        if (schema?.Examples is { Count: > 0 })
+        {
+            return new JsonArray(
+                schema
+                    .Examples.Select(example =>
+                        example is null ? null : JsonNode.Parse(example.ToJsonString())
+                    )
+                    .ToArray()
+            );
+        }
+
+        return schema?.Example is null
+            ? null
+            : new JsonArray(JsonNode.Parse(schema.Example.ToJsonString()));
+    }
+
+    private static JsonObject? BuildExamplesNode(
+        IDictionary<string, IOpenApiExample>? sourceExamples
+    )
+    {
+        if (sourceExamples is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        var examples = new JsonObject();
+        foreach (var (name, example) in sourceExamples)
+        {
+            if (example is not OpenApiExample concrete)
+            {
+                continue;
+            }
+
+            var value = new JsonObject();
+            if (concrete.Summary is not null)
+            {
+                value["summary"] = concrete.Summary;
+            }
+            if (concrete.Description is not null)
+            {
+                value["description"] = concrete.Description;
+            }
+            if (concrete.Value is not null)
+            {
+                value["value"] = JsonNode.Parse(concrete.Value.ToJsonString());
+            }
+            if (concrete.ExternalValue is not null)
+            {
+                value["externalValue"] = concrete.ExternalValue.ToString();
+            }
+            examples[name] = value;
+        }
+
+        return examples.Count == 0 ? null : examples;
+    }
 
     private static readonly HashSet<string> _binaryContentTypes = new(
         StringComparer.OrdinalIgnoreCase
@@ -863,12 +1108,7 @@ internal static class ContractBuilder
         int? SuccessStatus,
         string? FileContentType,
         string? ResponseContentType
-    ) ResolveOutputType(
-        OpenApiOperation operation,
-        SchemaMapper mapper,
-        string fieldName,
-        List<string> unsupported
-    )
+    ) ResolveOutputType(OpenApiOperation operation, SchemaMapper mapper, string fieldName)
     {
         if (operation.Responses is null)
         {
@@ -880,16 +1120,14 @@ internal static class ContractBuilder
         string? fileContentType = null;
         string? responseContentType = null;
 
-        // Collect concrete 2xx responses; a "2XX" range wildcard (I9) maps to 200 but only
-        // when no concrete 2xx status is declared — concrete statuses always win.
+        // A runtime success branch needs a concrete status. Wildcard response keys remain
+        // exact secondary metadata and suppress the authored method default.
         var successResponses = new List<(int Code, IOpenApiResponse Response)>();
-        (int Code, IOpenApiResponse Response)? rangeWildcard = null;
 
         foreach (var (statusStr, response) in operation.Responses)
         {
             if (statusStr is "2XX" or "2xx")
             {
-                rangeWildcard ??= (200, response);
                 continue;
             }
 
@@ -897,14 +1135,6 @@ internal static class ContractBuilder
             {
                 successResponses.Add((parsed, response));
             }
-        }
-
-        if (successResponses.Count == 0 && rangeWildcard is not null)
-        {
-            // Cross-corpus #2 (FABLE_ROUNDTRIP): the projection re-emits a literal
-            // status the API never promised — keep it, but loudly.
-            unsupported.Add("response status-range=2XX projected=200");
-            successResponses.Add(rangeWildcard.Value);
         }
 
         foreach (var (code, response) in successResponses)
@@ -960,9 +1190,8 @@ internal static class ContractBuilder
                         }
                         else
                         {
-                            unsupported.Add(
-                                $"response status={code} {DescribeUnsupportedContent(response.Content)}"
-                            );
+                            // The complete response content map carries this schema even
+                            // when no media type can become the primary runtime return type.
                             outputType = null;
                         }
                     }
@@ -996,7 +1225,6 @@ internal static class ContractBuilder
         OpenApiOperation operation,
         SchemaMapper mapper,
         string fieldName,
-        List<string> unsupported,
         int? successStatus = null
     )
     {
@@ -1009,40 +1237,9 @@ internal static class ContractBuilder
 
         foreach (var (statusStr, response) in operation.Responses)
         {
-            int code;
-            // NOTE: "default" responses are projected to 500 — OpenAPI's catch-all has no
-            // C# contract equivalent, and real-world specs overwhelmingly use it for errors.
-            if (statusStr == "default")
-            {
-                code = 500;
-            }
-            else if (statusStr is "4XX" or "4xx")
-            {
-                // Cross-corpus #2: the range projects to a literal status the API
-                // never promised — kept (dropping loses the error type), but loudly.
-                unsupported.Add($"error status-range={statusStr} projected=400");
-                code = 400;
-            }
-            else if (statusStr is "5XX" or "5xx")
-            {
-                unsupported.Add($"error status-range={statusStr} projected=500");
-                code = 500;
-            }
-            else if (!int.TryParse(statusStr, out code) || code < 300)
-            {
-                // Cross-corpus #3: a 1xx that is not the promoted success status has
-                // no contract axis — dropped, but never silently.
-                if (code is >= 100 and < 200 && code != successStatus)
-                {
-                    unsupported.Add($"response status={code} reason=informational-status-dropped");
-                }
+            var code = int.TryParse(statusStr, out var parsed) ? parsed : 0;
 
-                continue;
-            }
-
-            // A 3xx promoted to the declared success status (redirect-only op)
-            // is already carried by .Status(...) — don't double-declare it.
-            if (code == successStatus)
+            if (code != 0 && code == successStatus)
             {
                 continue;
             }
@@ -1054,31 +1251,48 @@ internal static class ContractBuilder
                     || TryGetSchemaForContentType(response.Content, "*/*", out schema)
                 )
                 {
-                    var typeName = mapper.ResolveCSharpType(schema!, $"{fieldName}Error{code}");
-                    var description = string.IsNullOrEmpty(response.Description)
-                        ? null
-                        : response.Description;
+                    var suffix =
+                        code == 0 ? Naming.ToPascalCaseFromSegments(statusStr) : code.ToString();
+                    var typeName = mapper.ResolveCSharpType(
+                        schema!,
+                        $"{fieldName}Response{suffix}"
+                    );
+                    var description = response.Description;
 
-                    if (!errors.Any(e => e.StatusCode == code))
+                    if (
+                        !errors.Any(e =>
+                            e.StatusKey.Equals(statusStr, StringComparison.OrdinalIgnoreCase)
+                        )
+                    )
                     {
-                        errors.Add(new GeneratedErrorResponse(code, typeName, description));
+                        errors.Add(
+                            new GeneratedErrorResponse(code, statusStr, typeName, description)
+                        );
                     }
                 }
                 else
                 {
-                    // Error response has content but no supported schema
-                    unsupported.Add(
-                        $"error status={code} {DescribeUnsupportedContent(response.Content)}"
-                    );
+                    if (
+                        !errors.Any(e =>
+                            e.StatusKey.Equals(statusStr, StringComparison.OrdinalIgnoreCase)
+                        )
+                    )
+                    {
+                        errors.Add(
+                            new GeneratedErrorResponse(code, statusStr, null, response.Description)
+                        );
+                    }
+
+                    // ResolveResponseContents persists every status/media/schema tuple.
+                    // The untyped error declaration only supplies the status and
+                    // description when the media type is not the primary JSON shape.
                 }
             }
-            else if (!errors.Any(e => e.StatusCode == code))
+            else if (
+                !errors.Any(e => e.StatusKey.Equals(statusStr, StringComparison.OrdinalIgnoreCase))
+            )
             {
-                // Void error response (no content) — preserve the status code and description
-                var description = string.IsNullOrEmpty(response.Description)
-                    ? null
-                    : response.Description;
-                errors.Add(new GeneratedErrorResponse(code, null, description));
+                errors.Add(new GeneratedErrorResponse(code, statusStr, null, response.Description));
             }
         }
 
@@ -1114,8 +1328,8 @@ internal static class ContractBuilder
 
         foreach (var (statusStr, response) in operation.Responses)
         {
-            var statusCode = NormalizeStatusCode(statusStr);
-            if (statusCode is null || response.Content is not { Count: > 0 } content)
+            var statusCode = int.TryParse(statusStr, out var parsed) ? parsed : 0;
+            if (response.Content is not { Count: > 0 } content)
             {
                 continue;
             }
@@ -1124,65 +1338,18 @@ internal static class ContractBuilder
                 var example in ResolveMediaExamples(
                     content,
                     unsupported,
-                    $"response-example status={statusCode.Value}",
+                    $"response-example status={statusStr}",
                     componentExamples
                 )
             )
             {
                 responseExamples.Add(
-                    new GeneratedEndpointResponseExample(statusCode.Value, example)
+                    new GeneratedEndpointResponseExample(statusCode, statusStr, example)
                 );
             }
         }
 
         return responseExamples;
-    }
-
-    private static IReadOnlyList<GeneratedErrorResponse> EnsureExampleStatusesAreDeclared(
-        OpenApiOperation operation,
-        int? successStatus,
-        IReadOnlyList<GeneratedErrorResponse> errorResponses,
-        IReadOnlyList<GeneratedEndpointResponseExample> responseExamples
-    )
-    {
-        if (responseExamples.Count == 0)
-        {
-            return errorResponses;
-        }
-
-        var declaredStatuses = errorResponses.Select(response => response.StatusCode).ToHashSet();
-        var descriptionsByStatus = (operation.Responses ?? [])
-            .Select(entry => new
-            {
-                StatusCode = NormalizeStatusCode(entry.Key),
-                Description = string.IsNullOrEmpty(entry.Value.Description)
-                    ? null
-                    : entry.Value.Description,
-            })
-            .Where(entry => entry.StatusCode is not null)
-            .GroupBy(entry => entry.StatusCode!.Value)
-            .ToDictionary(group => group.Key, group => group.First().Description);
-
-        var augmentedResponses = errorResponses.ToList();
-
-        foreach (
-            var statusCode in responseExamples
-                .Select(example => example.StatusCode)
-                .Distinct()
-                .OrderBy(code => code)
-        )
-        {
-            if (statusCode == successStatus || declaredStatuses.Contains(statusCode))
-            {
-                continue;
-            }
-
-            descriptionsByStatus.TryGetValue(statusCode, out var description);
-            augmentedResponses.Add(new GeneratedErrorResponse(statusCode, null, description));
-            declaredStatuses.Add(statusCode);
-        }
-
-        return augmentedResponses;
     }
 
     private static IReadOnlyList<TsEndpointExample> ResolveMediaExamples(
@@ -1198,17 +1365,19 @@ internal static class ContractBuilder
         {
             if (media.Example is not null)
             {
+                var resolved = PreserveEmbeddedExampleRefs(
+                    media.Example.ToJsonString(),
+                    componentExamples,
+                    unsupported,
+                    markerPrefix,
+                    mediaType,
+                    null
+                );
                 examples.Add(
                     new TsEndpointExample(
                         mediaType,
-                        Json: InlineEmbeddedExampleRefs(
-                            media.Example.ToJsonString(),
-                            componentExamples,
-                            unsupported,
-                            markerPrefix,
-                            mediaType,
-                            null
-                        )
+                        Json: resolved.Json,
+                        ReferencedComponents: resolved.ReferencedComponents
                     )
                 );
             }
@@ -1265,9 +1434,10 @@ internal static class ContractBuilder
     {
         var componentExampleId = TryGetComponentExampleId(example);
         var resolvedJson = TryGetExampleJson(example);
+        IReadOnlyDictionary<string, string>? referencedComponents = null;
         if (resolvedJson is not null)
         {
-            resolvedJson = InlineEmbeddedExampleRefs(
+            var resolved = PreserveEmbeddedExampleRefs(
                 resolvedJson,
                 componentExamples,
                 unsupported,
@@ -1275,6 +1445,8 @@ internal static class ContractBuilder
                 mediaType,
                 name
             );
+            resolvedJson = resolved.Json;
+            referencedComponents = resolved.ReferencedComponents;
         }
 
         if (componentExampleId is not null)
@@ -1285,14 +1457,24 @@ internal static class ContractBuilder
                     mediaType,
                     name,
                     ComponentExampleId: componentExampleId,
-                    ResolvedJson: resolvedJson
+                    ResolvedJson: resolvedJson,
+                    ReferencedComponents: referencedComponents
                 )
                 : null;
         }
 
-        reason = resolvedJson is null ? "missing-value" : null;
+        reason = resolvedJson is null
+            ? example.ExternalValue is not null
+                ? "external-value"
+                : "missing-value"
+            : null;
         return resolvedJson is not null
-            ? new TsEndpointExample(mediaType, name, Json: resolvedJson)
+            ? new TsEndpointExample(
+                mediaType,
+                name,
+                Json: resolvedJson,
+                ReferencedComponents: referencedComponents
+            )
             : null;
     }
 
@@ -1313,6 +1495,138 @@ internal static class ContractBuilder
     /// </summary>
     private const string OpenApiNullSentinel =
         "\"openapi-json-null-sentinel-value-2BF93600-0FE4-4250-987A-E5DDB203E464\"";
+
+    private static (
+        string Json,
+        IReadOnlyDictionary<string, string>? ReferencedComponents
+    ) PreserveEmbeddedExampleRefs(
+        string json,
+        IDictionary<string, IOpenApiExample>? componentExamples,
+        List<string> unsupported,
+        string markerPrefix,
+        string mediaType,
+        string? name
+    )
+    {
+        json = json.Replace(OpenApiNullSentinel, "null", StringComparison.Ordinal);
+        if (!json.Contains("#/components/examples/", StringComparison.Ordinal))
+        {
+            return (json, null);
+        }
+
+        JsonNode? parsed;
+        try
+        {
+            parsed = JsonNode.Parse(json);
+        }
+        catch (JsonException)
+        {
+            return (json, null);
+        }
+
+        var referenced = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (
+            CollectReferencedExampleComponents(
+                parsed,
+                componentExamples,
+                referenced,
+                new HashSet<string>(StringComparer.Ordinal)
+            )
+        )
+        {
+            return (parsed?.ToJsonString() ?? "null", referenced);
+        }
+
+        return (
+            InlineEmbeddedExampleRefs(
+                json,
+                componentExamples,
+                unsupported,
+                markerPrefix,
+                mediaType,
+                name
+            ),
+            null
+        );
+    }
+
+    private static bool CollectReferencedExampleComponents(
+        JsonNode? node,
+        IDictionary<string, IOpenApiExample>? componentExamples,
+        Dictionary<string, string> referenced,
+        HashSet<string> resolving
+    )
+    {
+        const string examplesPrefix = "#/components/examples/";
+        switch (node)
+        {
+            case JsonObject obj:
+                if (
+                    obj["$ref"]?.GetValue<string>() is { } reference
+                    && reference.StartsWith(examplesPrefix, StringComparison.Ordinal)
+                )
+                {
+                    var componentName = reference[examplesPrefix.Length..];
+                    if (
+                        componentExamples is null
+                        || !componentExamples.TryGetValue(componentName, out var component)
+                        || !resolving.Add(componentName)
+                        || TryGetExampleJson(component) is not { } componentJson
+                    )
+                    {
+                        resolving.Remove(componentName);
+                        return false;
+                    }
+
+                    componentJson = componentJson.Replace(
+                        OpenApiNullSentinel,
+                        "null",
+                        StringComparison.Ordinal
+                    );
+                    referenced.TryAdd(componentName, componentJson);
+                    JsonNode? componentNode;
+                    try
+                    {
+                        componentNode = JsonNode.Parse(componentJson);
+                    }
+                    catch (JsonException)
+                    {
+                        resolving.Remove(componentName);
+                        return false;
+                    }
+                    var resolved = CollectReferencedExampleComponents(
+                        componentNode,
+                        componentExamples,
+                        referenced,
+                        resolving
+                    );
+                    resolving.Remove(componentName);
+                    return resolved;
+                }
+
+                return obj.All(property =>
+                    CollectReferencedExampleComponents(
+                        property.Value,
+                        componentExamples,
+                        referenced,
+                        resolving
+                    )
+                );
+
+            case JsonArray array:
+                return array.All(item =>
+                    CollectReferencedExampleComponents(
+                        item,
+                        componentExamples,
+                        referenced,
+                        resolving
+                    )
+                );
+
+            default:
+                return true;
+        }
+    }
 
     private static string InlineEmbeddedExampleRefs(
         string json,
@@ -1500,44 +1814,6 @@ internal static class ContractBuilder
         };
     }
 
-    private static int? NormalizeStatusCode(string statusStr)
-    {
-        if (statusStr == "default")
-        {
-            return 500;
-        }
-
-        if (statusStr is "2XX" or "2xx")
-        {
-            return 200;
-        }
-
-        if (statusStr is "4XX" or "4xx")
-        {
-            return 400;
-        }
-
-        if (statusStr is "5XX" or "5xx")
-        {
-            return 500;
-        }
-
-        return int.TryParse(statusStr, out var code) ? code : null;
-    }
-
-    /// <summary>
-    /// I10: content-type matching is an exact dictionary lookup, so media-type parameters
-    /// (e.g. <c>application/json; charset=utf-8</c>) defeat it. The resulting unsupported
-    /// marker names the cause explicitly instead of looking like an exotic content type.
-    /// </summary>
-    private static string DescribeUnsupportedContent(IDictionary<string, OpenApiMediaType> content)
-    {
-        var contentTypes = string.Join(", ", content.Keys);
-        return content.Keys.Any(k => k.Contains(';'))
-            ? $"content-type={contentTypes} reason=media-type-parameters"
-            : $"content-type={contentTypes}";
-    }
-
     private static bool TryGetSchemaForContentType(
         IDictionary<string, OpenApiMediaType> content,
         string contentType,
@@ -1554,10 +1830,11 @@ internal static class ContractBuilder
         return false;
     }
 
-    private static (bool IsAnonymous, string? Scheme, string? RequirementsJson) ResolveSecurity(
-        OpenApiOperation operation,
-        string? globalSecurityScheme
-    )
+    private static (
+        bool IsAnonymous,
+        string? Scheme,
+        SecurityRequirements? Requirements
+    ) ResolveSecurity(OpenApiOperation operation, string? globalSecurityScheme)
     {
         if (operation.Security is null)
         {
@@ -1570,13 +1847,13 @@ internal static class ContractBuilder
         // Empty list → anonymous
         if (operation.Security.Count == 0)
         {
-            return (false, null, "[]");
+            return (false, null, new SecurityRequirements([]));
         }
 
-        var requirements = new JsonArray();
+        var requirements = new List<SecurityRequirement>();
         foreach (var requirement in operation.Security)
         {
-            var requirementJson = new JsonObject();
+            var schemes = new List<SecurityRequirementScheme>();
             foreach (var (scheme, scopes) in requirement)
             {
                 var name = scheme.Reference?.Id;
@@ -1585,15 +1862,13 @@ internal static class ContractBuilder
                     continue;
                 }
 
-                requirementJson[name] = new JsonArray(
-                    scopes.Select(scope => JsonValue.Create(scope)).ToArray()
-                );
+                schemes.Add(new SecurityRequirementScheme(name, scopes.ToList()));
             }
 
-            requirements.Add(requirementJson);
+            requirements.Add(new SecurityRequirement(schemes));
         }
 
-        return (false, null, requirements.ToJsonString());
+        return (false, null, new SecurityRequirements(requirements));
     }
 
     private static IReadOnlyList<GeneratedEndpointField> DeduplicateFields(

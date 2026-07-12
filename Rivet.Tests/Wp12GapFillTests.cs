@@ -1302,7 +1302,11 @@ public sealed class Wp12GapFillTests
 
         var holder = CompilationHelper.FindFile(result, "Holder.cs");
         Assert.Contains("Status", holder);
-        Assert.DoesNotContain("StatusAlias", holder);
+        Assert.Contains("[RivetSchemaRef(\"StatusAlias\")]", holder);
+        Assert.Contains(
+            "[assembly: RivetGeneratedSchema(\"StatusAlias\", \"StatusAlias\"",
+            CompilationHelper.FindFile(result, "RivetScalarSchemas.cs")
+        );
 
         CompilationHelper.CompileImportResult(result);
     }

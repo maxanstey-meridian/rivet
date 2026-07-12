@@ -44,7 +44,10 @@ public sealed class OpenApiCorpusManifestTests
             .ToArray();
         Assert.Equal(manifestFiles, actualFiles);
 
-        Assert.Equal(manifest.Corpora.Length, manifest.Corpora.Select(c => c.Id).Distinct().Count());
+        Assert.Equal(
+            manifest.Corpora.Length,
+            manifest.Corpora.Select(c => c.Id).Distinct().Count()
+        );
         Assert.Equal(
             manifest.Corpora.Length,
             manifest.Corpora.Select(c => c.Sha256).Distinct().Count()
@@ -62,7 +65,10 @@ public sealed class OpenApiCorpusManifestTests
                 ? openApi.GetString()
                 : root.GetProperty("swagger").GetString();
             Assert.Equal(corpus.OpenApiVersion, openApiVersion);
-            Assert.Equal(corpus.ApiVersion, root.GetProperty("info").GetProperty("version").GetString());
+            Assert.Equal(
+                corpus.ApiVersion,
+                root.GetProperty("info").GetProperty("version").GetString()
+            );
 
             var paths = root.GetProperty("paths");
             Assert.Equal(corpus.PathCount, paths.EnumerateObject().Count());
@@ -71,19 +77,20 @@ public sealed class OpenApiCorpusManifestTests
                 paths
                     .EnumerateObject()
                     .Sum(pathItem =>
-                        pathItem.Value.EnumerateObject().Count(property => _methods.Contains(property.Name))
+                        pathItem
+                            .Value.EnumerateObject()
+                            .Count(property => _methods.Contains(property.Name))
                     )
             );
 
-            var schemas = root.TryGetProperty("components", out var components)
+            var schemas =
+                root.TryGetProperty("components", out var components)
                 && components.TryGetProperty("schemas", out var componentSchemas)
                     ? componentSchemas
-                    : root.TryGetProperty("definitions", out var definitions)
-                        ? definitions
-                        : default;
-            var schemaCount = schemas.ValueKind == JsonValueKind.Object
-                ? schemas.EnumerateObject().Count()
-                : 0;
+                : root.TryGetProperty("definitions", out var definitions) ? definitions
+                : default;
+            var schemaCount =
+                schemas.ValueKind == JsonValueKind.Object ? schemas.EnumerateObject().Count() : 0;
             Assert.Equal(corpus.SchemaCount, schemaCount);
         }
     }

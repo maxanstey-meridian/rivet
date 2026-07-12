@@ -29,6 +29,62 @@ public sealed class OperationParameterCorpusTests
                         "schema": { "type": "boolean" }
                       },
                       {
+                        "name": "integer_without_format",
+                        "in": "query",
+                        "required": true,
+                        "schema": { "type": "integer" }
+                      },
+                      {
+                        "name": "number_without_format",
+                        "in": "query",
+                        "required": true,
+                        "schema": { "type": "number" }
+                      },
+                      {
+                        "name": "page_size",
+                        "in": "query",
+                        "required": false,
+                        "description": "Maximum results per page",
+                        "deprecated": true,
+                        "style": "spaceDelimited",
+                        "explode": true,
+                        "examples": {
+                          "small": { "summary": "Small page", "value": 10 }
+                        },
+                        "schema": {
+                          "type": "integer",
+                          "default": 25,
+                          "minimum": 1,
+                          "maximum": 100,
+                          "multipleOf": 1,
+                          "examples": [25, 50]
+                        }
+                      },
+                      {
+                        "name": "formatted_string",
+                        "in": "query",
+                        "required": true,
+                        "schema": { "type": "string", "format": "hostname" }
+                      },
+                      {
+                        "name": "from",
+                        "in": "query",
+                        "required": false,
+                        "schema": { "type": "string", "format": "date-time" }
+                      },
+                      {
+                        "name": "to",
+                        "in": "query",
+                        "required": false,
+                        "schema": { "type": "string", "format": "date-time" }
+                      },
+                      {
+                        "name": "nullable_integer",
+                        "in": "query",
+                        "required": false,
+                        "schema": { "type": ["integer", "null"] }
+                      },
+                      {
                         "name": "X-Trace",
                         "in": "header",
                         "required": true,
@@ -89,18 +145,14 @@ public sealed class OperationParameterCorpusTests
             )!["paths"]!["/things/{thing_id}"]!["post"]!;
             Assert.True(
                 JsonNode.DeepEquals(
-                    JsonNode.Parse(spec)!["paths"]!["/things/{thing_id}"]!["post"]![
-                        "parameters"
-                    ],
+                    JsonNode.Parse(spec)!["paths"]!["/things/{thing_id}"]!["post"]!["parameters"],
                     operation["parameters"]
                 ),
-                "Parameters changed."
+                $"Parameters changed.\nExpected: {JsonNode.Parse(spec)!["paths"]!["/things/{thing_id}"]!["post"]!["parameters"]}\nActual: {operation["parameters"]}"
             );
             Assert.True(
                 JsonNode.DeepEquals(
-                    JsonNode.Parse(spec)!["paths"]!["/things/{thing_id}"]!["post"]![
-                        "requestBody"
-                    ],
+                    JsonNode.Parse(spec)!["paths"]!["/things/{thing_id}"]!["post"]!["requestBody"],
                     operation["requestBody"]
                 ),
                 "Request body changed."

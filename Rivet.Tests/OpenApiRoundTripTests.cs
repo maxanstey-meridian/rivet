@@ -67,6 +67,7 @@ public sealed class OpenApiRoundTripTests
         {
             ["post"] = sourcePath["post"]!.DeepClone(),
         };
+        CopyComponentEntries(source, document, "securitySchemes", "accountSid_authToken");
 
         return document.ToJsonString();
     }
@@ -160,13 +161,8 @@ public sealed class OpenApiRoundTripTests
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var securitySchemes = endpoints
-            .Select(endpoint => endpoint.Security?.Scheme)
-            .Where(scheme => scheme is not null)
-            .Distinct()
-            .Select(scheme => $"{scheme}=bearer");
-        var security = SecurityParser.ParseMany(securitySchemes);
-        var emittedJson = OpenApiEmitter.Emit(
+        var security = SecurityMetadataWalker.Walk(compilation);
+        var emittedJson = OpenApiEmitter.EmitWithSecurityMetadata(
             endpoints,
             walker.Definitions,
             walker.Brands,
@@ -232,13 +228,10 @@ public sealed class OpenApiRoundTripTests
         Assert.True(bodyProperties.TryGetProperty("role", out _));
 
         var imported = CompilationHelper.Import(spec, "SameNameRuntimeInput");
-        var input = CompilationHelper.FindFile(imported, "UpdateMemberInput.cs");
-        Assert.Contains("string Id", input);
-        Assert.Contains("UpdateMember? Body", input);
-        Assert.Contains(
-            "[RivetRequestBody(typeof(UpdateMember), false)]",
-            CompilationHelper.FindFile(imported, "MembersContract.cs")
-        );
+        var contract = CompilationHelper.FindFile(imported, "MembersContract.cs");
+        Assert.Contains(".Parameter<string>(\"id\", \"path\", true", contract);
+        Assert.Contains(".RequestContent<UpdateMember>(\"application/json\")", contract);
+        Assert.Contains(".RequestBodyRequired(false)", contract);
     }
 
     private static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker) RoundTrip(
@@ -453,7 +446,7 @@ public sealed class OpenApiRoundTripTests
         Assert.True(bio.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "string" } });
 
         var age = person.Properties.First(p => p.Name == "age");
-        Assert.True(age.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } });
+        Assert.True(age.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "integer" } });
 
         var address = person.Properties.First(p => p.Name == "address");
         Assert.True(
@@ -1239,18 +1232,29 @@ public sealed class OpenApiRoundTripTests
 
         // Anonymous endpoint
         var health = endpoints.First(e => e.RouteTemplate == "/api/health");
-        Assert.NotNull(health.Security);
-        Assert.True(health.Security.IsAnonymous);
+        Assert.Empty(Assert.IsType<SecurityRequirements>(health.SecurityRequirements).Alternatives);
 
         // Override endpoint
         var admin = endpoints.First(e => e.RouteTemplate == "/api/admin");
-        Assert.NotNull(admin.Security);
-        Assert.Equal("admin", admin.Security.Scheme);
+        Assert.Equal(
+            "admin",
+            Assert
+                .Single(
+                    Assert
+                        .Single(
+                            Assert
+                                .IsType<SecurityRequirements>(admin.SecurityRequirements)
+                                .Alternatives
+                        )
+                        .Schemes
+                )
+                .Name
+        );
 
-        // Default-security endpoint inherits global bearer after round-trip
+        // The explicit import override still applies a default endpoint scheme.
         var task = endpoints.First(e => e.RouteTemplate == "/api/tasks/{id}");
-        Assert.NotNull(task.Security);
-        Assert.Equal("bearer", task.Security.Scheme);
+        Assert.Equal("bearer", Assert.IsType<EndpointSecurity>(task.Security).Scheme);
+        Assert.Null(task.SecurityRequirements);
 
         // Return types survive through security round-trip
         Assert.True(
@@ -1402,8 +1406,8 @@ public sealed class OpenApiRoundTripTests
         var limitParam = Assert.Single(search.Params, p => p.Name == "limit");
         Assert.Equal(ParamSource.Query, limitParam.Source);
         Assert.True(
-            limitParam.Type is TsType.Primitive { Name: "number", Format: "int32" },
-            $"Expected Primitive(number, int32) but got {limitParam.Type}"
+            limitParam.Type is TsType.Primitive { Name: "integer", Format: "int32" },
+            $"Expected Primitive(integer, int32) but got {limitParam.Type}"
         );
 
         // Return type survives
@@ -2437,10 +2441,10 @@ public sealed class OpenApiRoundTripTests
         Assert.True(nameP.Type is TsType.Primitive { Name: "string" });
 
         var intP = sink.Properties.First(p => p.Name == "intVal");
-        Assert.True(intP.Type is TsType.Primitive { Name: "number", Format: "int32" });
+        Assert.True(intP.Type is TsType.Primitive { Name: "integer", Format: "int32" });
 
         var longP = sink.Properties.First(p => p.Name == "longVal");
-        Assert.True(longP.Type is TsType.Primitive { Name: "number", Format: "int64" });
+        Assert.True(longP.Type is TsType.Primitive { Name: "integer", Format: "int64" });
 
         var floatP = sink.Properties.First(p => p.Name == "floatVal");
         Assert.True(floatP.Type is TsType.Primitive { Name: "number", Format: "float" });
@@ -2471,7 +2475,9 @@ public sealed class OpenApiRoundTripTests
         Assert.True(nullStr.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "string" } });
 
         var nullInt = sink.Properties.First(p => p.Name == "nullableInt");
-        Assert.True(nullInt.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } });
+        Assert.True(
+            nullInt.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "integer" } }
+        );
 
         var nullBool = sink.Properties.First(p => p.Name == "nullableBool");
         Assert.True(
@@ -2604,13 +2610,26 @@ public sealed class OpenApiRoundTripTests
 
         // --- Security: anonymous ---
         var healthEp = endpoints.First(e => e.RouteTemplate == "/api/health");
-        Assert.NotNull(healthEp.Security);
-        Assert.True(healthEp.Security.IsAnonymous);
+        Assert.Empty(
+            Assert.IsType<SecurityRequirements>(healthEp.SecurityRequirements).Alternatives
+        );
 
         // --- Security: override scheme ---
         var adminEp = endpoints.First(e => e.RouteTemplate == "/api/admin");
-        Assert.NotNull(adminEp.Security);
-        Assert.Equal("admin", adminEp.Security.Scheme);
+        Assert.Equal(
+            "admin",
+            Assert
+                .Single(
+                    Assert
+                        .Single(
+                            Assert
+                                .IsType<SecurityRequirements>(adminEp.SecurityRequirements)
+                                .Alternatives
+                        )
+                        .Schemes
+                )
+                .Name
+        );
 
         // --- Security: default bearer ---
         Assert.NotNull(getItem.Security);
@@ -2978,8 +2997,8 @@ public sealed class OpenApiRoundTripTests
 
         // Plain primitives — default C# types have null CSharpType
         AssertPrimitive("name", "string", null, null);
-        AssertPrimitive("intVal", "number", "int32", null);
-        AssertPrimitive("longVal", "number", "int64", null);
+        AssertPrimitive("intVal", "integer", "int32", null);
+        AssertPrimitive("longVal", "integer", "int64", null);
         AssertPrimitive("floatVal", "number", "float", null);
         AssertPrimitive("doubleVal", "number", "double", null);
         AssertPrimitive("boolVal", "boolean", null, null);
@@ -2988,18 +3007,18 @@ public sealed class OpenApiRoundTripTests
         AssertPrimitive("guidVal", "string", "uuid", null);
 
         // x-rivet-csharp-type primitives — non-default C# types survive via extension
-        AssertPrimitive("uintVal", "number", "uint32", "uint");
-        AssertPrimitive("ulongVal", "number", "uint64", "ulong");
-        AssertPrimitive("shortVal", "number", "int16", "short");
-        AssertPrimitive("ushortVal", "number", "uint16", "ushort");
-        AssertPrimitive("byteVal", "number", "uint8", "byte");
-        AssertPrimitive("sbyteVal", "number", "int8", "sbyte");
+        AssertPrimitive("uintVal", "integer", "uint32", "uint");
+        AssertPrimitive("ulongVal", "integer", "uint64", "ulong");
+        AssertPrimitive("shortVal", "integer", "int16", "short");
+        AssertPrimitive("ushortVal", "integer", "uint16", "ushort");
+        AssertPrimitive("byteVal", "integer", "uint8", "byte");
+        AssertPrimitive("sbyteVal", "integer", "int8", "sbyte");
         AssertPrimitive("decimalVal", "number", "decimal", null);
         AssertPrimitive("dateTimeOffsetVal", "string", "date-time", "DateTimeOffset");
 
         // Nullable primitives
         AssertNullablePrimitive("nullableString", "string", null, null);
-        AssertNullablePrimitive("nullableInt", "number", "int32", null);
+        AssertNullablePrimitive("nullableInt", "integer", "int32", null);
         AssertNullablePrimitive("nullableBool", "boolean", null, null);
         AssertNullablePrimitive("nullableGuid", "string", "uuid", null);
         AssertNullablePrimitive("nullableDateTime", "string", "date-time", null);
@@ -3057,7 +3076,7 @@ public sealed class OpenApiRoundTripTests
 
         // object (P2 wave 6): deliberately untyped — imports as JsonElement ("any
         // JSON value"), which re-emits the same bare {} schema
-        AssertPrimitive("objectVal", "unknown", null, null);
+        AssertPrimitive("objectVal", "unknown", null, "JsonElement");
 
         // Brand references
         var emailRef = sink.Properties.First(p => p.Name == "authorEmail");
@@ -3158,17 +3177,43 @@ public sealed class OpenApiRoundTripTests
         // ───── Assertion group 8: Security survived ─────
 
         // Anonymous
-        Assert.NotNull(healthCheck.Security);
-        Assert.True(healthCheck.Security.IsAnonymous);
+        Assert.Empty(
+            Assert.IsType<SecurityRequirements>(healthCheck.SecurityRequirements).Alternatives
+        );
 
         // Custom scheme
         var adminPurge = eps2.First(e => e.RouteTemplate == "/api/admin/cache");
-        Assert.NotNull(adminPurge.Security);
-        Assert.Equal("admin", adminPurge.Security.Scheme);
+        Assert.Equal(
+            "admin",
+            Assert
+                .Single(
+                    Assert
+                        .Single(
+                            Assert
+                                .IsType<SecurityRequirements>(adminPurge.SecurityRequirements)
+                                .Alternatives
+                        )
+                        .Schemes
+                )
+                .Name
+        );
 
         // Default bearer
-        Assert.NotNull(getItem.Security);
-        Assert.Equal("bearer", getItem.Security.Scheme);
+        Assert.Null(getItem.Security);
+        Assert.Equal(
+            "bearer",
+            Assert
+                .Single(
+                    Assert
+                        .Single(
+                            Assert
+                                .IsType<SecurityRequirements>(getItem.SecurityRequirements)
+                                .Alternatives
+                        )
+                        .Schemes
+                )
+                .Name
+        );
 
         // ───── Assertion group 9: HTTP verbs + status codes + multi-response ─────
 
@@ -3222,15 +3267,15 @@ public sealed class OpenApiRoundTripTests
 
         var limitParam = searchParams.First(p => p.Name == "limit");
         Assert.True(
-            limitParam.Type is TsType.Primitive { Name: "number" },
-            $"limit param should be number, got {limitParam.Type}"
+            limitParam.Type is TsType.Primitive { Name: "integer" },
+            $"limit param should be integer, got {limitParam.Type}"
         );
 
         // CRITICAL: nullable query param must survive as Nullable
         var offsetParam = searchParams.First(p => p.Name == "offset");
         Assert.True(
-            offsetParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
-            $"offset param should be Nullable(number) — optional query param must survive as nullable, got {offsetParam.Type}"
+            offsetParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "integer" } },
+            $"offset param should be Nullable(integer) — optional query param must survive as nullable, got {offsetParam.Type}"
         );
 
         // File upload: File + FormField params with types
@@ -3252,8 +3297,8 @@ public sealed class OpenApiRoundTripTests
             p => p.Source == ParamSource.FormField && p.Name == "pageCount"
         );
         Assert.True(
-            pageCountField.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
-            $"pageCount FormField should be Nullable(number) — optional form field must survive as nullable, got {pageCountField.Type}"
+            pageCountField.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "integer" } },
+            $"pageCount FormField should be Nullable(integer) — optional form field must survive as nullable, got {pageCountField.Type}"
         );
 
         // ───── Assertion group 11: Nested types survived ─────
@@ -3303,12 +3348,11 @@ public sealed class OpenApiRoundTripTests
     // ========== Isolated bug-detection tests ==========
 
     /// <summary>
-    /// Verifies that optional query params (required: false) produce nullable C# types
-    /// in the generated import code, and that nullability survives the full round-trip.
-    /// Bug: ContractBuilder.ResolveParamInputType stores IsRequired but CSharpWriter ignores it.
+    /// Verifies that optional query params preserve requiredness independently from
+    /// their schema nullability through generated C# and the walked model.
     /// </summary>
     [Fact]
-    public void OptionalQueryParam_SurvivesImport_AsNullable()
+    public void OptionalQueryParam_SurvivesImport_WithoutBecomingNullable()
     {
         // Hand-crafted OpenAPI with an optional query param
         var openApiJson = """
@@ -3370,18 +3414,14 @@ public sealed class OpenApiRoundTripTests
 
         var importResult = OpenApiImporter.Import(openApiJson, new ImportOptions("Test"));
 
-        // Find the generated input type — should contain nullable params
-        var inputFile = importResult.Files.First(f =>
-            f.Content.Contains("SearchItemsInput") || f.Content.Contains("limit")
-        );
-        var content = inputFile.Content;
+        var contract = CompilationHelper.FindFile(importResult, "DefaultContract.cs");
 
-        // "limit" is required:false → must be int? not int
-        Assert.Contains("int?", content);
-        // "cursor" is required:false → must be string? not string
-        Assert.Contains("string?", content);
+        // Optionality and nullability are independent: required:false remains on
+        // the parameter declaration without adding null to either schema type.
+        Assert.Contains(".Parameter<int>(\"limit\", \"query\", false", contract);
+        Assert.Contains(".Parameter<string>(\"cursor\", \"query\", false", contract);
 
-        // Full compile + walk: verify the nullable types survive into TsType model
+        // Full compile + walk: verify optionality survives independently.
         var compilation = CompilationHelper.CreateCompilationFromMultiple(
             importResult.Files.Select(f => f.Content).ToArray()
         );
@@ -3398,17 +3438,18 @@ public sealed class OpenApiRoundTripTests
             $"Required query param should be string, got {queryParam.Type}"
         );
 
-        // Optional params must be nullable
+        // Optional params retain their non-nullable schema types.
         var limitParam = queryParams.First(p => p.Name == "limit");
         Assert.True(
-            limitParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
-            $"Optional limit should be Nullable(number), got {limitParam.Type}"
+            limitParam.IsOptional
+                && limitParam.Type is TsType.Primitive { Name: "integer", Format: "int32" },
+            $"Optional limit should be optional Primitive(integer), got {limitParam.Type}"
         );
 
         var cursorParam = queryParams.First(p => p.Name == "cursor");
         Assert.True(
-            cursorParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "string" } },
-            $"Optional cursor should be Nullable(string), got {cursorParam.Type}"
+            cursorParam.IsOptional && cursorParam.Type is TsType.Primitive { Name: "string" },
+            $"Optional cursor should be optional Primitive(string), got {cursorParam.Type}"
         );
     }
 
@@ -4110,8 +4151,8 @@ public sealed class OpenApiRoundTripTests
         AssertProp("title", t => t is TsType.Primitive { Name: "string" }, "string");
         AssertProp(
             "count",
-            t => t is TsType.Primitive { Name: "number", Format: "int32" },
-            "number(int32)"
+            t => t is TsType.Primitive { Name: "integer", Format: "int32" },
+            "integer(int32)"
         );
         AssertProp("isActive", t => t is TsType.Primitive { Name: "boolean" }, "boolean");
         AssertProp(
@@ -4133,8 +4174,8 @@ public sealed class OpenApiRoundTripTests
         );
         AssertProp(
             "optionalCount",
-            t => t is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
-            "number | null"
+            t => t is TsType.Nullable { Inner: TsType.Primitive { Name: "integer" } },
+            "integer | null"
         );
         AssertProp(
             "optionalId",
@@ -4258,8 +4299,8 @@ public sealed class OpenApiRoundTripTests
         var offsetParam = queryParams.FirstOrDefault(p => p.Name == "offset");
         Assert.NotNull(offsetParam);
         Assert.True(
-            offsetParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
-            $"offset param should be nullable number, got {offsetParam.Type}"
+            offsetParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "integer" } },
+            $"offset param should be nullable integer, got {offsetParam.Type}"
         );
 
         // ===== POST /api/tasks (201 + multi-response) =====
@@ -4329,8 +4370,7 @@ public sealed class OpenApiRoundTripTests
             e.HttpMethod == "GET" && e.RouteTemplate == "/api/health"
         );
         Assert.Null(health.ReturnType);
-        Assert.NotNull(health.Security);
-        Assert.True(health.Security!.IsAnonymous, "Health endpoint should be anonymous");
+        Assert.Empty(Assert.IsType<SecurityRequirements>(health.SecurityRequirements).Alternatives);
 
         // ===== PATCH /api/tasks/{id} (input + void + 204) =====
         // Known limitation: input-only endpoints (Define.Patch<TInput>) round-trip with the

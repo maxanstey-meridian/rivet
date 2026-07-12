@@ -177,7 +177,7 @@ public sealed class FormatRoundTripTests
     }
 
     [Fact]
-    public void Int_Property_Has_Integer_Type_And_Range_In_Schema()
+    public void Int_Property_Has_Integer_Type_And_No_Implicit_Range_In_Schema()
     {
         var source = """
             using Rivet;
@@ -191,12 +191,12 @@ public sealed class FormatRoundTripTests
         var prop = EmitSchemaFor(source, "CountDto").GetProperty("properties").GetProperty("count");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("int32", prop.GetProperty("format").GetString());
-        Assert.Equal(-2147483648, prop.GetProperty("minimum").GetInt64());
-        Assert.Equal(2147483647, prop.GetProperty("maximum").GetInt64());
+        Assert.False(prop.TryGetProperty("minimum", out _));
+        Assert.False(prop.TryGetProperty("maximum", out _));
     }
 
     [Fact]
-    public void Uint_Property_Has_Unsigned_Range_In_Schema()
+    public void Uint_Property_Has_Unsigned_Format_And_No_Implicit_Range_In_Schema()
     {
         var source = """
             using Rivet;
@@ -210,12 +210,12 @@ public sealed class FormatRoundTripTests
         var prop = EmitSchemaFor(source, "FlagDto").GetProperty("properties").GetProperty("flags");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("uint32", prop.GetProperty("format").GetString());
-        Assert.Equal(0, prop.GetProperty("minimum").GetInt64());
-        Assert.Equal(4294967295, prop.GetProperty("maximum").GetInt64());
+        Assert.False(prop.TryGetProperty("minimum", out _));
+        Assert.False(prop.TryGetProperty("maximum", out _));
     }
 
     [Fact]
-    public void Byte_Property_Has_Uint8_Range_In_Schema()
+    public void Byte_Property_Has_Uint8_Format_And_No_Implicit_Range_In_Schema()
     {
         var source = """
             using Rivet;
@@ -229,8 +229,8 @@ public sealed class FormatRoundTripTests
         var prop = EmitSchemaFor(source, "PixelDto").GetProperty("properties").GetProperty("r");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("uint8", prop.GetProperty("format").GetString());
-        Assert.Equal(0, prop.GetProperty("minimum").GetInt64());
-        Assert.Equal(255, prop.GetProperty("maximum").GetInt64());
+        Assert.False(prop.TryGetProperty("minimum", out _));
+        Assert.False(prop.TryGetProperty("maximum", out _));
     }
 
     [Fact]
@@ -427,7 +427,7 @@ public sealed class FormatRoundTripTests
     }
 
     [Fact]
-    public void Short_Property_Has_Int16_Range_In_Schema()
+    public void Short_Property_Has_Int16_Format_And_No_Implicit_Range_In_Schema()
     {
         var source = """
             using Rivet;
@@ -441,8 +441,8 @@ public sealed class FormatRoundTripTests
         var prop = EmitSchemaFor(source, "LevelDto").GetProperty("properties").GetProperty("level");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("int16", prop.GetProperty("format").GetString());
-        Assert.Equal(-32768, prop.GetProperty("minimum").GetInt64());
-        Assert.Equal(32767, prop.GetProperty("maximum").GetInt64());
+        Assert.False(prop.TryGetProperty("minimum", out _));
+        Assert.False(prop.TryGetProperty("maximum", out _));
     }
 
     [Fact]
@@ -753,24 +753,23 @@ public sealed class FormatRoundTripTests
         var nullableSnowflake = Assert.IsType<TsType.Nullable>(
             def.Properties.First(p => p.Name == "nullableSnowflake").Type
         );
-        Assert.Equal(
-            "snowflake",
-            Assert.IsType<TsType.Primitive>(nullableSnowflake.Inner).Format
-        );
+        Assert.Equal("snowflake", Assert.IsType<TsType.Primitive>(nullableSnowflake.Inner).Format);
         Assert.Equal("int32", Assert.IsType<TsType.IntUnion>(walker.Enums["Mode"]).Format);
         Assert.Null(
-            Assert.IsType<TsType.Primitive>(def.Properties.First(p => p.Name == "bareInteger").Type)
+            Assert
+                .IsType<TsType.Primitive>(def.Properties.First(p => p.Name == "bareInteger").Type)
                 .Format
         );
         Assert.Equal(
             "integer",
-            Assert.IsType<TsType.Primitive>(def.Properties.First(p => p.Name == "bareInteger").Type)
+            Assert
+                .IsType<TsType.Primitive>(def.Properties.First(p => p.Name == "bareInteger").Type)
                 .Name
         );
         Assert.Null(
-            Assert.IsType<TsType.Primitive>(
-                def.Properties.First(p => p.Name == "bareNumber").Type
-            ).Format
+            Assert
+                .IsType<TsType.Primitive>(def.Properties.First(p => p.Name == "bareNumber").Type)
+                .Format
         );
     }
 

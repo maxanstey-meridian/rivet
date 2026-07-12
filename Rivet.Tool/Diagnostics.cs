@@ -80,6 +80,7 @@ public static class Diagnostics
     public const string ImportEnumConstraintDropped = "RIV3012";
     public const string ImportDeclaredPropertiesDropped = "RIV3013";
     public const string ImportDictionaryKeyDropped = "RIV3014";
+    public const string ImportNamedScalarAlgebraUnsupported = "RIV3015";
 
     // ----- RIV4xxx: coverage -----
     public const string CoverageMissingImplementation = "RIV4001";
@@ -161,7 +162,7 @@ public static class Diagnostics
         [ImportSecuritySchemesDropped] =
             "Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented.",
         [ImportOperationMethodDropped] =
-            "HEAD/OPTIONS/TRACE operation dropped — the HTTP method has no contract representation.",
+            "TRACE operation dropped — the HTTP method has no contract representation.",
         [ImportAdditionalPropertiesDropped] =
             "Named schema declares both 'properties' and 'additionalProperties' — imported as a record; extra members are not represented.",
         [ImportDiscriminatorDropped] =
@@ -182,6 +183,8 @@ public static class Diagnostics
             "Inline schema declares both 'properties' and 'additionalProperties' — imported as a dictionary; the declared properties are not represented.",
         [ImportDictionaryKeyDropped] =
             "Dictionary 'propertyNames' schema has no C# dictionary-key representation — imported with string keys.",
+        [ImportNamedScalarAlgebraUnsupported] =
+            "Named scalar uses schema algebra outside primitive/flat-enum preservation — existing fallback mapping retained.",
         [CoverageMissingImplementation] = "Contract endpoint has no matching implementation.",
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",

@@ -71,9 +71,7 @@ public sealed class ImportMetricTests
             // Added with Phase 4 / I12: multi-scheme document security collapses to the first
             // scheme — previously silent, now a named warning.
             Diagnostics.ImportSecuritySchemesDropped => "security-schemes-dropped",
-            // Added with I15 (FABLE_GAPS §2): HEAD/OPTIONS/TRACE operations have no contract
-            // representation and used to be skipped with ZERO diagnostics — now each dropped
-            // op emits a named warning.
+            // TRACE has no contract representation; each dropped operation emits RIV3003.
             Diagnostics.ImportOperationMethodDropped => "operation-method-dropped",
             // Added with P2 wave 3 (dictionary key types): a propertyNames key schema the
             // importer cannot represent as a C# dictionary key degrades to string keys
@@ -290,21 +288,20 @@ public sealed class ImportMetricTests
             $"Expected ≤29 body caveats (ratchet), got {BodyCaveats(r)}"
         );
         Assert.Equal(0, UnsupportedError(r));
+        // Kubernetes declares six HEAD and six OPTIONS operations. They must survive import.
+        Assert.Equal(6, CountPattern(r, "Contracts/", "Define.Head"));
+        Assert.Equal(6, CountPattern(r, "Contracts/", "Define.Options"));
+
         // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
-        // "operation-method-dropped" added deliberately with I15 (FABLE_GAPS §2): the
-        // kubernetes spec declares 6 HEAD + 6 OPTIONS operations that have no contract
-        // representation — previously skipped with zero diagnostics, now each emits a
-        // named warning. Exact count pinned below against the corpus.
         AssertWarningCategoriesSubsetOf(
             r,
             "unresolved-schema",
             "unsupported-schema-type",
-            "array-missing-items",
-            "operation-method-dropped"
+            "array-missing-items"
         );
-        Assert.Equal(
-            12,
-            r.Warnings.Count(w => DiagnosticId(w) == Diagnostics.ImportOperationMethodDropped)
+        Assert.DoesNotContain(
+            r.Warnings,
+            warning => DiagnosticId(warning) == Diagnostics.ImportOperationMethodDropped
         );
     }
 
@@ -465,12 +462,10 @@ public sealed class ImportMetricTests
         Assert.True(TypeFiles(r) >= 220, $"Expected ≥220 types, got {TypeFiles(r)}");
         Assert.True(ContractFiles(r) >= 50, $"Expected ≥50 contracts, got {ContractFiles(r)}");
 
-        // Slack has genuinely untyped schemas — warnings are expected.
-        // Raised 25 → 26 deliberately with Phase 4 / I5: Slack's `test`/`getPresence`
-        // response schemas declare both `properties` and a typed `additionalProperties`;
-        // the previously-silent property drop now emits 3 named "Declared properties
-        // dropped" warnings (23 pre-existing + 3 new = 26).
-        Assert.True(r.Warnings.Count <= 26, $"Expected ≤26 warnings, got {r.Warnings.Count}");
+        // Slack has genuinely untyped schemas — warnings are expected. The exact
+        // response-content pass now visits every status/media schema rather than only
+        // the primary response, exposing 14 additional unresolved-schema sites.
+        Assert.True(r.Warnings.Count <= 40, $"Expected ≤40 warnings, got {r.Warnings.Count}");
         Assert.True(r.Warnings.Count > 0, "Slack should have some warnings for untyped schemas");
     }
 }

@@ -45,11 +45,100 @@ public sealed class OpenApiEmitterTests
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
         IReadOnlyDictionary<string, TsType> enums,
-        SecurityConfig? security = null
+        SecurityConfig? security = null,
+        OpenApiDocumentInfo? documentInfo = null
     )
     {
-        var json = OpenApiEmitter.Emit(endpoints, definitions, brands, enums, security);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            definitions,
+            brands,
+            enums,
+            security,
+            documentInfo
+        );
         return JsonDocument.Parse(json);
+    }
+
+    [Fact]
+    public void Authored_Component_Examples_Merge_With_Endpoint_Examples_Without_Clobbering()
+    {
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "getDeployment",
+                "GET",
+                "/deployments",
+                [],
+                null,
+                "deployments",
+                [
+                    new TsResponseType(
+                        200,
+                        new TsType.Primitive("string"),
+                        Examples:
+                        [
+                            new TsEndpointExample(
+                                "application/json",
+                                Name: "shared",
+                                ComponentExampleId: "shared",
+                                ResolvedJson: "{\"source\":\"endpoint\"}"
+                            ),
+                            new TsEndpointExample(
+                                "application/json",
+                                Name: "derived",
+                                ComponentExampleId: "derived",
+                                ResolvedJson: "{\"source\":\"derived\"}"
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        };
+        var provenance = new OpenApiDocumentProvenance(
+            new OpenApiInfoProvenance("Examples", "1.0.0"),
+            [],
+            null,
+            [],
+            [
+                new OpenApiComponentExampleProvenance(
+                    "shared",
+                    "Authored summary",
+                    "Authored description",
+                    "{\"source\":\"authored\"}",
+                    null
+                ),
+                new OpenApiComponentExampleProvenance(
+                    "external",
+                    null,
+                    "External example",
+                    null,
+                    "https://example.test/example.json"
+                ),
+            ]
+        );
+
+        using var doc = EmitOpenApiFromModel(
+            endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            documentInfo: new OpenApiDocumentInfo(Provenance: provenance)
+        );
+
+        var examples = doc.RootElement.GetProperty("components").GetProperty("examples");
+        var shared = examples.GetProperty("shared");
+        Assert.Equal("Authored summary", shared.GetProperty("summary").GetString());
+        Assert.Equal("Authored description", shared.GetProperty("description").GetString());
+        Assert.Equal("authored", shared.GetProperty("value").GetProperty("source").GetString());
+        Assert.Equal(
+            "derived",
+            examples.GetProperty("derived").GetProperty("value").GetProperty("source").GetString()
+        );
+        Assert.Equal(
+            "https://example.test/example.json",
+            examples.GetProperty("external").GetProperty("externalValue").GetString()
+        );
     }
 
     private static JsonDocument EmitOpenApiFromJsonContract(string json)
@@ -91,10 +180,10 @@ public sealed class OpenApiEmitterTests
             .GetProperty("content")
             .GetProperty("application/json")
             .GetProperty("schema");
-        var bodyComponent = doc
+        var authoredComponent = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
-            .GetProperty("UpdateRoleRequest");
+            .GetProperty("UpdateRoleInput");
 
         Assert.Equal(
             "string",
@@ -104,12 +193,9 @@ public sealed class OpenApiEmitterTests
             "uuid",
             routeParameter.GetProperty("schema").GetProperty("format").GetString()
         );
-        Assert.Equal(
-            "#/components/schemas/UpdateRoleRequest",
-            bodySchema.GetProperty("$ref").GetString()
-        );
-        Assert.False(bodyComponent.GetProperty("properties").TryGetProperty("id", out _));
-        Assert.True(bodyComponent.GetProperty("properties").TryGetProperty("role", out _));
+        Assert.False(bodySchema.GetProperty("properties").TryGetProperty("id", out _));
+        Assert.True(bodySchema.GetProperty("properties").TryGetProperty("role", out _));
+        Assert.True(authoredComponent.GetProperty("properties").TryGetProperty("id", out _));
     }
 
     [Fact]
@@ -143,10 +229,9 @@ public sealed class OpenApiEmitterTests
             .GetProperty("schema");
         var oneOf = bodySchema.GetProperty("oneOf");
 
-        Assert.Equal(
-            "#/components/schemas/UpdateRoleRequest",
-            oneOf[0].GetProperty("$ref").GetString()
-        );
+        Assert.Equal("object", oneOf[0].GetProperty("type").GetString());
+        Assert.False(oneOf[0].GetProperty("properties").TryGetProperty("id", out _));
+        Assert.True(oneOf[0].GetProperty("properties").TryGetProperty("role", out _));
         Assert.Equal("null", oneOf[1].GetProperty("type").GetString());
     }
 
@@ -178,14 +263,15 @@ public sealed class OpenApiEmitterTests
             .RootElement.GetProperty("paths")
             .GetProperty("/api/members/{id}/role")
             .GetProperty("put");
-        var bodyComponent = doc
-            .RootElement.GetProperty("components")
-            .GetProperty("schemas")
-            .GetProperty("UpdateRoleRequest");
+        var bodySchema = operation
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema");
 
         Assert.Equal("id", operation.GetProperty("parameters")[0].GetProperty("name").GetString());
-        Assert.False(bodyComponent.GetProperty("properties").TryGetProperty("member_key", out _));
-        Assert.True(bodyComponent.GetProperty("properties").TryGetProperty("role", out _));
+        Assert.False(bodySchema.GetProperty("properties").TryGetProperty("member_key", out _));
+        Assert.True(bodySchema.GetProperty("properties").TryGetProperty("role", out _));
     }
 
     [Fact]
@@ -355,20 +441,14 @@ public sealed class OpenApiEmitterTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var bodyRef = doc
+        var body = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/members/{id}")
             .GetProperty("put")
             .GetProperty("requestBody")
             .GetProperty("content")
             .GetProperty("application/json")
-            .GetProperty("schema")
-            .GetProperty("$ref")
-            .GetString()!;
-        var body = doc
-            .RootElement.GetProperty("components")
-            .GetProperty("schemas")
-            .GetProperty(bodyRef.Split('/')[^1]);
+            .GetProperty("schema");
 
         Assert.False(body.GetProperty("properties").TryGetProperty("id", out _));
         Assert.Equal(
@@ -404,7 +484,7 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
-    public void RouteFiltered_Body_Names_Avoid_Definitions_And_SameNamed_Endpoints()
+    public void RouteFiltered_Bodies_Are_Inline_And_Authored_Types_Remain_Components()
     {
         var source = """
             using Rivet;
@@ -432,29 +512,27 @@ public sealed class OpenApiEmitterTests
 
         using var doc = EmitOpenApi(source);
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
-        var memberRef = doc
+        var memberBody = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/members/{id}")
             .GetProperty("put")
             .GetProperty("requestBody")
             .GetProperty("content")
             .GetProperty("application/json")
-            .GetProperty("schema")
-            .GetProperty("$ref")
-            .GetString();
-        var teamRef = doc
+            .GetProperty("schema");
+        var teamBody = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/teams/{id}")
             .GetProperty("put")
             .GetProperty("requestBody")
             .GetProperty("content")
             .GetProperty("application/json")
-            .GetProperty("schema")
-            .GetProperty("$ref")
-            .GetString();
+            .GetProperty("schema");
 
-        Assert.Equal("#/components/schemas/MembersUpdateRequest", memberRef);
-        Assert.Equal("#/components/schemas/TeamsUpdateRequest", teamRef);
+        Assert.True(memberBody.GetProperty("properties").TryGetProperty("role", out _));
+        Assert.False(memberBody.GetProperty("properties").TryGetProperty("id", out _));
+        Assert.True(teamBody.GetProperty("properties").TryGetProperty("name", out _));
+        Assert.False(teamBody.GetProperty("properties").TryGetProperty("id", out _));
         Assert.True(
             schemas
                 .GetProperty("UpdateRequest")
@@ -462,17 +540,13 @@ public sealed class OpenApiEmitterTests
                 .TryGetProperty("existing", out _)
         );
         Assert.True(
-            schemas
-                .GetProperty("MembersUpdateRequest")
-                .GetProperty("properties")
-                .TryGetProperty("role", out _)
+            schemas.GetProperty("MemberInput").GetProperty("properties").TryGetProperty("id", out _)
         );
         Assert.True(
-            schemas
-                .GetProperty("TeamsUpdateRequest")
-                .GetProperty("properties")
-                .TryGetProperty("name", out _)
+            schemas.GetProperty("TeamInput").GetProperty("properties").TryGetProperty("id", out _)
         );
+        Assert.False(schemas.TryGetProperty("MembersUpdateRequest", out _));
+        Assert.False(schemas.TryGetProperty("TeamsUpdateRequest", out _));
     }
 
     [Fact]
@@ -703,17 +777,13 @@ public sealed class OpenApiEmitterTests
     [Fact]
     public void Direct_Emission_Rejects_Duplicate_Primary_Security_Definition()
     {
-        var primary = new Dictionary<string, object> { ["type"] = "http", ["scheme"] = "bearer" };
-        var replacement = new Dictionary<string, object>
-        {
-            ["type"] = "apiKey",
-            ["in"] = "header",
-            ["name"] = "X-Key",
-        };
         var security = new SecurityConfig(
             "bearer",
-            primary,
-            new Dictionary<string, Dictionary<string, object>> { ["bearer"] = replacement }
+            new HttpSecurityScheme("bearer"),
+            new Dictionary<string, SecuritySchemeDefinition>
+            {
+                ["bearer"] = new ApiKeySecurityScheme("X-Key", SecurityApiKeyLocation.Header),
+            }
         );
 
         var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
@@ -2245,10 +2315,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var security = new SecurityConfig(
-            "bearer",
-            new Dictionary<string, object> { ["type"] = "http", ["scheme"] = "bearer" }
-        );
+        var security = new SecurityConfig("bearer", new HttpSecurityScheme("bearer"));
 
         using var doc = EmitOpenApi(source, security);
         var root = doc.RootElement;
@@ -2285,10 +2352,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var security = new SecurityConfig(
-            "bearer",
-            new Dictionary<string, object> { ["type"] = "http", ["scheme"] = "bearer" }
-        );
+        var security = new SecurityConfig("bearer", new HttpSecurityScheme("bearer"));
 
         using var doc = EmitOpenApi(source, security);
         var get = doc
@@ -2322,10 +2386,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var security = new SecurityConfig(
-            "admin",
-            new Dictionary<string, object> { ["type"] = "http", ["scheme"] = "bearer" }
-        );
+        var security = new SecurityConfig("admin", new HttpSecurityScheme("bearer"));
 
         using var doc = EmitOpenApi(source, security);
         var delete = doc
@@ -2359,10 +2420,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var security = new SecurityConfig(
-            "bearer",
-            new Dictionary<string, object> { ["type"] = "http", ["scheme"] = "bearer" }
-        );
+        var security = new SecurityConfig("bearer", new HttpSecurityScheme("bearer"));
 
         var exception = Assert.Throws<OpenApiEmissionException>(() =>
             EmitOpenApi(source, security)
@@ -2392,10 +2450,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var security = new SecurityConfig(
-            "bearer",
-            new Dictionary<string, object> { ["type"] = "http", ["scheme"] = "bearer" }
-        );
+        var security = new SecurityConfig("bearer", new HttpSecurityScheme("bearer"));
 
         JsonDocument? doc = null;
         var stderr = CompilationHelper.CaptureStdErr(() => doc = EmitOpenApi(source, security));
@@ -2503,15 +2558,15 @@ public sealed class OpenApiEmitterTests
         var result = SecurityParser.Parse(spec);
         Assert.NotNull(result);
         Assert.Equal(expectedName, result.SchemeName);
-        Assert.Equal(expectedType, result.SchemeDefinition["type"]);
-
         if (expectedType == "http")
         {
-            Assert.Equal(expectedSchemeOrIn, result.SchemeDefinition["scheme"]);
+            var definition = Assert.IsType<HttpSecurityScheme>(result.SchemeDefinition);
+            Assert.Equal(expectedSchemeOrIn, definition.Scheme);
         }
         else
         {
-            Assert.Equal(expectedSchemeOrIn, result.SchemeDefinition["in"]);
+            var definition = Assert.IsType<ApiKeySecurityScheme>(result.SchemeDefinition);
+            Assert.Equal(expectedSchemeOrIn, definition.Location.ToString().ToLowerInvariant());
         }
     }
 
@@ -2520,7 +2575,10 @@ public sealed class OpenApiEmitterTests
     {
         var result = SecurityParser.Parse("bearer:jwt");
         Assert.NotNull(result);
-        Assert.Equal("JWT", result.SchemeDefinition["bearerFormat"]);
+        Assert.Equal(
+            "JWT",
+            Assert.IsType<HttpSecurityScheme>(result.SchemeDefinition).BearerFormat
+        );
     }
 
     [Fact]
@@ -2528,7 +2586,7 @@ public sealed class OpenApiEmitterTests
     {
         var result = SecurityParser.Parse("cookie:sid");
         Assert.NotNull(result);
-        Assert.Equal("sid", result.SchemeDefinition["name"]);
+        Assert.Equal("sid", Assert.IsType<ApiKeySecurityScheme>(result.SchemeDefinition).Name);
     }
 
     [Fact]
@@ -2536,7 +2594,10 @@ public sealed class OpenApiEmitterTests
     {
         var result = SecurityParser.Parse("apikey:header:X-API-Key");
         Assert.NotNull(result);
-        Assert.Equal("X-API-Key", result.SchemeDefinition["name"]);
+        Assert.Equal(
+            "X-API-Key",
+            Assert.IsType<ApiKeySecurityScheme>(result.SchemeDefinition).Name
+        );
     }
 
     [Fact]
@@ -3006,9 +3067,8 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
-    public void Void_Endpoint_Without_Status_Gets_204_Response()
+    public void Empty_Response_Ir_Uses_The_Method_Default_Response()
     {
-        // Void endpoint with no .Status() and no return type → should get default 204
         var endpoints = new List<TsEndpointDefinition>
         {
             new("doSomething", "POST", "/api/do", [], null, "test", []),
@@ -3027,12 +3087,9 @@ public sealed class OpenApiEmitterTests
             .GetProperty("post")
             .GetProperty("responses");
 
-        Assert.True(responses.TryGetProperty("204", out var resp204));
-        Assert.Equal("No Content", resp204.GetProperty("description").GetString());
-        Assert.False(
-            resp204.TryGetProperty("content", out _),
-            "204 response should have no content"
-        );
+        var response = Assert.Single(responses.EnumerateObject());
+        Assert.Equal("201", response.Name);
+        Assert.Equal("Created", response.Value.GetProperty("description").GetString());
     }
 
     [Fact]

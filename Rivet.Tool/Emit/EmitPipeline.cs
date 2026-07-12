@@ -16,7 +16,8 @@ internal static class EmitPipeline
         IReadOnlyDictionary<string, string?> TypeNamespaces,
         IReadOnlyDictionary<string, TsTypeDefinition> DefinitionsByName,
         IReadOnlyDictionary<string, TsType.Brand> BrandsByName,
-        ContractSecurityMetadata? Security = null
+        ContractSecurityMetadata? Security = null,
+        OpenApiDocumentProvenance? DocumentProvenance = null
     );
 
     internal static async Task<int> RunAsync(EmitInput input, RivetOptions options)
@@ -34,10 +35,11 @@ internal static class EmitPipeline
 
         var endpoints = extraction.Endpoints;
 
-        var documentInfo = new OpenApiDocumentInfo(
-            options.Title ?? "API",
-            options.Version ?? "1.0.0",
-            options.Servers is { Count: > 0 } ? options.Servers : null
+        var documentInfo = OpenApiDocumentInfo.Resolve(
+            input.DocumentProvenance,
+            options.Title,
+            options.Version,
+            options.Servers
         );
         string openApiJson;
         try
@@ -45,23 +47,33 @@ internal static class EmitPipeline
             var securityConfig = options.SecuritySchemes is { Count: > 0 }
                 ? SecurityParser.ParseMany(options.SecuritySchemes)
                 : SecurityParser.Parse(options.DefaultSecurity);
-            openApiJson = input.Security is not null
-                ? OpenApiEmitter.EmitWithSecurityMetadata(
+            openApiJson =
+                securityConfig is not null
+                    ? OpenApiEmitter.Emit(
+                        endpoints,
+                        definitionsByName,
+                        input.BrandsByName,
+                        input.Enums,
+                        securityConfig,
+                        documentInfo
+                    )
+                : input.Security is not null
+                    ? OpenApiEmitter.EmitWithSecurityMetadata(
+                        endpoints,
+                        definitionsByName,
+                        input.BrandsByName,
+                        input.Enums,
+                        input.Security,
+                        documentInfo
+                    )
+                : OpenApiEmitter.Emit(
                     endpoints,
                     definitionsByName,
                     input.BrandsByName,
                     input.Enums,
-                    input.Security,
+                    null,
                     documentInfo
-                )
-                : OpenApiEmitter.Emit(
-                endpoints,
-                definitionsByName,
-                input.BrandsByName,
-                input.Enums,
-                securityConfig,
-                documentInfo
-            );
+                );
         }
         catch (Exception exception)
             when (exception is OpenApiEmissionException or SecurityConfigurationException)

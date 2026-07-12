@@ -1,16 +1,44 @@
 {
   "openapi": "3.0.3",
   "info": {"title": "Probe", "version": "1.0.0"},
+  "security": [{"oauth": ["read"]}, {"bearer": []}],
   "paths": {
     "/things/{thing_id}": {
+      "parameters": [
+        {"name": "trace", "in": "query", "required": false, "schema": {"type": "string", "format": "uuid", "nullable": true}}
+      ],
       "get": {
         "operationId": "getThing",
-        "parameters": [{"name": "thing_id", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "responses": {"200": {"description": "ok", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Thing"}}}}}
+        "summary": "Get a thing",
+        "description": "Returns one thing.",
+        "x-rivet-query-auth": {"parameterName": "access_token"},
+        "security": [{"oauth": ["read", "write"], "bearer": []}, {"apiKey": []}],
+        "parameters": [
+          {"name": "thing_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+          {"name": "trace", "in": "query", "required": true, "schema": {"type": "string", "format": "uuid", "nullable": true}}
+        ],
+        "responses": {
+          "200": {
+            "description": "thing returned",
+            "headers": {
+              "X-Trace": {"description": "request trace", "required": true, "schema": {"type": "string"}}
+            },
+            "content": {
+              "application/json": {
+                "schema": {"type": "string", "format": "uuid", "nullable": true},
+                "examples": {"thing": {"value": "5b5f7f83-4f8f-4c68-855d-08f4c12468a8"}}
+              }
+            }
+          },
+          "202": {"description": "accepted"}
+        }
       },
       "put": {
         "operationId": "suspendThing",
-        "parameters": [{"name": "thing_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
+        "parameters": [
+          {"name": "thing_id", "in": "path", "required": true, "schema": {"type": "integer"}},
+          {"name": "trace", "in": "query", "required": true, "schema": {"type": "string", "format": "uuid", "nullable": true}}
+        ],
         "responses": {"204": {"description": "done"}}
       }
     },
@@ -27,8 +55,26 @@
     "/echo": {
       "post": {
         "operationId": "echo",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"x": {"type": "string"}}}, "examples": {"default": {"value": null}}}}},
-        "responses": {"200": {"description": "ok"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"type": "string", "format": "date-time", "nullable": true},
+              "examples": {"now": {"value": "2026-07-12T10:00:00Z"}}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "echoed",
+            "content": {
+              "application/json": {
+                "schema": {"type": "string", "format": "uri", "nullable": true},
+                "example": "https://example.test/result"
+              }
+            }
+          }
+        }
       }
     },
     "/notes": {
@@ -58,17 +104,42 @@
         "requestBody": {"required": true, "content": {"text/plain": {"schema": {"type": "string"}}}},
         "responses": {"200": {"description": "rendered", "content": {"text/html": {"schema": {"type": "string"}}}}}
       }
+    },
+    "/wildcard": {
+      "get": {
+        "operationId": "wildcard",
+        "responses": {"2XX": {"description": "any success"}}
+      }
     }
   },
   "components": {
+    "securitySchemes": {
+      "oauth": {"type": "oauth2", "flows": {"clientCredentials": {"tokenUrl": "https://example.test/token", "scopes": {"read": "Read", "write": "Write"}}}},
+      "bearer": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
+      "apiKey": {"type": "apiKey", "in": "header", "name": "X-Api-Key"}
+    },
     "schemas": {
       "Thing": {
         "type": "object",
+        "description": "A thing.",
         "required": ["state", "owner", "name"],
         "properties": {
-          "state": {"type": "string", "enum": ["Ready", "FLAT_RATE", "EastUs", "ALLCAPS"]},
+          "state": {
+            "type": "string",
+            "description": "Current state.",
+            "deprecated": true,
+            "default": "Ready",
+            "example": "FLAT_RATE",
+            "readOnly": true,
+            "enum": ["Ready", "FLAT_RATE", "EastUs", "ALLCAPS"],
+            "minLength": 2,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z_]+$"
+          },
           "owner": {"$ref": "#/components/schemas/nullable-owner"},
-          "name": {"type": "string", "nullable": true}
+          "name": {"type": "string", "nullable": true, "writeOnly": true},
+          "score": {"type": "number", "minimum": 0, "maximum": 100, "exclusiveMinimum": -1, "exclusiveMaximum": 101, "multipleOf": 0.5},
+          "tags": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 5, "uniqueItems": true}
         }
       },
       "nullable-owner": {"type": "object", "nullable": true, "properties": {"id": {"type": "integer"}}}

@@ -13,7 +13,7 @@ internal static class ResponseStatusValidation
     )
     {
         var duplicate = responses
-            .GroupBy(response => response.StatusCode)
+            .GroupBy(response => response.EffectiveStatusKey, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault(group => group.Skip(1).Any());
         if (duplicate is null)
         {
@@ -31,12 +31,12 @@ internal static class ResponseStatusValidation
         string endpointName
     )
     {
-        var seen = new HashSet<int>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var normalized = new List<TsResponseType>();
 
         foreach (var response in responses)
         {
-            if (seen.Add(response.StatusCode))
+            if (seen.Add(response.EffectiveStatusKey))
             {
                 normalized.Add(response);
                 continue;
@@ -51,7 +51,43 @@ internal static class ResponseStatusValidation
             );
         }
 
-        normalized.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
+        normalized.Sort(
+            (a, b) =>
+                StringComparer.OrdinalIgnoreCase.Compare(a.EffectiveStatusKey, b.EffectiveStatusKey)
+        );
+        return normalized;
+    }
+
+    internal static List<TsResponseType> NormalizeIrAndEnsureResponse(
+        IEnumerable<TsResponseType> responses,
+        TsEndpointDefinition endpoint
+    ) =>
+        NormalizeIrAndEnsureResponse(
+            responses,
+            endpoint.Name,
+            endpoint.HttpMethod,
+            endpoint.ReturnType
+        );
+
+    internal static List<TsResponseType> NormalizeIrAndEnsureResponse(
+        IEnumerable<TsResponseType> responses,
+        string endpointName,
+        string httpMethod,
+        TsType? returnType
+    )
+    {
+        var normalized = NormalizeIrKeepingFirst(responses, endpointName);
+        if (normalized.Count > 0)
+        {
+            return normalized;
+        }
+
+        var statusCode =
+            httpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase) ? 201
+            : httpMethod.Equals("DELETE", StringComparison.OrdinalIgnoreCase) && returnType is null
+                ? 204
+            : 200;
+        normalized.Add(new TsResponseType(statusCode, returnType));
         return normalized;
     }
 }

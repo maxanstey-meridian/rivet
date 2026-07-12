@@ -11,7 +11,19 @@ internal sealed record GenericTemplateInfo(
 internal sealed record SchemaMapResult(
     IReadOnlyList<GeneratedRecord> Records,
     IReadOnlyList<GeneratedEnum> Enums,
-    IReadOnlyList<GeneratedBrand> Brands
+    IReadOnlyList<GeneratedBrand> Brands,
+    IReadOnlyList<GeneratedScalarSchema> ScalarSchemas
+);
+
+internal sealed record GeneratedScalarSchema(
+    string Name,
+    string ComponentId,
+    string? SchemaType,
+    string? Format,
+    bool IsNullable,
+    TsScalarMetadata Metadata,
+    bool IsEnum = false,
+    string? SchemaRef = null
 );
 
 internal sealed record GeneratedRecord(
@@ -23,8 +35,13 @@ internal sealed record GeneratedRecord(
     string? BaseTypeName = null,
     // Undiscriminated-oneOf wrapper (As* properties) — emitted with [RivetUnion]
     // so the walker re-emits oneOf and the runtime serializes the bare variant.
-    bool IsUnion = false
+    bool IsUnion = false,
+    string? ComponentId = null,
+    bool IsSynthetic = true,
+    IReadOnlyList<GeneratedSchemaMetadata>? SchemaMetadata = null
 );
+
+internal sealed record GeneratedSchemaMetadata(string Pointer, TsScalarMetadata Metadata);
 
 /// <summary>
 /// Reversal of an emitted oneOf + discriminator + mapping union: the record becomes an
@@ -60,7 +77,9 @@ internal sealed record RecordProperty(
     string? WireName = null,
     // Imported properties pin format presence because CLR primitives infer defaults.
     bool IsFormatSpecified = false,
-    string? SchemaType = null
+    string? SchemaType = null,
+    string? SchemaRef = null,
+    IReadOnlyList<GeneratedSchemaMetadata>? SchemaMetadata = null
 );
 
 internal sealed record GeneratedEnumMember(
@@ -72,10 +91,20 @@ internal sealed record GeneratedEnumMember(
 internal sealed record GeneratedEnum(
     string Name,
     IReadOnlyList<GeneratedEnumMember> Members,
-    string? Format = null
+    string? Format = null,
+    string? Description = null,
+    string? ComponentId = null,
+    bool IsSynthetic = true
 );
 
-internal sealed record GeneratedBrand(string Name, string InnerType);
+internal sealed record GeneratedBrand(
+    string Name,
+    string InnerType,
+    string? Format = null,
+    string? Description = null,
+    string? ComponentId = null,
+    bool IsSynthetic = true
+);
 
 internal sealed record GeneratedContract(
     string ModuleName,
@@ -92,6 +121,8 @@ internal sealed record GeneratedEndpointField(
     string? Summary,
     string? Description,
     int? SuccessStatus,
+    string? SuccessStatusKey,
+    string? SuccessResponseDescription,
     IReadOnlyList<GeneratedErrorResponse> ErrorResponses,
     bool IsAnonymous,
     string? SecurityScheme,
@@ -108,10 +139,13 @@ internal sealed record GeneratedEndpointField(
     string? ResponseContentType = null,
     string? RequestBodyType = null,
     bool? RequestBodyRequired = null,
-    string? SecurityRequirementsJson = null,
+    bool RequestBodyPresent = false,
+    SecurityRequirements? SecurityRequirements = null,
     IReadOnlyList<GeneratedMediaTypeContent>? RequestContents = null,
     IReadOnlyList<GeneratedResponseMediaTypeContent>? ResponseContents = null,
-    IReadOnlyList<GeneratedEndpointParameter>? Parameters = null
+    IReadOnlyList<GeneratedEndpointParameter>? Parameters = null,
+    bool SuppressImplicitResponse = false,
+    OpenApiOperationProvenance? Provenance = null
 )
 {
     public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
@@ -127,21 +161,40 @@ internal sealed record GeneratedEndpointField(
     public IReadOnlyList<GeneratedEndpointParameter> Parameters { get; init; } = Parameters ?? [];
 }
 
-internal sealed record GeneratedMediaTypeContent(string MediaType, string TypeName);
+internal sealed record GeneratedMediaTypeContent(
+    string MediaType,
+    string? TypeName,
+    bool IsBinary = false,
+    string? SchemaRef = null,
+    string? SchemaType = null,
+    string? Format = null,
+    bool IsFormatSpecified = false
+);
 
 internal sealed record GeneratedResponseMediaTypeContent(
     int StatusCode,
+    string StatusKey,
     string MediaType,
-    string TypeName
+    string? TypeName,
+    bool IsBinary = false,
+    string? SchemaRef = null,
+    string? SchemaType = null,
+    string? Format = null,
+    bool IsFormatSpecified = false
 );
 
 internal sealed record GeneratedErrorResponse(
     int StatusCode,
+    string StatusKey,
     string? TypeName,
     string? Description
 );
 
-internal sealed record GeneratedEndpointResponseExample(int StatusCode, TsEndpointExample Example);
+internal sealed record GeneratedEndpointResponseExample(
+    int StatusCode,
+    string StatusKey,
+    TsEndpointExample Example
+);
 
 internal sealed record GeneratedEndpointParameter(
     string Name,
@@ -150,13 +203,30 @@ internal sealed record GeneratedEndpointParameter(
     bool Required,
     string? SchemaType,
     string? Format,
-    bool IsFormatSpecified
+    bool IsFormatSpecified,
+    string? MetadataJson,
+    string? SchemaRef = null
 );
 
 /// <summary>P2 wave 5: a response header re-emitted as a .WithResponseHeader(...) chain call.</summary>
 internal sealed record GeneratedResponseHeader(
     int StatusCode,
+    string StatusKey,
     string Name,
+    string TypeName,
+    string? SchemaType,
+    string? Format,
+    bool IsFormatSpecified,
     string? Description,
-    bool Required
+    bool Required,
+    string? SchemaRef = null,
+    string? SchemaExamplesJson = null,
+    string? ExampleJson = null,
+    string? ExamplesJson = null,
+    bool Deprecated = false,
+    string? Style = null,
+    bool? Explode = null,
+    bool AllowReserved = false,
+    bool AllowEmptyValue = false,
+    string? ContentType = null
 );

@@ -1,5 +1,6 @@
 namespace Rivet.Tool.Emit;
 
+using System.Text.Json;
 using Rivet.Tool.Model;
 
 public sealed record ExtractionResult(
@@ -21,18 +22,17 @@ public static class InlineTypeExtractor
             TsType.Primitive p =>
                 $"P:{Encode(p.Name)}F:{Encode(p.Format ?? "")}C:{Encode(p.CSharpType ?? "")}",
             TsType.Nullable n => $"N:{CanonicalHash(n.Inner)}",
-            TsType.Array a => $"A:{CanonicalHash(a.Element)}",
+            TsType.Array a => $"A:{CanonicalHash(a.Element)}M:{MetadataHash(a.ElementMetadata)}",
             // Keyless dictionaries keep the historical hash so existing names stay stable
             TsType.Dictionary d => d.Key is null
-                ? $"D:{CanonicalHash(d.Value)}"
-                : $"D[{CanonicalHash(d.Key)}]:{CanonicalHash(d.Value)}",
+                ? $"D:{CanonicalHash(d.Value)}M:{MetadataHash(d.ValueMetadata)}"
+                : $"D[{CanonicalHash(d.Key)}]:{CanonicalHash(d.Value)}M:{MetadataHash(d.ValueMetadata)}",
             TsType.StringUnion su => "SU:"
                 + string.Concat(su.Members.OrderBy(m => m).Select(Encode)),
-            TsType.IntUnion iu =>
-                "IU:"
-                    + (iu.Format ?? "")
-                    + ":"
-                    + string.Join(",", iu.Members.OrderBy(m => m)),
+            TsType.IntUnion iu => "IU:"
+                + (iu.Format ?? "")
+                + ":"
+                + string.Join(",", iu.Members.OrderBy(m => m)),
             TsType.Literal literal =>
                 $"L:{literal.Value.ValueKind}:{Encode(literal.Value.ToString())}",
             TsType.TypeRef r => $"R:{Encode(r.Name)}",
@@ -65,6 +65,9 @@ public static class InlineTypeExtractor
         };
     }
 
+    private static string MetadataHash(TsScalarMetadata? metadata) =>
+        metadata is null ? "" : Encode(JsonSerializer.Serialize(metadata));
+
     public static List<(TsType.InlineObject Type, string Context)> CollectInlineObjects(
         IReadOnlyList<TsEndpointDefinition> endpoints
     )
@@ -82,6 +85,22 @@ public static class InlineTypeExtractor
                     $"{e.ControllerName}.{e.Name}.response.{r.StatusCode}",
                     results
                 );
+                foreach (var content in r.Contents ?? [])
+                {
+                    CollectFromType(
+                        content.Schema,
+                        $"{e.ControllerName}.{e.Name}.response.{r.EffectiveStatusKey}.content.{content.MediaType}",
+                        results
+                    );
+                }
+                foreach (var header in r.Headers ?? [])
+                {
+                    CollectFromType(
+                        header.Type,
+                        $"{e.ControllerName}.{e.Name}.response.{r.EffectiveStatusKey}.header.{header.Name}",
+                        results
+                    );
+                }
             }
 
             foreach (var p in e.Params)
@@ -92,6 +111,14 @@ public static class InlineTypeExtractor
             if (e.RequestType is not null)
             {
                 CollectFromType(e.RequestType, $"{e.ControllerName}.{e.Name}.requestType", results);
+            }
+            foreach (var content in e.RequestContents ?? [])
+            {
+                CollectFromType(
+                    content.Schema,
+                    $"{e.ControllerName}.{e.Name}.requestContent.{content.MediaType}",
+                    results
+                );
             }
         }
 
@@ -506,12 +533,28 @@ public static class InlineTypeExtractor
 
         var responses = endpoint
             .Responses.Select(r =>
-                r.DataType is not null
-                    ? r with
-                    {
-                        DataType = ReplaceInType(r.DataType, replacements),
-                    }
-                    : r
+                r with
+                {
+                    DataType = r.DataType is null ? null : ReplaceInType(r.DataType, replacements),
+                    Contents = r
+                        .Contents?.Select(content =>
+                            content with
+                            {
+                                Schema = content.Schema is null
+                                    ? null
+                                    : ReplaceInType(content.Schema, replacements),
+                            }
+                        )
+                        .ToList(),
+                    Headers = r
+                        .Headers?.Select(header =>
+                            header with
+                            {
+                                Type = ReplaceInType(header.Type, replacements),
+                            }
+                        )
+                        .ToList(),
+                }
             )
             .ToList();
 
@@ -522,6 +565,16 @@ public static class InlineTypeExtractor
         var requestType = endpoint.RequestType is not null
             ? ReplaceInType(endpoint.RequestType, replacements)
             : null;
+        var requestContents = endpoint
+            .RequestContents?.Select(content =>
+                content with
+                {
+                    Schema = content.Schema is null
+                        ? null
+                        : ReplaceInType(content.Schema, replacements),
+                }
+            )
+            .ToList();
 
         return endpoint with
         {
@@ -529,6 +582,7 @@ public static class InlineTypeExtractor
             Responses = responses,
             Params = parameters,
             RequestType = requestType,
+            RequestContents = requestContents,
         };
     }
 
@@ -556,13 +610,17 @@ public static class InlineTypeExtractor
                 return new TsType.InlineObject(replacedFields);
 
             case TsType.Array a:
-                return new TsType.Array(ReplaceInType(a.Element, replacements));
+                return new TsType.Array(ReplaceInType(a.Element, replacements), a.ElementMetadata);
 
             case TsType.Nullable n:
                 return new TsType.Nullable(ReplaceInType(n.Inner, replacements));
 
             case TsType.Dictionary d:
-                return new TsType.Dictionary(ReplaceInType(d.Value, replacements), d.Key);
+                return new TsType.Dictionary(
+                    ReplaceInType(d.Value, replacements),
+                    d.Key,
+                    d.ValueMetadata
+                );
 
             case TsType.Generic g:
                 var replacedArgs = g
@@ -571,14 +629,15 @@ public static class InlineTypeExtractor
                 return new TsType.Generic(g.Name, replacedArgs);
 
             case TsType.Brand b:
-                return new TsType.Brand(b.Name, ReplaceInType(b.Inner, replacements));
+                return new TsType.Brand(b.Name, ReplaceInType(b.Inner, replacements), b.Metadata);
 
             case TsType.TaggedUnion tu:
                 return new TsType.TaggedUnion(
                     tu.Discriminator,
                     tu.Variants.Select(v => new TsType.TaggedUnionVariant(
                             v.Tag,
-                            ReplaceInType(v.Type, replacements)
+                            ReplaceInType(v.Type, replacements),
+                            v.Metadata
                         ))
                         .ToList()
                 );
@@ -604,6 +663,14 @@ public static class InlineTypeExtractor
             foreach (var r in e.Responses)
             {
                 CollectArrayElements(r.DataType, hashes);
+                foreach (var content in r.Contents ?? [])
+                {
+                    CollectArrayElements(content.Schema, hashes);
+                }
+                foreach (var header in r.Headers ?? [])
+                {
+                    CollectArrayElements(header.Type, hashes);
+                }
             }
 
             foreach (var p in e.Params)
@@ -614,6 +681,10 @@ public static class InlineTypeExtractor
             if (e.RequestType is not null)
             {
                 CollectArrayElements(e.RequestType, hashes);
+            }
+            foreach (var content in e.RequestContents ?? [])
+            {
+                CollectArrayElements(content.Schema, hashes);
             }
         }
         return hashes;

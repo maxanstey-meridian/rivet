@@ -32,14 +32,23 @@ public static class ContractEmitter
             IReadOnlyList<TsPropertyDefinition>? Properties = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? Type = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-            string? Description = null
+            string? Description = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            TsTypeMetadata? Metadata = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            TsScalarMetadata? ScalarMetadata = null
     );
 
     internal sealed record ContractEnum(
         string Name,
         IReadOnlyList<string>? Values = null,
         IReadOnlyList<int>? IntValues = null,
-        string? Format = null
+        string? Format = null,
+        string? Description = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            TsTypeMetadata? Metadata = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            TsScalarMetadata? ScalarMetadata = null
     );
 
     internal sealed record ContractQueryAuth(string ParameterName);
@@ -77,18 +86,31 @@ public static class ContractEmitter
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             string? RequestContentTypeOverride = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-            string? ResponseContentTypeOverride = null
+            string? ResponseContentTypeOverride = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            IReadOnlyList<TsMediaTypeContent>? RequestContents = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            bool? RequestBodyRequired = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+            bool RequestBodyPresent = false,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            SecurityRequirements? SecurityRequirements = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            OpenApiOperationProvenance? Provenance = null
     );
 
     internal sealed record ContractResponseType(
-        int StatusCode,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? StatusCode,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StatusKey,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? DataType,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             string? Description = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             IReadOnlyList<ContractEndpointExample>? Examples = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-            IReadOnlyList<TsResponseHeader>? Headers = null
+            IReadOnlyList<TsResponseHeader>? Headers = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            IReadOnlyList<TsMediaTypeContent>? Contents = null
     );
 
     internal sealed record ContractEndpointExample(
@@ -98,7 +120,9 @@ public static class ContractEmitter
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             string? ComponentExampleId = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-            string? ResolvedJson = null
+            string? ResolvedJson = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            IReadOnlyDictionary<string, string>? ReferencedComponents = null
     );
 
     public static string Emit(
@@ -111,11 +135,21 @@ public static class ContractEmitter
             .Select(kv =>
                 kv.Value switch
                 {
-                    TsType.StringUnion su => new ContractEnum(kv.Key, Values: su.Members),
+                    TsType.StringUnion su => new ContractEnum(
+                        kv.Key,
+                        Values: su.Members,
+                        Format: su.Format,
+                        Description: su.Description,
+                        Metadata: su.Metadata,
+                        ScalarMetadata: su.ScalarMetadata
+                    ),
                     TsType.IntUnion iu => new ContractEnum(
                         kv.Key,
                         IntValues: iu.Members,
-                        Format: iu.Format
+                        Format: iu.Format,
+                        Description: iu.Description,
+                        Metadata: iu.Metadata,
+                        ScalarMetadata: iu.ScalarMetadata
                     ),
                     _ => throw new InvalidOperationException(
                         $"Unsupported enum type: {kv.Value.GetType().Name}"
@@ -143,7 +177,7 @@ public static class ContractEmitter
             endpoint.ReturnType,
             endpoint.ControllerName,
             ResponseStatusValidation
-                .NormalizeIrKeepingFirst(endpoint.Responses, endpoint.Name)
+                .NormalizeIrAndEnsureResponse(endpoint.Responses, endpoint)
                 .Select(ToContractResponseType)
                 .ToList(),
             endpoint.Summary,
@@ -158,18 +192,25 @@ public static class ContractEmitter
             endpoint.QueryAuth is { } qa ? new ContractQueryAuth(qa.ParameterName) : null,
             endpoint.BinaryRequestContentType,
             endpoint.RequestContentTypeOverride,
-            endpoint.ResponseContentTypeOverride
+            endpoint.ResponseContentTypeOverride,
+            endpoint.RequestContents,
+            endpoint.RequestBodyRequired,
+            endpoint.RequestBodyPresent,
+            endpoint.SecurityRequirements,
+            endpoint.Provenance
         );
     }
 
     internal static ContractResponseType ToContractResponseType(TsResponseType response)
     {
         return new ContractResponseType(
-            response.StatusCode,
+            response.StatusCode == 0 ? null : response.StatusCode,
+            response.StatusKey,
             response.DataType,
             response.Description,
             response.Examples?.Select(ToContractEndpointExample).ToList(),
-            response.Headers
+            response.Headers,
+            response.Contents
         );
     }
 
@@ -180,7 +221,8 @@ public static class ContractEmitter
             example.Name,
             example.Json,
             example.ComponentExampleId,
-            example.ResolvedJson
+            example.ResolvedJson,
+            example.ReferencedComponents
         );
     }
 
@@ -191,7 +233,9 @@ public static class ContractEmitter
             definition.TypeParameters,
             definition.Type is null ? definition.Properties : null,
             definition.Type,
-            definition.Description
+            definition.Description,
+            definition.Metadata,
+            definition.ScalarMetadata
         );
     }
 }

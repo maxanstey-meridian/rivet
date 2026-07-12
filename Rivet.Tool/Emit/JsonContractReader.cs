@@ -37,11 +37,23 @@ public static class JsonContractReader
         {
             if (e.IntValues is not null)
             {
-                enums[e.Name] = new TsType.IntUnion(e.IntValues, e.Format);
+                enums[e.Name] = new TsType.IntUnion(
+                    e.IntValues,
+                    e.Format,
+                    e.Metadata,
+                    e.Description,
+                    e.ScalarMetadata
+                );
             }
             else
             {
-                enums[e.Name] = new TsType.StringUnion(e.Values!);
+                enums[e.Name] = new TsType.StringUnion(
+                    e.Values!,
+                    e.Metadata,
+                    e.Format,
+                    e.Description,
+                    e.ScalarMetadata
+                );
             }
         }
 
@@ -94,11 +106,32 @@ public static class JsonContractReader
                 WalkForBrands(endpoint.RequestType, brands);
             }
 
+            foreach (var content in endpoint.RequestContents ?? [])
+            {
+                if (content.Schema is not null)
+                {
+                    WalkForBrands(content.Schema, brands);
+                }
+            }
+
             foreach (var response in endpoint.Responses)
             {
                 if (response.DataType is not null)
                 {
                     WalkForBrands(response.DataType, brands);
+                }
+
+                foreach (var content in response.Contents ?? [])
+                {
+                    if (content.Schema is not null)
+                    {
+                        WalkForBrands(content.Schema, brands);
+                    }
+                }
+
+                foreach (var header in response.Headers ?? [])
+                {
+                    WalkForBrands(header.Type, brands);
                 }
             }
         }
@@ -176,9 +209,11 @@ public static class JsonContractReader
         ContractEmitter.ContractEndpoint endpoint
     )
     {
-        var responses = ResponseStatusValidation.NormalizeIrKeepingFirst(
+        var responses = ResponseStatusValidation.NormalizeIrAndEnsureResponse(
             endpoint.Responses.Select(ToResponseType),
-            endpoint.Name
+            endpoint.Name,
+            endpoint.HttpMethod,
+            endpoint.ReturnType
         );
 
         return new TsEndpointDefinition(
@@ -205,22 +240,32 @@ public static class JsonContractReader
             // contract-JSON round-trip like IsFileEndpoint/QueryAuth above.
             endpoint.BinaryRequestContentType,
             endpoint.RequestContentTypeOverride,
-            endpoint.ResponseContentTypeOverride
+            endpoint.ResponseContentTypeOverride,
+            SecurityRequirements: endpoint.SecurityRequirements,
+            RequestContents: endpoint.RequestContents,
+            RequestBodyRequired: endpoint.RequestBodyRequired,
+            RequestBodyPresent: endpoint.RequestBodyPresent,
+            Provenance: endpoint.Provenance
         );
     }
 
     private static TsResponseType ToResponseType(ContractEmitter.ContractResponseType response)
     {
         return new TsResponseType(
-            response.StatusCode,
+            response.StatusCode ?? ParseStatusCode(response.StatusKey),
             response.DataType,
             response.Description,
             response.Examples?.Select(ToEndpointExample).ToList(),
             // P2 wave 5: headers are optional in contract JSON — absence (old contracts,
             // TS lowerer output) deserializes to null and is tolerated everywhere.
-            response.Headers
+            response.Headers,
+            response.Contents,
+            response.StatusKey
         );
     }
+
+    private static int ParseStatusCode(string? statusKey) =>
+        int.TryParse(statusKey, out var statusCode) ? statusCode : 0;
 
     private static TsEndpointExample ToEndpointExample(
         ContractEmitter.ContractEndpointExample example
@@ -231,7 +276,8 @@ public static class JsonContractReader
             example.Name,
             example.Json,
             example.ComponentExampleId,
-            example.ResolvedJson
+            example.ResolvedJson,
+            example.ReferencedComponents
         );
     }
 
@@ -244,13 +290,17 @@ public static class JsonContractReader
                 definition.Name,
                 definition.TypeParameters,
                 definition.Type,
-                definition.Description
+                definition.Description,
+                definition.Metadata,
+                definition.ScalarMetadata
             )
             : new TsTypeDefinition(
                 definition.Name,
                 definition.TypeParameters,
                 definition.Properties ?? [],
-                definition.Description
+                definition.Description,
+                definition.Metadata,
+                definition.ScalarMetadata
             );
     }
 }

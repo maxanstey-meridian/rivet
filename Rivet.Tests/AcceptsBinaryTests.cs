@@ -469,7 +469,7 @@ public sealed class AcceptsBinaryTests
 
         var chunkIndexParam = ep.Params.First(p => p.Name == "chunkIndex");
         Assert.Equal(ParamSource.Route, chunkIndexParam.Source);
-        Assert.True(chunkIndexParam.Type is TsType.Primitive { Name: "number", Format: "int32" });
+        Assert.True(chunkIndexParam.Type is TsType.Primitive { Name: "integer", Format: "int32" });
 
         // Forward again: the re-emitted operation must be equivalent
         var secondSpec = OpenApiEmitter.Emit(

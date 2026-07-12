@@ -1,3 +1,5 @@
+using Rivet.Tool.Model;
+
 namespace Rivet.Tool.Emit;
 
 /// <summary>
@@ -5,8 +7,8 @@ namespace Rivet.Tool.Emit;
 /// </summary>
 public sealed record SecurityConfig(
     string SchemeName,
-    Dictionary<string, object> SchemeDefinition,
-    IReadOnlyDictionary<string, Dictionary<string, object>>? AdditionalSchemeDefinitions = null
+    SecuritySchemeDefinition SchemeDefinition,
+    IReadOnlyDictionary<string, SecuritySchemeDefinition>? AdditionalSchemeDefinitions = null
 );
 
 public static class SecurityParser
@@ -29,9 +31,7 @@ public static class SecurityParser
             return null;
         }
 
-        var definitions = new Dictionary<string, Dictionary<string, object>>(
-            StringComparer.Ordinal
-        );
+        var definitions = new Dictionary<string, SecuritySchemeDefinition>(StringComparer.Ordinal);
         foreach (var config in parsed)
         {
             if (!definitions.TryAdd(config.SchemeName, config.SchemeDefinition))
@@ -44,8 +44,7 @@ public static class SecurityParser
 
         var primary = parsed[0];
         definitions.Remove(primary.SchemeName);
-        var additional = definitions;
-        return primary with { AdditionalSchemeDefinitions = additional };
+        return primary with { AdditionalSchemeDefinitions = definitions };
     }
 
     public static SecurityConfig? Parse(string? spec)
@@ -81,46 +80,23 @@ public static class SecurityParser
         {
             "bearer" when parts.Length == 1 => new SecurityConfig(
                 "bearer",
-                new Dictionary<string, object> { ["type"] = "http", ["scheme"] = "bearer" }
+                new HttpSecurityScheme("bearer")
             ),
-
             "bearer" when parts.Length == 2 && parts[1].Length > 0 => new SecurityConfig(
                 "bearer",
-                new Dictionary<string, object>
-                {
-                    ["type"] = "http",
-                    ["scheme"] = "bearer",
-                    ["bearerFormat"] = parts[1].ToUpperInvariant(),
-                }
+                new HttpSecurityScheme("bearer", parts[1].ToUpperInvariant())
             ),
-
             "cookie" when parts.Length == 2 && parts[1].Length > 0 => new SecurityConfig(
                 "cookieAuth",
-                new Dictionary<string, object>
-                {
-                    ["type"] = "apiKey",
-                    ["in"] = "cookie",
-                    ["name"] = parts[1],
-                }
+                new ApiKeySecurityScheme(parts[1], SecurityApiKeyLocation.Cookie)
             ),
-
             "apikey"
                 when parts.Length == 3
                     && parts[2].Length > 0
-                    && (
-                        parts[1].Equals("query", StringComparison.OrdinalIgnoreCase)
-                        || parts[1].Equals("header", StringComparison.OrdinalIgnoreCase)
-                        || parts[1].Equals("cookie", StringComparison.OrdinalIgnoreCase)
-                    ) => new SecurityConfig(
+                    && TryParseLocation(parts[1], out var location) => new SecurityConfig(
                 "apiKeyAuth",
-                new Dictionary<string, object>
-                {
-                    ["type"] = "apiKey",
-                    ["in"] = parts[1].ToLowerInvariant(),
-                    ["name"] = parts[2],
-                }
+                new ApiKeySecurityScheme(parts[2], location)
             ),
-
             _ => null,
         };
     }
@@ -139,6 +115,9 @@ public static class SecurityParser
                     or '_'
                     or '-'
         );
+
+    private static bool TryParseLocation(string value, out SecurityApiKeyLocation location) =>
+        Enum.TryParse(value, ignoreCase: true, out location);
 }
 
 internal sealed class SecurityConfigurationException(string message)

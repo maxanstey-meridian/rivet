@@ -1133,4 +1133,72 @@ public sealed class JsonContractReaderTests
         var roundTripped = Assert.Single(JsonContractReader.Read(json).Endpoints);
         Assert.Equal("member_key", roundTripped.Params[0].BodyPropertyName);
     }
+
+    [Fact]
+    public void Endpoint_Security_Provenance_And_Content_Metadata_Survive_RoundTrip()
+    {
+        var endpoint = new TsEndpointDefinition(
+            "create",
+            "POST",
+            "/items",
+            [],
+            null,
+            "items",
+            [
+                new TsResponseType(
+                    201,
+                    null,
+                    "Created exactly",
+                    Headers:
+                    [
+                        new TsResponseHeader(
+                            "X-Item",
+                            new TsType.Primitive("string"),
+                            "Item header"
+                        ),
+                    ],
+                    Contents:
+                    [
+                        new TsMediaTypeContent(
+                            "application/custom+json",
+                            new TsType.Primitive("string"),
+                            SchemaType: "string",
+                            Format: "item-id",
+                            IsFormatSpecified: true
+                        ),
+                    ]
+                ),
+            ],
+            SecurityRequirements: new SecurityRequirements([
+                new SecurityRequirement([new SecurityRequirementScheme("oauth", ["items:write"])]),
+            ]),
+            Provenance: new OpenApiOperationProvenance(
+                true,
+                "items.create",
+                ["Items"],
+                true,
+                [],
+                "Exact request body",
+                new OpenApiRivetIdentityProvenance("items", "create")
+            )
+        );
+
+        var json = ContractEmitter.Emit([], [], [endpoint]);
+        var roundTripped = Assert.Single(JsonContractReader.Read(json).Endpoints);
+        var response = Assert.Single(roundTripped.Responses);
+
+        Assert.Equal("oauth", roundTripped.SecurityRequirements!.Alternatives[0].Schemes[0].Name);
+        Assert.Equal(
+            ["items:write"],
+            roundTripped.SecurityRequirements.Alternatives[0].Schemes[0].Scopes
+        );
+        Assert.Equal("items.create", roundTripped.Provenance!.OperationId);
+        Assert.Equal("Exact request body", roundTripped.Provenance.RequestBodyDescription);
+        Assert.Equal("Created exactly", response.Description);
+        Assert.Equal("Item header", Assert.Single(response.Headers!).Description);
+        var content = Assert.Single(response.Contents!);
+        Assert.Equal("application/custom+json", content.MediaType);
+        Assert.Equal("item-id", content.Format);
+        Assert.True(content.IsFormatSpecified);
+    }
 }

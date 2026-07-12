@@ -11,7 +11,8 @@ internal sealed class RecordSynthesizer(
     ResolutionContext ctx,
     Func<IOpenApiSchema, string?, string> resolveType,
     Func<IOpenApiSchema, string?> resolveFormat,
-    Func<IOpenApiSchema, string?> resolveSchemaType
+    Func<IOpenApiSchema, string?> resolveSchemaType,
+    Func<IOpenApiSchema, string?> resolveScalarReference
 )
 {
     public GeneratedRecord ResolveAllOfRecord(
@@ -151,6 +152,7 @@ internal sealed class RecordSynthesizer(
                 var propContext = $"{context}{propName}";
                 var isRequired = requiredSet.Contains(propKey);
                 var csharpType = resolveType(propSchema, propContext);
+                var scalarReference = resolveScalarReference(propSchema);
 
                 var isDeprecated = propSchema.Deprecated;
 
@@ -202,6 +204,22 @@ internal sealed class RecordSynthesizer(
                 var isReadOnly = propSchema.ReadOnly;
                 var isWriteOnly = propSchema.WriteOnly;
 
+                // A component $ref is the complete authored property schema. The OpenAPI
+                // reader exposes resolved target facets through its proxy; emitting those
+                // again as $ref siblings would invent use-site metadata.
+                if (scalarReference is not null)
+                {
+                    isDeprecated = false;
+                    format = null;
+                    isFormatSpecified = false;
+                    defaultValue = null;
+                    constraints = null;
+                    description = null;
+                    example = null;
+                    isReadOnly = false;
+                    isWriteOnly = false;
+                }
+
                 // Wire fidelity: the walker re-emits camelCase(Name) unless a
                 // [JsonPropertyName] says otherwise, and the runtime serializer
                 // makes the same assumption — snake_case keys, already-PascalCase
@@ -223,7 +241,9 @@ internal sealed class RecordSynthesizer(
                         isWriteOnly,
                         WireName: wireName,
                         IsFormatSpecified: isFormatSpecified,
-                        SchemaType: resolveSchemaType(propSchema)
+                        SchemaType: scalarReference is null ? resolveSchemaType(propSchema) : null,
+                        SchemaRef: scalarReference,
+                        SchemaMetadata: SchemaMapper.CollectGeneratedSchemaMetadata(propSchema)
                     )
                 );
             }
@@ -285,7 +305,12 @@ internal sealed class RecordSynthesizer(
         var properties = ExtractProperties(schema, name);
         var description = string.IsNullOrEmpty(schema.Description) ? null : schema.Description;
         ctx.Resolving.Remove(name);
-        return new GeneratedRecord(name, properties, Description: description);
+        return new GeneratedRecord(
+            name,
+            properties,
+            Description: description,
+            SchemaMetadata: SchemaMapper.CollectGeneratedSchemaMetadata(schema)
+        );
     }
 
     public GeneratedRecord? BuildGenericTemplateRecord(
@@ -331,7 +356,7 @@ internal sealed class RecordSynthesizer(
         return new GeneratedRecord(templateName, templateProps, info.TypeParams);
     }
 
-    private static TsPropertyConstraints? ExtractConstraints(IOpenApiSchema schema)
+    internal static TsPropertyConstraints? ExtractConstraints(IOpenApiSchema schema)
     {
         var c = new TsPropertyConstraints(
             MinLength: schema.MinLength.HasValue ? (int)schema.MinLength.Value : null,

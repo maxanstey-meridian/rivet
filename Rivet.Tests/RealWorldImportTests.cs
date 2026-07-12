@@ -130,8 +130,8 @@ public sealed class RealWorldImportTests
         var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
 
         // Emit OpenAPI from walked model
-        var security = ImportedSecurity(json, eps1);
-        var emittedJson = OpenApiEmitter.Emit(
+        var security = SecurityMetadataWalker.Walk(comp1);
+        var emittedJson = OpenApiEmitter.EmitWithSecurityMetadata(
             eps1,
             wlk1.Definitions,
             wlk1.Brands,
@@ -175,8 +175,8 @@ public sealed class RealWorldImportTests
 
         var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
         var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
-        var security = ImportedSecurity(json, eps1);
-        var emittedJson = OpenApiEmitter.Emit(
+        var security = SecurityMetadataWalker.Walk(comp1);
+        var emittedJson = OpenApiEmitter.EmitWithSecurityMetadata(
             eps1,
             wlk1.Definitions,
             wlk1.Brands,
@@ -204,45 +204,6 @@ public sealed class RealWorldImportTests
         var eps2 = CompilationHelper.WalkContracts(comp2, disc2, wlk2);
 
         return new(import1, eps1, wlk1, emittedJson, import2, eps2, wlk2);
-    }
-
-    private static SecurityConfig? ImportedSecurity(
-        string sourceJson,
-        IReadOnlyList<TsEndpointDefinition> endpoints
-    )
-    {
-        using var document = JsonDocument.Parse(sourceJson);
-        if (
-            !document.RootElement.TryGetProperty("components", out var components)
-            || !components.TryGetProperty("securitySchemes", out var sourceSchemes)
-        )
-        {
-            return null;
-        }
-
-        var referenced = endpoints
-            .Select(endpoint => endpoint.Security?.Scheme)
-            .Where(name => name is not null)
-            .ToHashSet(StringComparer.Ordinal);
-        var definitions = sourceSchemes
-            .EnumerateObject()
-            .Where(scheme => referenced.Contains(scheme.Name))
-            .ToDictionary(
-                scheme => scheme.Name,
-                scheme =>
-                    JsonSerializer.Deserialize<Dictionary<string, object>>(
-                        scheme.Value.GetRawText()
-                    )!,
-                StringComparer.Ordinal
-            );
-        if (definitions.Count == 0)
-        {
-            return null;
-        }
-
-        var primary = definitions.First();
-        definitions.Remove(primary.Key);
-        return new SecurityConfig(primary.Key, primary.Value, definitions);
     }
 
     /// <summary>
@@ -420,7 +381,16 @@ public sealed class RealWorldImportTests
 
         var lostDefs = referencedNames
             .Where(n =>
-                r.Walker1.Definitions.ContainsKey(n) && !r.Walker2.Definitions.ContainsKey(n)
+                r.Walker1.Definitions.TryGetValue(n, out var definition)
+                && !r.Walker2.Definitions.ContainsKey(n)
+                && !(
+                    definition.Metadata?.Provenance == TsTypeProvenance.Synthetic
+                    && r.Walker2.Definitions.Values.Any(candidate =>
+                        candidate.Metadata?.Provenance == TsTypeProvenance.Synthetic
+                        && SyntheticShape(definition, r.Walker1)
+                            == SyntheticShape(candidate, r.Walker2)
+                    )
+                )
             )
             .ToList();
         Assert.True(
@@ -429,7 +399,18 @@ public sealed class RealWorldImportTests
         );
 
         var lostEnums = referencedNames
-            .Where(n => r.Walker1.Enums.ContainsKey(n) && !r.Walker2.Enums.ContainsKey(n))
+            .Where(n =>
+                r.Walker1.Enums.TryGetValue(n, out var enumType)
+                && !r.Walker2.Enums.ContainsKey(n)
+                && !(
+                    IsSynthetic(enumType)
+                    && r.Walker2.Enums.Values.Any(candidate =>
+                        IsSynthetic(candidate)
+                        && InlineTypeExtractor.CanonicalHash(enumType)
+                            == InlineTypeExtractor.CanonicalHash(candidate)
+                    )
+                )
+            )
             .ToList();
         Assert.True(
             lostEnums.Count == 0,
@@ -469,17 +450,32 @@ public sealed class RealWorldImportTests
         // --- Structural stability: type property counts (only for surviving types) ---
         foreach (var (name, def1) in r.Walker1.Definitions)
         {
+            if (def1.Metadata?.Provenance == TsTypeProvenance.Synthetic)
+            {
+                continue;
+            }
+
             if (!r.Walker2.Definitions.TryGetValue(name, out var def2))
             {
                 continue; // Orphan type not emitted — already checked above
             }
 
-            Assert.Equal(def1.Properties.Count, def2.Properties.Count);
+            Assert.True(
+                def1.Properties.Count == def2.Properties.Count,
+                $"{specName}: Type '{name}' property count changed from {def1.Properties.Count} "
+                    + $"to {def2.Properties.Count}. Pass 1: [{string.Join(", ", def1.Properties.Select(property => property.Name))}]. "
+                    + $"Pass 2: [{string.Join(", ", def2.Properties.Select(property => property.Name))}]."
+            );
         }
 
         // --- Structural stability: enum member counts (only for surviving enums) ---
         foreach (var (name, enum1) in r.Walker1.Enums)
         {
+            if (IsSynthetic(enum1))
+            {
+                continue;
+            }
+
             if (!r.Walker2.Enums.TryGetValue(name, out _))
             {
                 continue;
@@ -489,6 +485,61 @@ public sealed class RealWorldImportTests
             Assert.Equal(((TsType.StringUnion)enum1).Members.Count, enum2.Members.Count);
         }
     }
+
+    private static string SyntheticShape(TsTypeDefinition definition, TypeWalker walker)
+    {
+        var visiting = new HashSet<string>(StringComparer.Ordinal);
+
+        string TypeShape(TsType type) =>
+            type switch
+            {
+                TsType.Primitive primitive =>
+                    $"primitive:{primitive.Name}:{primitive.Format}:{primitive.CSharpType}",
+                TsType.Nullable nullable => $"nullable:{TypeShape(nullable.Inner)}",
+                TsType.Array array => $"array:{TypeShape(array.Element)}",
+                TsType.Dictionary dictionary =>
+                    $"dictionary:{(dictionary.Key is null ? "string" : TypeShape(dictionary.Key))}:{TypeShape(dictionary.Value)}",
+                TsType.TypeRef reference
+                    when walker.Definitions.TryGetValue(reference.Name, out var referenced)
+                        && referenced.Metadata?.Provenance == TsTypeProvenance.Synthetic =>
+                    DefinitionShape(referenced),
+                TsType.TypeRef reference => $"ref:{reference.Name}",
+                _ => InlineTypeExtractor.CanonicalHash(type),
+            };
+
+        string DefinitionShape(TsTypeDefinition current)
+        {
+            if (!visiting.Add(current.Name))
+            {
+                return "recursive-synthetic";
+            }
+
+            var shape = current.Type is not null
+                ? TypeShape(current.Type)
+                : "object:"
+                    + string.Join(
+                        ",",
+                        current
+                            .Properties.OrderBy(property => property.Name, StringComparer.Ordinal)
+                            .Select(property =>
+                                $"{property.Name}:{property.IsOptional}:{TypeShape(property.Type)}"
+                            )
+                    );
+            visiting.Remove(current.Name);
+            return shape;
+        }
+
+        return DefinitionShape(definition);
+    }
+
+    private static bool IsSynthetic(TsType type) =>
+        type switch
+        {
+            TsType.StringUnion union => union.Metadata?.Provenance == TsTypeProvenance.Synthetic,
+            TsType.IntUnion union => union.Metadata?.Provenance == TsTypeProvenance.Synthetic,
+            TsType.Brand brand => brand.Metadata?.Provenance == TsTypeProvenance.Synthetic,
+            _ => false,
+        };
 
     private static void CollectRefs(JsonElement element, List<string> refs)
     {
@@ -713,10 +764,9 @@ public sealed class RealWorldImportTests
 
         // ItemDetail is a real object → should appear as AsItemDetail
         Assert.Contains("ItemDetail? AsItemDetail", content);
-        // PublicEvent is bare object (no properties) → should NOT appear as "AsPublicEvent"
-        // (it would be unresolvable). Instead it resolves to Dictionary — positively present.
-        Assert.DoesNotContain("PublicEvent", content);
-        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement>? AsDictionary", content);
+        // PublicEvent is a named empty-object component. It remains a real generated
+        // type so its exact component identity can survive import→emit.
+        Assert.Contains("PublicEvent? AsPublicEvent", content);
         // ContentDirectory is an array type → should NOT appear as "AsContentDirectory";
         // it resolves through to a list of the synthesized item record — positively present.
         Assert.DoesNotContain("ContentDirectory", content);
@@ -1008,7 +1058,7 @@ public sealed class RealWorldImportTests
 
         // C# keywords become PascalCase — "class" → "Class", "event" → "Event"
         // These are contextual in record position and should not cause compilation errors
-        Assert.Contains("sealed record ReservedWords(", content);
+        Assert.Contains("sealed record ReservedWords\n{", content.Replace("\r\n", "\n"));
     }
 
     [Fact]
@@ -1023,7 +1073,7 @@ public sealed class RealWorldImportTests
         var content = specialFile.Content;
 
         // Properties with special chars should be sanitized to valid C# identifiers
-        Assert.Contains("sealed record SpecialCharsModel(", content);
+        Assert.Contains("sealed record SpecialCharsModel\n{", content.Replace("\r\n", "\n"));
         // No empty parameter names
         Assert.DoesNotMatch(@",\s*\)", content);
         Assert.DoesNotMatch(@"\(\s*,", content);
@@ -1076,8 +1126,9 @@ public sealed class RealWorldImportTests
 
         // The consumer referencing both refs resolves to the two distinct types
         var consumer = CompilationHelper.FindFile(result, "CaseTestResult.cs");
-        Assert.Contains("FooBarSchema? SnakeCase", consumer);
-        Assert.Contains("FooBarSchema_2? PascalCase", consumer);
+        Assert.Contains("FooBarSchema SnakeCase", consumer);
+        Assert.Contains("FooBarSchema_2 PascalCase", consumer);
+        Assert.Contains("[RivetOptional]", consumer);
 
         var errors = GetCompilationErrors(result);
         Assert.True(

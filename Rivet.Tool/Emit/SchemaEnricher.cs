@@ -65,67 +65,75 @@ internal static class SchemaEnricher
             propSchema["writeOnly"] = true;
         }
 
-        if (prop.Constraints is { } cc)
-        {
-            if (cc.MinLength.HasValue)
-            {
-                propSchema["minLength"] = cc.MinLength.Value;
-            }
-
-            if (cc.MaxLength.HasValue)
-            {
-                propSchema["maxLength"] = cc.MaxLength.Value;
-            }
-
-            if (cc.Pattern is not null)
-            {
-                propSchema["pattern"] = cc.Pattern;
-            }
-
-            if (cc.Minimum.HasValue)
-            {
-                propSchema["minimum"] = cc.Minimum.Value;
-            }
-
-            if (cc.Maximum.HasValue)
-            {
-                propSchema["maximum"] = cc.Maximum.Value;
-            }
-
-            if (cc.ExclusiveMinimum.HasValue)
-            {
-                propSchema["exclusiveMinimum"] = cc.ExclusiveMinimum.Value;
-            }
-
-            if (cc.ExclusiveMaximum.HasValue)
-            {
-                propSchema["exclusiveMaximum"] = cc.ExclusiveMaximum.Value;
-            }
-
-            if (cc.MultipleOf.HasValue)
-            {
-                propSchema["multipleOf"] = cc.MultipleOf.Value;
-            }
-
-            if (cc.MinItems.HasValue)
-            {
-                propSchema["minItems"] = cc.MinItems.Value;
-            }
-
-            if (cc.MaxItems.HasValue)
-            {
-                propSchema["maxItems"] = cc.MaxItems.Value;
-            }
-
-            if (cc.UniqueItems == true)
-            {
-                propSchema["uniqueItems"] = true;
-            }
-        }
+        EnrichConstraints(propSchema, prop.Constraints);
 
         if (prop.Format is not null)
         {
             propSchema["format"] = prop.Format;
+        }
+    }
+
+    public static void EnrichConstraints(
+        Dictionary<string, object> schema,
+        TsPropertyConstraints? constraints
+    )
+    {
+        if (constraints is { } cc)
+        {
+            if (cc.MinLength.HasValue)
+            {
+                schema["minLength"] = cc.MinLength.Value;
+            }
+
+            if (cc.MaxLength.HasValue)
+            {
+                schema["maxLength"] = cc.MaxLength.Value;
+            }
+
+            if (cc.Pattern is not null)
+            {
+                schema["pattern"] = cc.Pattern;
+            }
+
+            if (cc.Minimum.HasValue)
+            {
+                schema["minimum"] = cc.Minimum.Value;
+            }
+
+            if (cc.Maximum.HasValue)
+            {
+                schema["maximum"] = cc.Maximum.Value;
+            }
+
+            if (cc.ExclusiveMinimum.HasValue)
+            {
+                schema["exclusiveMinimum"] = cc.ExclusiveMinimum.Value;
+            }
+
+            if (cc.ExclusiveMaximum.HasValue)
+            {
+                schema["exclusiveMaximum"] = cc.ExclusiveMaximum.Value;
+            }
+
+            if (cc.MultipleOf.HasValue)
+            {
+                schema["multipleOf"] = cc.MultipleOf.Value;
+            }
+
+            if (cc.MinItems.HasValue)
+            {
+                schema["minItems"] = cc.MinItems.Value;
+            }
+
+            if (cc.MaxItems.HasValue)
+            {
+                schema["maxItems"] = cc.MaxItems.Value;
+            }
+
+            if (cc.UniqueItems == true)
+            {
+                schema["uniqueItems"] = true;
+            }
         }
     }
 }

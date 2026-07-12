@@ -1,5 +1,6 @@
 {
   "type": "module",
+  "packageManager": "pnpm@10.24.0",
   "dependencies": {
     "zod": "^4.0.0"
   },

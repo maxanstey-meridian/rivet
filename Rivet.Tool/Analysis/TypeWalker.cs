@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Rivet.Tool.Model;
 
@@ -22,6 +23,10 @@ public sealed class TypeWalker
     // (discovery order), mirroring the component-name registry in OpenApiEmitter.
     private readonly Dictionary<string, string> _emittedNames = new(StringComparer.Ordinal);
     private readonly HashSet<string> _claimedNames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _generatedSchemaNames = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, TsScalarMetadata> _generatedEnumMetadata = new(
+        StringComparer.Ordinal
+    );
 
     // Scalar C# types that map directly to TsType.Primitive (Guid → string/uuid, etc.)
     private readonly ImmutableDictionary<INamedTypeSymbol, TsType.Primitive> _scalarTypes;
@@ -144,6 +149,85 @@ public sealed class TypeWalker
             "System.Text.Json.Serialization.JsonDerivedTypeAttribute"
         );
         _rivetUnionType = compilation.GetTypeByMetadataName("Rivet.RivetUnionAttribute");
+        LoadGeneratedSchemas(compilation.Assembly);
+    }
+
+    private void LoadGeneratedSchemas(IAssemblySymbol assembly)
+    {
+        foreach (
+            var attribute in assembly
+                .GetAttributes()
+                .Where(attribute =>
+                    attribute.AttributeClass?.Name == "RivetGeneratedSchemaAttribute"
+                )
+        )
+        {
+            if (
+                attribute.ConstructorArguments.Length < 6
+                || attribute.ConstructorArguments[0].Value is not string name
+                || attribute.ConstructorArguments[1].Value is not string componentId
+                || attribute.ConstructorArguments[4].Value is not bool nullable
+                || attribute.ConstructorArguments[5].Value is not string metadataJson
+            )
+            {
+                throw new InvalidOperationException(
+                    "Invalid generated schema metadata in RivetGeneratedSchemaAttribute."
+                );
+            }
+
+            var schemaType = attribute.ConstructorArguments[2].Value as string;
+            var format = attribute.ConstructorArguments[3].Value as string;
+            var metadata =
+                JsonSerializer.Deserialize<TsScalarMetadata>(
+                    metadataJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                ) ?? new TsScalarMetadata();
+            var isEnum =
+                attribute.ConstructorArguments.Length > 6
+                && attribute.ConstructorArguments[6].Value is true;
+            var schemaRef =
+                attribute.ConstructorArguments.Length > 7
+                    ? attribute.ConstructorArguments[7].Value as string
+                    : null;
+            if (!_generatedSchemaNames.Add(name))
+            {
+                throw new InvalidOperationException(
+                    $"Generated schema name '{name}' collides with another generated type."
+                );
+            }
+
+            if (isEnum)
+            {
+                _generatedEnumMetadata[name] = metadata;
+                continue;
+            }
+
+            TsType leaf = schemaRef is null
+                ? schemaType is null
+                    ? new TsType.Primitive("unknown", CSharpType: "object")
+                    : new TsType.Primitive(schemaType, format)
+                : new TsType.TypeRef(schemaRef);
+            if (nullable && schemaRef is null && schemaType is not null)
+            {
+                leaf = new TsType.Nullable(leaf);
+            }
+
+            if (_definitions.ContainsKey(name))
+            {
+                throw new InvalidOperationException(
+                    $"Generated schema name '{name}' collides with another generated type."
+                );
+            }
+
+            _definitions[name] = new TsTypeDefinition(
+                name,
+                [],
+                leaf,
+                metadata.Description,
+                new TsTypeMetadata(componentId, TsTypeProvenance.Component),
+                metadata
+            );
+        }
     }
 
     private static void AddScalar(
@@ -210,6 +294,23 @@ public sealed class TypeWalker
     /// </summary>
     public TsType MapType(ITypeSymbol symbol, string? context = null) =>
         MapTypeCore(symbol, context);
+
+    public TsType ApplyGeneratedSchemaRef(TsType type, string? schemaRef, string context)
+    {
+        if (schemaRef is null)
+        {
+            return type;
+        }
+
+        if (!_definitions.ContainsKey(schemaRef) && !_enums.ContainsKey(schemaRef))
+        {
+            throw new InvalidOperationException(
+                $"{context} references unknown generated schema '{schemaRef}'."
+            );
+        }
+
+        return new TsType.TypeRef(schemaRef);
+    }
 
     /// <summary>
     /// Returns true if the property has [JsonIgnore].
@@ -358,7 +459,8 @@ public sealed class TypeWalker
                 name,
                 typeParams,
                 union,
-                GetTypeDescription(definition)
+                GetTypeDescription(definition),
+                GetTypeMetadata(definition)
             );
             _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
             return;
@@ -374,7 +476,8 @@ public sealed class TypeWalker
                 name,
                 typeParams,
                 plainUnion,
-                GetTypeDescription(definition)
+                GetTypeDescription(definition),
+                GetTypeMetadata(definition)
             );
             _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
             return;
@@ -443,6 +546,7 @@ public sealed class TypeWalker
             string? format = null;
             var isFormatSpecified = false;
             string? schemaType = null;
+            string? schemaRef = null;
             string? defaultValue = null;
             TsPropertyConstraints? constraints = null;
             string? description = null;
@@ -470,6 +574,14 @@ public sealed class TypeWalker
                 )
                 {
                     schemaType = primitiveType;
+                }
+                else if (
+                    attrName is "RivetSchemaRefAttribute"
+                    && attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is string refName
+                )
+                {
+                    schemaRef = refName;
                 }
                 else if (
                     attrName is "RivetDefaultAttribute"
@@ -555,10 +667,7 @@ public sealed class TypeWalker
             {
                 tsType = p with { Format = format };
             }
-            else if (
-                isFormatSpecified
-                && tsType is TsType.Nullable { Inner: TsType.Primitive np }
-            )
+            else if (isFormatSpecified && tsType is TsType.Nullable { Inner: TsType.Primitive np })
             {
                 tsType = new TsType.Nullable(np with { Format = format });
             }
@@ -568,14 +677,24 @@ public sealed class TypeWalker
             }
             else if (
                 format is not null
-                && tsType is TsType.Nullable
-                {
-                    Inner: TsType.Primitive { Format: null } nullableFallback
-                }
+                && tsType
+                    is TsType.Nullable { Inner: TsType.Primitive { Format: null } nullableFallback }
             )
             {
                 tsType = new TsType.Nullable(nullableFallback with { Format = format });
             }
+
+            if (schemaRef is not null)
+            {
+                tsType = ApplyGeneratedSchemaRef(
+                    tsType,
+                    schemaRef,
+                    $"Property '{name}.{member.Name}'"
+                );
+            }
+
+            var generatedSchemaMetadata = ReadGeneratedSchemaMetadata(member);
+            tsType = ApplyGeneratedSchemaMetadata(tsType, "", generatedSchemaMetadata);
 
             properties.Add(
                 new TsPropertyDefinition(
@@ -589,7 +708,8 @@ public sealed class TypeWalker
                     description,
                     example,
                     isReadOnly,
-                    isWriteOnly
+                    isWriteOnly,
+                    generatedSchemaMetadata.GetValueOrDefault("")
                 )
             );
         }
@@ -598,7 +718,14 @@ public sealed class TypeWalker
         var typeDescription = GetTypeDescription(definition);
 
         _visiting.Remove(name);
-        _definitions[name] = new TsTypeDefinition(name, typeParams, properties, typeDescription);
+        _definitions[name] = new TsTypeDefinition(
+            name,
+            typeParams,
+            properties,
+            typeDescription,
+            GetTypeMetadata(definition),
+            ReadGeneratedSchemaMetadata(definition).GetValueOrDefault("")
+        );
         _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
     }
 
@@ -617,6 +744,159 @@ public sealed class TypeWalker
         }
 
         return null;
+    }
+
+    private static TsTypeMetadata? GetTypeMetadata(INamedTypeSymbol definition)
+    {
+        var attribute = definition
+            .GetAttributes()
+            .FirstOrDefault(attr => attr.AttributeClass?.Name == "RivetGeneratedTypeAttribute");
+        if (attribute is null || attribute.ConstructorArguments.Length < 2)
+        {
+            return null;
+        }
+
+        var componentId = attribute.ConstructorArguments[0].Value as string;
+        var provenance =
+            Convert.ToInt32(attribute.ConstructorArguments[1].Value) == 0
+                ? TsTypeProvenance.Component
+                : TsTypeProvenance.Synthetic;
+        return new TsTypeMetadata(componentId, provenance);
+    }
+
+    private static Dictionary<string, TsScalarMetadata> ReadGeneratedSchemaMetadata(ISymbol symbol)
+    {
+        var result = new Dictionary<string, TsScalarMetadata>(StringComparer.Ordinal);
+        foreach (
+            var attribute in symbol
+                .GetAttributes()
+                .Where(attribute =>
+                    attribute.AttributeClass?.Name == "RivetGeneratedSchemaMetadataAttribute"
+                )
+        )
+        {
+            if (
+                attribute.ConstructorArguments.Length < 22
+                || attribute.ConstructorArguments[0].Value is not string pointer
+            )
+            {
+                throw new InvalidOperationException(
+                    "Invalid generated schema metadata in RivetGeneratedSchemaMetadataAttribute."
+                );
+            }
+
+            int? IntAt(int index) =>
+                attribute.ConstructorArguments[index].Value is int value && value >= 0
+                    ? value
+                    : null;
+            double? DoubleAt(int index) =>
+                attribute.ConstructorArguments[index].Value is double value && !double.IsNaN(value)
+                    ? value
+                    : null;
+            string? StringAt(int index) => attribute.ConstructorArguments[index].Value as string;
+            bool BoolAt(int index) => attribute.ConstructorArguments[index].Value is true;
+            string? OptionalStringAt(int index) =>
+                attribute.ConstructorArguments.Length > index
+                    ? attribute.ConstructorArguments[index].Value as string
+                    : null;
+            bool OptionalBoolAt(int index) =>
+                attribute.ConstructorArguments.Length > index
+                && attribute.ConstructorArguments[index].Value is true;
+
+            var constraints = new TsPropertyConstraints(
+                MinLength: IntAt(6),
+                MaxLength: IntAt(7),
+                Pattern: StringAt(8),
+                Minimum: DoubleAt(9),
+                Maximum: DoubleAt(10),
+                ExclusiveMinimum: DoubleAt(11),
+                ExclusiveMaximum: DoubleAt(12),
+                MultipleOf: DoubleAt(13),
+                MinItems: IntAt(14),
+                MaxItems: IntAt(15),
+                UniqueItems: BoolAt(16) ? true : null
+            );
+            var xml =
+                StringAt(17) is not null
+                || StringAt(18) is not null
+                || StringAt(19) is not null
+                || BoolAt(20)
+                || BoolAt(21)
+                    ? new TsSchemaXmlMetadata(
+                        StringAt(17),
+                        StringAt(18),
+                        StringAt(19),
+                        BoolAt(20),
+                        BoolAt(21)
+                    )
+                    : null;
+            result[pointer] = new TsScalarMetadata(
+                Description: StringAt(2),
+                DefaultValue: StringAt(3),
+                Example: StringAt(4),
+                Examples: StringAt(5),
+                Constraints: constraints.HasAny ? constraints : null,
+                Title: StringAt(1),
+                Xml: xml,
+                Format: OptionalStringAt(22),
+                IsFormatSpecified: OptionalBoolAt(23),
+                IsNullable: OptionalBoolAt(24),
+                IsDeprecated: OptionalBoolAt(25),
+                IsReadOnly: OptionalBoolAt(26),
+                IsWriteOnly: OptionalBoolAt(27),
+                Required: OptionalStringAt(28) is { } requiredJson
+                    ? JsonSerializer.Deserialize<List<string>>(requiredJson)
+                    : null
+            );
+        }
+        return result;
+    }
+
+    private static TsType ApplyGeneratedSchemaMetadata(
+        TsType type,
+        string pointer,
+        IReadOnlyDictionary<string, TsScalarMetadata> metadata
+    ) =>
+        type switch
+        {
+            TsType.Nullable nullable => new TsType.Nullable(
+                ApplyGeneratedSchemaMetadata(nullable.Inner, pointer, metadata)
+            ),
+            TsType.Array array => new TsType.Array(
+                ApplyGeneratedSchemaMetadata(array.Element, pointer + "/items", metadata),
+                metadata.GetValueOrDefault(pointer + "/items")
+            ),
+            TsType.Dictionary dictionary => new TsType.Dictionary(
+                ApplyGeneratedSchemaMetadata(
+                    dictionary.Value,
+                    pointer + "/additionalProperties",
+                    metadata
+                ),
+                dictionary.Key,
+                metadata.GetValueOrDefault(pointer + "/additionalProperties")
+            ),
+            _ => type,
+        };
+
+    public TsType MapPropertyType(IPropertySymbol property)
+    {
+        var type = MapType(property.Type);
+        var schemaType =
+            property
+                .GetAttributes()
+                .FirstOrDefault(attribute =>
+                    attribute.AttributeClass?.Name == "RivetSchemaTypeAttribute"
+                )
+                ?.ConstructorArguments.FirstOrDefault()
+                .Value as string;
+
+        return (type, schemaType) switch
+        {
+            (TsType.Primitive primitive, not null) => primitive with { Name = schemaType },
+            (TsType.Nullable { Inner: TsType.Primitive primitive }, not null) =>
+                new TsType.Nullable(primitive with { Name = schemaType }),
+            _ => type,
+        };
     }
 
     /// <summary>
@@ -792,7 +1072,13 @@ public sealed class TypeWalker
                 );
             }
 
-            variants.Add(new TsType.TaggedUnionVariant(tag, new TsType.InlineObject(fields)));
+            variants.Add(
+                new TsType.TaggedUnionVariant(
+                    tag,
+                    new TsType.InlineObject(fields),
+                    GetTypeMetadata(derivedType)
+                )
+            );
         }
 
         return new TsType.TaggedUnion(discriminator, variants);
@@ -959,16 +1245,20 @@ public sealed class TypeWalker
                         .ToList();
                     if (IsNumericEnum(namedType))
                     {
-                        var format = namedType
-                            .GetAttributes()
-                            .FirstOrDefault(attribute =>
-                                attribute.AttributeClass?.Name == "RivetFormatAttribute"
-                            )
-                            ?.ConstructorArguments.FirstOrDefault()
-                            .Value as string;
+                        var format =
+                            namedType
+                                .GetAttributes()
+                                .FirstOrDefault(attribute =>
+                                    attribute.AttributeClass?.Name == "RivetFormatAttribute"
+                                )
+                                ?.ConstructorArguments.FirstOrDefault()
+                                .Value as string;
                         _enums[enumName] = new TsType.IntUnion(
                             fields.Select(field => Convert.ToInt32(field.ConstantValue)).ToList(),
-                            format
+                            format,
+                            GetTypeMetadata(namedType),
+                            GetTypeDescription(namedType),
+                            _generatedEnumMetadata.GetValueOrDefault(enumName)
                         );
                         _typeNamespaces.TryAdd(enumName, GetNamespaceGroup(namedType));
                         return new TsType.TypeRef(enumName);
@@ -993,7 +1283,13 @@ public sealed class TypeWalker
                         })
                         .ToList();
 
-                    _enums[enumName] = new TsType.StringUnion(members);
+                    _enums[enumName] = new TsType.StringUnion(
+                        members,
+                        GetTypeMetadata(namedType),
+                        GetTypeFormat(namedType),
+                        GetTypeDescription(namedType),
+                        _generatedEnumMetadata.GetValueOrDefault(enumName)
+                    );
                     _typeNamespaces.TryAdd(enumName, GetNamespaceGroup(namedType));
                 }
 
@@ -1008,12 +1304,20 @@ public sealed class TypeWalker
             {
                 // Value Object convention: single property named "Value" → branded type
                 // Skip for generic types — Wrapper<T>(T Value) is a generic record, not a VO
-                var voInner = namedType.IsGenericType ? null : TryGetValueObjectInner(namedType);
+                var voInner =
+                    namedType.IsGenericType || IsGeneratedRecord(namedType)
+                        ? null
+                        : TryGetValueObjectInner(namedType);
                 if (voInner is not null)
                 {
                     // A5: brands used to be keyed by simple name with first-wins TryAdd
                     var brandName = GetEmittedName(namedType);
-                    var brand = new TsType.Brand(brandName, MapTypeCore(voInner, context));
+                    var brand = new TsType.Brand(
+                        brandName,
+                        ApplyTypeFormat(MapTypeCore(voInner, context), GetTypeFormat(namedType)),
+                        GetTypeMetadata(namedType),
+                        GetTypeDescription(namedType)
+                    );
                     _brands.TryAdd(brandName, brand);
                     _typeNamespaces.TryAdd(brandName, GetNamespaceGroup(namedType));
                     return brand;
@@ -1075,12 +1379,50 @@ public sealed class TypeWalker
     }
 
     private static bool IsNumericEnum(INamedTypeSymbol type) =>
-        type.GetAttributes().Any(attribute =>
-            attribute.AttributeClass?.Name == "JsonConverterAttribute"
-            && attribute.ConstructorArguments is [var converterArgument]
-            && converterArgument.Value is INamedTypeSymbol converterType
-            && converterType.Name.StartsWith("JsonNumberEnumConverter", StringComparison.Ordinal)
-        );
+        type.GetAttributes()
+            .Any(attribute =>
+                attribute.AttributeClass?.Name == "JsonConverterAttribute"
+                && attribute.ConstructorArguments is [var converterArgument]
+                && converterArgument.Value is INamedTypeSymbol converterType
+                && converterType.Name.StartsWith(
+                    "JsonNumberEnumConverter",
+                    StringComparison.Ordinal
+                )
+            );
+
+    private static string? GetTypeFormat(INamedTypeSymbol type) =>
+        type.GetAttributes()
+            .FirstOrDefault(attribute => attribute.AttributeClass?.Name == "RivetFormatAttribute")
+            ?.ConstructorArguments.FirstOrDefault()
+            .Value as string;
+
+    private static bool IsGeneratedRecord(INamedTypeSymbol type)
+    {
+        var attribute = type.GetAttributes()
+            .FirstOrDefault(attribute =>
+                attribute.AttributeClass?.Name == "RivetGeneratedTypeAttribute"
+            );
+        return attribute is not null
+            && (
+                attribute.ConstructorArguments.Length < 3
+                || attribute.ConstructorArguments[2].Value is not true
+            );
+    }
+
+    private static TsType ApplyTypeFormat(TsType type, string? format) =>
+        format is null
+            ? type
+            : type switch
+            {
+                TsType.Primitive primitive => primitive with { Format = format },
+                TsType.Nullable { Inner: TsType.Primitive primitive } => new TsType.Nullable(
+                    primitive with
+                    {
+                        Format = format,
+                    }
+                ),
+                _ => type,
+            };
 
     private static string AtContext(string? context) => context is null ? "" : $" on '{context}'";
 

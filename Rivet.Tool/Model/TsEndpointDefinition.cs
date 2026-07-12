@@ -40,11 +40,15 @@ public sealed record TsEndpointDefinition(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? ResponseContentTypeOverride = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        JsonElement? SecurityRequirements = null,
+        SecurityRequirements? SecurityRequirements = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<TsMediaTypeContent>? RequestContents = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        bool? RequestBodyRequired = null
+        bool? RequestBodyRequired = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool RequestBodyPresent = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        OpenApiOperationProvenance? Provenance = null
 );
 
 /// <summary>
@@ -64,20 +68,53 @@ public sealed record TsResponseType(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<TsResponseHeader>? Headers = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyList<TsMediaTypeContent>? Contents = null
+        IReadOnlyList<TsMediaTypeContent>? Contents = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StatusKey = null
+)
+{
+    public string EffectiveStatusKey => StatusKey ?? StatusCode.ToString();
+}
+
+public sealed record TsMediaTypeContent(
+    string MediaType,
+    TsType? Schema,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool IsBinary = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? SchemaType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Format = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool IsFormatSpecified = false
 );
 
-public sealed record TsMediaTypeContent(string MediaType, TsType? Schema);
-
 /// <summary>
-/// A declared response header (string-typed in v1). Spec-only: Rivet never sets or
+/// A declared response header. Spec-only: Rivet never sets or
 /// validates response headers at runtime. Required is an explicit opt-in promise.
 /// </summary>
 public sealed record TsResponseHeader(
     string Name,
+    TsType Type,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? Description = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Required = false
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool Required = false,
+    [property: JsonPropertyName("deprecated")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool IsDeprecated = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        JsonElement? SchemaExamples = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        JsonElement? Example = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        JsonElement? Examples = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Style = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Explode = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool AllowReserved = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool AllowEmptyValue = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? ContentType = null
 );
 
 /// <summary>
@@ -89,7 +126,28 @@ public sealed record TsEndpointParam(
     ParamSource Source,
     bool IsOptional = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        string? BodyPropertyName = null
+        string? BodyPropertyName = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Description = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool IsDeprecated = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? DefaultValue = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        TsPropertyConstraints? Constraints = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        JsonElement? SchemaExamples = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        JsonElement? Example = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        JsonElement? Examples = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Style = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Explode = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? SchemaType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Format = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool IsFormatSpecified = false
 );
 
 public enum ParamSource

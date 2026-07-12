@@ -558,7 +558,7 @@ public sealed class ContractSchemaTests
     public void Header_ParamSource_And_Response_Headers_Accepted() // P2 wave 5
     {
         var json =
-            """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"Notion-Version","type":{"kind":"primitive","type":"string"},"source":"header"}],"controllerName":"C","responses":[{"statusCode":200,"headers":[{"name":"ETag","description":"Entity tag","required":true}]}]}]}""";
+            """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"Notion-Version","type":{"kind":"primitive","type":"string"},"source":"header"}],"controllerName":"C","responses":[{"statusCode":200,"headers":[{"name":"ETag","type":{"kind":"primitive","type":"string"},"description":"Entity tag","required":true}]}]}]}""";
         var result = Validate(json);
         Assert.True(result.IsValid);
     }

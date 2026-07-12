@@ -9,7 +9,8 @@ public sealed record TsEndpointExample
         string? Name = null,
         string? Json = null,
         string? ComponentExampleId = null,
-        string? ResolvedJson = null
+        string? ResolvedJson = null,
+        IReadOnlyDictionary<string, string>? ReferencedComponents = null
     )
     {
         var hasJson = Json is not null;
@@ -32,6 +33,7 @@ public sealed record TsEndpointExample
         this.Json = Json;
         this.ComponentExampleId = ComponentExampleId;
         this.ResolvedJson = ResolvedJson;
+        this.ReferencedComponents = ReferencedComponents;
     }
 
     public string MediaType { get; }
@@ -47,4 +49,7 @@ public sealed record TsEndpointExample
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ResolvedJson { get; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, string>? ReferencedComponents { get; }
 }

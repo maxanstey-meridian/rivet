@@ -428,7 +428,8 @@ public sealed class PolymorphismTests
         Assert.Contains(": Shape;", circleContent);
         Assert.Contains("double Radius", circleContent);
         Assert.Contains("string Id", circleContent);
-        Assert.DoesNotContain("Type", circleContent.Split("record ShapeCircle")[1]);
+        Assert.DoesNotContain("string Type", circleContent.Split("record ShapeCircle")[1]);
+        Assert.DoesNotContain("JsonPropertyName(\"$type\")", circleContent);
         Assert.DoesNotContain("[RivetType]", circleContent);
 
         // No union-wrapper fallback, no discriminator-dropped warning

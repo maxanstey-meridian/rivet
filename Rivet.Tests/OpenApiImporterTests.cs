@@ -513,7 +513,7 @@ public sealed class OpenApiImporterTests
         );
 
         Assert.Contains(
-            ".Anonymous()",
+            ".SecurityRequirements()",
             CompilationHelper.FindFile(CompilationHelper.Import(spec), "HealthContract.cs")
         );
     }
@@ -536,7 +536,7 @@ public sealed class OpenApiImporterTests
         );
 
         Assert.Contains(
-            ".Secure(\"admin\")",
+            ".SecurityRequirement(0, \"admin\")",
             CompilationHelper.FindFile(CompilationHelper.Import(spec), "AdminContract.cs")
         );
     }
@@ -864,8 +864,8 @@ public sealed class OpenApiImporterTests
         AssertProperty(taskDto, "priority", null);
         AssertProperty(taskDto, "score", "number");
         AssertProperty(taskDto, "rating", "number");
-        AssertProperty(taskDto, "viewCount", "number");
-        AssertProperty(taskDto, "totalBytes", "number");
+        AssertProperty(taskDto, "viewCount", "integer");
+        AssertProperty(taskDto, "totalBytes", "integer");
         AssertProperty(taskDto, "isArchived", "boolean");
         AssertProperty(taskDto, "createdAt", "string");
 
@@ -1077,7 +1077,8 @@ public sealed class OpenApiImporterTests
         Assert.Null(requestExample.ComponentExampleId);
         Assert.Null(requestExample.ResolvedJson);
 
-        Assert.Contains("[rivet:unsupported body content-type=text/plain]", contract);
+        Assert.DoesNotContain("[rivet:unsupported body content-type=text/plain]", contract);
+        Assert.Contains(".RequestContent(\"text/plain\")", contract);
         Assert.Contains(
             ".RequestExampleJson(\"\\\"hello world\\\"\", mediaType: \"text/plain\")",
             contract
@@ -1360,11 +1361,13 @@ public sealed class OpenApiImporterTests
         Assert.Equal("text/plain", responseExample.MediaType);
         Assert.Equal("\"queued\"", responseExample.Json);
 
-        Assert.Contains("[rivet:unsupported body content-type=application/json]", contract);
-        Assert.Contains(
+        Assert.DoesNotContain("[rivet:unsupported body content-type=application/json]", contract);
+        Assert.DoesNotContain(
             "[rivet:unsupported response status=202 content-type=text/plain]",
             contract
         );
+        Assert.Contains(".RequestContent(\"application/json\")", contract);
+        Assert.Contains(".ResponseContent(202, \"text/plain\")", contract);
         Assert.Contains(
             ".RequestExampleJson(\"{\\\"mode\\\":\\\"fast\\\"}\", mediaType: \"application/json\")",
             contract
@@ -1535,7 +1538,8 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains("IFormFile File", content);
         Assert.Contains("using Microsoft.AspNetCore.Http;", content);
-        Assert.Contains("string? Description", content);
+        Assert.Contains("[RivetOptional]", content);
+        Assert.Contains("public string Description { get; init; } = default!;", content);
     }
 
     [Fact]
@@ -1659,18 +1663,21 @@ public sealed class OpenApiImporterTests
     {
         var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
 
-        // Health endpoint has security: [] → .Anonymous()
-        Assert.Contains(".Anonymous()", CompilationHelper.FindFile(result, "HealthContract.cs"));
-
-        // Members invite has security: [{"admin": []}] → .Secure("admin")
+        // Health endpoint has an explicit empty requirement list.
         Assert.Contains(
-            ".Secure(\"admin\")",
+            ".SecurityRequirements()",
+            CompilationHelper.FindFile(result, "HealthContract.cs")
+        );
+
+        // Members invite has security: [{"admin": []}].
+        Assert.Contains(
+            ".SecurityRequirement(0, \"admin\")",
             CompilationHelper.FindFile(result, "MembersContract.cs")
         );
 
-        // Tasks list has global security → .Secure("bearer")
-        Assert.Contains(
-            ".Secure(\"bearer\")",
+        // Global security remains document-level provenance, not endpoint DSL.
+        Assert.DoesNotContain(
+            ".SecurityRequirement(",
             CompilationHelper.FindFile(result, "TasksContract.cs")
         );
 
@@ -2268,7 +2275,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Json_Content_Type_Takes_Priority_Over_Wildcard()
+    public void Json_Content_Type_Is_Primary_And_Wildcard_Content_Is_Also_Preserved()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -2312,15 +2319,17 @@ public sealed class OpenApiImporterTests
             "TasksContract.cs"
         );
 
-        // application/json should win
+        // application/json is the primary runtime output, while the complete content map
+        // retains the independently authored wildcard schema.
         Assert.Contains("RouteDefinition<TaskDto>", content);
-        Assert.DoesNotContain("GenericDto", content);
+        Assert.Contains(".ResponseContent<TaskDto>(200, \"application/json\"", content);
+        Assert.Contains(".ResponseContent<GenericDto>(200, \"*/*\"", content);
     }
 
     // ========== 4XX/5XX wildcard status codes ==========
 
     [Fact]
-    public void Wildcard_4XX_Status_Code_Maps_To_400()
+    public void Wildcard_4XX_Status_Code_Remains_Exact()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -2365,13 +2374,13 @@ public sealed class OpenApiImporterTests
         );
 
         Assert.Contains(
-            ".Returns<ClientErrorDto>(400, \"Client error\")",
+            ".Returns<ClientErrorDto>(\"4XX\", \"Client error\")",
             CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs")
         );
     }
 
     [Fact]
-    public void Wildcard_5XX_Status_Code_Maps_To_500()
+    public void Wildcard_5XX_Status_Code_Remains_Exact()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -2416,16 +2425,16 @@ public sealed class OpenApiImporterTests
         );
 
         Assert.Contains(
-            ".Returns<ServerErrorDto>(500, \"Server error\")",
+            ".Returns<ServerErrorDto>(\"5XX\", \"Server error\")",
             CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs")
         );
     }
 
     [Fact]
-    public void Wildcard_2XX_Status_Code_Maps_To_200_Typed_Output()
+    public void Wildcard_2XX_Status_Code_Remains_Exact_Typed_Response()
     {
-        // I9: an operation whose ONLY success response is the "2XX" range must not import as
-        // a void endpoint — the range maps to the success status 200 with its typed output.
+        // A range is not a concrete runtime success status. Keep it as an exact typed
+        // response and suppress the method's implicit 200 rather than inventing one.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
             "TaskDto": {
@@ -2460,10 +2469,10 @@ public sealed class OpenApiImporterTests
             "TasksContract.cs"
         );
 
-        Assert.Contains("RouteDefinition<TaskDto>", content);
-        // Cross-corpus #2: the projection to a literal 200 the spec never promised
-        // is kept (dropping loses the typed output) but is no longer silent.
-        Assert.Contains("[rivet:unsupported response status-range=2XX projected=200]", content);
+        Assert.Contains("public static readonly RouteDefinition List", content);
+        Assert.Contains(".SuppressImplicitResponse()", content);
+        Assert.Contains(".Returns<TaskDto>(\"2XX\", \"OK\")", content);
+        Assert.Contains(".ResponseContent<TaskDto>(\"2XX\", \"application/json\"", content);
     }
 
     [Fact]
@@ -2516,16 +2525,16 @@ public sealed class OpenApiImporterTests
             "TasksContract.cs"
         );
 
-        // The concrete 201 wins; the range wildcard never overrides a declared status.
-        // (201 is the POST method default, so no explicit .Status() call is emitted —
-        // a wildcard win would surface as .Status(200).)
+        // The concrete 201 remains the primary runtime result. The independently authored
+        // range remains an exact secondary response instead of being erased.
         Assert.Contains("RouteDefinition<TaskDto>", content);
         Assert.DoesNotContain(".Status(200)", content);
-        Assert.DoesNotContain("GenericDto", content);
+        Assert.Contains(".Returns<GenericDto>(\"2XX\", \"Some success\")", content);
+        Assert.Contains(".ResponseContent<GenericDto>(\"2XX\", \"application/json\"", content);
     }
 
     [Fact]
-    public void Wildcard_And_Default_ResponseExamples_Map_To_400_And_500()
+    public void Wildcard_And_Default_ResponseExamples_Keep_Exact_Status_Keys()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -2599,12 +2608,14 @@ public sealed class OpenApiImporterTests
 
         var endpoint = Assert.Single(endpoints);
 
-        var clientError = endpoint.Responses.Single(response => response.StatusCode == 400);
+        var clientError = endpoint.Responses.Single(response => response.StatusKey == "4XX");
+        Assert.Equal(0, clientError.StatusCode);
         var clientExample = Assert.Single(clientError.Examples!);
         Assert.Equal("clientProblem", clientExample.Name);
         Assert.Equal("""{"error":"Bad request"}""", clientExample.Json);
 
-        var serverError = endpoint.Responses.Single(response => response.StatusCode == 500);
+        var serverError = endpoint.Responses.Single(response => response.StatusKey == "default");
+        Assert.Equal(0, serverError.StatusCode);
         var serverExample = Assert.Single(serverError.Examples!);
         Assert.Equal("serverProblem", serverExample.Name);
         Assert.Equal("""{"error":"Unexpected failure"}""", serverExample.Json);
@@ -2832,7 +2843,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Unsupported_Error_Content_Type_Emits_Marker_Comment()
+    public void Error_Content_Type_Emits_Exact_Content_Map()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -2876,7 +2887,11 @@ public sealed class OpenApiImporterTests
             "ItemsContract.cs"
         );
 
-        Assert.Contains("[rivet:unsupported error status=404 content-type=text/plain]", content);
+        Assert.DoesNotContain(
+            "[rivet:unsupported error status=404 content-type=text/plain]",
+            content
+        );
+        Assert.Contains(".ResponseContent<string>(404, \"text/plain\"", content);
         // The typed 200 response should still work
         Assert.Contains("RouteDefinition<ItemDto>", content);
     }
@@ -4262,10 +4277,18 @@ public sealed class OpenApiImporterTests
         // No named enum file for FloatVals — WouldGenerateType returns false
         Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("FloatVals.cs"));
 
-        // Falls through to string-backed inline enum via ResolveFallbackType
+        // Numeric wire values cannot be represented by a string-backed C# enum.
+        // Preserve compilability with the existing string fallback, loudly.
         var dtoContent = CompilationHelper.FindFile(result, "ItemDto.cs");
-        Assert.Contains("ItemDtoVal Val", dtoContent);
+        Assert.Contains("string Val", dtoContent);
         Assert.DoesNotContain("long Val", dtoContent);
+        Assert.Contains(
+            result.Warnings,
+            warning =>
+                warning.StartsWith("RIV3012: Enum constraint dropped")
+                && warning.Contains("1.5")
+                && warning.Contains("'string'")
+        );
     }
 
     [Fact]
@@ -5374,13 +5397,13 @@ public sealed class OpenApiImporterTests
 
         var import = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(import, "Dto.cs");
-        Assert.Contains("[property: JsonPropertyName(\"equals\")]", content);
-        Assert.Contains("string? EqualsValue", content);
-        Assert.Contains("[property: JsonPropertyName(\"toString\")]", content);
-        Assert.Contains("string? ToStringValue", content);
-        Assert.Contains("[property: JsonPropertyName(\"clone\")]", content);
-        Assert.Contains("string? CloneValue", content);
-        Assert.DoesNotContain("string? Equals)", content);
+        Assert.Contains("[JsonPropertyName(\"equals\")]", content);
+        Assert.Contains("public string EqualsValue { get; init; } = default!;", content);
+        Assert.Contains("[JsonPropertyName(\"toString\")]", content);
+        Assert.Contains("public string ToStringValue { get; init; } = default!;", content);
+        Assert.Contains("[JsonPropertyName(\"clone\")]", content);
+        Assert.Contains("public string CloneValue { get; init; } = default!;", content);
+        Assert.DoesNotContain("string Equals)", content);
         CompilationHelper.CompileImportResult(import);
     }
 
@@ -5516,10 +5539,13 @@ public sealed class OpenApiImporterTests
         );
         using var document = System.Text.Json.JsonDocument.Parse(emitted);
 
-        var wrapperSchema = document
+        var dtoSchema = document
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
-            .GetProperty("DtoTitle");
+            .GetProperty("Dto");
+        var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.False(schemas.TryGetProperty("DtoTitle", out _));
+        var wrapperSchema = dtoSchema.GetProperty("properties").GetProperty("title");
         Assert.True(wrapperSchema.TryGetProperty("oneOf", out var oneOf));
         var variantTypes = oneOf
             .EnumerateArray()
@@ -5532,12 +5558,11 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Import_Inlines_Embedded_Example_Refs()
+    public void Import_Preserves_Resolvable_Embedded_Example_Refs_With_Their_Components()
     {
         // github anti-pattern: an example VALUE that is {"$ref": "#/components/examples/X"}.
-        // It resolves in the source document, but a round-trip only re-registers examples
-        // attached to surviving operations — the embedded ref would dangle and hard-fail
-        // openapi-typescript. The importer inlines the referenced value instead.
+        // Carry the reachable component value with the authored ref so the round-trip
+        // preserves its shape without emitting a dangling reference.
         var spec = """
             {
                 "openapi": "3.1.0",
@@ -5558,7 +5583,8 @@ public sealed class OpenApiImporterTests
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "Contract.cs");
-        Assert.DoesNotContain("#/components/examples/widget", contract);
+        Assert.Contains("#/components/examples/widget", contract);
+        Assert.Contains("referencedComponentsJson:", contract);
         Assert.Contains("Widget", contract);
     }
 
@@ -5709,7 +5735,8 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains("string Id", derived);
         Assert.DoesNotContain("string? Id", derived); // was wrongly optional (I8)
-        Assert.Contains("string? Name", derived); // untouched props stay optional
+        Assert.Contains("[RivetOptional]", derived);
+        Assert.Contains("public string Name { get; init; } = default!;", derived);
     }
 
     [Fact]
@@ -5847,10 +5874,10 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void MediaType_Parameters_Get_Named_Marker() // I10 — marker
+    public void MediaType_Parameters_Are_Preserved_In_The_Content_Map()
     {
-        // `application/json; charset=utf-8` defeats the exact content-type match; the
-        // existing unsupported marker gains an explicit reason naming the cause.
+        // A parameterized media type is not selected as the primary runtime body, but the
+        // complete content map preserves its exact key and schema without a loss marker.
         var spec = CompilationHelper.BuildSpec(
             paths: """
             "/api/items": {
@@ -5874,14 +5901,13 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
-        Assert.Contains(
-            "[rivet:unsupported body content-type=application/json; charset=utf-8 reason=media-type-parameters",
-            contract
-        );
+        Assert.Contains(".RequestContent<", contract);
+        Assert.Contains("(\"application/json; charset=utf-8\"", contract);
+        Assert.DoesNotContain("[rivet:unsupported body", contract);
     }
 
     [Fact]
-    public void MultiScheme_Global_Security_Warns_And_Imports_First() // I12 — marker (document level)
+    public void MultiScheme_Global_Security_Is_Preserved_As_Or_Requirements()
     {
         var spec = """
             {
@@ -5907,17 +5933,17 @@ public sealed class OpenApiImporterTests
             """;
 
         var result = CompilationHelper.Import(spec);
-        var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
+        var security = CompilationHelper.FindFile(result, "RivetSecurity.cs");
 
-        Assert.Contains(".Secure(\"alpha\")", contract);
-        Assert.Contains(
-            result.Warnings,
-            w => w.StartsWith("RIV3002: Security schemes dropped", StringComparison.Ordinal)
-        );
+        Assert.Contains("RivetGlobalSecurity(0)", security);
+        Assert.Contains("RivetGlobalSecurityScheme(0, \"alpha\", new string[] {  })", security);
+        Assert.Contains("RivetGlobalSecurity(1)", security);
+        Assert.Contains("RivetGlobalSecurityScheme(1, \"beta\", new string[] {  })", security);
+        Assert.Empty(result.Warnings);
     }
 
     [Fact]
-    public void MultiScheme_Operation_Security_Gets_Marker() // I12 — marker (operation level)
+    public void MultiScheme_Operation_Security_Is_Preserved_As_Or_Requirements()
     {
         var spec = """
             {
@@ -5945,19 +5971,16 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
-        Assert.Contains(".Secure(\"alpha\")", contract);
-        Assert.Contains(
-            "[rivet:unsupported security schemes=alpha, beta reason=multi-scheme-first-only]",
-            contract
-        );
+        Assert.Contains(".SecurityRequirement(0, \"alpha\")", contract);
+        Assert.Contains(".SecurityRequirement(1, \"beta\")", contract);
+        Assert.DoesNotContain("[rivet:unsupported security", contract);
     }
 
     [Fact]
-    public void Header_Params_Are_Preserved_And_Cookie_Params_Get_Location_Erasure_Marker() // I13 (narrowed by P2 wave 5)
+    public void Header_And_Cookie_Params_Are_Preserved_With_Exact_Locations()
     {
-        // P2 wave 5 inverts the old header pin: header params keep their location — the
-        // synthesized input property carries [RivetHeader("original-name")] and re-emits
-        // as in: header. COOKIE params still erase to query, loudly.
+        // The synthesized input remains available to the runtime, while explicit parameter
+        // provenance preserves every authored location for exact re-emission.
         var spec = CompilationHelper.BuildSpec(
             paths: """
             "/api/items/{id}": {
@@ -5978,17 +6001,12 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
-        // Header params are preserved — no erasure marker, [RivetHeader] on the input record
-        Assert.DoesNotContain("param name=x-trace", contract);
         var inputRecord = CompilationHelper.FindFile(result, "GetInput.cs");
         Assert.Contains("[property: RivetHeader(\"x-trace\")]", inputRecord);
-
-        Assert.Contains(
-            "[rivet:unsupported param name=session in=cookie reason=location-erased-to-query]",
-            contract
-        );
-        // path params keep their semantics — no marker
-        Assert.DoesNotContain("param name=id", contract);
+        Assert.Contains(".Parameter<string>(\"id\", \"path\", true", contract);
+        Assert.Contains(".Parameter<string>(\"x-trace\", \"header\", false", contract);
+        Assert.Contains(".Parameter<string>(\"session\", \"cookie\", false", contract);
+        Assert.DoesNotContain("reason=location-erased", contract);
     }
 
     [Fact]
@@ -6026,10 +6044,9 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Param_Metadata_Drop_Gets_Aggregated_Marker() // I13 — marker
+    public void Param_Metadata_Is_Preserved_Explicitly()
     {
-        // description/deprecated/constraints on parameters don't survive into the
-        // synthesized input record — one aggregated marker per endpoint names the params.
+        // Parameter metadata is endpoint provenance, independent of the synthesized input.
         var spec = CompilationHelper.BuildSpec(
             paths: """
             "/api/search": {
@@ -6049,11 +6066,12 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "SearchContract.cs");
 
-        Assert.Contains(
-            "[rivet:unsupported param-metadata params=q reason=metadata-dropped]",
-            contract
-        );
-        Assert.DoesNotContain("params=page", contract); // bare params don't trigger it
+        Assert.Contains(".Parameter<string>(\"q\", \"query\", true", contract);
+        Assert.Contains("metadataJson:", contract);
+        Assert.Contains("Search query", contract);
+        Assert.Contains("MaxLength", contract);
+        Assert.Contains(".Parameter<long>(\"page\", \"query\", false", contract);
+        Assert.DoesNotContain("reason=metadata-dropped", contract);
     }
 
     [Fact]
@@ -6106,11 +6124,10 @@ public sealed class OpenApiImporterTests
     // ========== I14/I15: params on body-carrying ops + unsupported methods ==========
 
     [Fact]
-    public void Params_On_Op_With_Body_Merge_Into_Input_Record()
+    public void Params_On_Op_With_Body_Are_Preserved_Explicitly()
     {
-        // I14 (FABLE_GAPS §2): ResolveParamInputType only ran when there was no body,
-        // so any op with a requestBody lost ALL path+query params silently (262 Stripe
-        // GETs). Path/query params must merge with the body-derived input record.
+        // Body content and parameters are independent OpenAPI surfaces. Preserve both
+        // explicitly instead of merging them into one record and erasing locations.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
             "PdfOptions": {
@@ -6144,25 +6161,22 @@ public sealed class OpenApiImporterTests
 
         var result = CompilationHelper.Import(spec);
 
-        // The endpoint's input is the merged synthesized record, not the bare body type
         var contract = CompilationHelper.FindFile(result, "QuotesContract.cs");
-        Assert.Contains("GetQuotePdfInput", contract);
-
-        // ...containing the path param, the query param AND the body's properties
-        var input = CompilationHelper.FindFile(result, "GetQuotePdfInput.cs");
-        Assert.Contains("string Quote", input);
-        Assert.Contains("long? Version", input);
-        Assert.Contains("Expand", input);
-
-        // The merge is faithful — no dropped-param markers
-        Assert.DoesNotContain("reason=dropped-unmergeable-body", contract);
+        Assert.Contains("PdfOptions", contract);
+        Assert.Contains(
+            ".RequestContent<PdfOptions>(\"application/x-www-form-urlencoded\"",
+            contract
+        );
+        Assert.Contains(".Parameter<string>(\"quote\", \"path\", true", contract);
+        Assert.Contains(".Parameter<long>(\"version\", \"query\", false", contract);
+        Assert.DoesNotContain("reason=", contract);
     }
 
     [Fact]
-    public void Query_Param_On_Post_With_Body_Merges_With_Erasure_Marker()
+    public void Query_Param_On_Post_With_Body_Preserves_Both_Surfaces()
     {
-        // On body-carrying methods the single TInput re-emits as the JSON body, so a
-        // merged query param's location is erased — diagnosed per param, never silent.
+        // The body remains the runtime input and explicit parameter provenance keeps path
+        // and query locations without folding either into the body schema.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
             "UpdatePet": {
@@ -6196,18 +6210,11 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "PetsContract.cs");
 
-        // Params survive into the merged input record...
-        Assert.Contains("UpdatePetInput", contract);
-        var input = CompilationHelper.FindFile(result, "UpdatePetInput.cs");
-        Assert.Contains("string PetId", input);
-        Assert.Contains("bool? Notify", input);
-        Assert.Contains("string Name", input);
-
-        // ...and the query param's location erasure is marked loudly.
-        Assert.Contains(
-            "// [rivet:unsupported param name=notify in=query reason=location-erased-to-body]",
-            contract
-        );
+        Assert.Contains("InputRouteDefinition<UpdatePet?>", contract);
+        Assert.Contains(".RequestContent<UpdatePet>(\"application/json\"", contract);
+        Assert.Contains(".Parameter<string>(\"petId\", \"path\", true", contract);
+        Assert.Contains(".Parameter<bool>(\"notify\", \"query\", false", contract);
+        Assert.DoesNotContain("reason=location-erased", contract);
     }
 
     [Fact]
@@ -6262,8 +6269,10 @@ public sealed class OpenApiImporterTests
         var alphaContract = CompilationHelper.FindFile(result, "AlphaContract.cs");
         var betaContract = CompilationHelper.FindFile(result, "BetaContract.cs");
 
-        Assert.Contains("[RivetRequestBody(typeof(AlphaBody), false)]", alphaContract);
-        Assert.Contains("[RivetRequestBody(typeof(BetaBody))]", betaContract);
+        Assert.Contains(".RequestContent<AlphaBody>(\"application/json\"", alphaContract);
+        Assert.Contains(".RequestBodyRequired(false)", alphaContract);
+        Assert.Contains(".RequestContent<BetaBody>(\"application/json\"", betaContract);
+        Assert.Contains(".RequestBodyRequired(true)", betaContract);
         Assert.DoesNotContain(
             result.Files.Where(file => file.FileName.Contains("Types/", StringComparison.Ordinal)),
             file => file.Content.Contains("RivetRequestBody", StringComparison.Ordinal)
@@ -6311,10 +6320,10 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Params_With_Unmergeable_Body_Are_Dropped_With_Named_Marker()
+    public void Params_With_NonRecord_Body_Are_Preserved_Explicitly()
     {
-        // A body that is not a plain record (here: an array) cannot merge with params —
-        // each param is dropped LOUDLY via a named marker instead of silently.
+        // A non-record body cannot merge with params, so preserve the body content and
+        // parameter independently rather than choosing a winner.
         var spec = CompilationHelper.BuildSpec(
             paths: """
             "/batch/{groupId}": {
@@ -6340,35 +6349,60 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "BatchContract.cs");
 
-        // The input stays the body type (no merged record was synthesized)...
         Assert.Contains("List<string>", contract);
         Assert.DoesNotContain("BatchUpdateInput", contract);
-
-        // ...and the absence of the param is paired with a named diagnostic.
-        Assert.Contains(
-            "// [rivet:unsupported param name=groupId in=path reason=dropped-unmergeable-body body-type=List<string>]",
-            contract
-        );
+        Assert.Contains(".RequestContent<List<string>>(\"application/json\"", contract);
+        Assert.Contains(".Parameter<string>(\"groupId\", \"path\", true", contract);
+        Assert.DoesNotContain("reason=dropped-unmergeable-body", contract);
     }
 
     [Fact]
-    public void Head_Options_Trace_Ops_Are_Skipped_With_Named_Warning()
+    public void Head_Operation_Compiles_And_Reemits()
     {
-        // I15: HEAD/OPTIONS/TRACE have no contract representation; the ops used to be
-        // skipped with zero diagnostics. Their absence must pair with a named warning.
         var spec = CompilationHelper.BuildSpec(
             paths: """
             "/health": {
-                "get": {
-                    "operationId": "getHealth",
-                    "tags": ["Health"],
-                    "responses": { "204": { "description": "No Content" } }
-                },
                 "head": {
                     "operationId": "headHealth",
                     "tags": ["Health"],
                     "responses": { "204": { "description": "No Content" } }
-                },
+                }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "HealthContract.cs");
+
+        Assert.Contains("Define.Head(\"/health\")", contract);
+        Assert.DoesNotContain(
+            result.Warnings,
+            warning => warning.StartsWith("RIV3003:", StringComparison.Ordinal)
+        );
+
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emitted = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
+        var document = JsonSerializer.Deserialize<JsonElement>(emitted);
+
+        Assert.True(
+            document.GetProperty("paths").GetProperty("/health").TryGetProperty("head", out _)
+        );
+    }
+
+    [Fact]
+    public void Options_Operation_Compiles_And_Reemits()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/health": {
                 "options": {
                     "operationId": "optionsHealth",
                     "tags": ["Health"],
@@ -6381,21 +6415,60 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "HealthContract.cs");
 
-        // The unsupported-method ops are absent from the scaffold...
-        Assert.Contains("GetHealth", contract);
-        Assert.DoesNotContain("HeadHealth", contract);
-        Assert.DoesNotContain("OptionsHealth", contract);
-
-        // ...and each absence is a named warning (ratcheted category: operation-method-dropped).
-        Assert.Contains(
+        Assert.Contains("Define.Options(\"/health\")", contract);
+        Assert.DoesNotContain(
             result.Warnings,
-            w => w.StartsWith("RIV3003: Operation dropped: HEAD /health", StringComparison.Ordinal)
+            warning => warning.StartsWith("RIV3003:", StringComparison.Ordinal)
         );
+
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emitted = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
+        var document = JsonSerializer.Deserialize<JsonElement>(emitted);
+
+        Assert.True(
+            document.GetProperty("paths").GetProperty("/health").TryGetProperty("options", out _)
+        );
+    }
+
+    [Fact]
+    public void Trace_Operation_Is_Skipped_With_Named_Warning()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/health": {
+                "get": {
+                    "operationId": "getHealth",
+                    "tags": ["Health"],
+                    "responses": { "204": { "description": "No Content" } }
+                },
+                "trace": {
+                    "operationId": "traceHealth",
+                    "tags": ["Health"],
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "HealthContract.cs");
+
+        Assert.Contains("GetHealth", contract);
+        Assert.DoesNotContain("TraceHealth", contract);
+
         Assert.Contains(
             result.Warnings,
-            w =>
-                w.StartsWith(
-                    "RIV3003: Operation dropped: OPTIONS /health",
+            warning =>
+                warning.StartsWith(
+                    "RIV3003: Operation dropped: TRACE /health",
                     StringComparison.Ordinal
                 )
         );

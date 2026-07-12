@@ -21,18 +21,34 @@ public abstract record TsType
     public sealed record Nullable(TsType Inner) : TsType;
 
     /// <summary>T[].</summary>
-    public sealed record Array(TsType Element) : TsType;
+    public sealed record Array(TsType Element, TsScalarMetadata? ElementMetadata = null) : TsType;
 
     /// <summary>Record&lt;string, T&gt;. Key is null for plain string keys; otherwise the
     /// key's contract representation (enum ref, string-backed brand, or a string-typed
     /// primitive carrying the original format/CSharpType) — emitted as propertyNames.</summary>
-    public sealed record Dictionary(TsType Value, TsType? Key = null) : TsType;
+    public sealed record Dictionary(
+        TsType Value,
+        TsType? Key = null,
+        TsScalarMetadata? ValueMetadata = null
+    ) : TsType;
 
     /// <summary>"A" | "B" | "C" — string enum rendered as union.</summary>
-    public sealed record StringUnion(IReadOnlyList<string> Members) : TsType;
+    public sealed record StringUnion(
+        IReadOnlyList<string> Members,
+        TsTypeMetadata? Metadata = null,
+        string? Format = null,
+        string? Description = null,
+        TsScalarMetadata? ScalarMetadata = null
+    ) : TsType;
 
     /// <summary>1 | 2 | 3 — int enum rendered as numeric literal union.</summary>
-    public sealed record IntUnion(IReadOnlyList<int> Members, string? Format = null) : TsType;
+    public sealed record IntUnion(
+        IReadOnlyList<int> Members,
+        string? Format = null,
+        TsTypeMetadata? Metadata = null,
+        string? Description = null,
+        TsScalarMetadata? ScalarMetadata = null
+    ) : TsType;
 
     /// <summary>A JSON scalar literal type represented with OpenAPI 3.1 const.</summary>
     public sealed record Literal(JsonElement Value) : TsType;
@@ -47,7 +63,12 @@ public abstract record TsType
     public sealed record TypeParam(string Name) : TsType;
 
     /// <summary>Branded primitive: string &amp; { readonly __brand: "Email" }.</summary>
-    public sealed record Brand(string Name, TsType Inner) : TsType;
+    public sealed record Brand(
+        string Name,
+        TsType Inner,
+        TsTypeMetadata? Metadata = null,
+        string? Description = null
+    ) : TsType;
 
     /// <summary>Inline object: { key: string; value?: number }. Used for tuples and union variants.</summary>
     public sealed record InlineObject(IReadOnlyList<InlineObjectField> Fields) : TsType;
@@ -68,7 +89,11 @@ public abstract record TsType
     /// <summary>An undiscriminated union (oneOf without discriminator) — [RivetUnion] wrappers.</summary>
     public sealed record Union(IReadOnlyList<TsType> Variants) : TsType;
 
-    public sealed record TaggedUnionVariant(string Tag, TsType Type);
+    public sealed record TaggedUnionVariant(
+        string Tag,
+        TsType Type,
+        TsTypeMetadata? Metadata = null
+    );
 
     /// <summary>
     /// Produces a stable, human-readable name suffix for a TsType.
@@ -126,11 +151,12 @@ public abstract record TsType
         return type switch
         {
             TypeParam tp when map.TryGetValue(tp.Name, out var resolved) => resolved,
-            Array a => new Array(ResolveTypeParams(a.Element, map)),
+            Array a => new Array(ResolveTypeParams(a.Element, map), a.ElementMetadata),
             Nullable n => new Nullable(ResolveTypeParams(n.Inner, map)),
             Dictionary d => new Dictionary(
                 ResolveTypeParams(d.Value, map),
-                d.Key is null ? null : ResolveTypeParams(d.Key, map)
+                d.Key is null ? null : ResolveTypeParams(d.Key, map),
+                d.ValueMetadata
             ),
             Generic g => new Generic(
                 g.Name,
@@ -148,7 +174,8 @@ public abstract record TsType
                 tu.Discriminator,
                 tu.Variants.Select(v => new TaggedUnionVariant(
                         v.Tag,
-                        ResolveTypeParams(v.Type, map)
+                        ResolveTypeParams(v.Type, map),
+                        v.Metadata
                     ))
                     .ToList()
             ),

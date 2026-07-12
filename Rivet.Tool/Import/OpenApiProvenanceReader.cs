@@ -1,0 +1,565 @@
+using System.Text.Json;
+using Rivet.Tool.Model;
+
+namespace Rivet.Tool.Import;
+
+internal sealed record ImportedOpenApiProvenance(
+    OpenApiDocumentProvenance Document,
+    IReadOnlyDictionary<(string Path, string Method), OpenApiOperationProvenance> Operations
+);
+
+internal static class OpenApiProvenanceReader
+{
+    private static readonly HashSet<string> _preservedVendorExtensions =
+    [
+        "x-ds-api-status",
+        "x-ds-examples",
+        "x-ds-in-sdk",
+        "x-enum-elements",
+        "x-is-beta",
+        "x-release-status",
+        "x-sq-version",
+        "x-twilio",
+        "x-visibility",
+    ];
+
+    private static readonly string[] _methods =
+    [
+        "get",
+        "put",
+        "post",
+        "delete",
+        "options",
+        "head",
+        "patch",
+        "trace",
+    ];
+
+    public static ImportedOpenApiProvenance Read(string json, List<string> warnings)
+    {
+        using var parsed = JsonDocument.Parse(json);
+        var root = parsed.RootElement;
+        var swagger2 =
+            root.TryGetProperty("swagger", out var swagger)
+            && swagger.GetString()?.StartsWith("2.", StringComparison.Ordinal) == true;
+        var info = ReadInfo(root.GetProperty("info"));
+        var tags = root.TryGetProperty("tags", out var tagArray)
+            ? tagArray.EnumerateArray().Select(ReadTag).ToList()
+            : [];
+        var externalDocs = root.TryGetProperty("externalDocs", out var docs)
+            ? ReadExternalDocs(docs)
+            : null;
+        var rootServers = swagger2
+            ? ReadSwaggerServers(root, warnings)
+            : ReadServersProperty(root) ?? [];
+        var componentExamples = ReadComponentExamples(root);
+        var vendorExtensions = ReadVendorExtensions(root, swagger2);
+        var document = new OpenApiDocumentProvenance(
+            info,
+            tags,
+            externalDocs,
+            rootServers,
+            componentExamples,
+            VendorExtensions: vendorExtensions
+        );
+        var operations = new Dictionary<(string Path, string Method), OpenApiOperationProvenance>();
+
+        if (!root.TryGetProperty("paths", out var paths))
+        {
+            return new ImportedOpenApiProvenance(document, operations);
+        }
+
+        foreach (var path in paths.EnumerateObject())
+        {
+            var pathServers = swagger2 ? null : ReadServersProperty(path.Value);
+            foreach (var method in _methods)
+            {
+                if (!path.Value.TryGetProperty(method, out var operation))
+                {
+                    continue;
+                }
+
+                var operationServers = swagger2 ? null : ReadServersProperty(operation);
+                var serverOverride = operationServers ?? pathServers;
+                var operationIdPresent = operation.TryGetProperty(
+                    "operationId",
+                    out var operationId
+                );
+                var operationIdValue = operationIdPresent
+                    ? ReadRequiredString(
+                        operationId,
+                        $"operationId for {method.ToUpperInvariant()} {path.Name}"
+                    )
+                    : null;
+                var operationTags = operation.TryGetProperty("tags", out var operationTagArray)
+                    ? operationTagArray
+                        .EnumerateArray()
+                        .Select(value =>
+                            ReadRequiredString(
+                                value,
+                                $"tag for {method.ToUpperInvariant()} {path.Name}"
+                            )
+                        )
+                        .ToList()
+                    : [];
+                var deprecated =
+                    operation.TryGetProperty("deprecated", out var deprecatedValue)
+                    && deprecatedValue.ValueKind == JsonValueKind.True;
+                var requestBodyDescription = swagger2
+                    ? ReadSwaggerBodyDescription(root, path.Value, operation)
+                    : ReadRequestBodyDescription(
+                        root,
+                        operation,
+                        $"{method.ToUpperInvariant()} {path.Name}"
+                    );
+
+                operations[(path.Name, method)] = new OpenApiOperationProvenance(
+                    operationIdPresent,
+                    operationIdValue,
+                    operationTags,
+                    deprecated,
+                    serverOverride,
+                    requestBodyDescription,
+                    ReadRivetIdentity(operation),
+                    ReadRequestBodyComponentId(operation)
+                );
+            }
+        }
+
+        return new ImportedOpenApiProvenance(document, operations);
+    }
+
+    private static IReadOnlyList<OpenApiVendorExtensionProvenance> ReadVendorExtensions(
+        JsonElement root,
+        bool swagger2
+    )
+    {
+        var result = new List<OpenApiVendorExtensionProvenance>();
+        ReadVendorExtensions(root, "#", swagger2, result);
+        return result;
+    }
+
+    private static void ReadVendorExtensions(
+        JsonElement value,
+        string pointer,
+        bool swagger2,
+        List<OpenApiVendorExtensionProvenance> result
+    )
+    {
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var item in value.EnumerateArray())
+            {
+                ReadVendorExtensions(item, $"{pointer}/{index++}", swagger2, result);
+            }
+            return;
+        }
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        foreach (var property in value.EnumerateObject())
+        {
+            if (_preservedVendorExtensions.Contains(property.Name))
+            {
+                result.Add(
+                    new OpenApiVendorExtensionProvenance(
+                        NormalizeOwnerPointer(pointer, swagger2),
+                        property.Name,
+                        property.Value.GetRawText()
+                    )
+                );
+            }
+            else
+            {
+                ReadVendorExtensions(
+                    property.Value,
+                    $"{pointer}/{EscapePointerToken(property.Name)}",
+                    swagger2,
+                    result
+                );
+            }
+        }
+    }
+
+    private static string NormalizeOwnerPointer(string pointer, bool swagger2)
+    {
+        if (!swagger2)
+        {
+            return pointer;
+        }
+
+        return pointer switch
+        {
+            "#/definitions" => "#/components/schemas",
+            "#/securityDefinitions" => "#/components/securitySchemes",
+            _ when pointer.StartsWith("#/definitions/", StringComparison.Ordinal) =>
+                "#/components/schemas/" + pointer["#/definitions/".Length..],
+            _ when pointer.StartsWith("#/securityDefinitions/", StringComparison.Ordinal) =>
+                "#/components/securitySchemes/" + pointer["#/securityDefinitions/".Length..],
+            _ => pointer,
+        };
+    }
+
+    private static string EscapePointerToken(string value) =>
+        value
+            .Replace("~", "~0", StringComparison.Ordinal)
+            .Replace("/", "~1", StringComparison.Ordinal);
+
+    private static IReadOnlyList<OpenApiComponentExampleProvenance> ReadComponentExamples(
+        JsonElement root
+    )
+    {
+        if (
+            !root.TryGetProperty("components", out var components)
+            || !components.TryGetProperty("examples", out var examples)
+        )
+        {
+            return [];
+        }
+
+        var result = new List<OpenApiComponentExampleProvenance>();
+        foreach (var example in examples.EnumerateObject())
+        {
+            var hasValue = example.Value.TryGetProperty("value", out var value);
+            var externalValue = ReadOptionalString(example.Value, "externalValue");
+            if (hasValue == (externalValue is not null))
+            {
+                throw new InvalidOperationException(
+                    $"Component example '{example.Name}' requires exactly one of value or externalValue."
+                );
+            }
+
+            result.Add(
+                new OpenApiComponentExampleProvenance(
+                    example.Name,
+                    ReadOptionalString(example.Value, "summary"),
+                    ReadOptionalString(example.Value, "description"),
+                    hasValue ? value.GetRawText() : null,
+                    externalValue
+                )
+            );
+        }
+
+        return result;
+    }
+
+    private static OpenApiInfoProvenance ReadInfo(JsonElement info)
+    {
+        var contact = info.TryGetProperty("contact", out var contactValue)
+            ? new OpenApiContactProvenance(
+                ReadOptionalString(contactValue, "name"),
+                ReadOptionalString(contactValue, "url"),
+                ReadOptionalString(contactValue, "email")
+            )
+            : null;
+        var license = info.TryGetProperty("license", out var licenseValue)
+            ? new OpenApiLicenseProvenance(
+                ReadRequiredPropertyString(licenseValue, "name", "info.license"),
+                ReadOptionalString(licenseValue, "url"),
+                ReadOptionalString(licenseValue, "identifier")
+            )
+            : null;
+
+        return new OpenApiInfoProvenance(
+            ReadRequiredPropertyString(info, "title", "info"),
+            ReadRequiredPropertyString(info, "version", "info"),
+            ReadOptionalString(info, "description"),
+            ReadOptionalString(info, "termsOfService"),
+            contact,
+            license
+        );
+    }
+
+    private static OpenApiRivetIdentityProvenance? ReadRivetIdentity(JsonElement operation)
+    {
+        var contract = ReadOptionalString(operation, "x-rivet-contract");
+        var endpoint = ReadOptionalString(operation, "x-rivet-endpoint");
+        return contract is null && endpoint is null
+            ? null
+            : new OpenApiRivetIdentityProvenance(contract, endpoint);
+    }
+
+    private static string? ReadRequestBodyComponentId(JsonElement operation)
+    {
+        if (
+            !operation.TryGetProperty("requestBody", out var requestBody)
+            || !requestBody.TryGetProperty("$ref", out var referenceValue)
+            || referenceValue.ValueKind != JsonValueKind.String
+            || referenceValue.GetString() is not { } reference
+            || !reference.StartsWith("#/components/requestBodies/", StringComparison.Ordinal)
+        )
+        {
+            return null;
+        }
+
+        return Uri.UnescapeDataString(reference["#/components/requestBodies/".Length..])
+            .Replace("~1", "/", StringComparison.Ordinal)
+            .Replace("~0", "~", StringComparison.Ordinal);
+    }
+
+    private static OpenApiTagProvenance ReadTag(JsonElement tag)
+    {
+        return new OpenApiTagProvenance(
+            ReadRequiredPropertyString(tag, "name", "tag"),
+            ReadOptionalString(tag, "description"),
+            tag.TryGetProperty("externalDocs", out var docs) ? ReadExternalDocs(docs) : null
+        );
+    }
+
+    private static OpenApiExternalDocsProvenance ReadExternalDocs(JsonElement docs)
+    {
+        return new OpenApiExternalDocsProvenance(
+            ReadRequiredPropertyString(docs, "url", "externalDocs"),
+            ReadOptionalString(docs, "description")
+        );
+    }
+
+    private static IReadOnlyList<OpenApiServerProvenance>? ReadServersProperty(JsonElement owner)
+    {
+        if (!owner.TryGetProperty("servers", out var servers))
+        {
+            return null;
+        }
+
+        return servers.EnumerateArray().Select(ReadServer).ToList();
+    }
+
+    private static OpenApiServerProvenance ReadServer(JsonElement server)
+    {
+        var variables = new List<OpenApiServerVariableProvenance>();
+        if (server.TryGetProperty("variables", out var variableMap))
+        {
+            foreach (var variable in variableMap.EnumerateObject())
+            {
+                var allowedValues = variable.Value.TryGetProperty("enum", out var values)
+                    ? values
+                        .EnumerateArray()
+                        .Select(value =>
+                            ReadRequiredString(value, $"server variable '{variable.Name}' enum")
+                        )
+                        .ToList()
+                    : [];
+                variables.Add(
+                    new OpenApiServerVariableProvenance(
+                        variable.Name,
+                        ReadRequiredPropertyString(
+                            variable.Value,
+                            "default",
+                            $"server variable '{variable.Name}'"
+                        ),
+                        allowedValues,
+                        ReadOptionalString(variable.Value, "description")
+                    )
+                );
+            }
+        }
+
+        return new OpenApiServerProvenance(
+            ReadRequiredPropertyString(server, "url", "server"),
+            ReadOptionalString(server, "description"),
+            variables
+        );
+    }
+
+    private static IReadOnlyList<OpenApiServerProvenance> ReadSwaggerServers(
+        JsonElement root,
+        List<string> warnings
+    )
+    {
+        var host = ReadOptionalString(root, "host");
+        var basePath = ReadOptionalString(root, "basePath");
+        var schemes = root.TryGetProperty("schemes", out var schemeArray)
+            ? schemeArray
+                .EnumerateArray()
+                .Select(value => ReadRequiredString(value, "Swagger schemes"))
+                .ToList()
+            : [];
+
+        if (host is not null && schemes.Count > 0)
+        {
+            return schemes
+                .Select(scheme => new OpenApiServerProvenance(
+                    $"{scheme}://{host}{basePath ?? ""}",
+                    null,
+                    []
+                ))
+                .ToList();
+        }
+
+        if (host is not null || schemes.Count > 0)
+        {
+            warnings.Add(
+                "RIV3019: Swagger host/schemes cannot be projected without both an explicit host and at least one explicit scheme; no server was invented."
+            );
+            return [];
+        }
+
+        return basePath is not null ? [new OpenApiServerProvenance(basePath, null, [])] : [];
+    }
+
+    private static string? ReadSwaggerBodyDescription(
+        JsonElement root,
+        JsonElement pathItem,
+        JsonElement operation
+    )
+    {
+        return TryFindSwaggerBodyDescription(root, operation, out var operationDescription)
+                ? operationDescription
+            : TryFindSwaggerBodyDescription(root, pathItem, out var pathDescription)
+                ? pathDescription
+            : null;
+    }
+
+    private static string? ReadRequestBodyDescription(
+        JsonElement root,
+        JsonElement operation,
+        string context
+    )
+    {
+        if (!operation.TryGetProperty("requestBody", out var requestBody))
+        {
+            return null;
+        }
+
+        return ReadRequestBodyDescription(
+            root,
+            requestBody,
+            context,
+            new HashSet<string>(StringComparer.Ordinal)
+        );
+    }
+
+    private static string? ReadRequestBodyDescription(
+        JsonElement root,
+        JsonElement requestBody,
+        string context,
+        HashSet<string> references
+    )
+    {
+        if (requestBody.TryGetProperty("description", out var description))
+        {
+            return ReadRequiredString(description, $"request body description for {context}");
+        }
+        if (!requestBody.TryGetProperty("$ref", out var referenceValue))
+        {
+            return null;
+        }
+
+        var reference = ReadRequiredString(referenceValue, $"request body reference for {context}");
+        if (!reference.StartsWith("#/", StringComparison.Ordinal))
+        {
+            return null;
+        }
+        if (!references.Add(reference))
+        {
+            throw new InvalidOperationException(
+                $"Cyclic request body reference '{reference}' for {context}."
+            );
+        }
+
+        if (!TryResolveLocalReference(root, reference, out var target))
+        {
+            return null;
+        }
+        var result = ReadRequestBodyDescription(root, target, context, references);
+        references.Remove(reference);
+        return result;
+    }
+
+    private static JsonElement ResolveLocalReference(JsonElement root, string reference)
+    {
+        if (TryResolveLocalReference(root, reference, out var target))
+        {
+            return target;
+        }
+
+        throw new InvalidOperationException(
+            $"Local request body reference '{reference}' targets a missing value."
+        );
+    }
+
+    private static bool TryResolveLocalReference(
+        JsonElement root,
+        string reference,
+        out JsonElement target
+    )
+    {
+        var current = root;
+        foreach (var encodedSegment in reference[2..].Split('/'))
+        {
+            var segment = Uri.UnescapeDataString(encodedSegment)
+                .Replace("~1", "/", StringComparison.Ordinal)
+                .Replace("~0", "~", StringComparison.Ordinal);
+            if (!current.TryGetProperty(segment, out current))
+            {
+                target = default;
+                return false;
+            }
+        }
+        target = current;
+        return true;
+    }
+
+    private static bool TryFindSwaggerBodyDescription(
+        JsonElement root,
+        JsonElement owner,
+        out string? description
+    )
+    {
+        description = null;
+        if (!owner.TryGetProperty("parameters", out var parameters))
+        {
+            return false;
+        }
+
+        foreach (var parameter in parameters.EnumerateArray())
+        {
+            var resolved = parameter.TryGetProperty("$ref", out var referenceValue)
+                ? ResolveLocalReference(
+                    root,
+                    ReadRequiredString(referenceValue, "Swagger body parameter reference")
+                )
+                : parameter;
+            if (ReadOptionalString(resolved, "in") != "body")
+            {
+                continue;
+            }
+
+            description = ReadOptionalString(resolved, "description");
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string ReadRequiredPropertyString(
+        JsonElement owner,
+        string property,
+        string context
+    )
+    {
+        if (!owner.TryGetProperty(property, out var value))
+        {
+            throw new InvalidOperationException($"Missing required {context}.{property} value.");
+        }
+
+        return ReadRequiredString(value, $"{context}.{property}");
+    }
+
+    private static string ReadRequiredString(JsonElement value, string context)
+    {
+        return value.ValueKind == JsonValueKind.String
+            ? value.GetString()!
+            : throw new InvalidOperationException($"{context} must be a string.");
+    }
+
+    private static string? ReadOptionalString(JsonElement owner, string property)
+    {
+        return owner.TryGetProperty(property, out var value)
+            ? ReadRequiredString(value, property)
+            : null;
+    }
+}

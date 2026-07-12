@@ -1,3 +1,5 @@
+using Rivet.Tool.Model;
+
 namespace Rivet.Tool.Emit;
 
 /// <summary>
@@ -10,5 +12,30 @@ namespace Rivet.Tool.Emit;
 public sealed record OpenApiDocumentInfo(
     string Title = "API",
     string Version = "1.0.0",
-    IReadOnlyList<string>? Servers = null
-);
+    IReadOnlyList<string>? Servers = null,
+    OpenApiDocumentProvenance? Provenance = null
+)
+{
+    public static OpenApiDocumentInfo Resolve(
+        OpenApiDocumentProvenance? provenance,
+        string? title,
+        string? version,
+        IReadOnlyList<string>? servers
+    )
+    {
+        var resolvedTitle = title ?? provenance?.Info.Title ?? "API";
+        var resolvedVersion = version ?? provenance?.Info.Version ?? "1.0.0";
+        var resolvedProvenance = provenance is null
+            ? null
+            : provenance with
+            {
+                Info = provenance.Info with { Title = resolvedTitle, Version = resolvedVersion },
+            };
+        return new OpenApiDocumentInfo(
+            resolvedTitle,
+            resolvedVersion,
+            servers is { Count: > 0 } ? servers : null,
+            resolvedProvenance
+        );
+    }
+}

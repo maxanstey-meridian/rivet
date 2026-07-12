@@ -503,7 +503,7 @@ internal static class SchemaClassifier
             }
         }
 
-        return new GeneratedEnum(name, members, schema.Format);
+        return new GeneratedEnum(name, members, schema.Format, schema.Description);
     }
 
     internal static GeneratedEnum MapIntEnum(string name, IOpenApiSchema schema)
@@ -544,14 +544,14 @@ internal static class SchemaClassifier
             index++;
         }
 
-        return new GeneratedEnum(name, members, schema.Format);
+        return new GeneratedEnum(name, members, schema.Format, schema.Description);
     }
 
     internal static GeneratedBrand MapBrand(string name, IOpenApiSchema schema)
     {
         var brandName = GetExtensionString(schema, "x-rivet-brand") ?? name;
         var innerType = ResolvePrimitiveType(schema) ?? "string";
-        return new GeneratedBrand(brandName, innerType);
+        return new GeneratedBrand(brandName, innerType, schema.Format, schema.Description);
     }
 
     // --- Generic type helpers ---
@@ -609,6 +609,8 @@ internal static class SchemaClassifier
         {
             sb.Append(",f:").Append(schema.Format);
         }
+
+        AppendSemanticFacets(sb, schema);
 
         if (schema.Properties is { Count: > 0 })
         {
@@ -668,5 +670,47 @@ internal static class SchemaClassifier
         }
 
         sb.Append('}');
+    }
+
+    private static void AppendSemanticFacets(StringBuilder sb, IOpenApiSchema schema)
+    {
+        void Append(string name, object? value)
+        {
+            if (value is not null)
+            {
+                sb.Append(',').Append(name).Append(':').Append(value);
+            }
+        }
+
+        Append("title", schema.Title);
+        Append("description", schema.Description);
+        Append("default", schema.Default?.ToJsonString());
+        Append("example", schema.Example?.ToJsonString());
+        if (schema.Examples is { Count: > 0 })
+        {
+            Append("examples", string.Join("|", schema.Examples.Select(x => x?.ToJsonString())));
+        }
+        Append("deprecated", schema.Deprecated ? true : null);
+        Append("readOnly", schema.ReadOnly ? true : null);
+        Append("writeOnly", schema.WriteOnly ? true : null);
+        Append("minLength", schema.MinLength);
+        Append("maxLength", schema.MaxLength);
+        Append("pattern", schema.Pattern);
+        Append("minimum", schema.Minimum);
+        Append("maximum", schema.Maximum);
+        Append("exclusiveMinimum", schema.ExclusiveMinimum);
+        Append("exclusiveMaximum", schema.ExclusiveMaximum);
+        Append("multipleOf", schema.MultipleOf);
+        Append("minItems", schema.MinItems);
+        Append("maxItems", schema.MaxItems);
+        Append("uniqueItems", schema.UniqueItems == true ? true : null);
+        if (schema.Xml is { } xml)
+        {
+            Append("xml.name", xml.Name);
+            Append("xml.namespace", xml.Namespace);
+            Append("xml.prefix", xml.Prefix);
+            Append("xml.attribute", xml.Attribute ? true : null);
+            Append("xml.wrapped", xml.Wrapped ? true : null);
+        }
     }
 }

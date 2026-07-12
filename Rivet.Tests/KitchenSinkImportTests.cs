@@ -39,8 +39,8 @@ public sealed class KitchenSinkImportTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
-        // 15 endpoints: 6 Users + 1 Orgs + 1 Tenants + 1 Analytics + 1 Health + 2 Admin + 1 Default + 1 InlineTest + 1 Forms
-        Assert.Equal(15, endpoints.Count);
+        // 17 endpoints: the original 15 plus the now-representable HEAD and OPTIONS health operations.
+        Assert.Equal(17, endpoints.Count);
 
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/users");
@@ -75,6 +75,11 @@ public sealed class KitchenSinkImportTests
             e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/analytics"
         );
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/health");
+        Assert.Contains(endpoints, e => e.HttpMethod == "HEAD" && e.RouteTemplate == "/api/health");
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "OPTIONS" && e.RouteTemplate == "/api/health"
+        );
         Assert.Contains(
             endpoints,
             e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/admin/purge"
@@ -312,18 +317,21 @@ public sealed class KitchenSinkImportTests
     {
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
 
-        // Health endpoint has security: [] → .Anonymous()
-        Assert.Contains(".Anonymous()", CompilationHelper.FindFile(result, "HealthContract.cs"));
-
-        // Admin purge has security: [{"admin": []}] → .Secure("admin")
+        // Health endpoint has an explicit empty requirement list.
         Assert.Contains(
-            ".Secure(\"admin\")",
+            ".SecurityRequirements()",
+            CompilationHelper.FindFile(result, "HealthContract.cs")
+        );
+
+        // Admin purge has security: [{"admin": []}].
+        Assert.Contains(
+            ".SecurityRequirement(0, \"admin\")",
             CompilationHelper.FindFile(result, "AdminContract.cs")
         );
 
-        // Users endpoints inherit global → .Secure("bearer")
-        Assert.Contains(
-            ".Secure(\"bearer\")",
+        // Users inherit document-level global security without endpoint duplication.
+        Assert.DoesNotContain(
+            ".SecurityRequirement(",
             CompilationHelper.FindFile(result, "UsersContract.cs")
         );
     }
@@ -373,22 +381,19 @@ public sealed class KitchenSinkImportTests
         // Synthetic request type should exist
         var requestContent = CompilationHelper.FindFile(result, "SubmitRequest.cs");
         Assert.Contains("string Name", requestContent);
-        Assert.Contains("long? Value", requestContent);
+        Assert.Contains("[RivetOptional]", requestContent);
+        Assert.Contains("public long Value { get; init; } = default!;", requestContent);
     }
 
     // ========== Default error response ==========
 
     [Fact]
-    public void Default_Error_Response_Mapped_As_500()
+    public void Default_Error_Response_Remains_Exact()
     {
-        // DELIBERATE PROJECTION: OpenAPI's "default" response is a catch-all with no C#
-        // contract equivalent; the importer projects it to 500 (see
-        // ContractBuilder.ResolveErrorResponses/NormalizeStatusCode). A spec declaring both
-        // "default" and "500" keeps the concrete 500 (first-in wins per status).
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         var content = CompilationHelper.FindFile(result, "FormsContract.cs");
 
-        Assert.Contains(".Returns<ValidationErrorDto>(500, \"Unexpected error\")", content);
+        Assert.Contains(".Returns<ValidationErrorDto>(\"default\", \"Unexpected error\")", content);
     }
 
     // ========== Composition ==========
@@ -404,7 +409,8 @@ public sealed class KitchenSinkImportTests
         Assert.Contains("string City", content);
         Assert.Contains("string ZipCode", content);
         // Plus the inline extension property
-        Assert.Contains("string? Extra", content);
+        Assert.Contains("[RivetOptional]", content);
+        Assert.Contains("public string Extra { get; init; } = default!;", content);
     }
 
     [Fact]
@@ -493,7 +499,8 @@ public sealed class KitchenSinkImportTests
 
         Assert.Contains("IFormFile File", content);
         Assert.Contains("using Microsoft.AspNetCore.Http;", content);
-        Assert.Contains("string? Caption", content);
+        Assert.Contains("[RivetOptional]", content);
+        Assert.Contains("public string Caption { get; init; } = default!;", content);
     }
 
     // ========== Operation naming ==========
@@ -529,42 +536,37 @@ public sealed class KitchenSinkImportTests
     }
 
     [Fact]
-    public void AdditionalProperties_True_Skips_Record_Generation()
+    public void Named_AdditionalProperties_True_Preserves_Component_Identity()
     {
-        // A top-level schema with additionalProperties: true and no properties
-        // should NOT generate a record — it resolves to Dictionary inline.
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
-        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("OpenMapDto"));
+        Assert.Contains(result.Files, f => f.FileName.EndsWith("OpenMapDto.cs"));
 
-        // Consumer-side: refs to the skipped schema resolve to Dictionary, not a dangling name
         var consumer = CompilationHelper.FindFile(result, "MapRefConsumerDto.cs");
-        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement> OpenMap", consumer);
+        Assert.Contains("OpenMapDto OpenMap", consumer);
     }
 
     // ========== Bare object ==========
 
     [Fact]
-    public void Bare_Object_Skips_Record_Generation()
+    public void Named_Bare_Object_Preserves_Component_Identity()
     {
-        // { "type": "object" } with no properties — resolved inline as Dictionary, no record generated
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
-        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("BareObjectDto"));
+        Assert.Contains(result.Files, f => f.FileName.EndsWith("BareObjectDto.cs"));
 
-        // Consumer-side: refs to the skipped schema resolve to Dictionary, not a dangling name
         var consumer = CompilationHelper.FindFile(result, "MapRefConsumerDto.cs");
-        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement> BareObj", consumer);
+        Assert.Contains("BareObjectDto BareObj", consumer);
     }
 
     [Fact]
-    public void Ref_To_PropertyLess_Object_Resolves_To_Dictionary()
+    public void Ref_To_Named_Bare_Object_Uses_Component_Type()
     {
         // A $ref pointing to a property-less object schema (OpenMapDto, BareObjectDto)
         // should resolve to Dictionary on the consuming property, not to a dead type name.
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         var content = CompilationHelper.FindFile(result, "MapRefConsumerDto.cs");
 
-        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement> OpenMap", content);
-        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement> BareObj", content);
+        Assert.Contains("OpenMapDto OpenMap", content);
+        Assert.Contains("BareObjectDto BareObj", content);
         Assert.Contains("string Label", content);
     }
 
@@ -575,7 +577,6 @@ public sealed class KitchenSinkImportTests
     {
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         var content = CompilationHelper.FindFile(result, "InlineParentDto.cs");
-
         // The nested property should reference the synthetic type, not JsonElement
         Assert.Contains("InlineParentDtoNested Nested", content);
         Assert.DoesNotContain("JsonElement", content);
@@ -594,7 +595,8 @@ public sealed class KitchenSinkImportTests
         // Inline request body → synthetic CreateRequest record
         var requestContent = CompilationHelper.FindFile(result, "CreateRequest.cs");
         Assert.Contains("string Title", requestContent);
-        Assert.Contains("long? Count", requestContent);
+        Assert.Contains("[RivetOptional]", requestContent);
+        Assert.Contains("public long Count { get; init; } = default!;", requestContent);
 
         // Inline response body → synthetic CreateResponse record
         var responseContent = CompilationHelper.FindFile(result, "CreateResponse.cs");
@@ -612,10 +614,15 @@ public sealed class KitchenSinkImportTests
 
         // Multi-value inline enums should reference synthesised enum types
         Assert.Contains("InlineParentDtoStatus Status", content);
-        Assert.Contains("InlineParentDtoCategory? Category", content);
+        Assert.Contains(
+            "public InlineParentDtoCategory Category { get; init; } = default!;",
+            content
+        );
 
-        // Single-value inline enum stays as string (not worth an enum)
-        Assert.Contains("string? SingleTag", content);
+        Assert.Contains(
+            "public InlineParentDtoSingleTag SingleTag { get; init; } = default!;",
+            content
+        );
     }
 
     [Fact]
@@ -656,8 +663,9 @@ public sealed class KitchenSinkImportTests
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         var content = CompilationHelper.FindFile(result, "AllOptionalDto.cs");
 
-        Assert.Contains("string? Name", content);
-        Assert.Contains("long? Value", content);
+        Assert.Contains("[RivetOptional]", content);
+        Assert.Contains("public string Name { get; init; } = default!;", content);
+        Assert.Contains("public long Value { get; init; } = default!;", content);
     }
 
     [Fact]
@@ -666,20 +674,19 @@ public sealed class KitchenSinkImportTests
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         var content = CompilationHelper.FindFile(result, "EmptyRequiredDto.cs");
 
-        Assert.Contains("string? Name", content);
-        Assert.Contains("long? Value", content);
+        Assert.Contains("[RivetOptional]", content);
+        Assert.Contains("public string Name { get; init; } = default!;", content);
+        Assert.Contains("public long Value { get; init; } = default!;", content);
     }
 
     [Fact]
-    public void Empty_Object_Skips_Record_Generation()
+    public void Named_Empty_Object_Preserves_Component_Identity()
     {
-        // { "type": "object", "properties": {} } — no actual properties, no record generated
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
-        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("EmptyDto"));
+        Assert.Contains(result.Files, f => f.FileName.EndsWith("EmptyDto.cs"));
 
-        // Consumer-side: refs to the skipped schema resolve to Dictionary, not a dangling name
         var consumer = CompilationHelper.FindFile(result, "MapRefConsumerDto.cs");
-        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement>? Empty", consumer);
+        Assert.Contains("EmptyDto Empty", consumer);
     }
 
     [Fact]
@@ -716,12 +723,17 @@ public sealed class KitchenSinkImportTests
     // ========== bare nullable ==========
 
     [Fact]
-    public void Bare_Nullable_Maps_To_Nullable_JsonElement()
+    public void Bare_Nullable_Uses_Provenance_Without_Inventing_A_Null_Union()
     {
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         var content = CompilationHelper.FindFile(result, "BareNullableDto.cs");
-
-        Assert.Contains("System.Text.Json.JsonElement? Data", content);
+        // OpenAPI 3.1 does not define the legacy `nullable` keyword. SIX preserves
+        // that authored provenance independently without inventing a null type union.
+        Assert.Contains("[RivetOptional]", content);
+        Assert.Contains(
+            "public System.Text.Json.JsonElement Data { get; init; } = default!;",
+            content
+        );
         Assert.Contains("string Name", content);
     }
 

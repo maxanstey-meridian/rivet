@@ -722,6 +722,41 @@ public sealed class InlineTypeExtractorTests
     }
 
     [Fact]
+    public void Content_And_Response_Header_Schemas_Are_Collected_And_Replaced()
+    {
+        static TsType.InlineObject Shape() =>
+            new([("id", new TsType.Primitive("string")), ("name", new TsType.Primitive("string"))]);
+
+        var endpoint = MakeEndpoint(
+            "Items",
+            "exchange",
+            responses:
+            [
+                new TsResponseType(
+                    200,
+                    null,
+                    Contents: [new TsMediaTypeContent("application/json", Shape())],
+                    Headers: [new TsResponseHeader("X-Item", Shape())]
+                ),
+            ]
+        ) with
+        {
+            RequestContents = [new TsMediaTypeContent("application/json", Shape())],
+        };
+
+        var collected = InlineTypeExtractor.CollectInlineObjects([endpoint]);
+        var result = InlineTypeExtractor.Extract([endpoint], []);
+        var updated = Assert.Single(result.Endpoints);
+        var response = Assert.Single(updated.Responses);
+
+        Assert.Equal(3, collected.Count);
+        Assert.Single(result.ExtractedTypes);
+        Assert.IsType<TsType.TypeRef>(Assert.Single(updated.RequestContents!).Schema);
+        Assert.IsType<TsType.TypeRef>(Assert.Single(response.Contents!).Schema);
+        Assert.IsType<TsType.TypeRef>(Assert.Single(response.Headers!).Type);
+    }
+
+    [Fact]
     public void ExistingDefinitions_NoNameCollision()
     {
         var inline = new TsType.InlineObject([

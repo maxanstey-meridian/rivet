@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -244,11 +245,17 @@ public sealed class HeaderSupportTests
         Assert.NotNull(definition.ResponseHeaders);
         Assert.Equal(2, definition.ResponseHeaders!.Count);
         Assert.Equal(
-            new RouteResponseHeader(null, "ETag", null, false),
+            new RouteResponseHeader(null, "ETag", null, false, HeaderType: typeof(string)),
             definition.ResponseHeaders[0]
         );
         Assert.Equal(
-            new RouteResponseHeader(304, "Cache-Control", "Caching policy", true),
+            new RouteResponseHeader(
+                304,
+                "Cache-Control",
+                "Caching policy",
+                true,
+                HeaderType: typeof(string)
+            ),
             definition.ResponseHeaders[1]
         );
     }
@@ -391,5 +398,88 @@ public sealed class HeaderSupportTests
         Assert.False(etag.TryGetProperty("required", out _));
         Assert.False(etag.TryGetProperty("description", out _));
         Assert.Equal("string", etag.GetProperty("schema").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public void Imported_Response_Header_Leaf_Metadata_Survives_Generated_CSharp_And_Emitters()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/items": {
+                "get": {
+                    "operationId": "listItems",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "headers": {
+                                "X-Rate-Limit": {
+                                    "description": "Requests remaining",
+                                    "required": true,
+                                    "schema": {
+                                        "type": ["integer", "null"],
+                                        "format": "int32"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec);
+        var contractSource = CompilationHelper.FindFile(imported, "Contract.cs");
+        Assert.Contains(".WithResponseHeader<int?>", contractSource);
+
+        var compilation = CompilationHelper.CompileImportResult(imported);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var endpoint = Assert.Single(endpoints);
+        var response = Assert.Single(endpoint.Responses);
+        var header = Assert.Single(response.Headers!);
+        Assert.Equal("X-Rate-Limit", header.Name);
+        Assert.Equal("Requests remaining", header.Description);
+        Assert.True(header.Required);
+        var nullable = Assert.IsType<TsType.Nullable>(header.Type);
+        var primitive = Assert.IsType<TsType.Primitive>(nullable.Inner);
+        Assert.Equal("integer", primitive.Name);
+        Assert.Equal("int32", primitive.Format);
+
+        using var contract = JsonDocument.Parse(
+            ContractEmitter.Emit(
+                walker.Definitions.ToDictionary(),
+                walker.Enums.ToDictionary(),
+                endpoints
+            )
+        );
+        var contractHeader = contract
+            .RootElement.GetProperty("endpoints")[0]
+            .GetProperty("responses")[0]
+            .GetProperty("headers")[0];
+        Assert.Equal(
+            "nullable",
+            contractHeader.GetProperty("type").GetProperty("kind").GetString()
+        );
+
+        using var emitted = JsonDocument.Parse(
+            OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null)
+        );
+        var emittedHeader = emitted
+            .RootElement.GetProperty("paths")
+            .GetProperty("/items")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("headers")
+            .GetProperty("X-Rate-Limit");
+        Assert.Equal("Requests remaining", emittedHeader.GetProperty("description").GetString());
+        Assert.True(emittedHeader.GetProperty("required").GetBoolean());
+        var schema = emittedHeader.GetProperty("schema");
+        Assert.Equal(
+            ["integer", "null"],
+            schema.GetProperty("type").EnumerateArray().Select(value => value.GetString())
+        );
+        Assert.Equal("int32", schema.GetProperty("format").GetString());
     }
 }

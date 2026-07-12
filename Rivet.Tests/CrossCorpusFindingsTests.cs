@@ -110,10 +110,10 @@ public sealed class CrossCorpusFindingsTests
         Assert.DoesNotContain("/record-input-things", stderr);
     }
 
-    // ---- #1, import side: params win over an opaque body on bodyless methods ----
+    // ---- #1, import side: params and opaque body content remain independent ----
 
     [Fact]
-    public void Bodyless_Op_With_Opaque_Body_Keeps_Params_And_Drops_The_Body_Loudly()
+    public void Bodyless_Op_With_Opaque_Body_Preserves_Params_And_Content()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -144,22 +144,14 @@ public sealed class CrossCorpusFindingsTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "DefaultContract.cs");
 
-        // the real query param survives as the input; the unexpressable body goes, loudly
-        Assert.Contains("Define.Get<ListItemsInput,", contract);
-        Assert.Contains(
-            "[rivet:unsupported body method=GET reason=opaque-body-dropped-params-kept",
-            contract
-        );
-        Assert.DoesNotContain("reason=dropped-unmergeable-body", contract);
-        // the dropped body takes its serialization metadata with it
-        Assert.DoesNotContain(".FormEncoded()", contract);
-
-        var input = CompilationHelper.FindFile(result, "ListItemsInput.cs");
-        Assert.Contains("PageSize", input);
+        Assert.Contains(".RequestContent<", contract);
+        Assert.Contains("\"application/x-www-form-urlencoded\"", contract);
+        Assert.Contains(".Parameter<long>(\"page_size\", \"query\", false", contract);
+        Assert.DoesNotContain("reason=", contract);
     }
 
     [Fact]
-    public void Delete_With_Opaque_Body_Drops_The_Body_Not_The_Path_Param_Types()
+    public void Delete_With_Opaque_Body_Preserves_Body_And_Path_Param()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -187,17 +179,14 @@ public sealed class CrossCorpusFindingsTests
             "DefaultContract.cs"
         );
 
-        Assert.Contains("DeleteTunnelInput", contract);
-        Assert.Contains(
-            "[rivet:unsupported body method=DELETE reason=opaque-body-dropped-params-kept",
-            contract
-        );
-        // nothing relocates to the query string, so the DELETE body-location marker must not also fire
-        Assert.DoesNotContain("reason=body-lowered-to-query-params", contract);
+        Assert.Contains(".RequestContent<", contract);
+        Assert.Contains("(\"application/json\"", contract);
+        Assert.Contains(".Parameter<string>(\"tunnel_id\", \"path\", true", contract);
+        Assert.DoesNotContain("reason=", contract);
     }
 
     [Fact]
-    public void Post_With_Opaque_Body_Still_Prefers_The_Body_And_Drops_Params_Loudly()
+    public void Post_With_Opaque_Body_Preserves_Body_And_Query_Param()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -226,15 +215,16 @@ public sealed class CrossCorpusFindingsTests
             "DefaultContract.cs"
         );
 
-        // on a body-carrying method TInput re-emits as the JSON body — body wins, params drop loudly
-        Assert.Contains("reason=dropped-unmergeable-body", contract);
-        Assert.DoesNotContain("reason=opaque-body-dropped-params-kept", contract);
+        Assert.Contains(".RequestContent<", contract);
+        Assert.Contains("(\"application/json\"", contract);
+        Assert.Contains(".Parameter<string>(\"tag\", \"query\", false", contract);
+        Assert.DoesNotContain("reason=", contract);
     }
 
-    // ---- #2: status ranges project loudly ----
+    // ---- #2: status ranges remain exact ----
 
     [Fact]
-    public void Error_Status_Range_Projects_To_400_With_A_Loud_Marker()
+    public void Error_Status_Range_Remains_Exact()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -267,8 +257,8 @@ public sealed class CrossCorpusFindingsTests
             "DefaultContract.cs"
         );
 
-        Assert.Contains(".Returns<ErrorDto>(400", contract);
-        Assert.Contains("[rivet:unsupported error status-range=4xx projected=400]", contract);
+        Assert.Contains(".Returns<ErrorDto>(\"4xx\"", contract);
+        Assert.DoesNotContain("projected=400", contract);
     }
 
     // ---- #3: 1xx-only ops keep their informational status ----
@@ -302,7 +292,7 @@ public sealed class CrossCorpusFindingsTests
     }
 
     [Fact]
-    public void Informational_Status_Beside_A_2xx_Is_Dropped_With_A_Loud_Marker()
+    public void Informational_Status_Beside_A_2xx_Remains_Declared()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -330,11 +320,9 @@ public sealed class CrossCorpusFindingsTests
             "DefaultContract.cs"
         );
 
-        // 200 is the success (the builder's default — no .Status call); the 101 drops loudly
+        // 200 remains the runtime success; 101 remains an independent exact response.
         Assert.DoesNotContain(".Status(101)", contract);
-        Assert.Contains(
-            "[rivet:unsupported response status=101 reason=informational-status-dropped]",
-            contract
-        );
+        Assert.Contains(".Returns(101, \"switching protocols\")", contract);
+        Assert.DoesNotContain("informational-status-dropped", contract);
     }
 }

@@ -6,7 +6,15 @@ using Microsoft.AspNetCore.Http.HttpResults;
 /// <summary>
 /// Describes an additional (non-success) response declared via .Returns&lt;T&gt;().
 /// </summary>
-public sealed record RouteErrorResponse(int StatusCode, Type? ResponseType, string? Description);
+public sealed record RouteErrorResponse(
+    int StatusCode,
+    Type? ResponseType,
+    string? Description,
+    string? StatusKey = null
+)
+{
+    public string EffectiveStatusKey => StatusKey ?? StatusCode.ToString();
+}
 
 /// <summary>
 /// Describes a response header declared via .WithResponseHeader(). A null StatusCode
@@ -17,7 +25,20 @@ public sealed record RouteResponseHeader(
     int? StatusCode,
     string Name,
     string? Description,
-    bool Required
+    bool Required,
+    string? StatusKey = null,
+    Type? HeaderType = null,
+    string? SchemaType = null,
+    string? Format = null,
+    string? SchemaExamplesJson = null,
+    string? ExampleJson = null,
+    string? ExamplesJson = null,
+    bool Deprecated = false,
+    string? Style = null,
+    bool? Explode = null,
+    bool AllowReserved = false,
+    bool AllowEmptyValue = false,
+    string? ContentType = null
 );
 
 /// <summary>
@@ -49,7 +70,7 @@ public abstract class RouteDefinitionBase<TSelf>
     // change global state for all requests. Frozen definitions throw instead.
     private bool _published;
 
-    /// <summary>The HTTP method (GET, POST, PUT, PATCH, DELETE).</summary>
+    /// <summary>The HTTP method (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS).</summary>
     public string Method { get; }
 
     /// <summary>The route template from the contract definition.</summary>
@@ -173,6 +194,28 @@ public abstract class RouteDefinitionBase<TSelf>
         return (TSelf)this;
     }
 
+    /// <summary>
+    /// Carries the source OpenAPI response key and primary response description through
+    /// generated C#. Concrete runtime status behavior remains controlled by <see cref="Status"/>.
+    /// </summary>
+    public TSelf StatusKey(string statusKey, string? description = null)
+    {
+        EnsureMutable();
+        _ = statusKey;
+        _ = description;
+        return (TSelf)this;
+    }
+
+    /// <summary>
+    /// Suppresses Rivet's authored method-default response. Intended for imported
+    /// operations whose source response set contains no concrete success response.
+    /// </summary>
+    public TSelf SuppressImplicitResponse()
+    {
+        EnsureMutable();
+        return (TSelf)this;
+    }
+
     public TSelf FormEncoded()
     {
         EnsureMutable();
@@ -247,10 +290,16 @@ public abstract class RouteDefinitionBase<TSelf>
     public TSelf Returns<TResponse>(int statusCode, string? description) =>
         AddErrorResponse(new RouteErrorResponse(statusCode, typeof(TResponse), description));
 
+    public TSelf Returns<TResponse>(string statusKey, string? description = null) =>
+        AddErrorResponse(new RouteErrorResponse(0, typeof(TResponse), description, statusKey));
+
     public TSelf Returns(int statusCode) => Returns(statusCode, null);
 
     public TSelf Returns(int statusCode, string? description) =>
         AddErrorResponse(new RouteErrorResponse(statusCode, null, description));
+
+    public TSelf Returns(string statusKey, string? description = null) =>
+        AddErrorResponse(new RouteErrorResponse(0, null, description, statusKey));
 
     private TSelf AddErrorResponse(RouteErrorResponse response)
     {
@@ -264,7 +313,15 @@ public abstract class RouteDefinitionBase<TSelf>
             );
         }
 
-        if (_errorResponses.Any(existing => existing.StatusCode == response.StatusCode))
+        if (
+            _errorResponses.Any(existing =>
+                string.Equals(
+                    existing.EffectiveStatusKey,
+                    response.EffectiveStatusKey,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        )
         {
             throw new InvalidOperationException(
                 $"Status {response.StatusCode} is already declared via .Returns() — a status carries a single response shape. "
@@ -287,7 +344,105 @@ public abstract class RouteDefinitionBase<TSelf>
         string name,
         string? description = null,
         bool required = false
-    ) => AddResponseHeader(new RouteResponseHeader(statusCode, name, description, required));
+    ) =>
+        AddResponseHeader(
+            new RouteResponseHeader(
+                statusCode,
+                name,
+                description,
+                required,
+                HeaderType: typeof(string)
+            )
+        );
+
+    public TSelf WithResponseHeader<THeader>(
+        int statusCode,
+        string name,
+        string? description = null,
+        bool required = false,
+        string? schemaType = null,
+        string? format = null,
+        string? schemaExamplesJson = null,
+        string? exampleJson = null,
+        string? examplesJson = null,
+        bool deprecated = false,
+        string? style = null,
+        bool? explode = null,
+        bool allowReserved = false,
+        bool allowEmptyValue = false,
+        string? contentType = null
+    ) =>
+        AddResponseHeader(
+            new RouteResponseHeader(
+                statusCode,
+                name,
+                description,
+                required,
+                HeaderType: typeof(THeader),
+                SchemaType: schemaType,
+                Format: format,
+                SchemaExamplesJson: schemaExamplesJson,
+                ExampleJson: exampleJson,
+                ExamplesJson: examplesJson,
+                Deprecated: deprecated,
+                Style: style,
+                Explode: explode,
+                AllowReserved: allowReserved,
+                AllowEmptyValue: allowEmptyValue,
+                ContentType: contentType
+            )
+        );
+
+    public TSelf WithResponseHeaderKey(
+        string statusKey,
+        string name,
+        string? description = null,
+        bool required = false
+    )
+    {
+        return AddResponseHeader(
+            new RouteResponseHeader(null, name, description, required, statusKey, typeof(string))
+        );
+    }
+
+    public TSelf WithResponseHeaderKey<THeader>(
+        string statusKey,
+        string name,
+        string? description = null,
+        bool required = false,
+        string? schemaType = null,
+        string? format = null,
+        string? schemaExamplesJson = null,
+        string? exampleJson = null,
+        string? examplesJson = null,
+        bool deprecated = false,
+        string? style = null,
+        bool? explode = null,
+        bool allowReserved = false,
+        bool allowEmptyValue = false,
+        string? contentType = null
+    ) =>
+        AddResponseHeader(
+            new RouteResponseHeader(
+                null,
+                name,
+                description,
+                required,
+                statusKey,
+                typeof(THeader),
+                schemaType,
+                format,
+                schemaExamplesJson,
+                exampleJson,
+                examplesJson,
+                deprecated,
+                style,
+                explode,
+                allowReserved,
+                allowEmptyValue,
+                contentType
+            )
+        );
 
     /// <summary>
     /// Declares a response header on the endpoint's success status (contract concept).
@@ -297,7 +452,47 @@ public abstract class RouteDefinitionBase<TSelf>
         string name,
         string? description = null,
         bool required = false
-    ) => AddResponseHeader(new RouteResponseHeader(null, name, description, required));
+    ) =>
+        AddResponseHeader(
+            new RouteResponseHeader(null, name, description, required, HeaderType: typeof(string))
+        );
+
+    public TSelf WithResponseHeader<THeader>(
+        string name,
+        string? description = null,
+        bool required = false,
+        string? schemaType = null,
+        string? format = null,
+        string? schemaExamplesJson = null,
+        string? exampleJson = null,
+        string? examplesJson = null,
+        bool deprecated = false,
+        string? style = null,
+        bool? explode = null,
+        bool allowReserved = false,
+        bool allowEmptyValue = false,
+        string? contentType = null
+    ) =>
+        AddResponseHeader(
+            new RouteResponseHeader(
+                null,
+                name,
+                description,
+                required,
+                HeaderType: typeof(THeader),
+                SchemaType: schemaType,
+                Format: format,
+                SchemaExamplesJson: schemaExamplesJson,
+                ExampleJson: exampleJson,
+                ExamplesJson: examplesJson,
+                Deprecated: deprecated,
+                Style: style,
+                Explode: explode,
+                AllowReserved: allowReserved,
+                AllowEmptyValue: allowEmptyValue,
+                ContentType: contentType
+            )
+        );
 
     private TSelf AddResponseHeader(RouteResponseHeader header)
     {
@@ -307,6 +502,11 @@ public abstract class RouteDefinitionBase<TSelf>
         if (
             _responseHeaders.Any(existing =>
                 existing.StatusCode == header.StatusCode
+                && string.Equals(
+                    existing.StatusKey,
+                    header.StatusKey,
+                    StringComparison.OrdinalIgnoreCase
+                )
                 && string.Equals(existing.Name, header.Name, StringComparison.OrdinalIgnoreCase)
             )
         )
@@ -320,12 +520,18 @@ public abstract class RouteDefinitionBase<TSelf>
         return (TSelf)this;
     }
 
-    public TSelf RequestExampleJson(string json, string? name = null, string? mediaType = null)
+    public TSelf RequestExampleJson(
+        string json,
+        string? name = null,
+        string? mediaType = null,
+        string? referencedComponentsJson = null
+    )
     {
         // Example metadata is consumed by the Roslyn analyzer, not at runtime.
         _ = json;
         _ = name;
         _ = mediaType;
+        _ = referencedComponentsJson;
         return (TSelf)this;
     }
 
@@ -333,13 +539,15 @@ public abstract class RouteDefinitionBase<TSelf>
         string componentExampleId,
         string resolvedJson,
         string? name = null,
-        string? mediaType = null
+        string? mediaType = null,
+        string? referencedComponentsJson = null
     )
     {
         _ = componentExampleId;
         _ = resolvedJson;
         _ = name;
         _ = mediaType;
+        _ = referencedComponentsJson;
         return (TSelf)this;
     }
 
@@ -347,13 +555,31 @@ public abstract class RouteDefinitionBase<TSelf>
         int statusCode,
         string json,
         string? name = null,
-        string? mediaType = null
+        string? mediaType = null,
+        string? referencedComponentsJson = null
     )
     {
         _ = statusCode;
         _ = json;
         _ = name;
         _ = mediaType;
+        _ = referencedComponentsJson;
+        return (TSelf)this;
+    }
+
+    public TSelf ResponseExampleJson(
+        string statusKey,
+        string json,
+        string? name = null,
+        string? mediaType = null,
+        string? referencedComponentsJson = null
+    )
+    {
+        _ = statusKey;
+        _ = json;
+        _ = name;
+        _ = mediaType;
+        _ = referencedComponentsJson;
         return (TSelf)this;
     }
 
@@ -362,7 +588,8 @@ public abstract class RouteDefinitionBase<TSelf>
         string componentExampleId,
         string resolvedJson,
         string? name = null,
-        string? mediaType = null
+        string? mediaType = null,
+        string? referencedComponentsJson = null
     )
     {
         _ = statusCode;
@@ -370,6 +597,25 @@ public abstract class RouteDefinitionBase<TSelf>
         _ = resolvedJson;
         _ = name;
         _ = mediaType;
+        _ = referencedComponentsJson;
+        return (TSelf)this;
+    }
+
+    public TSelf ResponseExampleRef(
+        string statusKey,
+        string componentExampleId,
+        string resolvedJson,
+        string? name = null,
+        string? mediaType = null,
+        string? referencedComponentsJson = null
+    )
+    {
+        _ = statusKey;
+        _ = componentExampleId;
+        _ = resolvedJson;
+        _ = name;
+        _ = mediaType;
+        _ = referencedComponentsJson;
         return (TSelf)this;
     }
 
@@ -387,14 +633,51 @@ public abstract class RouteDefinitionBase<TSelf>
         return (TSelf)this;
     }
 
-    public TSelf SecurityRequirementsJson(string requirementsJson)
+    public TSelf SecurityRequirements()
     {
         EnsureMutable();
-        _ = requirementsJson;
         return (TSelf)this;
     }
 
-    public TSelf RequestContent<T>(string mediaType)
+    public TSelf SecurityRequirement(int requirementOrder)
+    {
+        EnsureMutable();
+        _ = requirementOrder;
+        return (TSelf)this;
+    }
+
+    public TSelf SecurityRequirement(int requirementOrder, string scheme, string? scope = null)
+    {
+        EnsureMutable();
+        _ = requirementOrder;
+        _ = scheme;
+        _ = scope;
+        return (TSelf)this;
+    }
+
+    public TSelf RequestContent<T>(
+        string mediaType,
+        string? schemaRef = null,
+        string? schemaType = null,
+        string? format = null
+    )
+    {
+        EnsureMutable();
+        _ = mediaType;
+        _ = schemaRef;
+        _ = schemaType;
+        _ = format;
+        return (TSelf)this;
+    }
+
+    public TSelf RequestContent(string mediaType)
+    {
+        EnsureMutable();
+        _ = mediaType;
+        return (TSelf)this;
+    }
+
+    public TSelf RequestBinaryContent(string mediaType)
     {
         EnsureMutable();
         _ = mediaType;
@@ -408,12 +691,20 @@ public abstract class RouteDefinitionBase<TSelf>
         return (TSelf)this;
     }
 
+    public TSelf RequestBody()
+    {
+        EnsureMutable();
+        return (TSelf)this;
+    }
+
     public TSelf Parameter<T>(
         string name,
         string location,
         bool required,
         string? schemaType = null,
-        string? format = null
+        string? format = null,
+        string? metadataJson = null,
+        string? schemaRef = null
     )
     {
         EnsureMutable();
@@ -422,13 +713,73 @@ public abstract class RouteDefinitionBase<TSelf>
         _ = required;
         _ = schemaType;
         _ = format;
+        _ = metadataJson;
+        _ = schemaRef;
         return (TSelf)this;
     }
 
-    public TSelf ResponseContent<T>(int statusCode, string mediaType)
+    public TSelf ResponseContent<T>(
+        int statusCode,
+        string mediaType,
+        string? schemaRef = null,
+        string? schemaType = null,
+        string? format = null
+    )
     {
         EnsureMutable();
         _ = statusCode;
+        _ = mediaType;
+        _ = schemaRef;
+        _ = schemaType;
+        _ = format;
+        return (TSelf)this;
+    }
+
+    public TSelf ResponseContent<T>(
+        string statusKey,
+        string mediaType,
+        string? schemaRef = null,
+        string? schemaType = null,
+        string? format = null
+    )
+    {
+        EnsureMutable();
+        _ = statusKey;
+        _ = mediaType;
+        _ = schemaRef;
+        _ = schemaType;
+        _ = format;
+        return (TSelf)this;
+    }
+
+    public TSelf ResponseContent(int statusCode, string mediaType)
+    {
+        EnsureMutable();
+        _ = statusCode;
+        _ = mediaType;
+        return (TSelf)this;
+    }
+
+    public TSelf ResponseContent(string statusKey, string mediaType)
+    {
+        EnsureMutable();
+        _ = statusKey;
+        _ = mediaType;
+        return (TSelf)this;
+    }
+
+    public TSelf ResponseBinaryContent(int statusCode, string mediaType)
+    {
+        EnsureMutable();
+        _ = statusCode;
+        _ = mediaType;
+        return (TSelf)this;
+    }
+
+    public TSelf ResponseBinaryContent(string statusKey, string mediaType)
+    {
+        EnsureMutable();
+        _ = statusKey;
         _ = mediaType;
         return (TSelf)this;
     }
