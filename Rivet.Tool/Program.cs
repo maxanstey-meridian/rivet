@@ -136,6 +136,16 @@ static async Task<int> Run(string[] args)
 
     var definitions = walker.Definitions.Values.ToList();
     var brands = walker.Brands.Values.ToList();
+    ContractSecurityMetadata? securityMetadata;
+    try
+    {
+        securityMetadata = SecurityMetadataWalker.Walk(compilation);
+    }
+    catch (ContractAnalysisException exception)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 1;
+    }
 
     var emitInput = new EmitPipeline.EmitInput(
         definitions,
@@ -144,7 +154,8 @@ static async Task<int> Run(string[] args)
         endpoints,
         walker.TypeNamespaces,
         walker.Definitions,
-        walker.Brands
+        walker.Brands,
+        securityMetadata
     );
 
     return await EmitPipeline.RunAsync(emitInput, options);

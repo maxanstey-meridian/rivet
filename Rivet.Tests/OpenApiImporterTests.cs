@@ -274,7 +274,9 @@ public sealed class OpenApiImporterTests
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TaskDto.cs");
         Assert.Contains("string Id", content);
-        Assert.Contains("string? Description", content);
+        Assert.Contains("[RivetOptional]", content);
+        Assert.Contains("string Description { get; init; } = default!;", content);
+        Assert.DoesNotContain("string? Description", content);
         Assert.DoesNotContain("string? Id", content);
     }
 
@@ -4137,7 +4139,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Single_Value_IntEnum_Falls_Through_To_Long()
+    public void Single_Value_IntEnum_Remains_A_Numeric_Enum()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -4158,25 +4160,19 @@ public sealed class OpenApiImporterTests
 
         var result = CompilationHelper.Import(spec);
 
-        // No enum file should be generated for a single-value enum
-        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("Constant.cs"));
-
-        // The DTO property should fall through to long
+        var enumFile = Assert.Single(result.Files, f => f.FileName.EndsWith("Constant.cs"));
+        Assert.Contains("Value42 = 42", enumFile.Content);
         var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
-        Assert.Contains("long Code", dtoContent);
-
-        // Never silently: the dropped enum constraint emits a named warning (I.A-15)
-        Assert.Contains(
-            result.Warnings,
-            w =>
-                w.StartsWith("RIV3012: Enum constraint dropped")
-                && w.Contains("[42]")
-                && w.Contains("'long'")
-        );
+        Assert.Contains("Constant Code", dtoContent);
+        Assert.DoesNotContain(result.Warnings, warning => warning.StartsWith("RIV3012:"));
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var numericEnum = Assert.IsType<TsType.IntUnion>(walker.Enums["Constant"]);
+        Assert.Equal([42], numericEnum.Members);
     }
 
     [Fact]
-    public void Single_Value_Untyped_IntEnum_Falls_Through()
+    public void Single_Value_Untyped_IntEnum_Remains_A_Numeric_Enum()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -4196,21 +4192,11 @@ public sealed class OpenApiImporterTests
 
         var result = CompilationHelper.Import(spec);
 
-        // No enum file should be generated
-        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("SingleVal.cs"));
-
-        // Untyped single-value falls through to string in ResolveFallbackType
+        var enumFile = Assert.Single(result.Files, f => f.FileName.EndsWith("SingleVal.cs"));
+        Assert.Contains("Value42 = 42", enumFile.Content);
         var dtoContent = CompilationHelper.FindFile(result, "ItemDto.cs");
-        Assert.Contains("string Val", dtoContent);
-
-        // Never silently: the dropped enum constraint emits a named warning (I.A-15)
-        Assert.Contains(
-            result.Warnings,
-            w =>
-                w.StartsWith("RIV3012: Enum constraint dropped")
-                && w.Contains("[42]")
-                && w.Contains("'string'")
-        );
+        Assert.Contains("SingleVal Val", dtoContent);
+        Assert.DoesNotContain(result.Warnings, warning => warning.StartsWith("RIV3012:"));
     }
 
     [Fact]
@@ -5376,7 +5362,8 @@ public sealed class OpenApiImporterTests
                 "type": "object",
                 "properties": {
                     "equals": { "type": "string" },
-                    "toString": { "type": "string" }
+                    "toString": { "type": "string" },
+                    "clone": { "type": "string" }
                 }
             }
             """,
@@ -5385,12 +5372,16 @@ public sealed class OpenApiImporterTests
             """
         );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
+        var import = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(import, "Dto.cs");
         Assert.Contains("[property: JsonPropertyName(\"equals\")]", content);
         Assert.Contains("string? EqualsValue", content);
         Assert.Contains("[property: JsonPropertyName(\"toString\")]", content);
         Assert.Contains("string? ToStringValue", content);
+        Assert.Contains("[property: JsonPropertyName(\"clone\")]", content);
+        Assert.Contains("string? CloneValue", content);
         Assert.DoesNotContain("string? Equals)", content);
+        CompilationHelper.CompileImportResult(import);
     }
 
     [Fact]

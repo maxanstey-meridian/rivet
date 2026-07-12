@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Rivet.Tool.Model;
@@ -37,7 +38,13 @@ public sealed record TsEndpointDefinition(
         Condition = JsonIgnoreCondition.WhenWritingNull
     )] string? RequestContentTypeOverride = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        string? ResponseContentTypeOverride = null
+        string? ResponseContentTypeOverride = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        JsonElement? SecurityRequirements = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<TsMediaTypeContent>? RequestContents = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        bool? RequestBodyRequired = null
 );
 
 /// <summary>
@@ -55,8 +62,12 @@ public sealed record TsResponseType(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<TsEndpointExample>? Examples = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyList<TsResponseHeader>? Headers = null
+        IReadOnlyList<TsResponseHeader>? Headers = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<TsMediaTypeContent>? Contents = null
 );
+
+public sealed record TsMediaTypeContent(string MediaType, TsType? Schema);
 
 /// <summary>
 /// A declared response header (string-typed in v1). Spec-only: Rivet never sets or
@@ -89,6 +100,7 @@ public enum ParamSource
     File,
     FormField,
     Header,
+    Cookie,
 }
 
 /// <summary>

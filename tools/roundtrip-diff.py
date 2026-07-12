@@ -9,9 +9,9 @@ spec and its import->emit round-trip, resolving $refs on both sides.
 Usage:
     roundtrip-diff.py <original.json> <reemitted.json> [--summary-json <path>] [--details-json <path>]
 
---summary-json writes machine-readable category counts plus the clean-op
-ratio; RoundTripCorpusGateTests ratchets against a committed baseline of it.
-Exit code is always 0 — policy lives in the gate, not here.
+--summary-json writes machine-readable completeness and semantic finding
+counts. Exit 0 means no findings, 1 means semantic drift, and 2 means invalid
+arguments or input.
 """
 import json, re, sys, collections
 
@@ -35,7 +35,13 @@ def resolver(doc):
                 return s
             cur = doc
             for part in ref[2:].split('/'):
-                cur = cur.get(part.replace('~1', '/').replace('~0', '~'), {})
+                part = part.replace('~1', '/').replace('~0', '~')
+                if isinstance(cur, dict):
+                    cur = cur.get(part, {})
+                elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+                    cur = cur[int(part)]
+                else:
+                    cur = {}
             s = cur
             depth += 1
         return s
@@ -186,12 +192,40 @@ for key in shared:
 
 # ---------- component schema comparison ----------
 def norm(s): return re.sub(r'[^a-z0-9]', '', s.lower())
-# Inline-only specs (e.g. notion) have no components section at all.
-o_schemas = o.get('components', {}).get('schemas', {})
-r_schemas = r.get('components', {}).get('schemas', {})
-rn = {norm(n): n for n in r_schemas}
-pairs = [(n, rn[norm(n)]) for n in o_schemas if norm(n) in rn]
-print(f"schemas: orig={len(o_schemas)} matched={len(pairs)}")
+# Inline-only specs (e.g. notion) have no schema section at all. Swagger 2
+# stores definitions at the document root; OpenAPI 3 uses components.schemas.
+def schemas(doc):
+    return doc.get('components', {}).get('schemas', doc.get('definitions', {}))
+
+o_schemas = schemas(o)
+r_schemas = schemas(r)
+
+def names_by_normalized(names):
+    result = collections.defaultdict(list)
+    for name in names:
+        result[norm(name)].append(name)
+    return result
+
+on = names_by_normalized(o_schemas)
+rn = names_by_normalized(r_schemas)
+original_name_collisions = {key: names for key, names in on.items() if len(names) > 1}
+reemitted_name_collisions = {key: names for key, names in rn.items() if len(names) > 1}
+unmatched_original_schemas = sorted(
+    name for name in o_schemas if norm(name) not in rn
+)
+unmatched_reemitted_schemas = sorted(
+    name for name in r_schemas if norm(name) not in on
+)
+pairs = [
+    (original_names[0], rn[key][0])
+    for key, original_names in on.items()
+    if key in rn and len(original_names) == 1 and len(rn[key]) == 1
+]
+print(
+    f"schemas: orig={len(o_schemas)} reemit={len(r_schemas)} matched={len(pairs)} "
+    f"only_orig={len(unmatched_original_schemas)} only_reemit={len(unmatched_reemitted_schemas)} "
+    f"collisions={len(original_name_collisions) + len(reemitted_name_collisions)}"
+)
 
 def is_nullable(s):
     if s.get('nullable'): return True
@@ -331,18 +365,49 @@ flagged_ops = {k for items in findings.values() for k, _ in items if isinstance(
 clean = len([k for k in shared if k not in flagged_ops])
 print(f"\nclean ops: {clean}/{len(shared)} ({100 * clean // max(len(shared), 1)}%)")
 
+summary = {
+    "originalOps": len(oo),
+    "reemittedOps": len(ro),
+    "sharedOps": len(shared),
+    "missingOperations": len(only_o),
+    "inventedOperations": len(only_r),
+    "originalSchemas": len(o_schemas),
+    "reemittedSchemas": len(r_schemas),
+    "matchedSchemas": len(pairs),
+    "unmatchedOriginalSchemas": len(unmatched_original_schemas),
+    "unmatchedReemittedSchemas": len(unmatched_reemitted_schemas),
+    "originalSchemaNameCollisions": len(original_name_collisions),
+    "reemittedSchemaNameCollisions": len(reemitted_name_collisions),
+    "totalOps": len(shared),
+    "cleanOps": clean,
+    "opFindings": {cat: len(items) for cat, items in findings.items()},
+    "schemaFindings": {cat: len(items) for cat, items in schema_findings.items()},
+}
+
 if SUMMARY_PATH:
-    summary = {
-        "totalOps": len(shared),
-        "cleanOps": clean,
-        "opFindings": {cat: len(items) for cat, items in findings.items()},
-        "schemaFindings": {cat: len(items) for cat, items in schema_findings.items()},
-    }
     json.dump(summary, open(SUMMARY_PATH, 'w'), indent=2, sort_keys=True)
 
 if DETAILS_PATH:
     details = {
+        "missingOperations": [list(key) for key in only_o],
+        "inventedOperations": [list(key) for key in only_r],
+        "unmatchedOriginalSchemas": unmatched_original_schemas,
+        "unmatchedReemittedSchemas": unmatched_reemitted_schemas,
+        "originalSchemaNameCollisions": original_name_collisions,
+        "reemittedSchemaNameCollisions": reemitted_name_collisions,
         "opFindings": {cat: [[list(k), repr(d)] for k, d in items] for cat, items in findings.items()},
         "schemaFindings": {cat: [[list(k) if isinstance(k, tuple) else k, repr(d)] for k, d in items] for cat, items in schema_findings.items()},
     }
     json.dump(details, open(DETAILS_PATH, 'w'), indent=1, sort_keys=True)
+
+has_findings = any((
+    only_o,
+    only_r,
+    unmatched_original_schemas,
+    unmatched_reemitted_schemas,
+    original_name_collisions,
+    reemitted_name_collisions,
+    findings,
+    schema_findings,
+))
+sys.exit(1 if has_findings else 0)

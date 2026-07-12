@@ -37,7 +37,7 @@ public static class JsonContractReader
         {
             if (e.IntValues is not null)
             {
-                enums[e.Name] = new TsType.IntUnion(e.IntValues);
+                enums[e.Name] = new TsType.IntUnion(e.IntValues, e.Format);
             }
             else
             {

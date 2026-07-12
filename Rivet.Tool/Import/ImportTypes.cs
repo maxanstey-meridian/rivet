@@ -57,7 +57,10 @@ internal sealed record RecordProperty(
     // already-PascalCase keys, reserved-member renames). Written as
     // [property: JsonPropertyName("...")] so both the runtime serializer and the
     // walker's re-emit keep the original wire name.
-    string? WireName = null
+    string? WireName = null,
+    // Imported properties pin format presence because CLR primitives infer defaults.
+    bool IsFormatSpecified = false,
+    string? SchemaType = null
 );
 
 internal sealed record GeneratedEnumMember(
@@ -66,7 +69,11 @@ internal sealed record GeneratedEnumMember(
     int? IntValue = null
 );
 
-internal sealed record GeneratedEnum(string Name, IReadOnlyList<GeneratedEnumMember> Members);
+internal sealed record GeneratedEnum(
+    string Name,
+    IReadOnlyList<GeneratedEnumMember> Members,
+    string? Format = null
+);
 
 internal sealed record GeneratedBrand(string Name, string InnerType);
 
@@ -100,7 +107,11 @@ internal sealed record GeneratedEndpointField(
     string? RequestContentType = null,
     string? ResponseContentType = null,
     string? RequestBodyType = null,
-    bool? RequestBodyRequired = null
+    bool? RequestBodyRequired = null,
+    string? SecurityRequirementsJson = null,
+    IReadOnlyList<GeneratedMediaTypeContent>? RequestContents = null,
+    IReadOnlyList<GeneratedResponseMediaTypeContent>? ResponseContents = null,
+    IReadOnlyList<GeneratedEndpointParameter>? Parameters = null
 )
 {
     public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
@@ -109,7 +120,20 @@ internal sealed record GeneratedEndpointField(
         ResponseExamples ?? [];
     public IReadOnlyList<GeneratedResponseHeader> ResponseHeaders { get; init; } =
         ResponseHeaders ?? [];
+    public IReadOnlyList<GeneratedMediaTypeContent> RequestContents { get; init; } =
+        RequestContents ?? [];
+    public IReadOnlyList<GeneratedResponseMediaTypeContent> ResponseContents { get; init; } =
+        ResponseContents ?? [];
+    public IReadOnlyList<GeneratedEndpointParameter> Parameters { get; init; } = Parameters ?? [];
 }
+
+internal sealed record GeneratedMediaTypeContent(string MediaType, string TypeName);
+
+internal sealed record GeneratedResponseMediaTypeContent(
+    int StatusCode,
+    string MediaType,
+    string TypeName
+);
 
 internal sealed record GeneratedErrorResponse(
     int StatusCode,
@@ -118,6 +142,16 @@ internal sealed record GeneratedErrorResponse(
 );
 
 internal sealed record GeneratedEndpointResponseExample(int StatusCode, TsEndpointExample Example);
+
+internal sealed record GeneratedEndpointParameter(
+    string Name,
+    string Location,
+    string TypeName,
+    bool Required,
+    string? SchemaType,
+    string? Format,
+    bool IsFormatSpecified
+);
 
 /// <summary>P2 wave 5: a response header re-emitted as a .WithResponseHeader(...) chain call.</summary>
 internal sealed record GeneratedResponseHeader(

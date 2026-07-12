@@ -28,7 +28,11 @@ public static class InlineTypeExtractor
                 : $"D[{CanonicalHash(d.Key)}]:{CanonicalHash(d.Value)}",
             TsType.StringUnion su => "SU:"
                 + string.Concat(su.Members.OrderBy(m => m).Select(Encode)),
-            TsType.IntUnion iu => "IU:" + string.Join(",", iu.Members.OrderBy(m => m)),
+            TsType.IntUnion iu =>
+                "IU:"
+                    + (iu.Format ?? "")
+                    + ":"
+                    + string.Join(",", iu.Members.OrderBy(m => m)),
             TsType.Literal literal =>
                 $"L:{literal.Value.ValueKind}:{Encode(literal.Value.ToString())}",
             TsType.TypeRef r => $"R:{Encode(r.Name)}",

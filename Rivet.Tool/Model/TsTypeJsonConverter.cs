@@ -55,7 +55,8 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
             ),
 
             "intUnion" => new TsType.IntUnion(
-                root.GetProperty("values").EnumerateArray().Select(e => e.GetInt32()).ToArray()
+                root.GetProperty("values").EnumerateArray().Select(e => e.GetInt32()).ToArray(),
+                root.TryGetProperty("format", out var intFormat) ? intFormat.GetString() : null
             ),
 
             "literal" => new TsType.Literal(root.GetProperty("value").Clone()),
@@ -187,6 +188,10 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 }
 
                 writer.WriteEndArray();
+                if (iu.Format is not null)
+                {
+                    writer.WriteString("format", iu.Format);
+                }
                 break;
 
             case TsType.Literal literal:

@@ -64,6 +64,7 @@ internal static class ContractBuilder
                     httpMethod,
                     route,
                     operation,
+                    MergeParameters(pathItem.Parameters, operation.Parameters),
                     tag,
                     globalSecurityScheme,
                     mapper
@@ -94,6 +95,7 @@ internal static class ContractBuilder
         string httpMethod,
         string route,
         OpenApiOperation operation,
+        IReadOnlyList<IOpenApiParameter> parameters,
         string tag,
         string? globalSecurityScheme,
         SchemaMapper mapper
@@ -120,6 +122,7 @@ internal static class ContractBuilder
         // Resolve input type (requestBody — $ref resolved by library)
         var (inputType, isFormEncoded, binaryRequestContentType, requestContentType) =
             ResolveInputType(operation, mapper, fieldName, unsupported);
+        var requestContents = ResolveRequestContents(operation, mapper, fieldName);
         var inputTypeFromBody = inputType is not null;
 
         // I14: parameters must be resolved regardless of body presence — they used to be
@@ -128,111 +131,24 @@ internal static class ContractBuilder
         // input record; when a true merge is structurally impossible (opaque body type)
         // the loser is dropped LOUDLY via a named marker — never silently.
         var paramProperties = CollectParamProperties(
-            operation,
+            parameters,
             mapper,
             fieldName,
             unsupported,
             queryAuthParameterName
         );
 
-        var bodyDropped = false;
+        var explicitParameters = BuildExplicitParameters(
+            parameters,
+            paramProperties,
+            mapper,
+            fieldName
+        );
         if (inputType is null)
         {
             inputType = SynthesizeParamInputType(paramProperties, mapper, fieldName);
         }
         string? requestBodyType = null;
-        if (inputTypeFromBody && paramProperties.Count > 0 && inputType is not null)
-        {
-            var originalBodyType = inputType.EndsWith('?') ? inputType[..^1] : inputType;
-            inputType = originalBodyType;
-            var bodyRecord = mapper.FindRecordByName(originalBodyType);
-            var hasPropertyCollision =
-                bodyRecord is not null
-                && bodyRecord.Properties.Any(bodyProperty =>
-                    paramProperties.Any(parameter => parameter.Property.Name == bodyProperty.Name)
-                );
-            var hasJsonBody =
-                operation.RequestBody?.Content?.Keys.Any(contentType =>
-                    contentType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
-                    || contentType.StartsWith(
-                        "application/json;",
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
-                is true;
-            if (
-                (hasJsonBody || isFormEncoded)
-                && hasPropertyCollision
-                && paramProperties.Any(parameter => parameter.Location == "path")
-                && paramProperties.All(parameter => parameter.Location is "path" or "header")
-                && bodyRecord is not null
-            )
-            {
-                var bodyPropertyName = UniqueBodyPropertyName(paramProperties);
-                var compositeBodyType = operation.RequestBody is { Required: false }
-                    ? originalBodyType + "?"
-                    : originalBodyType;
-                var compositeProperties = paramProperties
-                    .Select(parameter => parameter.Property)
-                    .ToList();
-                compositeProperties.Add(
-                    new RecordProperty(
-                        bodyPropertyName,
-                        compositeBodyType,
-                        IsRequired: !compositeBodyType.EndsWith('?')
-                    )
-                );
-                inputType =
-                    SynthesizeInputRecord(compositeProperties, mapper, fieldName)
-                    ?? originalBodyType;
-                requestBodyType = originalBodyType;
-            }
-            else
-            {
-                inputType = MergeParamsIntoInputType(
-                    httpMethod,
-                    inputType,
-                    paramProperties,
-                    mapper,
-                    fieldName,
-                    unsupported,
-                    out bodyDropped
-                );
-                if (
-                    !bodyDropped
-                    && inputType != originalBodyType
-                    && !hasPropertyCollision
-                    && paramProperties.All(parameter => parameter.Location is "path" or "header")
-                )
-                {
-                    requestBodyType = originalBodyType;
-                }
-            }
-        }
-
-        // FABLE_ROUNDTRIP #5: Rivet lowers DELETE inputs to query params — a
-        // DELETE request body relocates to the query string on re-emit (an
-        // OAuth-style secret in such a body would move into the URL). The
-        // model has no DELETE-body axis; the relocation must at least be loud.
-        // (Skipped when the merge already dropped an opaque body — nothing
-        // relocates in that case, and that drop carries its own marker.)
-        if (
-            inputTypeFromBody
-            && !bodyDropped
-            && httpMethod.Equals("delete", StringComparison.OrdinalIgnoreCase)
-        )
-        {
-            unsupported.Add("body-location method=DELETE reason=body-lowered-to-query-params");
-        }
-
-        // A dropped body takes its serialization metadata with it — .FormEncoded()
-        // or a content-type override describing a body that no longer exists would
-        // re-emit a phantom requestBody.
-        if (bodyDropped)
-        {
-            isFormEncoded = false;
-            requestContentType = null;
-        }
 
         // FABLE_ROUNDTRIP #7: an optional request body (required:false — the
         // OpenAPI default) is modeled by a nullable TInput; the emitter's E11
@@ -245,16 +161,7 @@ internal static class ContractBuilder
             && operation.RequestBody is { Required: false };
         if (bodyIsOptional && inputType is not null && !inputType.EndsWith('?'))
         {
-            if (paramProperties.Count == 0)
-            {
-                inputType += "?";
-            }
-            else if (requestBodyType is null)
-            {
-                unsupported.Add(
-                    "body-optionality required=false reason=optional-body-merged-with-required-params"
-                );
-            }
+            inputType += "?";
         }
 
         // Resolve output type (lowest 2xx response with JSON content)
@@ -264,6 +171,7 @@ internal static class ContractBuilder
             fieldName,
             unsupported
         );
+        var responseContents = ResolveResponseContents(operation, mapper, fieldName);
 
         // File endpoint: binary content type on a GET endpoint → Define.File()
         // Non-GET binary endpoints (e.g. POST → PDF) keep Define.{Method}().ProducesFile()
@@ -298,10 +206,9 @@ internal static class ContractBuilder
         );
 
         // Security
-        var (isAnonymous, securityScheme) = ResolveSecurity(
+        var (isAnonymous, securityScheme, securityRequirementsJson) = ResolveSecurity(
             operation,
-            globalSecurityScheme,
-            unsupported
+            globalSecurityScheme
         );
 
         return new GeneratedEndpointField(
@@ -328,22 +235,154 @@ internal static class ContractBuilder
             requestContentType,
             responseContentType,
             requestBodyType,
-            requestBodyType is null ? null : operation.RequestBody?.Required is true
+            operation.RequestBody is null ? null : operation.RequestBody.Required,
+            securityRequirementsJson,
+            requestContents,
+            responseContents,
+            explicitParameters
         );
     }
 
-    private static string UniqueBodyPropertyName(IReadOnlyList<ParamProperty> parameters)
+    private static IReadOnlyList<IOpenApiParameter> MergeParameters(
+        IList<IOpenApiParameter>? pathParameters,
+        IList<IOpenApiParameter>? operationParameters
+    )
     {
-        var names = parameters
-            .Select(parameter => parameter.Property.Name)
-            .ToHashSet(StringComparer.Ordinal);
-        var name = "Body";
-        while (names.Contains(name))
+        var merged = new Dictionary<(string Name, ParameterLocation? Location), IOpenApiParameter>();
+        foreach (var parameter in pathParameters ?? [])
         {
-            name = "Request" + name;
+            merged[(parameter.Name ?? "", parameter.In)] = parameter;
+        }
+        foreach (var parameter in operationParameters ?? [])
+        {
+            merged[(parameter.Name ?? "", parameter.In)] = parameter;
         }
 
-        return name;
+        return merged.Values.ToList();
+    }
+
+    private static IReadOnlyList<GeneratedEndpointParameter> BuildExplicitParameters(
+        IReadOnlyList<IOpenApiParameter> sourceParameters,
+        IReadOnlyList<ParamProperty> parameters,
+        SchemaMapper mapper,
+        string fieldName
+    ) =>
+        parameters
+            .Select(parameter =>
+            {
+                var sourceParameter = sourceParameters.First(candidate =>
+                    candidate.Name == parameter.OriginalName
+                    && candidate.In is { } location
+                    && location.ToString().Equals(
+                        parameter.Location,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                );
+                var sourceSchema = sourceParameter.Schema!;
+                var typeName = mapper.ResolveCSharpType(
+                    sourceSchema,
+                    $"{fieldName}{Naming.ToPascalCaseFromSegments(parameter.OriginalName)}Parameter"
+                );
+                var format = mapper.ResolveFormat(sourceSchema);
+                return new GeneratedEndpointParameter(
+                    parameter.OriginalName,
+                    parameter.Location,
+                    typeName,
+                    parameter.Property.IsRequired,
+                    mapper.ResolveSchemaType(sourceSchema),
+                    format,
+                    format is not null
+                        || typeName.TrimEnd('?')
+                            is "sbyte"
+                                or "byte"
+                                or "short"
+                                or "ushort"
+                                or "int"
+                                or "uint"
+                                or "long"
+                                or "ulong"
+                                or "float"
+                                or "double"
+                                or "decimal"
+                );
+            })
+            .ToList();
+
+    private static IReadOnlyList<GeneratedMediaTypeContent> ResolveRequestContents(
+        OpenApiOperation operation,
+        SchemaMapper mapper,
+        string fieldName
+    )
+    {
+        if (operation.RequestBody?.Content is not { Count: > 0 } content)
+        {
+            return [];
+        }
+
+        var result = new List<GeneratedMediaTypeContent>();
+        var index = 0;
+        foreach (var (mediaType, media) in content)
+        {
+            if (media.Schema is null)
+            {
+                continue;
+            }
+            if (
+                IsRawBinarySchema(media.Schema)
+                && !mediaType.Equals("multipart/form-data", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                continue;
+            }
+
+            var typeName = mapper.ResolveCSharpType(
+                media.Schema,
+                $"{Naming.ToPascalCaseFromSegments(fieldName)}RequestContent{index++}"
+            );
+            result.Add(new GeneratedMediaTypeContent(mediaType, typeName));
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<GeneratedResponseMediaTypeContent> ResolveResponseContents(
+        OpenApiOperation operation,
+        SchemaMapper mapper,
+        string fieldName
+    )
+    {
+        var result = new List<GeneratedResponseMediaTypeContent>();
+        var index = 0;
+        foreach (var (status, response) in operation.Responses ?? [])
+        {
+            var statusCode = NormalizeStatusCode(status);
+            if (statusCode is null || response.Content is not { Count: > 0 } content)
+            {
+                continue;
+            }
+
+            foreach (var (mediaType, media) in content)
+            {
+                if (media.Schema is null)
+                {
+                    continue;
+                }
+                if (IsRawBinarySchema(media.Schema))
+                {
+                    continue;
+                }
+
+                var typeName = mapper.ResolveCSharpType(
+                    media.Schema,
+                    $"{Naming.ToPascalCaseFromSegments(fieldName)}Response{statusCode}Content{index++}"
+                );
+                result.Add(
+                    new GeneratedResponseMediaTypeContent(statusCode.Value, mediaType, typeName)
+                );
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -565,14 +604,14 @@ internal static class ContractBuilder
     );
 
     private static List<ParamProperty> CollectParamProperties(
-        OpenApiOperation operation,
+        IReadOnlyList<IOpenApiParameter> sourceParameters,
         SchemaMapper mapper,
         string fieldName,
         List<string> unsupported,
         string? queryAuthParameterName = null
     )
     {
-        if (operation.Parameters is null or { Count: 0 })
+        if (sourceParameters.Count == 0)
         {
             return [];
         }
@@ -580,7 +619,7 @@ internal static class ContractBuilder
         var properties = new List<ParamProperty>();
         var metadataDropped = new List<string>();
 
-        foreach (var param in operation.Parameters)
+        foreach (var param in sourceParameters)
         {
             if (
                 param.In
@@ -623,16 +662,6 @@ internal static class ContractBuilder
                 ParameterLocation.Header => "header",
                 _ => "cookie",
             };
-
-            // I13 residual (P2 wave 5 narrowed it): COOKIE params still erase to query.
-            // Header params now KEEP their location — the synthesized record property
-            // carries [RivetHeader("original-name")] and re-emits as in: header.
-            if (param.In is ParameterLocation.Cookie)
-            {
-                unsupported.Add(
-                    $"param name={param.Name} in={location} reason=location-erased-to-query"
-                );
-            }
 
             // Accept/Content-Type/Authorization are not legal OpenAPI header params —
             // the emitter would refuse to re-emit them (RIV2009), so importing them
@@ -781,112 +810,6 @@ internal static class ContractBuilder
         // (e.g. two tags both synthesizing GetByIdInput, or a name-only collision with a
         // component schema) gets a disambiguated name.
         return mapper.AddExtraRecord(new GeneratedRecord(recordName, deduped));
-    }
-
-    /// <summary>
-    /// I14: an operation with BOTH a request body and path/query parameters. The contract
-    /// model has a single TInput, so the parameters merge with the body-derived record
-    /// into a synthesized {Field}Input. When the body type is not a plain record (primitive,
-    /// collection, generic, union wrapper, JsonElement, …) a merge is structurally
-    /// impossible. On body-carrying methods the body wins (TInput re-emits as the JSON
-    /// body) and each param is dropped with a loud named marker. On bodyless methods the
-    /// preference INVERTS: TInput lowers to route/query params, which an opaque body type
-    /// cannot do — so the params win and the BODY is dropped loudly (FABLE_ROUNDTRIP
-    /// cross-corpus #1: keeping the opaque body emitted its CLR members as invented
-    /// query params).
-    /// </summary>
-    private static string MergeParamsIntoInputType(
-        string httpMethod,
-        string bodyInputType,
-        List<ParamProperty> paramProperties,
-        SchemaMapper mapper,
-        string fieldName,
-        List<string> unsupported,
-        out bool bodyDropped
-    )
-    {
-        bodyDropped = false;
-        var bodyRecord = mapper.FindRecordByName(bodyInputType);
-
-        if (bodyRecord is null || bodyRecord.TypeParameters is { Count: > 0 })
-        {
-            if (httpMethod is not ("post" or "put" or "patch"))
-            {
-                var paramInput = SynthesizeParamInputType(paramProperties, mapper, fieldName);
-                if (paramInput is not null)
-                {
-                    bodyDropped = true;
-                    unsupported.Add(
-                        $"body method={httpMethod.ToUpperInvariant()} reason=opaque-body-dropped-params-kept body-type={bodyInputType}"
-                    );
-                    return paramInput;
-                }
-            }
-
-            foreach (var p in paramProperties)
-            {
-                unsupported.Add(
-                    $"param name={p.OriginalName} in={p.Location} reason=dropped-unmergeable-body body-type={bodyInputType}"
-                );
-            }
-
-            return bodyInputType;
-        }
-
-        var merged = paramProperties.Select(p => p.Property).ToList();
-        var paramsByName = paramProperties
-            .GroupBy(parameter => parameter.Property.Name, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
-
-        foreach (var bodyProp in bodyRecord.Properties)
-        {
-            if (paramsByName.TryGetValue(bodyProp.Name, out var shadowing))
-            {
-                // Identical name+type collapses (params win — required for emit∘import
-                // stability: a previously merged path param re-merges onto itself).
-                // A differing body property is shadowed LOUDLY.
-                if (shadowing.Property.CSharpType != bodyProp.CSharpType)
-                {
-                    unsupported.Add(
-                        $"param name={shadowing.OriginalName} in={shadowing.Location} reason=body-property-shadowed-by-param body-type={bodyProp.CSharpType}"
-                    );
-                }
-
-                continue;
-            }
-
-            merged.Add(bodyProp);
-        }
-
-        // P2 wave 5: when every merged parameter is a header, the JSON body shape is
-        // untouched — re-attach the [RivetHeader] properties to the body record itself
-        // (headers never re-enter its JSON schema on emit) so the original record name
-        // survives the round-trip instead of being replaced by a synthesized {Field}Input.
-        if (
-            paramProperties.All(p => p.Property.HeaderName is not null)
-            && mapper.TryAugmentComponentRecord(bodyInputType, merged)
-        )
-        {
-            return bodyInputType;
-        }
-
-        // On body-carrying methods the single TInput re-emits as the JSON body, so a
-        // merged query param's location is erased to body — marked per param (the
-        // path params keep working via the route template, which carries their names).
-        if (httpMethod is "post" or "put" or "patch")
-        {
-            foreach (var p in paramProperties)
-            {
-                if (p.Location is "query")
-                {
-                    unsupported.Add(
-                        $"param name={p.OriginalName} in=query reason=location-erased-to-body"
-                    );
-                }
-            }
-        }
-
-        return SynthesizeInputRecord(merged, mapper, fieldName) ?? bodyInputType;
     }
 
     /// <summary>
@@ -1631,42 +1554,46 @@ internal static class ContractBuilder
         return false;
     }
 
-    private static (bool IsAnonymous, string? Scheme) ResolveSecurity(
+    private static (bool IsAnonymous, string? Scheme, string? RequirementsJson) ResolveSecurity(
         OpenApiOperation operation,
-        string? globalSecurityScheme,
-        List<string> unsupported
+        string? globalSecurityScheme
     )
     {
         if (operation.Security is null)
         {
             // No operation-level security — use global default
-            return globalSecurityScheme is not null ? (false, globalSecurityScheme) : (false, null);
+            return globalSecurityScheme is not null
+                ? (false, globalSecurityScheme, null)
+                : (false, null, null);
         }
 
         // Empty list → anonymous
         if (operation.Security.Count == 0)
         {
-            return (true, null);
+            return (false, null, "[]");
         }
 
-        // I12: the contract model carries a single scheme, so OR alternatives, AND
-        // combinations and scopes collapse to the first resolvable scheme — with a loud
-        // marker instead of a silent drop.
-        var schemeIds = operation
-            .Security.SelectMany(req => req.Keys)
-            .Select(scheme => scheme.Reference?.Id)
-            .Where(id => id is not null)
-            .Select(id => id!)
-            .ToList();
-
-        if (schemeIds.Count > 1)
+        var requirements = new JsonArray();
+        foreach (var requirement in operation.Security)
         {
-            unsupported.Add(
-                $"security schemes={string.Join(", ", schemeIds)} reason=multi-scheme-first-only"
-            );
+            var requirementJson = new JsonObject();
+            foreach (var (scheme, scopes) in requirement)
+            {
+                var name = scheme.Reference?.Id;
+                if (name is null)
+                {
+                    continue;
+                }
+
+                requirementJson[name] = new JsonArray(
+                    scopes.Select(scope => JsonValue.Create(scope)).ToArray()
+                );
+            }
+
+            requirements.Add(requirementJson);
         }
 
-        return (false, schemeIds.FirstOrDefault());
+        return (false, null, requirements.ToJsonString());
     }
 
     private static IReadOnlyList<GeneratedEndpointField> DeduplicateFields(

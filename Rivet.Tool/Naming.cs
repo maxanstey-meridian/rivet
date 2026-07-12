@@ -26,6 +26,7 @@ internal static class Naming
                 or "GetHashCode"
                 or "GetType"
                 or "ToString"
+                or "Clone"
                 or "Deconstruct"
                 or "EqualityContract";
 

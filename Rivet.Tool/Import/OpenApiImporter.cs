@@ -1,4 +1,6 @@
 using Microsoft.OpenApi;
+using System.Text.Json;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Import;
 
@@ -30,8 +32,18 @@ public static class OpenApiImporter
             ? mapper.MapSchemas(schemas)
             : new SchemaMapResult([], [], []);
 
-        // Detect global security scheme from spec
-        var globalSecurityScheme = options.SecurityScheme ?? DetectGlobalSecurity(doc, warnings);
+        var securityMetadata = ReadSecurityMetadata(json);
+        if (securityMetadata.Schemes.Count > 0 || securityMetadata.GlobalRequirements is not null)
+        {
+            files.Add(
+                new GeneratedFile(
+                    "RivetSecurity.cs",
+                    CSharpWriter.WriteSecurityMetadata(securityMetadata)
+                )
+            );
+        }
+
+        var globalSecurityScheme = options.SecurityScheme;
 
         // Parse paths → contracts
         var contracts = doc.Paths is { Count: > 0 }
@@ -95,6 +107,28 @@ public static class OpenApiImporter
         }
 
         return new ImportResult(files, warnings);
+    }
+
+    private static ContractSecurityMetadata ReadSecurityMetadata(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var schemes = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        if (
+            root.TryGetProperty("components", out var components)
+            && components.TryGetProperty("securitySchemes", out var securitySchemes)
+        )
+        {
+            foreach (var scheme in securitySchemes.EnumerateObject())
+            {
+                schemes[scheme.Name] = scheme.Value.Clone();
+            }
+        }
+
+        JsonElement? globalRequirements = root.TryGetProperty("security", out var security)
+            ? security.Clone()
+            : null;
+        return new ContractSecurityMetadata(schemes, globalRequirements);
     }
 
     /// <summary>
@@ -180,34 +214,6 @@ public static class OpenApiImporter
         return root.ToJsonString();
     }
 
-    private static string? DetectGlobalSecurity(OpenApiDocument doc, List<string> warnings)
-    {
-        if (doc.Security is null || doc.Security.Count == 0)
-        {
-            return null;
-        }
-
-        // I12: the contract model carries a single global scheme — OR alternatives, AND
-        // combinations and scopes collapse to the first resolvable scheme, loudly.
-        var schemeIds = doc
-            .Security.SelectMany(req => req.Keys)
-            .Select(scheme => scheme.Reference?.Id)
-            .Where(id => id is not null)
-            .Select(id => id!)
-            .ToList();
-
-        if (schemeIds.Count > 1)
-        {
-            warnings.Add(
-                Diagnostics.Prefix(
-                    Diagnostics.ImportSecuritySchemesDropped,
-                    $"Security schemes dropped: document declares [{string.Join(", ", schemeIds)}] — only the first scheme '{schemeIds[0]}' is imported; alternatives and scopes are not represented."
-                )
-            );
-        }
-
-        return schemeIds.FirstOrDefault();
-    }
 }
 
 public sealed record ImportOptions(string Namespace, string? SecurityScheme = null);

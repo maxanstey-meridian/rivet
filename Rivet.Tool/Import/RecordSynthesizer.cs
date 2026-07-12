@@ -9,7 +9,9 @@ namespace Rivet.Tool.Import;
 /// </summary>
 internal sealed class RecordSynthesizer(
     ResolutionContext ctx,
-    Func<IOpenApiSchema, string?, string> resolveType
+    Func<IOpenApiSchema, string?, string> resolveType,
+    Func<IOpenApiSchema, string?> resolveFormat,
+    Func<IOpenApiSchema, string?> resolveSchemaType
 )
 {
     public GeneratedRecord ResolveAllOfRecord(
@@ -150,19 +152,25 @@ internal sealed class RecordSynthesizer(
                 var isRequired = requiredSet.Contains(propKey);
                 var csharpType = resolveType(propSchema, propContext);
 
-                if (!isRequired && !csharpType.EndsWith("?"))
-                {
-                    csharpType += "?";
-                }
-
                 var isDeprecated = propSchema.Deprecated;
 
-                // Preserve custom string format (uri-template, currency, etc.)
-                string? format = null;
-                if (csharpType is "string" or "string?" && propSchema.Format is not null)
-                {
-                    format = propSchema.Format;
-                }
+                // Preserve both an explicit format and its explicit absence. CLR
+                // primitives otherwise invent defaults such as int64 and double.
+                var format = resolveFormat(propSchema);
+                var isFormatSpecified =
+                    format is not null
+                    || csharpType.TrimEnd('?')
+                        is "sbyte"
+                            or "byte"
+                            or "short"
+                            or "ushort"
+                            or "int"
+                            or "uint"
+                            or "long"
+                            or "ulong"
+                            or "float"
+                            or "double"
+                            or "decimal";
 
                 // Preserve default value
                 string? defaultValue = null;
@@ -213,7 +221,9 @@ internal sealed class RecordSynthesizer(
                         example,
                         isReadOnly,
                         isWriteOnly,
-                        WireName: wireName
+                        WireName: wireName,
+                        IsFormatSpecified: isFormatSpecified,
+                        SchemaType: resolveSchemaType(propSchema)
                     )
                 );
             }

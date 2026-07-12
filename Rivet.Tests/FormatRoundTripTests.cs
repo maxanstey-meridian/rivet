@@ -650,12 +650,12 @@ public sealed class FormatRoundTripTests
         var def = walker.Definitions.Values.First(d => d.Name == "IntTypesDto");
 
         // Each integer format should map to its specific C# type and back to the right format
-        AssertPrimitive(def, "i16", "number", "int16");
-        AssertPrimitive(def, "u16", "number", "uint16");
-        AssertPrimitive(def, "i8", "number", "int8");
-        AssertPrimitive(def, "u8", "number", "uint8");
-        AssertPrimitive(def, "u32", "number", "uint32");
-        AssertPrimitive(def, "u64", "number", "uint64");
+        AssertPrimitive(def, "i16", "integer", "int16");
+        AssertPrimitive(def, "u16", "integer", "uint16");
+        AssertPrimitive(def, "i8", "integer", "int8");
+        AssertPrimitive(def, "u8", "integer", "uint8");
+        AssertPrimitive(def, "u32", "integer", "uint32");
+        AssertPrimitive(def, "u64", "integer", "uint64");
     }
 
     [Fact]
@@ -699,6 +699,79 @@ public sealed class FormatRoundTripTests
         var prim = Assert.IsType<TsType.Primitive>(href.Type);
         Assert.Equal("string", prim.Name);
         Assert.Equal("uri", prim.Format);
+    }
+
+    [Fact]
+    public void Numeric_Format_Presence_And_Absence_Survive_OpenApi_RoundTrip()
+    {
+        var openApi = """
+            {
+                "openapi": "3.0.3",
+                "info": { "title": "Test", "version": "1.0" },
+                "paths": {
+                    "/api/numbers": {
+                        "get": {
+                            "operationId": "getNumbers",
+                            "responses": {
+                                "200": {
+                                    "description": "OK",
+                                    "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NumberDto" } } }
+                                }
+                            }
+                        }
+                    }
+                },
+                "components": {
+                    "schemas": {
+                        "NumberDto": {
+                            "type": "object",
+                            "properties": {
+                                "snowflake": { "type": "integer", "format": "snowflake" },
+                                "nullableSnowflake": {
+                                    "oneOf": [
+                                        { "type": "null" },
+                                        { "$ref": "#/components/schemas/Snowflake" }
+                                    ]
+                                },
+                                "mode": { "$ref": "#/components/schemas/Mode" },
+                                "bareInteger": { "type": "integer" },
+                                "bareNumber": { "type": "number" }
+                            },
+                            "required": ["snowflake", "nullableSnowflake", "mode", "bareInteger", "bareNumber"]
+                        },
+                        "Snowflake": { "type": "integer", "format": "snowflake" },
+                        "Mode": { "type": "integer", "format": "int32", "enum": [1, 2] }
+                    }
+                }
+            }
+            """;
+
+        var (_, walker) = ImportAndWalk(openApi);
+        var def = walker.Definitions.Values.First(d => d.Name == "NumberDto");
+
+        AssertPrimitive(def, "snowflake", "integer", "snowflake");
+        var nullableSnowflake = Assert.IsType<TsType.Nullable>(
+            def.Properties.First(p => p.Name == "nullableSnowflake").Type
+        );
+        Assert.Equal(
+            "snowflake",
+            Assert.IsType<TsType.Primitive>(nullableSnowflake.Inner).Format
+        );
+        Assert.Equal("int32", Assert.IsType<TsType.IntUnion>(walker.Enums["Mode"]).Format);
+        Assert.Null(
+            Assert.IsType<TsType.Primitive>(def.Properties.First(p => p.Name == "bareInteger").Type)
+                .Format
+        );
+        Assert.Equal(
+            "integer",
+            Assert.IsType<TsType.Primitive>(def.Properties.First(p => p.Name == "bareInteger").Type)
+                .Name
+        );
+        Assert.Null(
+            Assert.IsType<TsType.Primitive>(
+                def.Properties.First(p => p.Name == "bareNumber").Type
+            ).Format
+        );
     }
 
     // ─── Helpers ────────────────────────────────────────────────

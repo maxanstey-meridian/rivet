@@ -89,7 +89,7 @@ public sealed class TypeWalker
             scalars,
             compilation,
             "System.Text.Json.JsonElement",
-            new TsType.Primitive("unknown")
+            new TsType.Primitive("unknown", CSharpType: "JsonElement")
         );
         AddScalar(
             scalars,
@@ -441,6 +441,8 @@ public sealed class TypeWalker
 
             // Read metadata attributes
             string? format = null;
+            var isFormatSpecified = false;
+            string? schemaType = null;
             string? defaultValue = null;
             TsPropertyConstraints? constraints = null;
             string? description = null;
@@ -452,13 +454,22 @@ public sealed class TypeWalker
             foreach (var attr in member.GetAttributes())
             {
                 var attrName = attr.AttributeClass?.Name;
-                if (
-                    attrName is "RivetFormatAttribute"
+                if (attrName is "RivetFormatAttribute")
+                {
+                    isFormatSpecified = true;
+                    format =
+                        attr.ConstructorArguments.Length > 0
+                        && attr.ConstructorArguments[0].Value is string fmt
+                            ? fmt
+                            : null;
+                }
+                else if (
+                    attrName is "RivetSchemaTypeAttribute"
                     && attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is string fmt
+                    && attr.ConstructorArguments[0].Value is string primitiveType
                 )
                 {
-                    format = fmt;
+                    schemaType = primitiveType;
                 }
                 else if (
                     attrName is "RivetDefaultAttribute"
@@ -499,7 +510,22 @@ public sealed class TypeWalker
             }
 
             // DA format is a fallback — explicit [RivetFormat] takes precedence.
-            format ??= daFormat;
+            if (!isFormatSpecified)
+            {
+                format = daFormat;
+            }
+
+            if (schemaType is not null && tsType is TsType.Primitive schemaPrimitive)
+            {
+                tsType = schemaPrimitive with { Name = schemaType };
+            }
+            else if (
+                schemaType is not null
+                && tsType is TsType.Nullable { Inner: TsType.Primitive nullableSchemaPrimitive }
+            )
+            {
+                tsType = new TsType.Nullable(nullableSchemaPrimitive with { Name = schemaType });
+            }
 
             // Merge DataAnnotation constraints with RivetConstraints.
             // DA provides standard fields; RivetConstraints provides exotic-only fields.
@@ -525,16 +551,30 @@ public sealed class TypeWalker
             }
 
             // Apply format to the TsType if it's a primitive without one already
-            if (format is not null && tsType is TsType.Primitive { Format: null } p)
+            if (isFormatSpecified && tsType is TsType.Primitive p)
             {
                 tsType = p with { Format = format };
             }
             else if (
-                format is not null
-                && tsType is TsType.Nullable { Inner: TsType.Primitive { Format: null } np }
+                isFormatSpecified
+                && tsType is TsType.Nullable { Inner: TsType.Primitive np }
             )
             {
                 tsType = new TsType.Nullable(np with { Format = format });
+            }
+            else if (format is not null && tsType is TsType.Primitive { Format: null } fallback)
+            {
+                tsType = fallback with { Format = format };
+            }
+            else if (
+                format is not null
+                && tsType is TsType.Nullable
+                {
+                    Inner: TsType.Primitive { Format: null } nullableFallback
+                }
+            )
+            {
+                tsType = new TsType.Nullable(nullableFallback with { Format = format });
             }
 
             properties.Add(
@@ -912,10 +952,29 @@ public sealed class TypeWalker
                 var enumName = GetEmittedName(namedType);
                 if (!_enums.ContainsKey(enumName))
                 {
-                    var members = namedType
+                    var fields = namedType
                         .GetMembers()
                         .OfType<IFieldSymbol>()
                         .Where(f => f.HasConstantValue)
+                        .ToList();
+                    if (IsNumericEnum(namedType))
+                    {
+                        var format = namedType
+                            .GetAttributes()
+                            .FirstOrDefault(attribute =>
+                                attribute.AttributeClass?.Name == "RivetFormatAttribute"
+                            )
+                            ?.ConstructorArguments.FirstOrDefault()
+                            .Value as string;
+                        _enums[enumName] = new TsType.IntUnion(
+                            fields.Select(field => Convert.ToInt32(field.ConstantValue)).ToList(),
+                            format
+                        );
+                        _typeNamespaces.TryAdd(enumName, GetNamespaceGroup(namedType));
+                        return new TsType.TypeRef(enumName);
+                    }
+
+                    var members = fields
                         .Select(f =>
                         {
                             // Check for [JsonStringEnumMemberName("original")] attribute
@@ -1014,6 +1073,14 @@ public sealed class TypeWalker
         // Fallback
         return new TsType.Primitive("unknown");
     }
+
+    private static bool IsNumericEnum(INamedTypeSymbol type) =>
+        type.GetAttributes().Any(attribute =>
+            attribute.AttributeClass?.Name == "JsonConverterAttribute"
+            && attribute.ConstructorArguments is [var converterArgument]
+            && converterArgument.Value is INamedTypeSymbol converterType
+            && converterType.Name.StartsWith("JsonNumberEnumConverter", StringComparison.Ordinal)
+        );
 
     private static string AtContext(string? context) => context is null ? "" : $" on '{context}'";
 

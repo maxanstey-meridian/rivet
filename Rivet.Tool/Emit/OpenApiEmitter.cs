@@ -49,6 +49,23 @@ public static class OpenApiEmitter
         IReadOnlyDictionary<string, TsType> enums,
         SecurityConfig? security,
         OpenApiDocumentInfo? documentInfo = null
+    ) =>
+        EmitWithSecurityMetadata(
+            endpoints,
+            definitions,
+            brands,
+            enums,
+            ToSecurityMetadata(security),
+            documentInfo
+        );
+
+    public static string EmitWithSecurityMetadata(
+        IReadOnlyList<TsEndpointDefinition> endpoints,
+        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
+        IReadOnlyDictionary<string, TsType.Brand> brands,
+        IReadOnlyDictionary<string, TsType> enums,
+        ContractSecurityMetadata? security,
+        OpenApiDocumentInfo? documentInfo = null
     )
     {
         _ctx = new EmitContext();
@@ -86,7 +103,7 @@ public static class OpenApiEmitter
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
         IReadOnlyDictionary<string, TsType> enums,
-        SecurityConfig? security,
+        ContractSecurityMetadata? security,
         OpenApiDocumentInfo documentInfo
     )
     {
@@ -160,27 +177,20 @@ public static class OpenApiEmitter
 
         if (security is not null)
         {
-            securitySchemes[security.SchemeName] = security.SchemeDefinition;
-            if (security.AdditionalSchemeDefinitions is not null)
+            foreach (var (name, definition) in security.Schemes)
             {
-                foreach (var (name, definition) in security.AdditionalSchemeDefinitions)
+                if (!securitySchemes.TryAdd(name, definition))
                 {
-                    if (name == security.SchemeName)
-                    {
-                        throw new OpenApiEmissionException(
-                            $"error {Diagnostics.DuplicateSecuritySchemeDefinition}: security scheme '{name}' "
-                                + "is configured as both the primary and an additional definition"
-                        );
-                    }
-
-                    securitySchemes[name] = definition;
+                    throw new OpenApiEmissionException(
+                        $"error {Diagnostics.DuplicateSecuritySchemeDefinition}: duplicate security scheme definition '{name}'"
+                    );
                 }
             }
 
-            doc["security"] = new List<object>
+            if (security.GlobalRequirements is { } globalRequirements)
             {
-                new Dictionary<string, object> { [security.SchemeName] = Array.Empty<string>() },
-            };
+                doc["security"] = globalRequirements;
+            }
         }
 
         // Every endpoint security requirement must reference the configured scheme. Its type
@@ -215,6 +225,39 @@ public static class OpenApiEmitter
         }
 
         return JsonSerializer.Serialize(doc, _jsonOptions);
+    }
+
+    private static ContractSecurityMetadata? ToSecurityMetadata(SecurityConfig? security)
+    {
+        if (security is null)
+        {
+            return null;
+        }
+
+        var schemes = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+        {
+            [security.SchemeName] = JsonSerializer.SerializeToElement(security.SchemeDefinition),
+        };
+        if (security.AdditionalSchemeDefinitions is not null)
+        {
+            foreach (var (name, definition) in security.AdditionalSchemeDefinitions)
+            {
+                if (!schemes.TryAdd(name, JsonSerializer.SerializeToElement(definition)))
+                {
+                    throw new OpenApiEmissionException(
+                        $"error {Diagnostics.DuplicateSecuritySchemeDefinition}: duplicate security scheme definition '{name}'"
+                    );
+                }
+            }
+        }
+
+        var globalRequirements = JsonSerializer.SerializeToElement(
+            new[]
+            {
+                new Dictionary<string, string[]> { [security.SchemeName] = [] },
+            }
+        );
+        return new ContractSecurityMetadata(schemes, globalRequirements);
     }
 
     /// <summary>
@@ -354,6 +397,21 @@ public static class OpenApiEmitter
                     );
                     break;
 
+                case ParamSource.Cookie:
+                    parameters.Add(
+                        new Dictionary<string, object>
+                        {
+                            ["name"] = param.Name,
+                            ["in"] = "cookie",
+                            ["required"] = param.Type is not TsType.Nullable && !param.IsOptional,
+                            ["schema"] = MapTsTypeToJsonSchema(
+                                param.Type,
+                                $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+                            ),
+                        }
+                    );
+                    break;
+
                 case ParamSource.Body:
                     bodyParam = param;
                     break;
@@ -388,7 +446,32 @@ public static class OpenApiEmitter
         }
 
         // Request body
-        if (ep.BinaryRequestContentType is not null)
+        if (ep.RequestContents is { Count: > 0 })
+        {
+            var content = new Dictionary<string, object>();
+            foreach (var entry in ep.RequestContents)
+            {
+                var media = new Dictionary<string, object>();
+                if (entry.Schema is not null)
+                {
+                    media["schema"] = MapTsTypeToJsonSchema(
+                        entry.Schema,
+                        $"request content '{entry.MediaType}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+                    );
+                }
+
+                content[entry.MediaType] = media;
+            }
+
+            var primaryRequestType = ep.RequestType ?? bodyParam?.Type;
+            operation["requestBody"] = new Dictionary<string, object>
+            {
+                ["required"] = ep.RequestBodyRequired
+                    ?? (primaryRequestType is not TsType.Nullable),
+                ["content"] = WithExamples(content, ep.RequestExamples),
+            };
+        }
+        else if (ep.BinaryRequestContentType is not null)
         {
             // .AcceptsBinary(): the body is the raw bytes — never a JSON/multipart schema,
             // even if a Body param somehow survived upstream (the walker prevents it).
@@ -585,7 +668,26 @@ public static class OpenApiEmitter
                 respObj["headers"] = headerObjs;
             }
 
-            if (resp.DataType is not null)
+            if (resp.Contents is { Count: > 0 })
+            {
+                var content = new Dictionary<string, object>();
+                foreach (var entry in resp.Contents)
+                {
+                    var media = new Dictionary<string, object>();
+                    if (entry.Schema is not null)
+                    {
+                        media["schema"] = MapTsTypeToJsonSchema(
+                            entry.Schema,
+                            $"response {resp.StatusCode} content '{entry.MediaType}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+                        );
+                    }
+
+                    content[entry.MediaType] = media;
+                }
+
+                respObj["content"] = WithExamples(content, resp.Examples);
+            }
+            else if (resp.DataType is not null)
             {
                 // .ProducesContentType() overrides the SUCCESS response's media
                 // type only — declared error responses stay application/json.
@@ -643,7 +745,11 @@ public static class OpenApiEmitter
         operation["responses"] = responses;
 
         // Security
-        if (ep.Security is not null)
+        if (ep.SecurityRequirements is { } securityRequirements)
+        {
+            operation["security"] = securityRequirements;
+        }
+        else if (ep.Security is not null)
         {
             if (ep.Security.IsAnonymous)
             {
@@ -1026,11 +1132,7 @@ public static class OpenApiEmitter
                 ["enum"] = su.Members.ToList(),
             },
 
-            TsType.IntUnion iu => new Dictionary<string, object>
-            {
-                ["type"] = "integer",
-                ["enum"] = iu.Members.ToList(),
-            },
+            TsType.IntUnion iu => MapIntUnion(iu),
 
             TsType.Literal literal => new Dictionary<string, object>
             {
@@ -1069,6 +1171,21 @@ public static class OpenApiEmitter
 
             _ => new Dictionary<string, object> { ["type"] = "object" },
         };
+    }
+
+    private static Dictionary<string, object> MapIntUnion(TsType.IntUnion union)
+    {
+        var schema = new Dictionary<string, object>
+        {
+            ["type"] = "integer",
+            ["enum"] = union.Members.ToList(),
+        };
+        if (union.Format is not null)
+        {
+            schema["format"] = union.Format;
+        }
+
+        return schema;
     }
 
     private static object JsonElementValue(JsonElement value) =>

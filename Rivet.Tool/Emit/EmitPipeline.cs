@@ -15,7 +15,8 @@ internal static class EmitPipeline
         IReadOnlyList<TsEndpointDefinition> Endpoints,
         IReadOnlyDictionary<string, string?> TypeNamespaces,
         IReadOnlyDictionary<string, TsTypeDefinition> DefinitionsByName,
-        IReadOnlyDictionary<string, TsType.Brand> BrandsByName
+        IReadOnlyDictionary<string, TsType.Brand> BrandsByName,
+        ContractSecurityMetadata? Security = null
     );
 
     internal static async Task<int> RunAsync(EmitInput input, RivetOptions options)
@@ -44,7 +45,16 @@ internal static class EmitPipeline
             var securityConfig = options.SecuritySchemes is { Count: > 0 }
                 ? SecurityParser.ParseMany(options.SecuritySchemes)
                 : SecurityParser.Parse(options.DefaultSecurity);
-            openApiJson = OpenApiEmitter.Emit(
+            openApiJson = input.Security is not null
+                ? OpenApiEmitter.EmitWithSecurityMetadata(
+                    endpoints,
+                    definitionsByName,
+                    input.BrandsByName,
+                    input.Enums,
+                    input.Security,
+                    documentInfo
+                )
+                : OpenApiEmitter.Emit(
                 endpoints,
                 definitionsByName,
                 input.BrandsByName,

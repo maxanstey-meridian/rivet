@@ -38,7 +38,8 @@ public static class ContractEmitter
     internal sealed record ContractEnum(
         string Name,
         IReadOnlyList<string>? Values = null,
-        IReadOnlyList<int>? IntValues = null
+        IReadOnlyList<int>? IntValues = null,
+        string? Format = null
     );
 
     internal sealed record ContractQueryAuth(string ParameterName);
@@ -111,7 +112,11 @@ public static class ContractEmitter
                 kv.Value switch
                 {
                     TsType.StringUnion su => new ContractEnum(kv.Key, Values: su.Members),
-                    TsType.IntUnion iu => new ContractEnum(kv.Key, IntValues: iu.Members),
+                    TsType.IntUnion iu => new ContractEnum(
+                        kv.Key,
+                        IntValues: iu.Members,
+                        Format: iu.Format
+                    ),
                     _ => throw new InvalidOperationException(
                         $"Unsupported enum type: {kv.Value.GetType().Name}"
                     ),

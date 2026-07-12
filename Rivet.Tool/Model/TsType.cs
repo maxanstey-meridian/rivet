@@ -32,7 +32,7 @@ public abstract record TsType
     public sealed record StringUnion(IReadOnlyList<string> Members) : TsType;
 
     /// <summary>1 | 2 | 3 — int enum rendered as numeric literal union.</summary>
-    public sealed record IntUnion(IReadOnlyList<int> Members) : TsType;
+    public sealed record IntUnion(IReadOnlyList<int> Members, string? Format = null) : TsType;
 
     /// <summary>A JSON scalar literal type represented with OpenAPI 3.1 const.</summary>
     public sealed record Literal(JsonElement Value) : TsType;

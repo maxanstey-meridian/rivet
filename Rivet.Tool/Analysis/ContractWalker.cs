@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.Text.Json;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
@@ -229,10 +230,15 @@ public static class ContractWalker
         var requestExampleCalls = new List<PendingEndpointExampleCall>();
         var responseExampleCalls = new List<PendingEndpointExampleCall>();
         var responseHeaderCalls = new List<PendingResponseHeaderCall>();
+        var requestContents = new List<TsMediaTypeContent>();
+        var responseContents = new List<(int StatusCode, TsMediaTypeContent Content)>();
+        var declaredParameters = new List<TsEndpointParam>();
         int? successStatusOverride = null;
         string? endpointSummary = null;
         string? endpointDescription = null;
         EndpointSecurity? security = null;
+        JsonElement? securityRequirements = null;
+        bool? requestBodyRequired = null;
         var acceptsFile = false;
         var isFormEncoded = false;
         string? fileContentType = null;
@@ -363,6 +369,77 @@ public static class ContractWalker
             {
                 security = new EndpointSecurity(false, call.StringArg);
             }
+            else if (
+                call.MethodName == "SecurityRequirementsJson"
+                && call.StringArg is { } securityRequirementsJson
+            )
+            {
+                using var document = JsonDocument.Parse(securityRequirementsJson);
+                securityRequirements = document.RootElement.Clone();
+            }
+            else if (
+                call.MethodName == "RequestContent"
+                && call.TypeArgs.Count == 1
+                && call.GetStringArg("mediaType") is { } requestMediaType
+            )
+            {
+                requestContents.Add(
+                    new TsMediaTypeContent(requestMediaType, typeWalker.MapType(call.TypeArgs[0]))
+                );
+            }
+            else if (call.MethodName == "RequestBodyRequired")
+            {
+                requestBodyRequired = call.GetBoolArg("required");
+            }
+            else if (
+                call.MethodName == "Parameter"
+                && call.TypeArgs.Count == 1
+                && call.GetStringArg("name") is { } parameterName
+                && call.GetStringArg("location") is { } parameterLocation
+                && call.GetBoolArg("required") is { } parameterRequired
+            )
+            {
+                var source = parameterLocation.ToLowerInvariant() switch
+                {
+                    "path" => ParamSource.Route,
+                    "query" => ParamSource.Query,
+                    "header" => ParamSource.Header,
+                    "cookie" => ParamSource.Cookie,
+                    _ => throw new ContractAnalysisException(
+                        $"Endpoint '{name}' declares unsupported parameter location '{parameterLocation}'."
+                    ),
+                };
+                var parameterType = ApplyParameterMetadata(
+                    typeWalker.MapType(call.TypeArgs[0]),
+                    call.GetStringArg("schemaType"),
+                    call.GetStringArg("format")
+                );
+                declaredParameters.Add(
+                    new TsEndpointParam(
+                        parameterName,
+                        parameterType,
+                        source,
+                        IsOptional: !parameterRequired
+                    )
+                );
+            }
+            else if (
+                call.MethodName == "ResponseContent"
+                && call.TypeArgs.Count == 1
+                && call.GetIntArg("statusCode") is int contentStatusCode
+                && call.GetStringArg("mediaType") is { } responseMediaType
+            )
+            {
+                responseContents.Add(
+                    (
+                        contentStatusCode,
+                        new TsMediaTypeContent(
+                            responseMediaType,
+                            typeWalker.MapType(call.TypeArgs[0])
+                        )
+                    )
+                );
+            }
             else if (call.MethodName == "ProducesFile")
             {
                 fileContentType = call.StringArg ?? "application/octet-stream";
@@ -465,7 +542,7 @@ public static class ContractWalker
         TsType? returnType = tOutput is not null ? typeWalker.MapType(tOutput) : null;
 
         // Build params based on HTTP method and TInput
-        var (parameters, inputTypeName) = BuildParams(
+        var (builtParameters, inputTypeName) = BuildParams(
             wkt,
             httpMethod,
             route,
@@ -474,8 +551,20 @@ public static class ContractWalker
             compilation,
             typeWalker,
             acceptsFile,
-            binaryRequestContentType
+            binaryRequestContentType,
+            declaredParameters,
+            requestContents.Count > 0
         );
+        var parameters = builtParameters.ToList();
+
+        foreach (var declaredParameter in declaredParameters)
+        {
+            parameters.RemoveAll(parameter =>
+                parameter.Source == declaredParameter.Source
+                && parameter.Name == declaredParameter.Name
+            );
+            parameters.Add(declaredParameter);
+        }
 
         // Add success response to responses list
         // Void endpoints with typed error responses also need a success entry
@@ -509,6 +598,7 @@ public static class ContractWalker
                 ?? DefaultSuccessCode(httpMethod, hasOutput: returnType is not null),
             name
         );
+        ApplyResponseContents(responses, responseContents);
 
         var requestExamples =
             requestExampleCalls.Count == 0
@@ -541,8 +631,32 @@ public static class ContractWalker
             QueryAuth: queryAuth,
             BinaryRequestContentType: binaryRequestContentType,
             RequestContentTypeOverride: requestContentTypeOverride,
-            ResponseContentTypeOverride: responseContentTypeOverride
+            ResponseContentTypeOverride: responseContentTypeOverride,
+            SecurityRequirements: securityRequirements,
+            RequestContents: requestContents.Count == 0 ? null : requestContents,
+            RequestBodyRequired: requestBodyRequired
         );
+    }
+
+    private static void ApplyResponseContents(
+        List<TsResponseType> responses,
+        IReadOnlyList<(int StatusCode, TsMediaTypeContent Content)> contents
+    )
+    {
+        foreach (var group in contents.GroupBy(item => item.StatusCode))
+        {
+            var index = responses.FindIndex(response => response.StatusCode == group.Key);
+            var mapped = group.Select(item => item.Content).ToList();
+            if (index < 0)
+            {
+                responses.Add(new TsResponseType(group.Key, null, Contents: mapped));
+                continue;
+            }
+
+            responses[index] = responses[index] with { Contents = mapped };
+        }
+
+        responses.Sort((left, right) => left.StatusCode.CompareTo(right.StatusCode));
     }
 
     /// <summary>
@@ -697,7 +811,9 @@ public static class ContractWalker
         Compilation compilation,
         TypeWalker typeWalker,
         bool acceptsFile = false,
-        string? binaryContentType = null
+        string? binaryContentType = null,
+        IReadOnlyList<TsEndpointParam>? declaredParameters = null,
+        bool hasDeclaredRequestBody = false
     )
     {
         var routeParamNames = RouteParser.ParseRouteParamNames(route);
@@ -712,7 +828,7 @@ public static class ContractWalker
         }
 
         var parameters = new List<TsEndpointParam>();
-        var hasBody = httpMethod is "POST" or "PUT" or "PATCH";
+        var hasBody = httpMethod is "POST" or "PUT" or "PATCH" || hasDeclaredRequestBody;
         // .AcceptsBinary(): the request body is the raw bytes (host code reads the
         // stream), so TInput never lowers to a JSON body — its properties become
         // route/query params exactly like a GET/DELETE input.
@@ -777,11 +893,21 @@ public static class ContractWalker
                     }
                     else
                     {
-                        Diagnostics.Warn(
-                            Diagnostics.RouteTokenWithoutInputProperty,
-                            $"route token '{{{paramName}}}' on {httpMethod} {route} has no matching property "
-                                + $"on input type '{tInput.Name}' — emitted as an untyped string path param."
+                        var declared = declaredParameters?.FirstOrDefault(parameter =>
+                            parameter.Source == ParamSource.Route && parameter.Name == paramName
                         );
+                        if (declared is not null)
+                        {
+                            paramType = declared.Type;
+                        }
+                        else
+                        {
+                            Diagnostics.Warn(
+                                Diagnostics.RouteTokenWithoutInputProperty,
+                                $"route token '{{{paramName}}}' on {httpMethod} {route} has no matching property "
+                                    + $"on input type '{tInput.Name}' — emitted as an untyped string path param."
+                            );
+                        }
                     }
                 }
                 parameters.Add(
@@ -1046,6 +1172,31 @@ public static class ContractWalker
         }
 
         return (parameters, inputTypeName);
+    }
+
+    private static TsType ApplyParameterMetadata(
+        TsType type,
+        string? schemaType,
+        string? format
+    )
+    {
+        var explicitFormat = format == "" ? null : format;
+        return type switch
+        {
+            TsType.Primitive primitive => primitive with
+            {
+                Name = schemaType ?? primitive.Name,
+                Format = format is null ? primitive.Format : explicitFormat,
+            },
+            TsType.Nullable { Inner: TsType.Primitive primitive } => new TsType.Nullable(
+                primitive with
+                {
+                    Name = schemaType ?? primitive.Name,
+                    Format = format is null ? primitive.Format : explicitFormat,
+                }
+            ),
+            _ => type,
+        };
     }
 
     private static TsType? GetRequestBodyType(

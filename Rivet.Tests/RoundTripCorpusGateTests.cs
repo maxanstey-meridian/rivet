@@ -3,115 +3,112 @@ using System.Text.Json;
 namespace Rivet.Tests;
 
 /// <summary>
-/// The FABLE_ROUNDTRIP audit (2026-06-12) as a permanent ratchet: import the
-/// GitHub corpus through the real CLI, re-emit, semantic-diff against the
-/// original with tools/roundtrip-diff.py, and compare category counts to the
-/// committed baseline. Counts may only go DOWN — a new finding category or a
-/// regression in an existing one fails the gate; an improvement fails too,
-/// with instructions to ratchet the baseline so the gain is locked in.
+/// Strict source-to-source corpus gate. A corpus passes only when the real CLI
+/// imports it, compiles the generated C#, re-emits it without lossy diagnostics,
+/// and the semantic comparator reports no structural or semantic findings.
 /// </summary>
-[Trait("Category", "Local")] // needs the gitignored openapi/ corpus + python3
 public sealed class RoundTripCorpusGateTests
 {
-    [Fact]
-    public void GitHub_Corpus_RoundTrip_Drift_Never_Regresses()
+    public static IEnumerable<object[]> Corpora()
     {
-        var workDir = Directory.CreateTempSubdirectory("rivet-roundtrip-gate-");
+        var manifest = JsonSerializer.Deserialize<Manifest>(
+            File.ReadAllText(CliRunner.RepoPath("corpus", "openapi-manifest.json")),
+            _jsonOptions
+        )!;
+        return manifest.Corpora.Select(corpus => new object[] { corpus.Id, corpus.File });
+    }
+
+    [Theory]
+    [MemberData(nameof(Corpora))]
+    public void Corpus_Round_Trips_Without_Loss(string corpusId, string corpusFile)
+    {
+        var workDir = Directory.CreateTempSubdirectory($"rivet-roundtrip-{corpusId}-");
         try
         {
+            var reportDirectory = CliRunner.RepoPath("TestResults", "roundtrip", corpusId);
+            Directory.CreateDirectory(reportDirectory);
+            var originalPath = CliRunner.RepoPath("openapi", corpusFile);
             var srcDir = Path.Combine(workDir.FullName, "src");
             var import = CliRunner.RunCli(
                 workDir.FullName,
                 [
                     "--from-openapi",
-                    CliRunner.RepoPath("openapi", "github.json"),
+                    originalPath,
                     "--output",
                     srcDir,
                     "--namespace",
                     "Generated",
                 ]
             );
-            Assert.True(import.ExitCode == 0, $"import failed:\n{import.StdErr}");
+            File.WriteAllText(Path.Combine(reportDirectory, "import.stderr.log"), import.StdErr);
+            Assert.True(
+                import.ExitCode == 0,
+                WriteStageFailure(
+                    reportDirectory,
+                    corpusId,
+                    "import",
+                    import.ExitCode,
+                    import.StdErr
+                )
+            );
 
             var outDir = Path.Combine(workDir.FullName, "out");
             var emit = CliRunner.RunCli(
                 workDir.FullName,
                 [srcDir, "--openapi", "--output", outDir]
             );
-            Assert.True(emit.ExitCode == 0, $"compile/emit failed:\n{emit.StdErr}");
+            File.WriteAllText(Path.Combine(reportDirectory, "emit.stderr.log"), emit.StdErr);
+            Assert.True(
+                emit.ExitCode == 0,
+                WriteStageFailure(
+                    reportDirectory,
+                    corpusId,
+                    "compile-reemit",
+                    emit.ExitCode,
+                    emit.StdErr
+                )
+            );
 
             var summaryPath = Path.Combine(workDir.FullName, "summary.json");
+            var detailsPath = Path.Combine(workDir.FullName, "details.json");
             var diff = CliRunner.Run(
                 workDir.FullName,
                 "python3",
                 [
                     CliRunner.RepoPath("tools", "roundtrip-diff.py"),
-                    CliRunner.RepoPath("openapi", "github.json"),
+                    originalPath,
                     Path.Combine(outDir, "openapi.json"),
                     "--summary-json",
                     summaryPath,
+                    "--details-json",
+                    detailsPath,
                 ]
             );
-            Assert.True(diff.ExitCode == 0, $"roundtrip-diff.py failed:\n{diff.StdErr}");
+            File.WriteAllText(Path.Combine(reportDirectory, "diff.stderr.log"), diff.StdErr);
+            Assert.True(
+                diff.ExitCode is 0 or 1,
+                WriteStageFailure(
+                    reportDirectory,
+                    corpusId,
+                    "semantic-comparator",
+                    diff.ExitCode,
+                    diff.StdErr
+                )
+            );
 
-            var current = JsonSerializer.Deserialize<Summary>(
+            var summary = JsonSerializer.Deserialize<Summary>(
                 File.ReadAllText(summaryPath),
                 _jsonOptions
             )!;
-            var baselinePath = CliRunner.RepoPath(
-                "Rivet.Tests",
-                "Fixtures",
-                "roundtrip-baseline.json"
-            );
-            var baseline = JsonSerializer.Deserialize<Summary>(
-                File.ReadAllText(baselinePath),
-                _jsonOptions
-            )!;
+            File.Copy(summaryPath, Path.Combine(reportDirectory, "summary.json"), overwrite: true);
+            File.Copy(detailsPath, Path.Combine(reportDirectory, "details.json"), overwrite: true);
 
-            var failures = new List<string>();
-            var improvements = new List<string>();
-            CompareCategories(
-                "op",
-                baseline.OpFindings,
-                current.OpFindings,
-                failures,
-                improvements
-            );
-            CompareCategories(
-                "schema",
-                baseline.SchemaFindings,
-                current.SchemaFindings,
-                failures,
-                improvements
-            );
-
-            if (current.CleanOps < baseline.CleanOps)
-            {
-                failures.Add(
-                    $"clean ops regressed: {baseline.CleanOps} -> {current.CleanOps} (of {current.TotalOps})"
-                );
-            }
-            else if (current.CleanOps > baseline.CleanOps)
-            {
-                improvements.Add(
-                    $"clean ops improved: {baseline.CleanOps} -> {current.CleanOps} (of {current.TotalOps})"
-                );
-            }
-
+            var failures = DescribeFailures(import.StdErr, emit.StdErr, summary);
+            WriteResult(reportDirectory, corpusId, import, emit, diff, summary, failures);
             Assert.True(
-                failures.Count == 0,
-                "round-trip drift REGRESSED vs Rivet.Tests/Fixtures/roundtrip-baseline.json:\n  "
-                    + string.Join("\n  ", failures)
-            );
-
-            // An improvement is also a "failure" — of the baseline, not the code.
-            // Ratchet it down so the gain can never silently regress.
-            Assert.True(
-                improvements.Count == 0,
-                "round-trip drift IMPROVED — lock it in by replacing "
-                    + $"Rivet.Tests/Fixtures/roundtrip-baseline.json with {summaryPath} "
-                    + "(re-run the gate to confirm, then commit the new baseline):\n  "
-                    + string.Join("\n  ", improvements)
+                diff.ExitCode == 0 && failures.Count == 0,
+                $"{corpusId}: round-trip is lossy:\n  {string.Join("\n  ", failures)}\n"
+                    + $"Full report: {reportDirectory}"
             );
         }
         finally
@@ -120,38 +117,133 @@ public sealed class RoundTripCorpusGateTests
         }
     }
 
-    private static void CompareCategories(
-        string level,
-        Dictionary<string, int> baseline,
-        Dictionary<string, int> current,
-        List<string> failures,
-        List<string> improvements
+    private static string WriteStageFailure(
+        string reportDirectory,
+        string corpusId,
+        string stage,
+        int exitCode,
+        string stderr
     )
     {
-        foreach (var (category, count) in current)
+        File.WriteAllText(
+            Path.Combine(reportDirectory, "result.json"),
+            JsonSerializer.Serialize(
+                new
+                {
+                    corpusId,
+                    passed = false,
+                    failedStage = stage,
+                    exitCode,
+                    diagnosticCount = CountLines(stderr),
+                },
+                _reportJsonOptions
+            )
+        );
+        return $"{corpusId}: {stage} failed ({exitCode}); diagnostics: {CountLines(stderr)}; "
+            + $"full report: {reportDirectory}";
+    }
+
+    private static void WriteResult(
+        string reportDirectory,
+        string corpusId,
+        (int ExitCode, string StdOut, string StdErr) import,
+        (int ExitCode, string StdOut, string StdErr) emit,
+        (int ExitCode, string StdOut, string StdErr) diff,
+        Summary summary,
+        IReadOnlyCollection<string> failures
+    )
+    {
+        File.WriteAllText(
+            Path.Combine(reportDirectory, "result.json"),
+            JsonSerializer.Serialize(
+                new
+                {
+                    corpusId,
+                    passed = diff.ExitCode == 0 && failures.Count == 0,
+                    failedStage = failures.Count == 0 ? null : "semantic-diff",
+                    importExitCode = import.ExitCode,
+                    emitExitCode = emit.ExitCode,
+                    diffExitCode = diff.ExitCode,
+                    importDiagnosticCount = CountLines(import.StdErr),
+                    emitDiagnosticCount = CountLines(emit.StdErr),
+                    summary,
+                },
+                _reportJsonOptions
+            )
+        );
+    }
+
+    private static List<string> DescribeFailures(
+        string importStdErr,
+        string emitStdErr,
+        Summary summary
+    )
+    {
+        var failures = new List<string>();
+        if (!string.IsNullOrWhiteSpace(importStdErr))
         {
-            var allowed = baseline.GetValueOrDefault(category);
-            if (count > allowed)
-            {
-                failures.Add($"{level}/{category}: {allowed} -> {count}");
-            }
-            else if (count < allowed)
-            {
-                improvements.Add($"{level}/{category}: {allowed} -> {count}");
-            }
+            failures.Add($"lossy import diagnostics: {CountLines(importStdErr)}");
+        }
+        if (!string.IsNullOrWhiteSpace(emitStdErr))
+        {
+            failures.Add($"lossy emit diagnostics: {CountLines(emitStdErr)}");
         }
 
-        foreach (var (category, count) in baseline)
+        AddCount(failures, "missing operations", summary.MissingOperations);
+        AddCount(failures, "invented operations", summary.InventedOperations);
+        AddCount(failures, "unmatched original schemas", summary.UnmatchedOriginalSchemas);
+        AddCount(failures, "unmatched re-emitted schemas", summary.UnmatchedReemittedSchemas);
+        AddCount(
+            failures,
+            "original schema-name collisions",
+            summary.OriginalSchemaNameCollisions
+        );
+        AddCount(
+            failures,
+            "re-emitted schema-name collisions",
+            summary.ReemittedSchemaNameCollisions
+        );
+        foreach (var (category, count) in summary.OpFindings.OrderBy(pair => pair.Key))
         {
-            if (count > 0 && !current.ContainsKey(category))
-            {
-                improvements.Add($"{level}/{category}: {count} -> 0");
-            }
+            AddCount(failures, $"operation/{category}", count);
+        }
+        foreach (var (category, count) in summary.SchemaFindings.OrderBy(pair => pair.Key))
+        {
+            AddCount(failures, $"schema/{category}", count);
+        }
+
+        return failures;
+    }
+
+    private static int CountLines(string value) =>
+        value.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Length;
+
+    private static void AddCount(List<string> failures, string category, int count)
+    {
+        if (count > 0)
+        {
+            failures.Add($"{category}: {count}");
         }
     }
 
+    private sealed record Manifest(int SchemaVersion, Corpus[] Corpora);
+
+    private sealed record Corpus(string Id, string File);
+
     private sealed record Summary(
-        int TotalOps,
+        int OriginalOps,
+        int ReemittedOps,
+        int SharedOps,
+        int MissingOperations,
+        int InventedOperations,
+        int OriginalSchemas,
+        int ReemittedSchemas,
+        int MatchedSchemas,
+        int UnmatchedOriginalSchemas,
+        int UnmatchedReemittedSchemas,
+        int OriginalSchemaNameCollisions,
+        int ReemittedSchemaNameCollisions,
         int CleanOps,
         Dictionary<string, int> OpFindings,
         Dictionary<string, int> SchemaFindings
@@ -160,5 +252,10 @@ public sealed class RoundTripCorpusGateTests
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+    };
+
+    private static readonly JsonSerializerOptions _reportJsonOptions = new()
+    {
+        WriteIndented = true,
     };
 }

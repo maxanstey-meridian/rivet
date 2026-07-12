@@ -45,7 +45,12 @@ internal sealed class SchemaMapper
     public SchemaMapper(List<string> warnings)
     {
         _ctx = new ResolutionContext(warnings);
-        _synth = new RecordSynthesizer(_ctx, ResolveCSharpType);
+        _synth = new RecordSynthesizer(
+            _ctx,
+            ResolveCSharpType,
+            ResolveFormat,
+            ResolveSchemaType
+        );
     }
 
     /// <summary>
@@ -600,6 +605,118 @@ internal sealed class SchemaMapper
         {
             _ctx.RecursionDepth--;
         }
+    }
+
+    internal string? ResolveFormat(IOpenApiSchema schema)
+    {
+        if (schema.Format is not null)
+        {
+            return schema.Format;
+        }
+
+        if (
+            schema is OpenApiSchemaReference { Reference.Id: { } refId }
+            && _componentSchemas is not null
+        )
+        {
+            var finalKey = _aliasTargets.GetValueOrDefault(refId, refId);
+            if (
+                _componentSchemas.TryGetValue(finalKey, out var target)
+                && target is not OpenApiSchemaReference
+            )
+            {
+                return ResolveFormat(target);
+            }
+        }
+
+        foreach (var branches in new[] { schema.OneOf, schema.AnyOf })
+        {
+            if (branches is not { Count: 2 })
+            {
+                continue;
+            }
+
+            var valueBranch = branches.FirstOrDefault(branch =>
+                branch.Type is not { } type || type != JsonSchemaType.Null
+            );
+            if (
+                valueBranch is not null
+                && branches.Any(branch => branch.Type == JsonSchemaType.Null)
+            )
+            {
+                return ResolveFormat(valueBranch);
+            }
+        }
+
+        if (schema.AllOf is [var only])
+        {
+            return ResolveFormat(only);
+        }
+
+        return null;
+    }
+
+    internal string? ResolveSchemaType(IOpenApiSchema schema)
+    {
+        if (schema.Type is { } declaredType)
+        {
+            var type = declaredType & ~JsonSchemaType.Null;
+            var name = type switch
+            {
+                JsonSchemaType.String => "string",
+                JsonSchemaType.Integer => "integer",
+                JsonSchemaType.Number => "number",
+                JsonSchemaType.Boolean => "boolean",
+                JsonSchemaType.Object => "object",
+                JsonSchemaType.Array => "array",
+                _ => null,
+            };
+            if (name is not null)
+            {
+                return name;
+            }
+        }
+
+        if (
+            schema is OpenApiSchemaReference { Reference.Id: { } refId }
+            && _componentSchemas is not null
+        )
+        {
+            var finalKey = _aliasTargets.GetValueOrDefault(refId, refId);
+            if (
+                _componentSchemas.TryGetValue(finalKey, out var target)
+                && target is not OpenApiSchemaReference
+            )
+            {
+                return ResolveSchemaType(target);
+            }
+        }
+
+        foreach (var branches in new[] { schema.OneOf, schema.AnyOf })
+        {
+            if (branches is not { Count: 2 })
+            {
+                continue;
+            }
+
+            var valueBranch = branches.FirstOrDefault(branch =>
+                branch.Type is not { } type || type != JsonSchemaType.Null
+            );
+            if (
+                valueBranch is not null
+                && branches.Any(branch => branch.Type == JsonSchemaType.Null)
+            )
+            {
+                return ResolveSchemaType(valueBranch);
+            }
+        }
+
+        if (schema.AllOf is [var only])
+        {
+            return ResolveSchemaType(only);
+        }
+
+        return null;
     }
 
     private string ResolveCSharpTypeCore(IOpenApiSchema schema, string? context)
@@ -1159,18 +1276,18 @@ internal sealed class SchemaMapper
     private string ResolveFallbackType(IOpenApiSchema schema, string? context)
     {
         // enum without explicit type (common in some generators)
-        if (schema.Enum is { Count: > 1 })
+        if (schema.Enum is { Count: > 0 })
         {
             if (SchemaClassifier.IsIntEnum(schema))
             {
                 return SynthesizeInlineIntEnum(schema, context);
             }
 
-            return SynthesizeInlineEnum(schema, context);
-        }
+            if (SchemaClassifier.IsStringEnum(schema))
+            {
+                return SynthesizeInlineEnum(schema, context);
+            }
 
-        if (schema.Enum is { Count: > 0 })
-        {
             WarnEnumConstraintDropped(schema, context, "string");
             return "string";
         }
@@ -1239,7 +1356,7 @@ internal sealed class SchemaMapper
 
         if (type.HasFlag(JsonSchemaType.String))
         {
-            if (schema.Enum is { Count: > 1 })
+            if (schema.Enum is { Count: > 0 })
             {
                 return SynthesizeInlineEnum(schema, context);
             }
@@ -1255,7 +1372,7 @@ internal sealed class SchemaMapper
 
         if (type.HasFlag(JsonSchemaType.Integer))
         {
-            if (schema.Enum is { Count: > 1 } && SchemaClassifier.IsIntEnum(schema))
+            if (schema.Enum is { Count: > 0 } && SchemaClassifier.IsIntEnum(schema))
             {
                 return SynthesizeInlineIntEnum(schema, context);
             }

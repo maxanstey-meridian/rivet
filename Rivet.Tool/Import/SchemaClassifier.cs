@@ -48,7 +48,7 @@ internal static class SchemaClassifier
 
     internal static bool IsIntEnum(IOpenApiSchema schema)
     {
-        if (schema.Enum is not { Count: > 1 })
+        if (schema.Enum is not { Count: > 0 })
         {
             return false;
         }
@@ -302,6 +302,8 @@ internal static class SchemaClassifier
             "JsonObject" => "System.Text.Json.Nodes.JsonObject",
             "JsonArray" => "System.Text.Json.Nodes.JsonArray",
             "JsonNode" => "System.Text.Json.Nodes.JsonNode",
+            "JsonElement" => "System.Text.Json.JsonElement",
+            "JsonDocument" => "System.Text.Json.JsonDocument",
             _ => shortName,
         };
     }
@@ -501,7 +503,7 @@ internal static class SchemaClassifier
             }
         }
 
-        return new GeneratedEnum(name, members);
+        return new GeneratedEnum(name, members, schema.Format);
     }
 
     internal static GeneratedEnum MapIntEnum(string name, IOpenApiSchema schema)
@@ -542,7 +544,7 @@ internal static class SchemaClassifier
             index++;
         }
 
-        return new GeneratedEnum(name, members);
+        return new GeneratedEnum(name, members, schema.Format);
     }
 
     internal static GeneratedBrand MapBrand(string name, IOpenApiSchema schema)

@@ -387,6 +387,52 @@ public abstract class RouteDefinitionBase<TSelf>
         return (TSelf)this;
     }
 
+    public TSelf SecurityRequirementsJson(string requirementsJson)
+    {
+        EnsureMutable();
+        _ = requirementsJson;
+        return (TSelf)this;
+    }
+
+    public TSelf RequestContent<T>(string mediaType)
+    {
+        EnsureMutable();
+        _ = mediaType;
+        return (TSelf)this;
+    }
+
+    public TSelf RequestBodyRequired(bool required)
+    {
+        EnsureMutable();
+        _ = required;
+        return (TSelf)this;
+    }
+
+    public TSelf Parameter<T>(
+        string name,
+        string location,
+        bool required,
+        string? schemaType = null,
+        string? format = null
+    )
+    {
+        EnsureMutable();
+        _ = name;
+        _ = location;
+        _ = required;
+        _ = schemaType;
+        _ = format;
+        return (TSelf)this;
+    }
+
+    public TSelf ResponseContent<T>(int statusCode, string mediaType)
+    {
+        EnsureMutable();
+        _ = statusCode;
+        _ = mediaType;
+        return (TSelf)this;
+    }
+
     /// <summary>
     /// Opts this endpoint into query-based authentication, where the auth token is passed
     /// as a query parameter instead of a header. Primarily intended for media players

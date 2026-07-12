@@ -10,6 +10,27 @@ namespace Rivet.Tool.Import;
 /// </summary>
 internal static class CSharpWriter
 {
+    public static string WriteSecurityMetadata(ContractSecurityMetadata security)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("using Rivet;");
+        foreach (var (name, definition) in security.Schemes.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            sb.AppendLine(
+                $"[assembly: RivetSecurityScheme(\"{EscapeString(name)}\", \"{EscapeString(definition.GetRawText())}\")]"
+            );
+        }
+
+        if (security.GlobalRequirements is { } globalRequirements)
+        {
+            sb.AppendLine(
+                $"[assembly: RivetGlobalSecurity(\"{EscapeString(globalRequirements.GetRawText())}\")]"
+            );
+        }
+
+        return sb.ToString();
+    }
+
     public static string WriteRecord(GeneratedRecord record, string ns)
     {
         var sb = new StringBuilder();
@@ -79,7 +100,11 @@ internal static class CSharpWriter
         // land. Records carrying any ValidationAttribute are therefore emitted in the
         // non-positional required/init form, where the single property-level placement
         // is visible to MVC, Validator.TryValidateObject, and the Rivet walker alike.
-        if (CarriesValidationAttribute(record) || HasRequiredNullableProperty(record))
+        if (
+            CarriesValidationAttribute(record)
+            || HasRequiredNullableProperty(record)
+            || HasOptionalNonNullableProperty(record)
+        )
         {
             var baseSuffix = record.BaseTypeName is null ? "" : $" : {record.BaseTypeName}";
             sb.AppendLine($"public {modifier} record {record.Name}{typeParamSuffix}{baseSuffix}");
@@ -147,6 +172,9 @@ internal static class CSharpWriter
     private static bool HasRequiredNullableProperty(GeneratedRecord record) =>
         record.Properties.Any(p => p.IsRequired && p.CSharpType.EndsWith('?'));
 
+    private static bool HasOptionalNonNullableProperty(GeneratedRecord record) =>
+        record.Properties.Any(p => !p.IsRequired && !p.CSharpType.EndsWith('?'));
+
     private static void EmitPropertyAttributes(StringBuilder sb, RecordProperty prop, string target)
     {
         if (prop.WireName is not null)
@@ -171,7 +199,17 @@ internal static class CSharpWriter
         }
         else if (prop.Format is not null)
         {
-            sb.AppendLine($"    [{target}RivetFormat(\"{prop.Format}\")]");
+            sb.AppendLine($"    [{target}RivetFormat(\"{EscapeString(prop.Format)}\")]");
+        }
+        else if (prop.IsFormatSpecified)
+        {
+            sb.AppendLine($"    [{target}RivetFormat]");
+        }
+        if (prop.SchemaType is not null)
+        {
+            sb.AppendLine(
+                $"    [{target}RivetSchemaType(\"{EscapeString(prop.SchemaType)}\")]"
+            );
         }
         if (prop.IsDeprecated)
         {
@@ -220,6 +258,10 @@ internal static class CSharpWriter
         {
             sb.AppendLine($"[JsonConverter(typeof(JsonNumberEnumConverter<{enumDef.Name}>))]");
         }
+        if (enumDef.Format is not null)
+        {
+            sb.AppendLine($"[Rivet.RivetFormat(\"{EscapeString(enumDef.Format)}\")]");
+        }
 
         sb.AppendLine($"public enum {enumDef.Name}");
         sb.AppendLine("{");
@@ -266,6 +308,12 @@ internal static class CSharpWriter
             contract.Fields.Any(f =>
                 f.InputType?.Contains("IFormFile", StringComparison.Ordinal) == true
                 || f.OutputType?.Contains("IFormFile", StringComparison.Ordinal) == true
+                || f.RequestContents.Any(content =>
+                    content.TypeName.Contains("IFormFile", StringComparison.Ordinal)
+                )
+                || f.ResponseContents.Any(content =>
+                    content.TypeName.Contains("IFormFile", StringComparison.Ordinal)
+                )
             )
         )
         {
@@ -564,6 +612,45 @@ internal static class CSharpWriter
         else if (field.SecurityScheme is not null)
         {
             calls.Add($".Secure(\"{EscapeString(field.SecurityScheme)}\")");
+        }
+
+        if (field.SecurityRequirementsJson is not null)
+        {
+            calls.Add(
+                $".SecurityRequirementsJson(\"{EscapeString(field.SecurityRequirementsJson)}\")"
+            );
+        }
+
+        foreach (var content in field.RequestContents)
+        {
+            calls.Add(
+                $".RequestContent<{content.TypeName}>(\"{EscapeString(content.MediaType)}\")"
+            );
+        }
+
+        if (field.RequestBodyRequired is { } requestBodyRequired)
+        {
+            calls.Add($".RequestBodyRequired({requestBodyRequired.ToString().ToLowerInvariant()})");
+        }
+
+        foreach (var parameter in field.Parameters)
+        {
+            var format = parameter.IsFormatSpecified
+                ? $", \"{EscapeString(parameter.Format ?? "")}\""
+                : "";
+            var schemaType = parameter.SchemaType is null
+                ? format.Length == 0 ? "" : ", null"
+                : $", \"{EscapeString(parameter.SchemaType)}\"";
+            calls.Add(
+                $".Parameter<{parameter.TypeName}>(\"{EscapeString(parameter.Name)}\", \"{parameter.Location}\", {parameter.Required.ToString().ToLowerInvariant()}{schemaType}{format})"
+            );
+        }
+
+        foreach (var content in field.ResponseContents)
+        {
+            calls.Add(
+                $".ResponseContent<{content.TypeName}>({content.StatusCode}, \"{EscapeString(content.MediaType)}\")"
+            );
         }
 
         return calls;

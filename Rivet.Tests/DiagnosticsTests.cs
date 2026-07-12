@@ -246,7 +246,7 @@ public sealed class DiagnosticsTests
     // ---------------------------------------------------------------
 
     [Fact]
-    public void Unknown_Type_Emission_Warning_Names_The_Offending_Property()
+    public void Explicit_JsonElement_Emits_An_Untyped_Schema_Without_A_Warning()
     {
         var source = """
             using System.Text.Json;
@@ -269,10 +269,7 @@ public sealed class DiagnosticsTests
             CompilationHelper.EmitOpenApi(source).Dispose()
         );
 
-        Assert.Contains("warning RIV2005:", stderr);
-        // Property names are camelCased in the contract model — the site names the
-        // emitted property, not the C# member.
-        Assert.Contains("'PayloadDto.data'", stderr);
+        Assert.DoesNotContain("warning RIV2005:", stderr);
     }
 
     // ---------------------------------------------------------------
