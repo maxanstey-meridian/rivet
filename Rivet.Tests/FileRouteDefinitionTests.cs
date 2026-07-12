@@ -22,8 +22,7 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public void File_ContentType_OverridesDefault()
     {
-        var route = Define.File("/api/stream")
-            .ContentType("video/mp4");
+        var route = Define.File("/api/stream").ContentType("video/mp4");
 
         Assert.Equal("video/mp4", route.FileContentType);
     }
@@ -57,8 +56,7 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public void File_Generic_ContentType_OverridesDefault()
     {
-        var route = Define.File<FileDownloadInput>("/api/stream")
-            .ContentType("video/mp4");
+        var route = Define.File<FileDownloadInput>("/api/stream").ContentType("video/mp4");
 
         Assert.Equal("video/mp4", route.FileContentType);
     }
@@ -66,7 +64,8 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public void File_BaseBuilderMethods_Work()
     {
-        var route = Define.File("/api/stream")
+        var route = Define
+            .File("/api/stream")
             .ContentType("video/mp4")
             .Summary("Download a video")
             .Anonymous();
@@ -79,7 +78,8 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public void File_Generic_BaseBuilderMethods_Work()
     {
-        var route = Define.File<FileDownloadInput>("/api/stream")
+        var route = Define
+            .File<FileDownloadInput>("/api/stream")
             .ContentType("audio/mpeg")
             .Description("Stream audio content")
             .Secure("Bearer");
@@ -103,8 +103,7 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public void QueryAuth_DefaultParameterName_IsToken()
     {
-        var route = Define.File("/api/stream")
-            .QueryAuth();
+        var route = Define.File("/api/stream").QueryAuth();
 
         Assert.True(route.IsQueryAuth);
         Assert.Equal("token", route.QueryAuthParameterName);
@@ -113,8 +112,7 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public void QueryAuth_CustomParameterName()
     {
-        var route = Define.File("/api/stream")
-            .QueryAuth("key");
+        var route = Define.File("/api/stream").QueryAuth("key");
 
         Assert.True(route.IsQueryAuth);
         Assert.Equal("key", route.QueryAuthParameterName);
@@ -132,9 +130,7 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public void QueryAuth_ChainableWithContentType()
     {
-        var route = Define.File("/api/stream")
-            .ContentType("video/mp4")
-            .QueryAuth();
+        var route = Define.File("/api/stream").ContentType("video/mp4").QueryAuth();
 
         Assert.Equal("video/mp4", route.FileContentType);
         Assert.True(route.IsQueryAuth);
@@ -144,8 +140,7 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public void QueryAuth_AvailableOnRouteDefinition()
     {
-        var route = Define.Get("/api/data")
-            .QueryAuth("api_key");
+        var route = Define.Get("/api/data").QueryAuth("api_key");
 
         Assert.True(route.IsQueryAuth);
         Assert.Equal("api_key", route.QueryAuthParameterName);
@@ -154,8 +149,7 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public void QueryAuth_AvailableOnGenericRouteDefinition()
     {
-        var route = Define.Get<FileDownloadInput, string>("/api/data")
-            .QueryAuth();
+        var route = Define.Get<FileDownloadInput, string>("/api/data").QueryAuth();
 
         Assert.True(route.IsQueryAuth);
         Assert.Equal("token", route.QueryAuthParameterName);
@@ -164,7 +158,8 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public void QueryAuth_AvailableOnFileRouteDefinitionGeneric()
     {
-        var route = Define.File<FileDownloadInput>("/api/stream")
+        var route = Define
+            .File<FileDownloadInput>("/api/stream")
             .ContentType("audio/mpeg")
             .QueryAuth("session");
 
@@ -176,9 +171,7 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public void QueryAuth_SurvivesCopyStateTo_ViaAccepts()
     {
-        var route = Define.Get("/api/data")
-            .QueryAuth("tk")
-            .Accepts<FileDownloadInput>();
+        var route = Define.Get("/api/data").QueryAuth("tk").Accepts<FileDownloadInput>();
 
         Assert.True(route.IsQueryAuth);
         Assert.Equal("tk", route.QueryAuthParameterName);
@@ -267,10 +260,7 @@ public sealed class FileRouteDefinitionTests
     public void R3_BuilderChain_BeforeInvoke_StillMutable()
     {
         // The generation-time fluent chain is unaffected
-        var route = Define.File("/api/stream")
-            .ContentType("video/mp4")
-            .Summary("ok")
-            .QueryAuth();
+        var route = Define.File("/api/stream").ContentType("video/mp4").Summary("ok").QueryAuth();
 
         Assert.Equal("video/mp4", route.FileContentType);
     }

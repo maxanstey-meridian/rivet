@@ -50,27 +50,59 @@ public sealed class TypeWalker
     public TypeWalker(Compilation compilation)
     {
         // Build set of walkable assemblies: source + project references (not NuGet/framework)
-        _walkableAssemblies = new HashSet<IAssemblySymbol>(SymbolEqualityComparer.Default) { compilation.Assembly };
+        _walkableAssemblies = new HashSet<IAssemblySymbol>(SymbolEqualityComparer.Default)
+        {
+            compilation.Assembly,
+        };
         foreach (var reference in compilation.References)
         {
-            if (reference is CompilationReference
-                && compilation.GetAssemblyOrModuleSymbol(reference) is IAssemblySymbol asm)
+            if (
+                reference is CompilationReference
+                && compilation.GetAssemblyOrModuleSymbol(reference) is IAssemblySymbol asm
+            )
             {
                 _walkableAssemblies.Add(asm);
             }
         }
 
         // Scalar type → TsType.Primitive lookup
-        var scalars = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, TsType.Primitive>(SymbolEqualityComparer.Default);
+        var scalars = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, TsType.Primitive>(
+            SymbolEqualityComparer.Default
+        );
         AddScalar(scalars, compilation, "System.Guid", new TsType.Primitive("string", "uuid"));
-        AddScalar(scalars, compilation, "System.DateTime", new TsType.Primitive("string", "date-time"));
-        AddScalar(scalars, compilation, "System.DateTimeOffset", new TsType.Primitive("string", "date-time", "DateTimeOffset"));
+        AddScalar(
+            scalars,
+            compilation,
+            "System.DateTime",
+            new TsType.Primitive("string", "date-time")
+        );
+        AddScalar(
+            scalars,
+            compilation,
+            "System.DateTimeOffset",
+            new TsType.Primitive("string", "date-time", "DateTimeOffset")
+        );
         AddScalar(scalars, compilation, "System.DateOnly", new TsType.Primitive("string", "date"));
         AddScalar(scalars, compilation, "System.TimeOnly", new TsType.Primitive("string", "time"));
         AddScalar(scalars, compilation, "System.Uri", new TsType.Primitive("string", "uri"));
-        AddScalar(scalars, compilation, "System.Text.Json.JsonElement", new TsType.Primitive("unknown"));
-        AddScalar(scalars, compilation, "System.Text.Json.Nodes.JsonNode", new TsType.Primitive("unknown", CSharpType: "JsonNode"));
-        AddScalar(scalars, compilation, "Microsoft.AspNetCore.Http.IFormFile", new TsType.Primitive("File"));
+        AddScalar(
+            scalars,
+            compilation,
+            "System.Text.Json.JsonElement",
+            new TsType.Primitive("unknown")
+        );
+        AddScalar(
+            scalars,
+            compilation,
+            "System.Text.Json.Nodes.JsonNode",
+            new TsType.Primitive("unknown", CSharpType: "JsonNode")
+        );
+        AddScalar(
+            scalars,
+            compilation,
+            "Microsoft.AspNetCore.Http.IFormFile",
+            new TsType.Primitive("File")
+        );
         _scalarTypes = scalars.ToImmutable();
 
         _jsonObjectType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonObject");
@@ -81,24 +113,36 @@ public sealed class TypeWalker
         _timeSpanType = compilation.GetTypeByMetadataName("System.TimeSpan");
         _bigIntegerType = compilation.GetTypeByMetadataName("System.Numerics.BigInteger");
 
-        _collectionTypes = ResolveTypeSet(compilation,
+        _collectionTypes = ResolveTypeSet(
+            compilation,
             "System.Collections.Generic.List`1",
             "System.Collections.Generic.IList`1",
             "System.Collections.Generic.ICollection`1",
             "System.Collections.Generic.IEnumerable`1",
             "System.Collections.Generic.IReadOnlyList`1",
-            "System.Collections.Generic.IReadOnlyCollection`1");
+            "System.Collections.Generic.IReadOnlyCollection`1"
+        );
 
-        _dictionaryTypes = ResolveTypeSet(compilation,
+        _dictionaryTypes = ResolveTypeSet(
+            compilation,
             "System.Collections.Generic.Dictionary`2",
             "System.Collections.Generic.IDictionary`2",
-            "System.Collections.Generic.IReadOnlyDictionary`2");
+            "System.Collections.Generic.IReadOnlyDictionary`2"
+        );
 
-        _jsonPropertyNameType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonPropertyNameAttribute");
-        _jsonIgnoreType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonIgnoreAttribute");
+        _jsonPropertyNameType = compilation.GetTypeByMetadataName(
+            "System.Text.Json.Serialization.JsonPropertyNameAttribute"
+        );
+        _jsonIgnoreType = compilation.GetTypeByMetadataName(
+            "System.Text.Json.Serialization.JsonIgnoreAttribute"
+        );
         _obsoleteType = compilation.GetTypeByMetadataName("System.ObsoleteAttribute");
-        _jsonPolymorphicType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonPolymorphicAttribute");
-        _jsonDerivedTypeType = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonDerivedTypeAttribute");
+        _jsonPolymorphicType = compilation.GetTypeByMetadataName(
+            "System.Text.Json.Serialization.JsonPolymorphicAttribute"
+        );
+        _jsonDerivedTypeType = compilation.GetTypeByMetadataName(
+            "System.Text.Json.Serialization.JsonDerivedTypeAttribute"
+        );
         _rivetUnionType = compilation.GetTypeByMetadataName("Rivet.RivetUnionAttribute");
     }
 
@@ -106,23 +150,31 @@ public sealed class TypeWalker
         ImmutableDictionary<INamedTypeSymbol, TsType.Primitive>.Builder builder,
         Compilation compilation,
         string metadataName,
-        TsType.Primitive mapped)
+        TsType.Primitive mapped
+    )
     {
         var symbol = compilation.GetTypeByMetadataName(metadataName);
         if (symbol is not null)
+        {
             builder.Add(symbol, mapped);
+        }
     }
 
     private static ImmutableHashSet<INamedTypeSymbol> ResolveTypeSet(
         Compilation compilation,
-        params string[] metadataNames)
+        params string[] metadataNames
+    )
     {
-        var builder = ImmutableHashSet.CreateBuilder<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+        var builder = ImmutableHashSet.CreateBuilder<INamedTypeSymbol>(
+            SymbolEqualityComparer.Default
+        );
         foreach (var name in metadataNames)
         {
             var symbol = compilation.GetTypeByMetadataName(name);
             if (symbol is not null)
+            {
                 builder.Add(symbol);
+            }
         }
         return builder.ToImmutable();
     }
@@ -139,7 +191,8 @@ public sealed class TypeWalker
     /// </summary>
     public static TypeWalker Create(
         Compilation compilation,
-        IReadOnlyList<INamedTypeSymbol> attributedTypes)
+        IReadOnlyList<INamedTypeSymbol> attributedTypes
+    )
     {
         var walker = new TypeWalker(compilation);
 
@@ -155,7 +208,8 @@ public sealed class TypeWalker
     /// Maps a Roslyn type symbol to its TsType representation.
     /// Used by EndpointWalker for parameter and return types.
     /// </summary>
-    public TsType MapType(ITypeSymbol symbol, string? context = null) => MapTypeCore(symbol, context);
+    public TsType MapType(ITypeSymbol symbol, string? context = null) =>
+        MapTypeCore(symbol, context);
 
     /// <summary>
     /// Returns true if the property has [JsonIgnore].
@@ -163,7 +217,8 @@ public sealed class TypeWalker
     public bool IsJsonIgnored(IPropertySymbol prop)
     {
         return _jsonIgnoreType is not null
-            && prop.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIgnoreType));
+            && prop.GetAttributes()
+                .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIgnoreType));
     }
 
     /// <summary>
@@ -177,18 +232,21 @@ public sealed class TypeWalker
     {
         var chain = new List<ITypeSymbol>();
         var current = type;
-        while (current is not null
+        while (
+            current is not null
             && current.SpecialType is not SpecialType.System_Object
-            && current.SpecialType is not SpecialType.System_ValueType)
+            && current.SpecialType is not SpecialType.System_ValueType
+        )
         {
             chain.Add(current);
 
             var baseType = (current as INamedTypeSymbol)?.BaseType;
-            current = baseType is not null
+            current =
+                baseType is not null
                 && baseType.ContainingAssembly is not null
                 && _walkableAssemblies.Contains(baseType.ContainingAssembly)
-                ? baseType
-                : null;
+                    ? baseType
+                    : null;
         }
 
         chain.Reverse(); // base-most first, matching rivet-ts's X5 flatten semantics
@@ -239,10 +297,15 @@ public sealed class TypeWalker
         }
 
         var attr = prop.GetAttributes()
-            .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonPropertyNameType));
+            .FirstOrDefault(a =>
+                SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonPropertyNameType)
+            );
 
-        if (attr is not null && attr.ConstructorArguments.Length == 1
-            && attr.ConstructorArguments[0].Value is string name)
+        if (
+            attr is not null
+            && attr.ConstructorArguments.Length == 1
+            && attr.ConstructorArguments[0].Value is string name
+        )
         {
             return name;
         }
@@ -280,9 +343,7 @@ public sealed class TypeWalker
         _visiting.Add(name);
 
         // Extract type parameter names (e.g. "T", "TItem")
-        var typeParams = definition.TypeParameters
-            .Select(tp => tp.Name)
-            .ToList();
+        var typeParams = definition.TypeParameters.Select(tp => tp.Name).ToList();
 
         // P2 wave 4: a [JsonPolymorphic]/[JsonDerivedType] base type registers as a
         // TaggedUnion alias definition (oneOf + discriminator + mapping) instead of
@@ -293,7 +354,12 @@ public sealed class TypeWalker
         if (!definition.IsGenericType && TryBuildPolymorphicUnion(definition, name) is { } union)
         {
             _visiting.Remove(name);
-            _definitions[name] = new TsTypeDefinition(name, typeParams, union, GetTypeDescription(definition));
+            _definitions[name] = new TsTypeDefinition(
+                name,
+                typeParams,
+                union,
+                GetTypeDescription(definition)
+            );
             _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
             return;
         }
@@ -304,7 +370,12 @@ public sealed class TypeWalker
         if (!definition.IsGenericType && TryBuildRivetUnion(definition, name) is { } plainUnion)
         {
             _visiting.Remove(name);
-            _definitions[name] = new TsTypeDefinition(name, typeParams, plainUnion, GetTypeDescription(definition));
+            _definitions[name] = new TsTypeDefinition(
+                name,
+                typeParams,
+                plainUnion,
+                GetTypeDescription(definition)
+            );
             _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
             return;
         }
@@ -315,8 +386,14 @@ public sealed class TypeWalker
         foreach (var member in GetEffectiveProperties(definition))
         {
             // [JsonIgnore] → skip property
-            if (_jsonIgnoreType is not null
-                && member.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIgnoreType)))
+            if (
+                _jsonIgnoreType is not null
+                && member
+                    .GetAttributes()
+                    .Any(a =>
+                        SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIgnoreType)
+                    )
+            )
             {
                 continue;
             }
@@ -333,10 +410,19 @@ public sealed class TypeWalker
             string? jsonPropertyName = null;
             if (_jsonPropertyNameType is not null)
             {
-                var attr = member.GetAttributes()
-                    .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonPropertyNameType));
-                if (attr is not null && attr.ConstructorArguments.Length == 1
-                    && attr.ConstructorArguments[0].Value is string propName)
+                var attr = member
+                    .GetAttributes()
+                    .FirstOrDefault(a =>
+                        SymbolEqualityComparer.Default.Equals(
+                            a.AttributeClass,
+                            _jsonPropertyNameType
+                        )
+                    );
+                if (
+                    attr is not null
+                    && attr.ConstructorArguments.Length == 1
+                    && attr.ConstructorArguments[0].Value is string propName
+                )
                 {
                     jsonPropertyName = propName;
                 }
@@ -345,8 +431,13 @@ public sealed class TypeWalker
             var tsName = jsonPropertyName ?? Naming.ToCamelCase(member.Name);
             var tsType = MapTypeCore(member.Type, $"{name}.{member.Name}");
             var isOptional = IsOptionalProperty(member);
-            var isDeprecated = _obsoleteType is not null
-                && member.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _obsoleteType));
+            var isDeprecated =
+                _obsoleteType is not null
+                && member
+                    .GetAttributes()
+                    .Any(a =>
+                        SymbolEqualityComparer.Default.Equals(a.AttributeClass, _obsoleteType)
+                    );
 
             // Read metadata attributes
             string? format = null;
@@ -361,13 +452,19 @@ public sealed class TypeWalker
             foreach (var attr in member.GetAttributes())
             {
                 var attrName = attr.AttributeClass?.Name;
-                if (attrName is "RivetFormatAttribute" && attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is string fmt)
+                if (
+                    attrName is "RivetFormatAttribute"
+                    && attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is string fmt
+                )
                 {
                     format = fmt;
                 }
-                else if (attrName is "RivetDefaultAttribute" && attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is string def)
+                else if (
+                    attrName is "RivetDefaultAttribute"
+                    && attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is string def
+                )
                 {
                     defaultValue = def;
                 }
@@ -375,13 +472,19 @@ public sealed class TypeWalker
                 {
                     constraints = ReadConstraints(attr);
                 }
-                else if (attrName is "RivetDescriptionAttribute" && attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is string desc)
+                else if (
+                    attrName is "RivetDescriptionAttribute"
+                    && attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is string desc
+                )
                 {
                     description = desc;
                 }
-                else if (attrName is "RivetExampleAttribute" && attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is string ex)
+                else if (
+                    attrName is "RivetExampleAttribute"
+                    && attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is string ex
+                )
                 {
                     example = ex;
                 }
@@ -413,7 +516,8 @@ public sealed class TypeWalker
                     MultipleOf: constraints.MultipleOf,
                     MinItems: constraints.MinItems,
                     MaxItems: constraints.MaxItems,
-                    UniqueItems: constraints.UniqueItems);
+                    UniqueItems: constraints.UniqueItems
+                );
             }
             else
             {
@@ -425,13 +529,29 @@ public sealed class TypeWalker
             {
                 tsType = p with { Format = format };
             }
-            else if (format is not null && tsType is TsType.Nullable { Inner: TsType.Primitive { Format: null } np })
+            else if (
+                format is not null
+                && tsType is TsType.Nullable { Inner: TsType.Primitive { Format: null } np }
+            )
             {
                 tsType = new TsType.Nullable(np with { Format = format });
             }
 
-            properties.Add(new TsPropertyDefinition(tsName, tsType, isOptional, isDeprecated, format, defaultValue, constraints,
-                description, example, isReadOnly, isWriteOnly));
+            properties.Add(
+                new TsPropertyDefinition(
+                    tsName,
+                    tsType,
+                    isOptional,
+                    isDeprecated,
+                    format,
+                    defaultValue,
+                    constraints,
+                    description,
+                    example,
+                    isReadOnly,
+                    isWriteOnly
+                )
+            );
         }
 
         // Read type-level [RivetDescription] attribute
@@ -446,9 +566,11 @@ public sealed class TypeWalker
     {
         foreach (var attr in definition.GetAttributes())
         {
-            if (attr.AttributeClass?.Name is "RivetDescriptionAttribute"
+            if (
+                attr.AttributeClass?.Name is "RivetDescriptionAttribute"
                 && attr.ConstructorArguments.Length > 0
-                && attr.ConstructorArguments[0].Value is string td)
+                && attr.ConstructorArguments[0].Value is string td
+            )
             {
                 return td;
             }
@@ -478,9 +600,14 @@ public sealed class TypeWalker
     /// </summary>
     private TsType.Union? TryBuildRivetUnion(INamedTypeSymbol definition, string name)
     {
-        if (_rivetUnionType is null
-            || !definition.GetAttributes().Any(attr =>
-                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, _rivetUnionType)))
+        if (
+            _rivetUnionType is null
+            || !definition
+                .GetAttributes()
+                .Any(attr =>
+                    SymbolEqualityComparer.Default.Equals(attr.AttributeClass, _rivetUnionType)
+                )
+        )
         {
             return null;
         }
@@ -496,7 +623,8 @@ public sealed class TypeWalker
         {
             Diagnostics.Warn(
                 Diagnostics.RivetUnionNoVariants,
-                $"[RivetUnion] on '{name}' has no variant properties — falling back to plain property flattening");
+                $"[RivetUnion] on '{name}' has no variant properties — falling back to plain property flattening"
+            );
             return null;
         }
 
@@ -518,7 +646,9 @@ public sealed class TypeWalker
             {
                 polymorphicAttr = attr;
             }
-            else if (SymbolEqualityComparer.Default.Equals(attr.AttributeClass, _jsonDerivedTypeType))
+            else if (
+                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, _jsonDerivedTypeType)
+            )
             {
                 derivedAttrs.Add(attr);
             }
@@ -529,27 +659,35 @@ public sealed class TypeWalker
             return null;
         }
 
-        if (polymorphicAttr is not null
-            && polymorphicAttr.NamedArguments.Any(a => a.Key == "UnknownDerivedTypeHandling"))
+        if (
+            polymorphicAttr is not null
+            && polymorphicAttr.NamedArguments.Any(a => a.Key == "UnknownDerivedTypeHandling")
+        )
         {
             Diagnostics.Warn(
                 Diagnostics.PolymorphicUnknownHandlingDropped,
-                $"[JsonPolymorphic] UnknownDerivedTypeHandling on '{name}' has no spec representation — " +
-                "the emitted oneOf admits only the registered derived types");
+                $"[JsonPolymorphic] UnknownDerivedTypeHandling on '{name}' has no spec representation — "
+                    + "the emitted oneOf admits only the registered derived types"
+            );
         }
 
         if (derivedAttrs.Count == 0)
         {
             Diagnostics.Warn(
                 Diagnostics.PolymorphicNoDerivedTypes,
-                $"[JsonPolymorphic] on '{name}' has no [JsonDerivedType] registrations — " +
-                "there is no variant set to emit; falling back to plain property flattening");
+                $"[JsonPolymorphic] on '{name}' has no [JsonDerivedType] registrations — "
+                    + "there is no variant set to emit; falling back to plain property flattening"
+            );
             return null;
         }
 
         var discriminator = "$type";
-        if (polymorphicAttr?.NamedArguments
-                .FirstOrDefault(a => a.Key == "TypeDiscriminatorPropertyName").Value.Value is string custom)
+        if (
+            polymorphicAttr
+                ?.NamedArguments.FirstOrDefault(a => a.Key == "TypeDiscriminatorPropertyName")
+                .Value.Value
+            is string custom
+        )
         {
             discriminator = custom;
         }
@@ -557,22 +695,26 @@ public sealed class TypeWalker
         var registrations = new List<(INamedTypeSymbol Type, string Tag)>();
         foreach (var attr in derivedAttrs)
         {
-            if (attr.ConstructorArguments.Length == 0
-                || attr.ConstructorArguments[0].Value is not INamedTypeSymbol derivedType)
+            if (
+                attr.ConstructorArguments.Length == 0
+                || attr.ConstructorArguments[0].Value is not INamedTypeSymbol derivedType
+            )
             {
                 continue;
             }
 
-            var tagValue = attr.ConstructorArguments.Length > 1 ? attr.ConstructorArguments[1].Value : null;
+            var tagValue =
+                attr.ConstructorArguments.Length > 1 ? attr.ConstructorArguments[1].Value : null;
             if (tagValue is not string tag)
             {
                 // Do NOT stringify int tags: a spec validating string tags against an
                 // int wire value would be a lie. Flatten the whole base, loudly.
                 Diagnostics.Warn(
                     Diagnostics.PolymorphicNonStringTag,
-                    $"[JsonDerivedType] on '{name}' registers '{derivedType.ToDisplayString()}' with " +
-                    $"{(tagValue is null ? "no" : "a non-string")} discriminator tag — a string-discriminated " +
-                    $"oneOf cannot represent it; falling back to plain property flattening for '{name}'");
+                    $"[JsonDerivedType] on '{name}' registers '{derivedType.ToDisplayString()}' with "
+                        + $"{(tagValue is null ? "no" : "a non-string")} discriminator tag — a string-discriminated "
+                        + $"oneOf cannot represent it; falling back to plain property flattening for '{name}'"
+                );
                 return null;
             }
 
@@ -605,8 +747,9 @@ public sealed class TypeWalker
                 var fieldName = GetJsonPropertyName(member) ?? Naming.ToCamelCase(member.Name);
                 var fieldType = MapTypeCore(member.Type, $"{name}.{tag}.{member.Name}");
 
-                fields.Add(new TsType.InlineObjectField(
-                    fieldName, fieldType, IsOptionalProperty(member)));
+                fields.Add(
+                    new TsType.InlineObjectField(fieldName, fieldType, IsOptionalProperty(member))
+                );
             }
 
             variants.Add(new TsType.TaggedUnionVariant(tag, new TsType.InlineObject(fields)));
@@ -641,13 +784,13 @@ public sealed class TypeWalker
             {
                 name = pure + i;
                 i++;
-            }
-            while (!_claimedNames.Add(name));
+            } while (!_claimedNames.Add(name));
 
             Diagnostics.Warn(
                 Diagnostics.TypeNameCollision,
-                $"type name collision — '{pure}' ({key}) collides with a previously walked type of the same name; " +
-                $"emitting it as '{name}'. Use distinct type names to keep schema names stable.");
+                $"type name collision — '{pure}' ({key}) collides with a previously walked type of the same name; "
+                    + $"emitting it as '{name}'. Use distinct type names to keep schema names stable."
+            );
         }
 
         _emittedNames[key] = name;
@@ -657,7 +800,12 @@ public sealed class TypeWalker
     private TsType MapTypeCore(ITypeSymbol symbol, string? context = null)
     {
         // Nullable value type: int? → Nullable<int>
-        if (symbol is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
+        if (
+            symbol is INamedTypeSymbol
+            {
+                OriginalDefinition.SpecialType: SpecialType.System_Nullable_T
+            } nullable
+        )
         {
             var inner = MapTypeCore(nullable.TypeArguments[0], context);
             return new TsType.Nullable(inner);
@@ -666,10 +814,19 @@ public sealed class TypeWalker
         // Nullable reference type annotation.
         // A12: must run before the type-parameter check so Wrapper<T>(T? Value)
         // lowers as Nullable(TypeParam), not bare TypeParam.
-        if (symbol.NullableAnnotation == NullableAnnotation.Annotated
-            && symbol is not INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T })
+        if (
+            symbol.NullableAnnotation == NullableAnnotation.Annotated
+            && symbol
+                is not INamedTypeSymbol
+                {
+                    OriginalDefinition.SpecialType: SpecialType.System_Nullable_T
+                }
+        )
         {
-            var inner = MapTypeCore(symbol.WithNullableAnnotation(NullableAnnotation.NotAnnotated), context);
+            var inner = MapTypeCore(
+                symbol.WithNullableAnnotation(NullableAnnotation.NotAnnotated),
+                context
+            );
             return new TsType.Nullable(inner);
         }
 
@@ -709,7 +866,9 @@ public sealed class TypeWalker
             // CSharpType on the inner Primitive("unknown") preserves the original type for round-trips
             if (SymbolEqualityComparer.Default.Equals(namedType, _jsonObjectType))
             {
-                return new TsType.Dictionary(new TsType.Primitive("unknown", CSharpType: "JsonObject"));
+                return new TsType.Dictionary(
+                    new TsType.Primitive("unknown", CSharpType: "JsonObject")
+                );
             }
             if (SymbolEqualityComparer.Default.Equals(namedType, _jsonArrayType))
             {
@@ -737,8 +896,9 @@ public sealed class TypeWalker
                 {
                     Diagnostics.Warn(
                         Diagnostics.DictionaryKeyTypeDropped,
-                        $"dictionary key type '{keySymbol.ToDisplayString()}'{AtContext(context)} has no contract representation — " +
-                        "keys are emitted as unconstrained strings");
+                        $"dictionary key type '{keySymbol.ToDisplayString()}'{AtContext(context)} has no contract representation — "
+                            + "keys are emitted as unconstrained strings"
+                    );
                 }
 
                 return new TsType.Dictionary(MapTypeCore(namedType.TypeArguments[1], context), key);
@@ -752,16 +912,21 @@ public sealed class TypeWalker
                 var enumName = GetEmittedName(namedType);
                 if (!_enums.ContainsKey(enumName))
                 {
-                    var members = namedType.GetMembers()
+                    var members = namedType
+                        .GetMembers()
                         .OfType<IFieldSymbol>()
                         .Where(f => f.HasConstantValue)
                         .Select(f =>
                         {
                             // Check for [JsonStringEnumMemberName("original")] attribute
-                            var attr = f.GetAttributes().FirstOrDefault(a =>
-                                a.AttributeClass?.Name is "JsonStringEnumMemberNameAttribute");
-                            if (attr?.ConstructorArguments.Length > 0
-                                && attr.ConstructorArguments[0].Value is string original)
+                            var attr = f.GetAttributes()
+                                .FirstOrDefault(a =>
+                                    a.AttributeClass?.Name is "JsonStringEnumMemberNameAttribute"
+                                );
+                            if (
+                                attr?.ConstructorArguments.Length > 0
+                                && attr.ConstructorArguments[0].Value is string original
+                            )
                             {
                                 return original;
                             }
@@ -777,8 +942,10 @@ public sealed class TypeWalker
             }
 
             // Named record/class from source or project-referenced assembly → walk transitively
-            if (namedType.TypeKind is TypeKind.Class or TypeKind.Struct
-                && _walkableAssemblies.Contains(namedType.ContainingAssembly))
+            if (
+                namedType.TypeKind is TypeKind.Class or TypeKind.Struct
+                && _walkableAssemblies.Contains(namedType.ContainingAssembly)
+            )
             {
                 // Value Object convention: single property named "Value" → branded type
                 // Skip for generic types — Wrapper<T>(T Value) is a generic record, not a VO
@@ -799,7 +966,9 @@ public sealed class TypeWalker
                 // Closed generic (e.g. PagedResult<MessageDto>) → Generic node
                 if (namedType.IsGenericType && !namedType.IsUnboundGenericType)
                 {
-                    var tsArgs = namedType.TypeArguments.Select(a => MapTypeCore(a, context)).ToList();
+                    var tsArgs = namedType
+                        .TypeArguments.Select(a => MapTypeCore(a, context))
+                        .ToList();
                     return new TsType.Generic(emittedName, tsArgs);
                 }
 
@@ -810,12 +979,11 @@ public sealed class TypeWalker
         // ValueTuple → inline object { key: string; value: number }
         if (symbol is INamedTypeSymbol { IsTupleType: true } tupleType)
         {
-            var fields = tupleType.TupleElements
-                .Select(e =>
+            var fields = tupleType
+                .TupleElements.Select(e =>
                 {
                     var fieldType = MapTypeCore(e.Type, context);
-                    return new TsType.InlineObjectField(
-                        Naming.ToCamelCase(e.Name), fieldType);
+                    return new TsType.InlineObjectField(Naming.ToCamelCase(e.Name), fieldType);
                 })
                 .ToList();
             return new TsType.InlineObject(fields);
@@ -828,8 +996,10 @@ public sealed class TypeWalker
         // (RIV1011/RIV1012 retired).
         var unsupportedId = symbol switch
         {
-            _ when SymbolEqualityComparer.Default.Equals(symbol, _timeSpanType) => Diagnostics.UnsupportedTimeSpan,
-            _ when SymbolEqualityComparer.Default.Equals(symbol, _bigIntegerType) => Diagnostics.UnsupportedBigInteger,
+            _ when SymbolEqualityComparer.Default.Equals(symbol, _timeSpanType) =>
+                Diagnostics.UnsupportedTimeSpan,
+            _ when SymbolEqualityComparer.Default.Equals(symbol, _bigIntegerType) =>
+                Diagnostics.UnsupportedBigInteger,
             _ => null,
         };
 
@@ -837,15 +1007,15 @@ public sealed class TypeWalker
         {
             Diagnostics.Warn(
                 unsupportedId,
-                $"unsupported type '{symbol.ToDisplayString()}'{AtContext(context)} has no schema mapping — emitting an untyped (empty) schema");
+                $"unsupported type '{symbol.ToDisplayString()}'{AtContext(context)} has no schema mapping — emitting an untyped (empty) schema"
+            );
         }
 
         // Fallback
         return new TsType.Primitive("unknown");
     }
 
-    private static string AtContext(string? context)
-        => context is null ? "" : $" on '{context}'";
+    private static string AtContext(string? context) => context is null ? "" : $" on '{context}'";
 
     /// <summary>
     /// FABLE_GAPS §7 item 12 (P2 wave 3): maps a dictionary key type to its contract
@@ -877,10 +1047,12 @@ public sealed class TypeWalker
             // String-backed value-object brand → $ref to the brand schema.
             // Shape-checked BEFORE mapping so an unsupported (non-string) brand key
             // never registers a brand schema as a side effect of the probe.
-            if (named.TypeKind is TypeKind.Class or TypeKind.Struct
+            if (
+                named.TypeKind is TypeKind.Class or TypeKind.Struct
                 && !named.IsGenericType
                 && _walkableAssemblies.Contains(named.ContainingAssembly)
-                && TryGetValueObjectInner(named) is { SpecialType: SpecialType.System_String })
+                && TryGetValueObjectInner(named) is { SpecialType: SpecialType.System_String }
+            )
             {
                 return MapTypeCore(named, context);
             }
@@ -899,15 +1071,20 @@ public sealed class TypeWalker
                 // (string + int32 alone would not survive an import round-trip)
                 if (primitive.Name == "number")
                 {
-                    return new TsType.Primitive("string", primitive.Format, primitive.CSharpType ?? primitive.Format switch
-                    {
-                        "int32" => "int",
-                        "int64" => "long",
-                        "float" => "float",
-                        "double" => "double",
-                        "decimal" => "decimal",
-                        _ => null,
-                    });
+                    return new TsType.Primitive(
+                        "string",
+                        primitive.Format,
+                        primitive.CSharpType
+                            ?? primitive.Format switch
+                            {
+                                "int32" => "int",
+                                "int64" => "long",
+                                "float" => "float",
+                                "double" => "double",
+                                "decimal" => "decimal",
+                                _ => null,
+                            }
+                    );
                 }
             }
         }
@@ -931,9 +1108,12 @@ public sealed class TypeWalker
 
         return symbol switch
         {
-            IArrayTypeSymbol array => SymbolEqualityComparer.Default.Equals(array.ElementType, element),
-            INamedTypeSymbol { TypeArguments.Length: 1 } named when IsCollectionType(named)
-                => SymbolEqualityComparer.Default.Equals(named.TypeArguments[0], element),
+            IArrayTypeSymbol array => SymbolEqualityComparer.Default.Equals(
+                array.ElementType,
+                element
+            ),
+            INamedTypeSymbol { TypeArguments.Length: 1 } named when IsCollectionType(named) =>
+                SymbolEqualityComparer.Default.Equals(named.TypeArguments[0], element),
             _ => false,
         };
     }
@@ -971,11 +1151,15 @@ public sealed class TypeWalker
         };
 
         if (result is not null)
+        {
             return result;
+        }
 
         // Non-SpecialType primitives — resolved via dictionary lookup instead of per-field null checks
         if (_scalarTypes.TryGetValue(symbol, out var scalar))
+        {
             return scalar;
+        }
 
         return null;
     }
@@ -986,7 +1170,8 @@ public sealed class TypeWalker
     /// </summary>
     private static ITypeSymbol? TryGetValueObjectInner(INamedTypeSymbol symbol)
     {
-        var props = symbol.GetMembers()
+        var props = symbol
+            .GetMembers()
             .OfType<IPropertySymbol>()
             .Where(p => !p.IsStatic && !p.IsIndexer && !p.IsImplicitlyDeclared)
             .ToList();
@@ -1019,15 +1204,19 @@ public sealed class TypeWalker
 
         if (type is INamedTypeSymbol named)
         {
-            if (named.OriginalDefinition.SpecialType is SpecialType.System_Nullable_T
-                && named.TypeArguments is [var inner])
+            if (
+                named.OriginalDefinition.SpecialType is SpecialType.System_Nullable_T
+                && named.TypeArguments is [var inner]
+            )
             {
                 return IsParamLowerable(inner);
             }
 
-            if (_scalarTypes.ContainsKey(named)
+            if (
+                _scalarTypes.ContainsKey(named)
                 || IsDictionaryType(named)
-                || IsCollectionType(named))
+                || IsCollectionType(named)
+            )
             {
                 return false;
             }
@@ -1036,17 +1225,27 @@ public sealed class TypeWalker
         return true;
     }
 
-    private bool IsCollectionType(INamedTypeSymbol symbol)
-        => _collectionTypes.Contains(symbol.OriginalDefinition);
+    private bool IsCollectionType(INamedTypeSymbol symbol) =>
+        _collectionTypes.Contains(symbol.OriginalDefinition);
 
-    private bool IsDictionaryType(INamedTypeSymbol symbol)
-        => _dictionaryTypes.Contains(symbol.OriginalDefinition);
+    private bool IsDictionaryType(INamedTypeSymbol symbol) =>
+        _dictionaryTypes.Contains(symbol.OriginalDefinition);
 
     private static TsPropertyConstraints? ReadConstraints(AttributeData attr)
     {
-        int? GetInt(string name) => attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is int v && v >= 0 ? v : null;
-        double? GetDouble(string name) => attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is double v && !double.IsNaN(v) ? v : null;
-        bool? GetBool(string name) => attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is true ? true : null;
+        int? GetInt(string name) =>
+            attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is int v && v >= 0
+                ? v
+                : null;
+        double? GetDouble(string name) =>
+            attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is double v
+            && !double.IsNaN(v)
+                ? v
+                : null;
+        bool? GetBool(string name) =>
+            attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is true
+                ? true
+                : null;
 
         var c = new TsPropertyConstraints(
             ExclusiveMinimum: GetDouble("ExclusiveMinimum"),
@@ -1054,13 +1253,15 @@ public sealed class TypeWalker
             MultipleOf: GetDouble("MultipleOf"),
             MinItems: GetInt("MinItems"),
             MaxItems: GetInt("MaxItems"),
-            UniqueItems: GetBool("UniqueItems"));
+            UniqueItems: GetBool("UniqueItems")
+        );
 
         return c.HasAny ? c : null;
     }
 
     private static TsPropertyConstraints? ReadDataAnnotationConstraints(
-        ImmutableArray<AttributeData> attributes)
+        ImmutableArray<AttributeData> attributes
+    )
     {
         int? minLength = null;
         int? maxLength = null;
@@ -1073,51 +1274,69 @@ public sealed class TypeWalker
             var name = attr.AttributeClass?.Name;
             switch (name)
             {
-                case "MinLengthAttribute" when attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is int ml:
+                case "MinLengthAttribute"
+                    when attr.ConstructorArguments.Length > 0
+                        && attr.ConstructorArguments[0].Value is int ml:
                     minLength = ml;
                     break;
 
-                case "MaxLengthAttribute" when attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is int mxl:
+                case "MaxLengthAttribute"
+                    when attr.ConstructorArguments.Length > 0
+                        && attr.ConstructorArguments[0].Value is int mxl:
                     maxLength = mxl;
                     break;
 
-                case "StringLengthAttribute" when attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is int slMax:
+                case "StringLengthAttribute"
+                    when attr.ConstructorArguments.Length > 0
+                        && attr.ConstructorArguments[0].Value is int slMax:
                     maxLength = slMax;
-                    var minLenArg = attr.NamedArguments
-                        .FirstOrDefault(a => a.Key == "MinimumLength");
+                    var minLenArg = attr.NamedArguments.FirstOrDefault(a =>
+                        a.Key == "MinimumLength"
+                    );
                     if (minLenArg.Value.Value is int slMin)
+                    {
                         minLength = slMin;
+                    }
+
                     break;
 
                 case "RangeAttribute" when attr.ConstructorArguments.Length >= 2:
                     // A9: the (Type, string, string) overload puts an ITypeSymbol in arg 0 —
                     // the old Convert.ToDouble crashed the tool with InvalidCastException
                     var args = attr.ConstructorArguments;
-                    var (minArg, maxArg) = args.Length >= 3 && args[0].Value is ITypeSymbol
-                        ? (args[1].Value, args[2].Value)
-                        : (args[0].Value, args[1].Value);
+                    var (minArg, maxArg) =
+                        args.Length >= 3 && args[0].Value is ITypeSymbol
+                            ? (args[1].Value, args[2].Value)
+                            : (args[0].Value, args[1].Value);
 
-                    if (!TryConvertRangeBound(minArg, out var rangeMin)
-                        || !TryConvertRangeBound(maxArg, out var rangeMax))
+                    if (
+                        !TryConvertRangeBound(minArg, out var rangeMin)
+                        || !TryConvertRangeBound(maxArg, out var rangeMax)
+                    )
                     {
                         Diagnostics.Warn(
                             Diagnostics.UnparseableRangeBound,
-                            $"unparseable [Range] bound ('{minArg}', '{maxArg}') — skipping the range constraint");
+                            $"unparseable [Range] bound ('{minArg}', '{maxArg}') — skipping the range constraint"
+                        );
                         break;
                     }
 
                     // Filter sentinel values emitted by CSharpWriter for single-sided constraints
                     if (rangeMin is not double.MinValue)
+                    {
                         minimum = rangeMin;
+                    }
+
                     if (rangeMax is not double.MaxValue)
+                    {
                         maximum = rangeMax;
+                    }
+
                     break;
 
-                case "RegularExpressionAttribute" when attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is string pat:
+                case "RegularExpressionAttribute"
+                    when attr.ConstructorArguments.Length > 0
+                        && attr.ConstructorArguments[0].Value is string pat:
                     pattern = pat;
                     break;
             }
@@ -1128,7 +1347,8 @@ public sealed class TypeWalker
             MaxLength: maxLength,
             Pattern: pattern,
             Minimum: minimum,
-            Maximum: maximum);
+            Maximum: maximum
+        );
 
         return c.HasAny ? c : null;
     }
@@ -1146,8 +1366,19 @@ public sealed class TypeWalker
                     text,
                     System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture,
-                    out result);
-            case int or long or short or byte or sbyte or uint or ulong or ushort or float or double or decimal:
+                    out result
+                );
+            case int
+            or long
+            or short
+            or byte
+            or sbyte
+            or uint
+            or ulong
+            or ushort
+            or float
+            or double
+            or decimal:
                 result = Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
                 return true;
             default:
@@ -1162,8 +1393,10 @@ public sealed class TypeWalker
         {
             switch (attr.AttributeClass?.Name)
             {
-                case "EmailAddressAttribute": return "email";
-                case "UrlAttribute": return "uri";
+                case "EmailAddressAttribute":
+                    return "email";
+                case "UrlAttribute":
+                    return "uri";
             }
         }
 
@@ -1185,7 +1418,9 @@ public sealed class TypeWalker
             return null;
         }
 
-        return attr.ConstructorArguments.Length > 0 && attr.ConstructorArguments[0].Value is string name
+        return
+            attr.ConstructorArguments.Length > 0
+            && attr.ConstructorArguments[0].Value is string name
             ? name
             : prop.Name;
     }
@@ -1195,21 +1430,29 @@ public sealed class TypeWalker
         var attributes = prop.GetAttributes();
 
         if (attributes.Any(a => a.AttributeClass?.Name is "RivetOptionalAttribute"))
+        {
             return true;
+        }
 
         if (attributes.Any(a => a.AttributeClass?.Name is "RequiredAttribute"))
+        {
             return false;
+        }
 
         // The C# `required` keyword: must be set at construction, may still be
         // null — the one form that expresses required-AND-nullable (a real axis:
         // 139 github-corpus properties). DataAnnotations [Required] cannot say
         // this (it rejects null at MVC binding); the keyword can.
         if (prop.IsRequired)
+        {
             return false;
+        }
 
         // Nullable reference/value types are optional unless required/[Required]
         if (prop.Type.NullableAnnotation == NullableAnnotation.Annotated)
+        {
             return true;
+        }
 
         return false;
     }

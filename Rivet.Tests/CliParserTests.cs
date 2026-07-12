@@ -35,7 +35,13 @@ public sealed class CliParserTests
     [InlineData("--from", "contracts.json")]
     public void ParseArgs_VerifyFlag_SetsVerify(string modeFlag, string modeValue)
     {
-        var options = CliParser.ParseArgs([modeFlag, modeValue, "--output", "./generated", "--verify"]);
+        var options = CliParser.ParseArgs([
+            modeFlag,
+            modeValue,
+            "--output",
+            "./generated",
+            "--verify",
+        ]);
 
         Assert.NotNull(options);
         Assert.True(options!.Verify);
@@ -46,7 +52,8 @@ public sealed class CliParserTests
     {
         RivetOptions? options = null;
         var stderr = CompilationHelper.CaptureStdErr(() =>
-            options = CliParser.ParseArgs(["--project", "Api.csproj", "--verify"]));
+            options = CliParser.ParseArgs(["--project", "Api.csproj", "--verify"])
+        );
 
         Assert.Null(options);
         Assert.Contains("'--verify' needs --output or --openapi", stderr);
@@ -55,7 +62,13 @@ public sealed class CliParserTests
     [Fact]
     public void ParseArgs_VerifyFlag_WithOpenApiOverrideOnly_IsAccepted()
     {
-        var options = CliParser.ParseArgs(["--project", "Api.csproj", "--openapi", "spec/openapi.json", "--verify"]);
+        var options = CliParser.ParseArgs([
+            "--project",
+            "Api.csproj",
+            "--openapi",
+            "spec/openapi.json",
+            "--verify",
+        ]);
 
         Assert.NotNull(options);
         Assert.True(options!.Verify);
@@ -66,7 +79,14 @@ public sealed class CliParserTests
     {
         RivetOptions? options = null;
         var stderr = CompilationHelper.CaptureStdErr(() =>
-            options = CliParser.ParseArgs(["--from-openapi", "spec.json", "--output", "./out", "--verify"]));
+            options = CliParser.ParseArgs([
+                "--from-openapi",
+                "spec.json",
+                "--output",
+                "./out",
+                "--verify",
+            ])
+        );
 
         Assert.Null(options);
         Assert.Contains("does not apply to --from-openapi", stderr);
@@ -81,7 +101,8 @@ public sealed class CliParserTests
     {
         RivetOptions? options = null;
         var stderr = CompilationHelper.CaptureStdErr(() =>
-            options = CliParser.ParseArgs(["--from", "contracts.json", "--output", "./out", flag]));
+            options = CliParser.ParseArgs(["--from", "contracts.json", "--output", "./out", flag])
+        );
 
         Assert.Null(options);
         Assert.Contains($"'{flag}' was removed in v2", stderr);
@@ -92,7 +113,13 @@ public sealed class CliParserTests
     [Fact]
     public void ParseArgs_OpenApiFlag_WithoutValue_DefaultsFileName()
     {
-        var options = CliParser.ParseArgs(["--from", "contracts.json", "--output", "./out", "--openapi"]);
+        var options = CliParser.ParseArgs([
+            "--from",
+            "contracts.json",
+            "--output",
+            "./out",
+            "--openapi",
+        ]);
 
         Assert.NotNull(options);
         Assert.Equal("openapi.json", options!.OpenApiPath);
@@ -101,7 +128,14 @@ public sealed class CliParserTests
     [Fact]
     public void ParseArgs_OpenApiFlag_WithExplicitPath_SetsOverride()
     {
-        var options = CliParser.ParseArgs(["--from", "contracts.json", "--output", "./out", "--openapi", "../spec/openapi.json"]);
+        var options = CliParser.ParseArgs([
+            "--from",
+            "contracts.json",
+            "--output",
+            "./out",
+            "--openapi",
+            "../spec/openapi.json",
+        ]);
 
         Assert.NotNull(options);
         Assert.Equal("../spec/openapi.json", options!.OpenApiPath);
@@ -146,7 +180,8 @@ public sealed class CliParserTests
     {
         RivetOptions? options = null;
         var stderr = CompilationHelper.CaptureStdErr(() =>
-            options = CliParser.ParseArgs(["--project", "app.csproj", "--output"]));
+            options = CliParser.ParseArgs(["--project", "app.csproj", "--output"])
+        );
 
         Assert.Null(options);
         Assert.Contains("flag '--output' requires a value", stderr);
@@ -161,7 +196,9 @@ public sealed class CliParserTests
     public void ParseArgs_UnknownFlag_Fails_With_Loud_Error(string flag)
     {
         RivetOptions? options = null;
-        var stderr = CompilationHelper.CaptureStdErr(() => options = CliParser.ParseArgs([flag, "file.cs"]));
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            options = CliParser.ParseArgs([flag, "file.cs"])
+        );
 
         Assert.Null(options);
         Assert.Contains($"unknown flag '{flag}'", stderr);
@@ -182,8 +219,14 @@ public sealed class CliParserTests
     [Fact]
     public void ParseArgs_TitleAndVersion_SetOptions()
     {
-        var options = CliParser.ParseArgs(
-            ["--project", "app.csproj", "--title", "Orders API", "--version", "2.3.0"]);
+        var options = CliParser.ParseArgs([
+            "--project",
+            "app.csproj",
+            "--title",
+            "Orders API",
+            "--version",
+            "2.3.0",
+        ]);
 
         Assert.NotNull(options);
         Assert.Equal("Orders API", options!.Title);
@@ -193,18 +236,22 @@ public sealed class CliParserTests
     [Fact]
     public void ParseArgs_Server_Repeatable_AccumulatesInOrder()
     {
-        var options = CliParser.ParseArgs(
-        [
-            "--project", "app.csproj",
-            "--server", "https://api.example.com",
-            "--server", "https://staging.example.com",
-            "--server", "/relative-base",
+        var options = CliParser.ParseArgs([
+            "--project",
+            "app.csproj",
+            "--server",
+            "https://api.example.com",
+            "--server",
+            "https://staging.example.com",
+            "--server",
+            "/relative-base",
         ]);
 
         Assert.NotNull(options);
         Assert.Equal(
             new[] { "https://api.example.com", "https://staging.example.com", "/relative-base" },
-            options!.Servers);
+            options!.Servers
+        );
     }
 
     [Fact]
@@ -226,7 +273,8 @@ public sealed class CliParserTests
     {
         RivetOptions? options = null;
         var stderr = CompilationHelper.CaptureStdErr(() =>
-            options = CliParser.ParseArgs(["--project", "app.csproj", "--server", url]));
+            options = CliParser.ParseArgs(["--project", "app.csproj", "--server", url])
+        );
 
         Assert.Null(options);
         Assert.Contains($"'--server' value '{url}' is not a valid URL", stderr);
@@ -235,11 +283,15 @@ public sealed class CliParserTests
     [Fact]
     public void ParseArgs_MetadataFlags_FlowThrough_FromContractMode()
     {
-        var options = CliParser.ParseArgs(
-        [
-            "--from", "contracts.json",
-            "--title", "Orders API", "--version", "2.3.0",
-            "--server", "https://api.example.com",
+        var options = CliParser.ParseArgs([
+            "--from",
+            "contracts.json",
+            "--title",
+            "Orders API",
+            "--version",
+            "2.3.0",
+            "--server",
+            "https://api.example.com",
         ]);
 
         Assert.NotNull(options);
@@ -282,15 +334,17 @@ public sealed class CliParserTests
             var stderr = CompilationHelper.CaptureStdErr(() => options = CliParser.ParseArgs(args));
 
             Assert.Null(options);
-            Assert.Contains("--security with --from-openapi accepts one security scheme name", stderr);
+            Assert.Contains(
+                "--security with --from-openapi accepts one security scheme name",
+                stderr
+            );
         }
     }
 
     [Fact]
     public void ParseArgs_FromOpenApi_Accepts_Single_Security_Scheme_Name()
     {
-        var options = CliParser.ParseArgs(
-            ["--from-openapi", "spec.json", "--security", "admin"]);
+        var options = CliParser.ParseArgs(["--from-openapi", "spec.json", "--security", "admin"]);
 
         Assert.NotNull(options);
         Assert.Equal("admin", options!.DefaultSecurity);

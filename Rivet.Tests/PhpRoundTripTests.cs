@@ -12,16 +12,22 @@ public sealed class PhpRoundTripTests
     private static JsonElement SchemasFor(string contractJson)
     {
         var spec = CompilationHelper.EmitOpenApiFromJson(contractJson);
-        return JsonDocument.Parse(spec).RootElement
-            .GetProperty("components").GetProperty("schemas");
+        return JsonDocument
+            .Parse(spec)
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas");
     }
 
-    private static JsonElement Prop(JsonElement schemas, string type, string prop)
-        => schemas.GetProperty(type).GetProperty("properties").GetProperty(prop);
+    private static JsonElement Prop(JsonElement schemas, string type, string prop) =>
+        schemas.GetProperty(type).GetProperty("properties").GetProperty(prop);
 
-    private static List<string?> Required(JsonElement schemas, string type)
-        => schemas.GetProperty(type).GetProperty("required")
-            .EnumerateArray().Select(e => e.GetString()).ToList();
+    private static List<string?> Required(JsonElement schemas, string type) =>
+        schemas
+            .GetProperty(type)
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
 
     private static void AssertNullableType(JsonElement prop, string expectedType)
     {
@@ -56,11 +62,23 @@ public sealed class PhpRoundTripTests
         var schemas = SchemasFor(json);
 
         Assert.Equal("string", Prop(schemas, "ScalarDto", "name").GetProperty("type").GetString());
-        Assert.Equal("integer", Prop(schemas, "ScalarDto", "count").GetProperty("type").GetString());
-        Assert.Equal("int32", Prop(schemas, "ScalarDto", "count").GetProperty("format").GetString());
+        Assert.Equal(
+            "integer",
+            Prop(schemas, "ScalarDto", "count").GetProperty("type").GetString()
+        );
+        Assert.Equal(
+            "int32",
+            Prop(schemas, "ScalarDto", "count").GetProperty("format").GetString()
+        );
         Assert.Equal("number", Prop(schemas, "ScalarDto", "rate").GetProperty("type").GetString());
-        Assert.Equal("double", Prop(schemas, "ScalarDto", "rate").GetProperty("format").GetString());
-        Assert.Equal("boolean", Prop(schemas, "ScalarDto", "isActive").GetProperty("type").GetString());
+        Assert.Equal(
+            "double",
+            Prop(schemas, "ScalarDto", "rate").GetProperty("format").GetString()
+        );
+        Assert.Equal(
+            "boolean",
+            Prop(schemas, "ScalarDto", "isActive").GetProperty("type").GetString()
+        );
     }
 
     [Fact]
@@ -143,7 +161,10 @@ public sealed class PhpRoundTripTests
 
         var scores = Prop(schemas, "DictDto", "scores");
         Assert.Equal("object", scores.GetProperty("type").GetString());
-        Assert.Equal("integer", scores.GetProperty("additionalProperties").GetProperty("type").GetString());
+        Assert.Equal(
+            "integer",
+            scores.GetProperty("additionalProperties").GetProperty("type").GetString()
+        );
     }
 
     [Fact]
@@ -207,11 +228,19 @@ public sealed class PhpRoundTripTests
 
         var schemas = SchemasFor(json);
 
-        Assert.Equal("#/components/schemas/Status",
-            Prop(schemas, "WithEnumDto", "status").GetProperty("$ref").GetString());
-        Assert.Equal(new[] { "active", "inactive", "pending" },
-            schemas.GetProperty("Status").GetProperty("enum")
-                .EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal(
+            "#/components/schemas/Status",
+            Prop(schemas, "WithEnumDto", "status").GetProperty("$ref").GetString()
+        );
+        Assert.Equal(
+            new[] { "active", "inactive", "pending" },
+            schemas
+                .GetProperty("Status")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(e => e.GetString())
+                .ToArray()
+        );
     }
 
     [Fact]
@@ -265,11 +294,19 @@ public sealed class PhpRoundTripTests
 
         var schemas = SchemasFor(json);
 
-        Assert.Equal("#/components/schemas/Priority",
-            Prop(schemas, "TaskDto", "priority").GetProperty("$ref").GetString());
-        Assert.Equal(new[] { 1, 2, 3 },
-            schemas.GetProperty("Priority").GetProperty("enum")
-                .EnumerateArray().Select(e => e.GetInt32()).ToArray());
+        Assert.Equal(
+            "#/components/schemas/Priority",
+            Prop(schemas, "TaskDto", "priority").GetProperty("$ref").GetString()
+        );
+        Assert.Equal(
+            new[] { 1, 2, 3 },
+            schemas
+                .GetProperty("Priority")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(e => e.GetInt32())
+                .ToArray()
+        );
     }
 
     [Fact]
@@ -294,8 +331,10 @@ public sealed class PhpRoundTripTests
         var schemas = SchemasFor(json);
 
         var priority = Prop(schemas, "PriorityDto", "priority");
-        Assert.Equal(new[] { "low", "medium", "high" },
-            priority.GetProperty("enum").EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal(
+            new[] { "low", "medium", "high" },
+            priority.GetProperty("enum").EnumerateArray().Select(e => e.GetString()).ToArray()
+        );
     }
 
     [Fact]
@@ -320,8 +359,10 @@ public sealed class PhpRoundTripTests
         var schemas = SchemasFor(json);
 
         var priority = Prop(schemas, "IntDocblockDto", "priority");
-        Assert.Equal(new[] { 1, 2, 3 },
-            priority.GetProperty("enum").EnumerateArray().Select(e => e.GetInt32()).ToArray());
+        Assert.Equal(
+            new[] { 1, 2, 3 },
+            priority.GetProperty("enum").EnumerateArray().Select(e => e.GetInt32()).ToArray()
+        );
     }
 
     [Fact]
@@ -354,9 +395,14 @@ public sealed class PhpRoundTripTests
 
         var schemas = SchemasFor(json);
 
-        Assert.Equal("#/components/schemas/AddressDto",
-            Prop(schemas, "PersonDto", "address").GetProperty("$ref").GetString());
-        Assert.Equal("string", Prop(schemas, "AddressDto", "street").GetProperty("type").GetString());
+        Assert.Equal(
+            "#/components/schemas/AddressDto",
+            Prop(schemas, "PersonDto", "address").GetProperty("$ref").GetString()
+        );
+        Assert.Equal(
+            "string",
+            Prop(schemas, "AddressDto", "street").GetProperty("type").GetString()
+        );
         Assert.Equal("string", Prop(schemas, "AddressDto", "city").GetProperty("type").GetString());
     }
 
@@ -463,18 +509,36 @@ public sealed class PhpRoundTripTests
         var schemas = SchemasFor(json);
 
         // Enum components
-        Assert.Equal(new[] { "active", "pending" },
-            schemas.GetProperty("Status").GetProperty("enum")
-                .EnumerateArray().Select(e => e.GetString()).ToArray());
-        Assert.Equal(new[] { 1, 2, 3 },
-            schemas.GetProperty("Priority").GetProperty("enum")
-                .EnumerateArray().Select(e => e.GetInt32()).ToArray());
+        Assert.Equal(
+            new[] { "active", "pending" },
+            schemas
+                .GetProperty("Status")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(e => e.GetString())
+                .ToArray()
+        );
+        Assert.Equal(
+            new[] { 1, 2, 3 },
+            schemas
+                .GetProperty("Priority")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(e => e.GetInt32())
+                .ToArray()
+        );
 
         // Scalar types
         Assert.Equal("string", Prop(schemas, "ScalarDto", "name").GetProperty("type").GetString());
-        Assert.Equal("integer", Prop(schemas, "ScalarDto", "count").GetProperty("type").GetString());
+        Assert.Equal(
+            "integer",
+            Prop(schemas, "ScalarDto", "count").GetProperty("type").GetString()
+        );
         Assert.Equal("number", Prop(schemas, "ScalarDto", "rate").GetProperty("type").GetString());
-        Assert.Equal("boolean", Prop(schemas, "ScalarDto", "active").GetProperty("type").GetString());
+        Assert.Equal(
+            "boolean",
+            Prop(schemas, "ScalarDto", "active").GetProperty("type").GetString()
+        );
 
         // Nullable
         AssertNullableType(Prop(schemas, "NullableDto", "nickname"), "string");
@@ -483,30 +547,57 @@ public sealed class PhpRoundTripTests
         Assert.Equal("array", Prop(schemas, "ListDto", "tags").GetProperty("type").GetString());
 
         // Dictionary
-        Assert.Equal("integer",
-            Prop(schemas, "DictDto", "scores").GetProperty("additionalProperties").GetProperty("type").GetString());
+        Assert.Equal(
+            "integer",
+            Prop(schemas, "DictDto", "scores")
+                .GetProperty("additionalProperties")
+                .GetProperty("type")
+                .GetString()
+        );
 
         // Inline object
-        Assert.Equal("number",
-            Prop(schemas, "ShapeDto", "dimensions").GetProperty("properties").GetProperty("width").GetProperty("type").GetString());
+        Assert.Equal(
+            "number",
+            Prop(schemas, "ShapeDto", "dimensions")
+                .GetProperty("properties")
+                .GetProperty("width")
+                .GetProperty("type")
+                .GetString()
+        );
 
         // Enum refs
-        Assert.Equal("#/components/schemas/Status",
-            Prop(schemas, "EnumDto", "status").GetProperty("$ref").GetString());
-        Assert.Equal("#/components/schemas/Priority",
-            Prop(schemas, "IntEnumDto", "priority").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "#/components/schemas/Status",
+            Prop(schemas, "EnumDto", "status").GetProperty("$ref").GetString()
+        );
+        Assert.Equal(
+            "#/components/schemas/Priority",
+            Prop(schemas, "IntEnumDto", "priority").GetProperty("$ref").GetString()
+        );
 
         // Docblock unions inline
-        Assert.Equal(new[] { "low", "high" },
-            Prop(schemas, "UnionDto", "level").GetProperty("enum")
-                .EnumerateArray().Select(e => e.GetString()).ToArray());
-        Assert.Equal(new[] { 1, 2, 3 },
-            Prop(schemas, "UnionDto", "code").GetProperty("enum")
-                .EnumerateArray().Select(e => e.GetInt32()).ToArray());
+        Assert.Equal(
+            new[] { "low", "high" },
+            Prop(schemas, "UnionDto", "level")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(e => e.GetString())
+                .ToArray()
+        );
+        Assert.Equal(
+            new[] { 1, 2, 3 },
+            Prop(schemas, "UnionDto", "code")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(e => e.GetInt32())
+                .ToArray()
+        );
 
         // Nested ref
-        Assert.Equal("#/components/schemas/ChildDto",
-            Prop(schemas, "ParentDto", "child").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "#/components/schemas/ChildDto",
+            Prop(schemas, "ParentDto", "child").GetProperty("$ref").GetString()
+        );
         Assert.Equal("string", Prop(schemas, "ChildDto", "value").GetProperty("type").GetString());
     }
 
@@ -547,7 +638,10 @@ public sealed class PhpRoundTripTests
 
         // Nullable array: type ["array","null"] with string items
         var tags = Prop(schemas, "ProfileDto", "tags");
-        var tagTypes = tags.GetProperty("type").EnumerateArray().Select(e => e.GetString()).ToList();
+        var tagTypes = tags.GetProperty("type")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Contains("array", tagTypes);
         Assert.Contains("null", tagTypes);
         Assert.Equal("string", tags.GetProperty("items").GetProperty("type").GetString());

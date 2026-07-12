@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Rivet;
 
 namespace Rivet.Tests;
 
@@ -11,14 +10,10 @@ namespace Rivet.Tests;
 public sealed class RivetUnionConverterTests
 {
     [RivetUnion]
-    public sealed record StringOrLong(
-        string? AsString,
-        long? AsLong);
+    public sealed record StringOrLong(string? AsString, long? AsLong);
 
     [RivetUnion]
-    public sealed record StringOrShape(
-        string? AsString,
-        Shape? AsShape);
+    public sealed record StringOrShape(string? AsString, Shape? AsShape);
 
     public sealed record Shape(string Kind, int Sides);
 
@@ -44,8 +39,7 @@ public sealed class RivetUnionConverterTests
     [Fact]
     public void Handles_Complex_Variants()
     {
-        var json = JsonSerializer.Serialize(
-            new StringOrShape(null, new Shape("triangle", 3)));
+        var json = JsonSerializer.Serialize(new StringOrShape(null, new Shape("triangle", 3)));
         Assert.Contains("triangle", json);
         Assert.DoesNotContain("AsShape", json);
         Assert.DoesNotContain("asShape", json);
@@ -66,7 +60,8 @@ public sealed class RivetUnionConverterTests
     {
         var original = new StringOrLong("only-this", null);
         var roundTripped = JsonSerializer.Deserialize<StringOrLong>(
-            JsonSerializer.Serialize(original))!;
+            JsonSerializer.Serialize(original)
+        )!;
         Assert.Equal(original, roundTripped);
     }
 }

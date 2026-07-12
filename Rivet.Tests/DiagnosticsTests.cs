@@ -14,7 +14,7 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class DiagnosticsTests
 {
-    private static readonly Regex IdPattern = new(@"^RIV[1-4]\d{3}$", RegexOptions.Compiled);
+    private static readonly Regex _idPattern = new(@"^RIV[1-4]\d{3}$", RegexOptions.Compiled);
 
     /// <summary>All public const string ID fields declared on Diagnostics.</summary>
     private static IReadOnlyList<(string FieldName, string Id)> DeclaredIds() =>
@@ -39,7 +39,10 @@ public sealed class DiagnosticsTests
 
         foreach (var (field, id) in ids)
         {
-            Assert.True(IdPattern.IsMatch(id), $"{field} = '{id}' is not a canonical RIV[1-4]xxx ID");
+            Assert.True(
+                _idPattern.IsMatch(id),
+                $"{field} = '{id}' is not a canonical RIV[1-4]xxx ID"
+            );
         }
     }
 
@@ -52,7 +55,10 @@ public sealed class DiagnosticsTests
             .Select(g => $"{g.Key} ({string.Join(", ", g.Select(x => x.FieldName))})")
             .ToList();
 
-        Assert.True(duplicates.Count == 0, $"Duplicate diagnostic IDs:\n  {string.Join("\n  ", duplicates)}");
+        Assert.True(
+            duplicates.Count == 0,
+            $"Duplicate diagnostic IDs:\n  {string.Join("\n  ", duplicates)}"
+        );
     }
 
     [Fact]
@@ -64,17 +70,22 @@ public sealed class DiagnosticsTests
         var unregistered = declared.Except(registered).Order(StringComparer.Ordinal).ToList();
         var undeclared = registered.Except(declared).Order(StringComparer.Ordinal).ToList();
 
-        Assert.True(unregistered.Count == 0,
-            $"Declared IDs missing a Registry entry: {string.Join(", ", unregistered)}");
-        Assert.True(undeclared.Count == 0,
-            $"Registry entries with no declared const: {string.Join(", ", undeclared)}");
+        Assert.True(
+            unregistered.Count == 0,
+            $"Declared IDs missing a Registry entry: {string.Join(", ", unregistered)}"
+        );
+        Assert.True(
+            undeclared.Count == 0,
+            $"Registry entries with no declared const: {string.Join(", ", undeclared)}"
+        );
     }
 
     [Fact]
     public void Warn_Writes_The_Canonical_Stderr_Line()
     {
-        var stderr = CompilationHelper.CaptureStdErr(
-            () => Diagnostics.Warn(Diagnostics.TypeNameCollision, "test message"));
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            Diagnostics.Warn(Diagnostics.TypeNameCollision, "test message")
+        );
 
         Assert.Contains("warning RIV1007: test message", stderr);
     }
@@ -84,7 +95,10 @@ public sealed class DiagnosticsTests
     {
         // Program.cs prints import warnings as $"warning {warning}" — the Prefix
         // form must therefore compose into the same canonical line as Warn.
-        Assert.Equal("RIV3001: test message", Diagnostics.Prefix(Diagnostics.ImportAliasCycleBroken, "test message"));
+        Assert.Equal(
+            "RIV3001: test message",
+            Diagnostics.Prefix(Diagnostics.ImportAliasCycleBroken, "test message")
+        );
     }
 
     // ---------------------------------------------------------------
@@ -108,13 +122,15 @@ public sealed class DiagnosticsTests
     public void Every_Registered_Id_Has_A_Doc_Row()
     {
         var documented = DocumentedIds().ToHashSet(StringComparer.Ordinal);
-        var missing = Diagnostics.Registry.Keys
-            .Where(id => !documented.Contains(id))
+        var missing = Diagnostics
+            .Registry.Keys.Where(id => !documented.Contains(id))
             .Order(StringComparer.Ordinal)
             .ToList();
 
-        Assert.True(missing.Count == 0,
-            $"Registered IDs missing a row in docs/reference/diagnostics.md: {string.Join(", ", missing)}");
+        Assert.True(
+            missing.Count == 0,
+            $"Registered IDs missing a row in docs/reference/diagnostics.md: {string.Join(", ", missing)}"
+        );
     }
 
     [Fact]
@@ -125,8 +141,10 @@ public sealed class DiagnosticsTests
             .Order(StringComparer.Ordinal)
             .ToList();
 
-        Assert.True(rogue.Count == 0,
-            $"docs/reference/diagnostics.md rows with no registered ID: {string.Join(", ", rogue)}");
+        Assert.True(
+            rogue.Count == 0,
+            $"docs/reference/diagnostics.md rows with no registered ID: {string.Join(", ", rogue)}"
+        );
     }
 
     [Fact]
@@ -138,8 +156,10 @@ public sealed class DiagnosticsTests
             .Select(g => g.Key)
             .ToList();
 
-        Assert.True(duplicates.Count == 0,
-            $"docs/reference/diagnostics.md has duplicate rows for: {string.Join(", ", duplicates)}");
+        Assert.True(
+            duplicates.Count == 0,
+            $"docs/reference/diagnostics.md has duplicate rows for: {string.Join(", ", duplicates)}"
+        );
     }
 
     // ---------------------------------------------------------------
@@ -183,8 +203,7 @@ public sealed class DiagnosticsTests
     [Fact]
     public void BigInteger_Property_Emits_RIV1010_Naming_Type_And_Property()
     {
-        var stderr = WalkDtoCapturingStdErr(
-            "System.Numerics.BigInteger");
+        var stderr = WalkDtoCapturingStdErr("System.Numerics.BigInteger");
 
         Assert.Contains("warning RIV1010:", stderr);
         Assert.Contains("BigInteger", stderr);
@@ -246,8 +265,9 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var stderr = CompilationHelper.CaptureStdErr(
-            () => CompilationHelper.EmitOpenApi(source).Dispose());
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            CompilationHelper.EmitOpenApi(source).Dispose()
+        );
 
         Assert.Contains("warning RIV2005:", stderr);
         // Property names are camelCased in the contract model — the site names the
@@ -283,8 +303,9 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(
-            () => CompilationHelper.WalkContract(source));
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
 
         Assert.Contains("error RIV1021:", exception.Message);
         Assert.Contains("422", exception.Message);
@@ -308,8 +329,9 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(
-            () => CompilationHelper.WalkContract(source));
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
 
         Assert.Contains("error RIV1021:", exception.Message);
         Assert.Contains("calls .Status() more than once", exception.Message);
@@ -335,8 +357,9 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(
-            () => CompilationHelper.WalkContract(source));
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
 
         Assert.Contains("error RIV1021:", exception.Message);
         Assert.Contains("201", exception.Message);
@@ -366,8 +389,9 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(
-            () => CompilationHelper.WalkContract(source));
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
 
         Assert.Contains("error RIV1021:", exception.Message);
         Assert.Contains("422", exception.Message);
@@ -393,8 +417,9 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(
-            () => CompilationHelper.WalkContract(source));
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
 
         Assert.Contains("error RIV1022:", exception.Message);
         Assert.Contains("Unrelated", exception.Message);
@@ -420,8 +445,9 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(
-            () => CompilationHelper.WalkContract(source));
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
 
         Assert.Contains("error RIV1022:", exception.Message);
     }
@@ -450,8 +476,9 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(
-            () => CompilationHelper.WalkContract(source));
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
 
         Assert.Contains("error RIV1022:", exception.Message);
     }
@@ -476,8 +503,9 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(
-            () => CompilationHelper.WalkContract(source));
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
 
         Assert.Contains("error RIV1022:", exception.Message);
     }

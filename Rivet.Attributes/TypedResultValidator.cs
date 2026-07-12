@@ -12,7 +12,8 @@ internal static class TypedResultValidator
         Type? successResponseType,
         IReadOnlyList<RouteErrorResponse>? errorResponses,
         IResult result,
-        bool skipValidation = false)
+        bool skipValidation = false
+    )
     {
         if (skipValidation)
         {
@@ -24,13 +25,15 @@ internal static class TypedResultValidator
         if (branch is not IStatusCodeHttpResult statusCodeResult)
         {
             throw new RivetContractViolationException(
-                $"Route '{route}' returned '{branch.GetType().FullName}', which does not expose a status code.");
+                $"Route '{route}' returned '{branch.GetType().FullName}', which does not expose a status code."
+            );
         }
 
         if (statusCodeResult.StatusCode is not int actualStatusCode)
         {
             throw new RivetContractViolationException(
-                $"Route '{route}' returned '{branch.GetType().FullName}' without a concrete status code.");
+                $"Route '{route}' returned '{branch.GetType().FullName}' without a concrete status code."
+            );
         }
 
         var expectedResponseType = ResolveExpectedResponseType(
@@ -38,7 +41,8 @@ internal static class TypedResultValidator
             successStatus,
             successResponseType,
             errorResponses,
-            actualStatusCode);
+            actualStatusCode
+        );
 
         ValidatePayload(route, actualStatusCode, expectedResponseType, branch);
     }
@@ -54,7 +58,8 @@ internal static class TypedResultValidator
         string? declaredContentType,
         IReadOnlyList<RouteErrorResponse>? errorResponses,
         IResult result,
-        bool skipValidation = false)
+        bool skipValidation = false
+    )
     {
         if (skipValidation)
         {
@@ -72,7 +77,8 @@ internal static class TypedResultValidator
         if (branch is not IStatusCodeHttpResult { StatusCode: int actualStatusCode })
         {
             throw new RivetContractViolationException(
-                $"Route '{route}' returned '{branch.GetType().FullName}', which does not expose a status code.");
+                $"Route '{route}' returned '{branch.GetType().FullName}', which does not expose a status code."
+            );
         }
 
         if (actualStatusCode == successStatus)
@@ -80,15 +86,17 @@ internal static class TypedResultValidator
             if (branch is IValueHttpResult)
             {
                 throw new RivetContractViolationException(
-                    $"Route '{route}' is a file endpoint ('{declaredContentType}') but returned a JSON payload result " +
-                    $"'{branch.GetType().FullName}' on the success status.");
+                    $"Route '{route}' is a file endpoint ('{declaredContentType}') but returned a JSON payload result "
+                        + $"'{branch.GetType().FullName}' on the success status."
+                );
             }
 
             if (branch is not IContentTypeHttpResult { ContentType: { } actualContentType })
             {
                 throw new RivetContractViolationException(
-                    $"Route '{route}' is a file endpoint ('{declaredContentType}') but returned " +
-                    $"'{branch.GetType().FullName}' without file content on the success status.");
+                    $"Route '{route}' is a file endpoint ('{declaredContentType}') but returned "
+                        + $"'{branch.GetType().FullName}' without file content on the success status."
+                );
             }
 
             ValidateFileContentType(route, declaredContentType, actualContentType);
@@ -97,21 +105,36 @@ internal static class TypedResultValidator
 
         // Error branch: same rules as JSON endpoints — declared status, declared payload type.
         var expectedResponseType = ResolveExpectedResponseType(
-            route, successStatus, null, errorResponses, actualStatusCode);
+            route,
+            successStatus,
+            null,
+            errorResponses,
+            actualStatusCode
+        );
         ValidatePayload(route, actualStatusCode, expectedResponseType, branch);
     }
 
-    private static void ValidateFileContentType(string route, string? declaredContentType, string? actualContentType)
+    private static void ValidateFileContentType(
+        string route,
+        string? declaredContentType,
+        string? actualContentType
+    )
     {
         // "image/jpeg; charset=..." satisfies a declared "image/jpeg"; a null actual
         // content type defers to ASP.NET's default for the result, which is the declared
         // type's job to match — nothing to check.
-        if (declaredContentType is not null
+        if (
+            declaredContentType is not null
             && actualContentType is not null
-            && !actualContentType.StartsWith(declaredContentType, StringComparison.OrdinalIgnoreCase))
+            && !actualContentType.StartsWith(
+                declaredContentType,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
         {
             throw new RivetContractViolationException(
-                $"Route '{route}' declares content type '{declaredContentType}' but returned '{actualContentType}'.");
+                $"Route '{route}' declares content type '{declaredContentType}' but returned '{actualContentType}'."
+            );
         }
     }
 
@@ -132,14 +155,17 @@ internal static class TypedResultValidator
         int successStatus,
         Type? successResponseType,
         IReadOnlyList<RouteErrorResponse>? errorResponses,
-        int actualStatusCode)
+        int actualStatusCode
+    )
     {
         if (actualStatusCode == successStatus)
         {
             return successResponseType;
         }
 
-        var declaredError = errorResponses?.SingleOrDefault(response => response.StatusCode == actualStatusCode);
+        var declaredError = errorResponses?.SingleOrDefault(response =>
+            response.StatusCode == actualStatusCode
+        );
 
         if (declaredError is not null)
         {
@@ -152,15 +178,17 @@ internal static class TypedResultValidator
             .ToArray();
 
         throw new RivetContractViolationException(
-            $"Route '{route}' returned undeclared status code {actualStatusCode}. " +
-            $"Declared statuses: {string.Join(", ", declaredStatuses)}.");
+            $"Route '{route}' returned undeclared status code {actualStatusCode}. "
+                + $"Declared statuses: {string.Join(", ", declaredStatuses)}."
+        );
     }
 
     private static void ValidatePayload(
         string route,
         int actualStatusCode,
         Type? expectedResponseType,
-        IResult branch)
+        IResult branch
+    )
     {
         var actualResponseType = ResolveActualResponseType(branch);
 
@@ -169,8 +197,9 @@ internal static class TypedResultValidator
             if (actualResponseType is not null)
             {
                 throw new RivetContractViolationException(
-                    $"Route '{route}' returned status {actualStatusCode} with payload type " +
-                    $"'{actualResponseType.FullName}', but the contract declares no payload for that status.");
+                    $"Route '{route}' returned status {actualStatusCode} with payload type "
+                        + $"'{actualResponseType.FullName}', but the contract declares no payload for that status."
+                );
             }
 
             // Content-bearing results that are not IValueHttpResult (Results.Text/Content,
@@ -178,8 +207,9 @@ internal static class TypedResultValidator
             if (branch is IContentTypeHttpResult)
             {
                 throw new RivetContractViolationException(
-                    $"Route '{route}' returned status {actualStatusCode} with a content-bearing result " +
-                    $"'{branch.GetType().FullName}', but the contract declares no payload for that status.");
+                    $"Route '{route}' returned status {actualStatusCode} with a content-bearing result "
+                        + $"'{branch.GetType().FullName}', but the contract declares no payload for that status."
+                );
             }
 
             return;
@@ -188,24 +218,29 @@ internal static class TypedResultValidator
         if (actualResponseType is null)
         {
             throw new RivetContractViolationException(
-                $"Route '{route}' returned status {actualStatusCode} without a payload, but the contract declares " +
-                $"payload type '{expectedResponseType.FullName}'.");
+                $"Route '{route}' returned status {actualStatusCode} without a payload, but the contract declares "
+                    + $"payload type '{expectedResponseType.FullName}'."
+            );
         }
 
         if (!expectedResponseType.IsAssignableFrom(actualResponseType))
         {
             throw new RivetContractViolationException(
-                $"Route '{route}' returned status {actualStatusCode} with payload type " +
-                $"'{actualResponseType.FullName}', but the contract declares '{expectedResponseType.FullName}'.");
+                $"Route '{route}' returned status {actualStatusCode} with payload type "
+                    + $"'{actualResponseType.FullName}', but the contract declares '{expectedResponseType.FullName}'."
+            );
         }
 
         // A declared JSON payload served with a non-JSON content type contradicts the spec.
-        if (branch is IContentTypeHttpResult { ContentType: { } contentType }
-            && !contentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+        if (
+            branch is IContentTypeHttpResult { ContentType: { } contentType }
+            && !contentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase)
+        )
         {
             throw new RivetContractViolationException(
-                $"Route '{route}' returned status {actualStatusCode} with content type '{contentType}', " +
-                $"but the contract declares a JSON payload ('{expectedResponseType.FullName}').");
+                $"Route '{route}' returned status {actualStatusCode} with content type '{contentType}', "
+                    + $"but the contract declares a JSON payload ('{expectedResponseType.FullName}')."
+            );
         }
 
         ValidateValueRuntimeType(route, actualStatusCode, expectedResponseType, branch);
@@ -223,7 +258,8 @@ internal static class TypedResultValidator
         string route,
         int actualStatusCode,
         Type expectedResponseType,
-        IResult branch)
+        IResult branch
+    )
     {
         if (branch is not IValueHttpResult { Value: { } value })
         {
@@ -232,13 +268,15 @@ internal static class TypedResultValidator
 
         var valueType = value.GetType();
 
-        if (valueType == expectedResponseType
+        if (
+            valueType == expectedResponseType
             || expectedResponseType.IsInterface
             || expectedResponseType.IsAbstract
             || expectedResponseType == typeof(object)
             // A boxed T? reports the underlying T.
             || Nullable.GetUnderlyingType(expectedResponseType) == valueType
-            || expectedResponseType.GetCustomAttribute<JsonPolymorphicAttribute>() is not null)
+            || expectedResponseType.GetCustomAttribute<JsonPolymorphicAttribute>() is not null
+        )
         {
             return;
         }
@@ -246,10 +284,11 @@ internal static class TypedResultValidator
         if (expectedResponseType.IsAssignableFrom(valueType))
         {
             throw new RivetContractViolationException(
-                $"Route '{route}' returned status {actualStatusCode} with a '{valueType.FullName}' instance where " +
-                $"the contract declares '{expectedResponseType.FullName}'. The serializer writes the runtime type, " +
-                $"so undeclared members would go to the wire — map to the declared type, or mark it " +
-                $"[JsonPolymorphic] so the spec declares the hierarchy.");
+                $"Route '{route}' returned status {actualStatusCode} with a '{valueType.FullName}' instance where "
+                    + $"the contract declares '{expectedResponseType.FullName}'. The serializer writes the runtime type, "
+                    + $"so undeclared members would go to the wire — map to the declared type, or mark it "
+                    + $"[JsonPolymorphic] so the spec declares the hierarchy."
+            );
         }
     }
 
@@ -259,8 +298,8 @@ internal static class TypedResultValidator
             .GetType()
             .GetInterfaces()
             .FirstOrDefault(type =>
-                type.IsGenericType &&
-                type.GetGenericTypeDefinition() == typeof(IValueHttpResult<>));
+                type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IValueHttpResult<>)
+            );
 
         if (typedValueInterface is not null)
         {

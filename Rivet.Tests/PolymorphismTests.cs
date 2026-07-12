@@ -1,7 +1,5 @@
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
-using Rivet.Tool;
-using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -49,8 +47,10 @@ public sealed class PolymorphismTests
 
         // Base = oneOf of $ref'd named variant components, no flattened properties
         var shape = schemas.GetProperty("Shape");
-        Assert.False(shape.TryGetProperty("properties", out _),
-            "the base must not flatten to its own property surface");
+        Assert.False(
+            shape.TryGetProperty("properties", out _),
+            "the base must not flatten to its own property surface"
+        );
         var oneOf = shape.GetProperty("oneOf");
         Assert.Equal(2, oneOf.GetArrayLength());
         Assert.Equal("#/components/schemas/Shape_Circle", oneOf[0].GetProperty("$ref").GetString());
@@ -60,8 +60,14 @@ public sealed class PolymorphismTests
         var discriminator = shape.GetProperty("discriminator");
         Assert.Equal("$type", discriminator.GetProperty("propertyName").GetString());
         var mapping = discriminator.GetProperty("mapping");
-        Assert.Equal("#/components/schemas/Shape_Circle", mapping.GetProperty("circle").GetString());
-        Assert.Equal("#/components/schemas/Shape_Square", mapping.GetProperty("square").GetString());
+        Assert.Equal(
+            "#/components/schemas/Shape_Circle",
+            mapping.GetProperty("circle").GetString()
+        );
+        Assert.Equal(
+            "#/components/schemas/Shape_Square",
+            mapping.GetProperty("square").GetString()
+        );
 
         // Variant component: tag property first (single-member enum, required),
         // then the derived type's full flattened surface (inherited Id included)
@@ -75,7 +81,11 @@ public sealed class PolymorphismTests
         Assert.Equal("string", properties.GetProperty("id").GetProperty("type").GetString());
         Assert.Equal("number", properties.GetProperty("radius").GetProperty("type").GetString());
 
-        var required = circle.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        var required = circle
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Contains("$type", required);
         Assert.Contains("id", required);
         Assert.Contains("radius", required);
@@ -111,7 +121,10 @@ public sealed class PolymorphismTests
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
         var channel = schemas.GetProperty("Channel");
 
-        Assert.Equal("kind", channel.GetProperty("discriminator").GetProperty("propertyName").GetString());
+        Assert.Equal(
+            "kind",
+            channel.GetProperty("discriminator").GetProperty("propertyName").GetString()
+        );
         var email = schemas.GetProperty("Channel_Email");
         var tagEnum = email.GetProperty("properties").GetProperty("kind").GetProperty("enum");
         Assert.Equal("email", tagEnum[0].GetString());
@@ -154,8 +167,10 @@ public sealed class PolymorphismTests
         // The standalone Circle component: flattened surface, no discriminator
         var circle = schemas.GetProperty("Circle");
         var properties = circle.GetProperty("properties");
-        Assert.False(properties.TryGetProperty("$type", out _),
-            "a derived type serialized as its own static type writes no discriminator");
+        Assert.False(
+            properties.TryGetProperty("$type", out _),
+            "a derived type serialized as its own static type writes no discriminator"
+        );
         Assert.True(properties.TryGetProperty("radius", out _));
         Assert.False(circle.TryGetProperty("oneOf", out _));
 
@@ -191,7 +206,9 @@ public sealed class PolymorphismTests
             """;
 
         JsonDocument? doc = null;
-        var stderr = CompilationHelper.CaptureStdErr(() => doc = CompilationHelper.EmitOpenApi(source));
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            doc = CompilationHelper.EmitOpenApi(source)
+        );
         using var emitted = doc;
 
         // Do NOT stringify int tags — a spec validating string tags against an int
@@ -199,7 +216,10 @@ public sealed class PolymorphismTests
         Assert.Contains("RIV1014", stderr);
         Assert.Contains("non-string discriminator tag", stderr);
 
-        var shape = doc!.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("Shape");
+        var shape = doc!
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Shape");
         Assert.False(shape.TryGetProperty("oneOf", out _));
         Assert.True(shape.GetProperty("properties").TryGetProperty("id", out _));
     }
@@ -226,13 +246,18 @@ public sealed class PolymorphismTests
             """;
 
         JsonDocument? doc = null;
-        var stderr = CompilationHelper.CaptureStdErr(() => doc = CompilationHelper.EmitOpenApi(source));
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            doc = CompilationHelper.EmitOpenApi(source)
+        );
         using var emitted = doc;
 
         Assert.Contains("RIV1015", stderr);
         Assert.Contains("no [JsonDerivedType] registrations", stderr);
 
-        var shape = doc!.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("Shape");
+        var shape = doc!
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Shape");
         Assert.False(shape.TryGetProperty("oneOf", out _));
         Assert.True(shape.GetProperty("properties").TryGetProperty("id", out _));
     }
@@ -262,14 +287,19 @@ public sealed class PolymorphismTests
             """;
 
         JsonDocument? doc = null;
-        var stderr = CompilationHelper.CaptureStdErr(() => doc = CompilationHelper.EmitOpenApi(source));
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            doc = CompilationHelper.EmitOpenApi(source)
+        );
         using var emitted = doc;
 
         Assert.Contains("RIV1016", stderr);
         Assert.Contains("UnknownDerivedTypeHandling", stderr);
 
         // The union itself still emits — only the unknown-type fallback is invisible
-        var shape = doc!.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("Shape");
+        var shape = doc!
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Shape");
         Assert.True(shape.TryGetProperty("oneOf", out _));
         Assert.True(shape.TryGetProperty("discriminator", out _));
     }
@@ -302,9 +332,15 @@ public sealed class PolymorphismTests
 
         using var doc = CompilationHelper.EmitOpenApi(source);
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
-        var mapping = schemas.GetProperty("Shape").GetProperty("discriminator").GetProperty("mapping");
+        var mapping = schemas
+            .GetProperty("Shape")
+            .GetProperty("discriminator")
+            .GetProperty("mapping");
         Assert.Equal("#/components/schemas/Shape_Shape", mapping.GetProperty("shape").GetString());
-        Assert.Equal("#/components/schemas/Shape_Circle", mapping.GetProperty("circle").GetString());
+        Assert.Equal(
+            "#/components/schemas/Shape_Circle",
+            mapping.GetProperty("circle").GetString()
+        );
 
         var baseVariant = schemas.GetProperty("Shape_Shape").GetProperty("properties");
         Assert.True(baseVariant.TryGetProperty("$type", out _));
@@ -375,7 +411,10 @@ public sealed class PolymorphismTests
 
         // Abstract base with the polymorphism attributes
         var baseContent = CompilationHelper.FindFile(result, "Shape.cs");
-        Assert.Contains("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]", baseContent);
+        Assert.Contains(
+            "[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]",
+            baseContent
+        );
         Assert.Contains("[JsonDerivedType(typeof(ShapeCircle), \"circle\")]", baseContent);
         Assert.Contains("[JsonDerivedType(typeof(ShapeSquare), \"square\")]", baseContent);
         Assert.Contains("public abstract record Shape", baseContent);
@@ -398,11 +437,14 @@ public sealed class PolymorphismTests
 
         // The whole import compiles
         var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
-        Assert.True(errors.Count == 0,
-            $"Imported polymorphic hierarchy does not compile:\n{string.Join("\n", errors)}");
+        Assert.True(
+            errors.Count == 0,
+            $"Imported polymorphic hierarchy does not compile:\n{string.Join("\n", errors)}"
+        );
     }
 
     [Fact]
@@ -432,9 +474,12 @@ public sealed class PolymorphismTests
         var shape = CompilationHelper.FindFile(result, "Shape.cs");
         Assert.Contains("Circle? AsCircle", shape);
         Assert.Contains("Square? AsSquare", shape);
-        Assert.Contains(result.Warnings, w =>
-            w.StartsWith("RIV3005: Discriminator dropped on 'Shape'")
-            && w.Contains("mapping absent"));
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.StartsWith("RIV3005: Discriminator dropped on 'Shape'")
+                && w.Contains("mapping absent")
+        );
     }
 
     [Fact]
@@ -473,9 +518,12 @@ public sealed class PolymorphismTests
 
         var shape = CompilationHelper.FindFile(result, "Shape.cs");
         Assert.Contains("Circle? AsCircle", shape);
-        Assert.Contains(result.Warnings, w =>
-            w.StartsWith("RIV3005: Discriminator dropped on 'Shape'")
-            && w.Contains("no conforming '$type' tag property"));
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.StartsWith("RIV3005: Discriminator dropped on 'Shape'")
+                && w.Contains("no conforming '$type' tag property")
+        );
 
         // The variants stay plain records (tag property kept where present)
         var square = CompilationHelper.FindFile(result, "Square.cs");

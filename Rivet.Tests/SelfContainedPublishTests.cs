@@ -13,16 +13,20 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     [Fact]
     public void SelfContained_Publish_Succeeds()
     {
-        Assert.True(_fixture.PublishExitCode == 0,
-            $"dotnet publish failed (exit {_fixture.PublishExitCode}):\n{_fixture.PublishOutput}");
+        Assert.True(
+            _fixture.PublishExitCode == 0,
+            $"dotnet publish failed (exit {_fixture.PublishExitCode}):\n{_fixture.PublishOutput}"
+        );
     }
 
     [Fact]
     public void SelfContained_Binary_Exists_After_Publish()
     {
         Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
-        Assert.True(File.Exists(_fixture.BinaryPath),
-            $"Expected binary at {_fixture.BinaryPath} but it does not exist");
+        Assert.True(
+            File.Exists(_fixture.BinaryPath),
+            $"Expected binary at {_fixture.BinaryPath} but it does not exist"
+        );
     }
 
     [Fact]
@@ -46,7 +50,8 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
 
         var (exitCode, output) = await PublishFixture.RunProcessAsync(
             _fixture.BinaryPath,
-            $"--from-openapi \"{fixture}\" --namespace PetStore");
+            $"--from-openapi \"{fixture}\" --namespace PetStore"
+        );
 
         Assert.True(exitCode == 0, $"Import failed (exit {exitCode}):\n{output}");
         Assert.Contains("// ===", output);
@@ -59,14 +64,20 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
         Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
 
         var repoRoot = PublishFixture.FindRepoRoot();
-        var fixtureFile = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "openapi-petstore-v3.json");
+        var fixtureFile = Path.Combine(
+            repoRoot,
+            "Rivet.Tests",
+            "Fixtures",
+            "openapi-petstore-v3.json"
+        );
         var outputDir = Path.Combine(Path.GetTempPath(), $"rivet-output-test-{Guid.NewGuid():N}");
 
         try
         {
             var (exitCode, output) = await PublishFixture.RunProcessAsync(
                 _fixture.BinaryPath,
-                $"--from-openapi \"{fixtureFile}\" --namespace PetStore --output \"{outputDir}\"");
+                $"--from-openapi \"{fixtureFile}\" --namespace PetStore --output \"{outputDir}\""
+            );
 
             Assert.True(exitCode == 0, $"Import with --output failed (exit {exitCode}):\n{output}");
 
@@ -77,7 +88,9 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
         finally
         {
             if (Directory.Exists(outputDir))
+            {
                 Directory.Delete(outputDir, recursive: true);
+            }
         }
     }
 
@@ -91,7 +104,8 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
 
         var (exitCode, output) = await PublishFixture.RunProcessAsync(
             _fixture.BinaryPath,
-            $"--from \"{fixture}\"");
+            $"--from \"{fixture}\""
+        );
 
         Assert.True(exitCode == 0, $"--from failed (exit {exitCode}):\n{output}");
         Assert.Contains("ProductDto", output);
@@ -105,13 +119,17 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
 
         var repoRoot = PublishFixture.FindRepoRoot();
         var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
-        var outputDir = Path.Combine(Path.GetTempPath(), $"rivet-from-publish-test-{Guid.NewGuid():N}");
+        var outputDir = Path.Combine(
+            Path.GetTempPath(),
+            $"rivet-from-publish-test-{Guid.NewGuid():N}"
+        );
 
         try
         {
             var (exitCode, output) = await PublishFixture.RunProcessAsync(
                 _fixture.BinaryPath,
-                $"--from \"{fixture}\" --output \"{outputDir}\"");
+                $"--from \"{fixture}\" --output \"{outputDir}\""
+            );
 
             Assert.True(exitCode == 0, $"--from --output failed (exit {exitCode}):\n{output}");
 
@@ -123,7 +141,9 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
         finally
         {
             if (Directory.Exists(outputDir))
+            {
                 Directory.Delete(outputDir, recursive: true);
+            }
         }
     }
 
@@ -134,7 +154,8 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
 
         var (exitCode, output) = await PublishFixture.RunProcessAsync(
             _fixture.BinaryPath,
-            "--from-openapi /nonexistent/path/spec.json --namespace Ns");
+            "--from-openapi /nonexistent/path/spec.json --namespace Ns"
+        );
 
         Assert.NotEqual(0, exitCode);
         Assert.DoesNotContain("Unhandled exception", output);
@@ -146,18 +167,28 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
         var repoRoot = PublishFixture.FindRepoRoot();
 
         var csproj = File.ReadAllText(Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj"));
-        var tfmMatch = System.Text.RegularExpressions.Regex.Match(csproj, @"<TargetFramework>net(\d+)\.\d+</TargetFramework>");
+        var tfmMatch = System.Text.RegularExpressions.Regex.Match(
+            csproj,
+            @"<TargetFramework>net(\d+)\.\d+</TargetFramework>"
+        );
         Assert.True(tfmMatch.Success, "Could not parse TargetFramework from csproj");
         var csprojMajor = int.Parse(tfmMatch.Groups[1].Value);
 
-        var releaseYml = File.ReadAllText(Path.Combine(repoRoot, ".github", "workflows", "release.yml"));
-        var sdkMatch = System.Text.RegularExpressions.Regex.Match(releaseYml, @"dotnet-version:\s*""(\d+)\.\d+\.x""");
+        var releaseYml = File.ReadAllText(
+            Path.Combine(repoRoot, ".github", "workflows", "release.yml")
+        );
+        var sdkMatch = System.Text.RegularExpressions.Regex.Match(
+            releaseYml,
+            @"dotnet-version:\s*""(\d+)\.\d+\.x"""
+        );
         Assert.True(sdkMatch.Success, "Could not parse dotnet-version from release.yml");
         var sdkMajor = int.Parse(sdkMatch.Groups[1].Value);
 
         // .NET SDK major version must be >= target framework major version (backwards compatible)
-        Assert.True(sdkMajor >= csprojMajor,
-            $"release.yml uses .NET SDK {sdkMajor}.x but csproj targets net{csprojMajor}.0 — SDK must be >= target");
+        Assert.True(
+            sdkMajor >= csprojMajor,
+            $"release.yml uses .NET SDK {sdkMajor}.x but csproj targets net{csprojMajor}.0 — SDK must be >= target"
+        );
     }
 
     [Fact]
@@ -169,7 +200,8 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
         var (exitCode, output) = await PublishFixture.RunProcessAsync(
             "dotnet",
             $"pack \"{csproj}\" -c Release --no-restore",
-            repoRoot);
+            repoRoot
+        );
 
         Assert.True(exitCode == 0, $"dotnet pack failed (exit {exitCode}):\n{output}");
     }
@@ -186,22 +218,28 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
             var (exitCode, output) = await PublishFixture.RunProcessAsync(
                 "dotnet",
                 $"publish \"{csproj}\" -c Release -r linux-x64 --self-contained -o \"{outDir}\"",
-                repoRoot);
+                repoRoot
+            );
 
             Assert.True(exitCode == 0, $"Cross-compile failed (exit {exitCode}):\n{output}");
 
-            var files = Directory.GetFiles(outDir)
+            var files = Directory
+                .GetFiles(outDir)
                 .Where(f => !f.EndsWith(".pdb") && !f.EndsWith(".json"))
                 .ToArray();
 
-            Assert.True(files.Length <= 3,
+            Assert.True(
+                files.Length <= 3,
                 $"Expected single-file output (≤3 non-pdb/json files) but found {files.Length}:\n"
-                + string.Join("\n", files.Select(Path.GetFileName)));
+                    + string.Join("\n", files.Select(Path.GetFileName))
+            );
         }
         finally
         {
             if (Directory.Exists(outDir))
+            {
                 Directory.Delete(outDir, recursive: true);
+            }
         }
     }
 }
@@ -226,7 +264,8 @@ public sealed class PublishFixture : IAsyncLifetime
         var (exitCode, output) = await RunProcessAsync(
             "dotnet",
             $"publish \"{csproj}\" -c Release -r {rid} --self-contained -p:PublishSingleFile=true -o \"{_tempDir}\"",
-            repoRoot);
+            repoRoot
+        );
 
         PublishExitCode = exitCode;
         PublishOutput = output;
@@ -259,7 +298,11 @@ public sealed class PublishFixture : IAsyncLifetime
     }
 
     internal static async Task<(int ExitCode, string Output)> RunProcessAsync(
-        string fileName, string arguments, string? workingDir = null, CancellationToken ct = default)
+        string fileName,
+        string arguments,
+        string? workingDir = null,
+        CancellationToken ct = default
+    )
     {
         var psi = new ProcessStartInfo
         {
@@ -273,7 +316,8 @@ public sealed class PublishFixture : IAsyncLifetime
         };
         SampleProjectTests.MakeBuildHermetic(psi);
 
-        using var process = Process.Start(psi)
+        using var process =
+            Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start {fileName}");
 
         // Drain both pipes CONCURRENTLY: reading stdout to EOF before touching
@@ -285,8 +329,10 @@ public sealed class PublishFixture : IAsyncLifetime
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
 
-        var output = string.Join("\n",
-            new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var output = string.Join(
+            "\n",
+            new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s))
+        );
 
         return (process.ExitCode, output);
     }

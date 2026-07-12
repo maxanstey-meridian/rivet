@@ -58,8 +58,10 @@ public sealed class CoverageCheckerTests
         }
         """;
 
-    private static (IReadOnlyList<TsEndpointDefinition> Endpoints, IReadOnlyList<CoverageWarning> Warnings)
-        RunCheck(params string[] sources)
+    private static (
+        IReadOnlyList<TsEndpointDefinition> Endpoints,
+        IReadOnlyList<CoverageWarning> Warnings
+    ) RunCheck(params string[] sources)
     {
         var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
@@ -286,7 +288,10 @@ public sealed class CoverageCheckerTests
             """;
 
         var (_, warnings) = RunCheck(TasksContract, impl);
-        var warning = Assert.Single(warnings, w => w.Kind == CoverageWarningKind.HttpMethodMismatch);
+        var warning = Assert.Single(
+            warnings,
+            w => w.Kind == CoverageWarningKind.HttpMethodMismatch
+        );
         Assert.Equal("GET", warning.Expected);
         Assert.Equal("POST", warning.Actual);
         Assert.Equal("ListTasks", warning.FieldName);
@@ -337,7 +342,9 @@ public sealed class CoverageCheckerTests
             """;
 
         var (_, warnings) = RunCheck(TasksContract, impl);
-        var missing = warnings.Where(w => w.Kind == CoverageWarningKind.MissingImplementation).ToList();
+        var missing = warnings
+            .Where(w => w.Kind == CoverageWarningKind.MissingImplementation)
+            .ToList();
         Assert.Equal(5, missing.Count); // All 5 fields missing
 
         // MissingImplementation should populate Expected with method+route and Actual with "(none)"
@@ -378,10 +385,14 @@ public sealed class CoverageCheckerTests
 
         var (_, warnings) = RunCheck(TasksContract, impl);
         // RemoveTask should match — constraints stripped
-        Assert.DoesNotContain(warnings, w =>
-            w.FieldName == "RemoveTask" && w.Kind == CoverageWarningKind.RouteMismatch);
-        Assert.DoesNotContain(warnings, w =>
-            w.FieldName == "RemoveTask" && w.Kind == CoverageWarningKind.HttpMethodMismatch);
+        Assert.DoesNotContain(
+            warnings,
+            w => w.FieldName == "RemoveTask" && w.Kind == CoverageWarningKind.RouteMismatch
+        );
+        Assert.DoesNotContain(
+            warnings,
+            w => w.FieldName == "RemoveTask" && w.Kind == CoverageWarningKind.HttpMethodMismatch
+        );
     }
 
     // --- Minimal API tests (correct — no warnings) ---
@@ -559,8 +570,10 @@ public sealed class CoverageCheckerTests
             """;
 
         var (_, warnings) = RunCheck(TasksContract, impl);
-        var warning = Assert.Single(warnings, w =>
-            w.FieldName == "ListTasks" && w.Kind == CoverageWarningKind.HttpMethodMismatch);
+        var warning = Assert.Single(
+            warnings,
+            w => w.FieldName == "ListTasks" && w.Kind == CoverageWarningKind.HttpMethodMismatch
+        );
         Assert.Equal("GET", warning.Expected);
         Assert.Equal("POST", warning.Actual);
         Assert.Equal("TasksContract", warning.ContractName);
@@ -593,8 +606,10 @@ public sealed class CoverageCheckerTests
             """;
 
         var (_, warnings) = RunCheck(TasksContract, impl);
-        var warning = Assert.Single(warnings, w =>
-            w.FieldName == "ListTasks" && w.Kind == CoverageWarningKind.RouteMismatch);
+        var warning = Assert.Single(
+            warnings,
+            w => w.FieldName == "ListTasks" && w.Kind == CoverageWarningKind.RouteMismatch
+        );
         Assert.Equal("/api/tasks", warning.Expected);
         Assert.Equal("/api/items", warning.Actual);
         Assert.Equal("TasksContract", warning.ContractName);
@@ -630,14 +645,31 @@ public sealed class CoverageCheckerTests
 
         // TasksContract: ListTasks covered, rest missing (4)
         // MembersContract: ListMembers missing (1)
-        var missing = warnings.Where(w => w.Kind == CoverageWarningKind.MissingImplementation).ToList();
+        var missing = warnings
+            .Where(w => w.Kind == CoverageWarningKind.MissingImplementation)
+            .ToList();
         Assert.Equal(5, missing.Count);
-        Assert.Contains(missing, w => w.ContractName == "MembersContract" && w.FieldName == "ListMembers");
+        Assert.Contains(
+            missing,
+            w => w.ContractName == "MembersContract" && w.FieldName == "ListMembers"
+        );
         Assert.Equal(4, missing.Count(w => w.ContractName == "TasksContract"));
-        Assert.Contains(missing, w => w.ContractName == "TasksContract" && w.FieldName == "CreateTask");
-        Assert.Contains(missing, w => w.ContractName == "TasksContract" && w.FieldName == "UpdateTask");
-        Assert.Contains(missing, w => w.ContractName == "TasksContract" && w.FieldName == "PatchTask");
-        Assert.Contains(missing, w => w.ContractName == "TasksContract" && w.FieldName == "RemoveTask");
+        Assert.Contains(
+            missing,
+            w => w.ContractName == "TasksContract" && w.FieldName == "CreateTask"
+        );
+        Assert.Contains(
+            missing,
+            w => w.ContractName == "TasksContract" && w.FieldName == "UpdateTask"
+        );
+        Assert.Contains(
+            missing,
+            w => w.ContractName == "TasksContract" && w.FieldName == "PatchTask"
+        );
+        Assert.Contains(
+            missing,
+            w => w.ContractName == "TasksContract" && w.FieldName == "RemoveTask"
+        );
     }
 
     [Fact]
@@ -678,7 +710,9 @@ public sealed class CoverageCheckerTests
             """;
 
         var (_, warnings) = RunCheck(TasksContract, impl);
-        var missing = warnings.Where(w => w.Kind == CoverageWarningKind.MissingImplementation).ToList();
+        var missing = warnings
+            .Where(w => w.Kind == CoverageWarningKind.MissingImplementation)
+            .ToList();
         Assert.Equal(2, missing.Count); // UpdateTask and PatchTask missing
         Assert.Contains(missing, w => w.FieldName == "UpdateTask");
         Assert.Contains(missing, w => w.FieldName == "PatchTask");

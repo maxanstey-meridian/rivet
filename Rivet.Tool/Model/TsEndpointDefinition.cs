@@ -18,17 +18,27 @@ public sealed record TsEndpointDefinition(
     EndpointSecurity? Security = null,
     string? FileContentType = null,
     string? InputTypeName = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFormEncoded = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TsType? RequestType = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsEndpointExample>? RequestExamples = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFileEndpoint = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] QueryAuthMetadata? QueryAuth = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BinaryRequestContentType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool IsFormEncoded = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        TsType? RequestType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<TsEndpointExample>? RequestExamples = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool IsFileEndpoint = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        QueryAuthMetadata? QueryAuth = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? BinaryRequestContentType = null,
     // .AcceptsContentType()/.ProducesContentType(): non-JSON media types for
     // JSON-schema'd bodies (text/plain string body, text/html string response).
     // Schema is unchanged — only the declared content-type key (FABLE_ROUNDTRIP #10).
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RequestContentTypeOverride = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResponseContentTypeOverride = null);
+    [property: JsonIgnore(
+        Condition = JsonIgnoreCondition.WhenWritingNull
+    )] string? RequestContentTypeOverride = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? ResponseContentTypeOverride = null
+);
 
 /// <summary>
 /// Security metadata for an endpoint. null = inherit CLI default.
@@ -42,8 +52,11 @@ public sealed record TsResponseType(
     int StatusCode,
     TsType? DataType,
     string? Description = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsEndpointExample>? Examples = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TsResponseHeader>? Headers = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<TsEndpointExample>? Examples = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<TsResponseHeader>? Headers = null
+);
 
 /// <summary>
 /// A declared response header (string-typed in v1). Spec-only: Rivet never sets or
@@ -51,8 +64,10 @@ public sealed record TsResponseType(
 /// </summary>
 public sealed record TsResponseHeader(
     string Name,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Description = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Required = false);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Description = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Required = false
+);
 
 /// <summary>
 /// A parameter to a client function.
@@ -62,7 +77,9 @@ public sealed record TsEndpointParam(
     TsType Type,
     ParamSource Source,
     bool IsOptional = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BodyPropertyName = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? BodyPropertyName = null
+);
 
 public enum ParamSource
 {

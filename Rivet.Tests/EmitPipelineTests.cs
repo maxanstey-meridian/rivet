@@ -14,7 +14,10 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class EmitPipelineTests : IDisposable
 {
-    private readonly string _outputDir = Path.Combine(Path.GetTempPath(), $"rivet-emit-pipeline-{Guid.NewGuid():N}");
+    private readonly string _outputDir = Path.Combine(
+        Path.GetTempPath(),
+        $"rivet-emit-pipeline-{Guid.NewGuid():N}"
+    );
 
     public void Dispose()
     {
@@ -26,7 +29,8 @@ public sealed class EmitPipelineTests : IDisposable
 
     private static EmitPipeline.EmitInput BuildEmitInput(
         IReadOnlyList<TsEndpointDefinition> endpoints,
-        IReadOnlyList<TsTypeDefinition>? definitions = null)
+        IReadOnlyList<TsTypeDefinition>? definitions = null
+    )
     {
         var defs = definitions ?? [];
         return new EmitPipeline.EmitInput(
@@ -36,7 +40,8 @@ public sealed class EmitPipelineTests : IDisposable
             endpoints,
             new Dictionary<string, string?>(),
             defs.ToDictionary(d => d.Name),
-            new Dictionary<string, TsType.Brand>());
+            new Dictionary<string, TsType.Brand>()
+        );
     }
 
     private static List<TsEndpointDefinition> DuplicateInlineEndpoints()
@@ -48,11 +53,24 @@ public sealed class EmitPipelineTests : IDisposable
 
         return
         [
-            new("find", "GET", "/api/buyers/{id}",
+            new(
+                "find",
+                "GET",
+                "/api/buyers/{id}",
                 [new TsEndpointParam("id", new TsType.Primitive("number"), ParamSource.Route)],
-                inlineType, "Buyers", [new TsResponseType(200, inlineType)]),
-            new("list", "GET", "/api/buyers", [], new TsType.Array(inlineType), "Buyers",
-                [new TsResponseType(200, new TsType.Array(inlineType))]),
+                inlineType,
+                "Buyers",
+                [new TsResponseType(200, inlineType)]
+            ),
+            new(
+                "list",
+                "GET",
+                "/api/buyers",
+                [],
+                new TsType.Array(inlineType),
+                "Buyers",
+                [new TsResponseType(200, new TsType.Array(inlineType))]
+            ),
         ];
     }
 
@@ -67,7 +85,10 @@ public sealed class EmitPipelineTests : IDisposable
         Assert.Equal(0, result);
 
         var specPath = Path.Combine(_outputDir, "openapi.json");
-        Assert.True(File.Exists(specPath), "--output <dir> must write <dir>/openapi.json by default");
+        Assert.True(
+            File.Exists(specPath),
+            "--output <dir> must write <dir>/openapi.json by default"
+        );
 
         using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(specPath));
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
@@ -79,16 +100,34 @@ public sealed class EmitPipelineTests : IDisposable
         Assert.Equal("number", props.GetProperty("age").GetProperty("type").GetString());
 
         // ...and the operations reference it instead of inlining the object
-        var findSchema = doc.RootElement.GetProperty("paths").GetProperty("/api/buyers/{id}")
-            .GetProperty("get").GetProperty("responses").GetProperty("200")
-            .GetProperty("content").GetProperty("application/json").GetProperty("schema");
-        Assert.Equal("#/components/schemas/BuyerFindDto", findSchema.GetProperty("$ref").GetString());
+        var findSchema = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/buyers/{id}")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema");
+        Assert.Equal(
+            "#/components/schemas/BuyerFindDto",
+            findSchema.GetProperty("$ref").GetString()
+        );
 
-        var listSchema = doc.RootElement.GetProperty("paths").GetProperty("/api/buyers")
-            .GetProperty("get").GetProperty("responses").GetProperty("200")
-            .GetProperty("content").GetProperty("application/json").GetProperty("schema");
+        var listSchema = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/buyers")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema");
         Assert.Equal("array", listSchema.GetProperty("type").GetString());
-        Assert.Equal("#/components/schemas/BuyerFindDto", listSchema.GetProperty("items").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "#/components/schemas/BuyerFindDto",
+            listSchema.GetProperty("items").GetProperty("$ref").GetString()
+        );
     }
 
     [Fact]
@@ -101,19 +140,39 @@ public sealed class EmitPipelineTests : IDisposable
             ("y", new TsType.Primitive("number")),
         ]);
 
-        var existingDef = new TsTypeDefinition("WidgetGetWidgetDto", [],
-        [
-            new TsPropertyDefinition("id", new TsType.Primitive("string"), IsOptional: false),
-            new TsPropertyDefinition("label", new TsType.Primitive("string"), IsOptional: false),
-        ]);
+        var existingDef = new TsTypeDefinition(
+            "WidgetGetWidgetDto",
+            [],
+            [
+                new TsPropertyDefinition("id", new TsType.Primitive("string"), IsOptional: false),
+                new TsPropertyDefinition(
+                    "label",
+                    new TsType.Primitive("string"),
+                    IsOptional: false
+                ),
+            ]
+        );
 
         var endpoints = new List<TsEndpointDefinition>
         {
-            new("getWidget", "GET", "/api/widgets/{id}",
+            new(
+                "getWidget",
+                "GET",
+                "/api/widgets/{id}",
                 [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
-                inlineType, "Widget", [new TsResponseType(200, inlineType)]),
-            new("listWidgets", "GET", "/api/widgets", [], new TsType.Array(inlineType), "Widget",
-                [new TsResponseType(200, new TsType.Array(inlineType))]),
+                inlineType,
+                "Widget",
+                [new TsResponseType(200, inlineType)]
+            ),
+            new(
+                "listWidgets",
+                "GET",
+                "/api/widgets",
+                [],
+                new TsType.Array(inlineType),
+                "Widget",
+                [new TsResponseType(200, new TsType.Array(inlineType))]
+            ),
         };
 
         var input = BuildEmitInput(endpoints, [existingDef]);
@@ -122,7 +181,8 @@ public sealed class EmitPipelineTests : IDisposable
         await EmitPipeline.RunAsync(input, options);
 
         using var doc = JsonDocument.Parse(
-            await File.ReadAllTextAsync(Path.Combine(_outputDir, "openapi.json")));
+            await File.ReadAllTextAsync(Path.Combine(_outputDir, "openapi.json"))
+        );
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
         // Original keeps its fields
@@ -131,7 +191,8 @@ public sealed class EmitPipelineTests : IDisposable
         Assert.True(original.TryGetProperty("label", out _));
 
         // Extracted type landed under a collision-avoidance name with its own fields
-        var extractedName = schemas.EnumerateObject()
+        var extractedName = schemas
+            .EnumerateObject()
             .Select(p => p.Name)
             .Single(n => n.StartsWith("WidgetGetWidget") && n != "WidgetGetWidgetDto");
         var extracted = schemas.GetProperty(extractedName).GetProperty("properties");
@@ -150,7 +211,10 @@ public sealed class EmitPipelineTests : IDisposable
         var specPath = Path.Combine(_outputDir, "openapi.json");
         var writtenAt = File.GetLastWriteTimeUtc(specPath);
 
-        var result = await EmitPipeline.RunAsync(input, new RivetOptions(".", _outputDir, [], Verify: true));
+        var result = await EmitPipeline.RunAsync(
+            input,
+            new RivetOptions(".", _outputDir, [], Verify: true)
+        );
 
         Assert.Equal(0, result);
         Assert.Equal(writtenAt, File.GetLastWriteTimeUtc(specPath));
@@ -168,7 +232,11 @@ public sealed class EmitPipelineTests : IDisposable
 
         int result = -1;
         var stderr = CompilationHelper.CaptureStdErr(() =>
-            result = EmitPipeline.RunAsync(input, new RivetOptions(".", _outputDir, [], Verify: true)).GetAwaiter().GetResult());
+            result = EmitPipeline
+                .RunAsync(input, new RivetOptions(".", _outputDir, [], Verify: true))
+                .GetAwaiter()
+                .GetResult()
+        );
 
         Assert.Equal(1, result);
         Assert.Contains("is stale", stderr);
@@ -182,11 +250,18 @@ public sealed class EmitPipelineTests : IDisposable
 
         int result = -1;
         var stderr = CompilationHelper.CaptureStdErr(() =>
-            result = EmitPipeline.RunAsync(input, new RivetOptions(".", _outputDir, [], Verify: true)).GetAwaiter().GetResult());
+            result = EmitPipeline
+                .RunAsync(input, new RivetOptions(".", _outputDir, [], Verify: true))
+                .GetAwaiter()
+                .GetResult()
+        );
 
         Assert.Equal(1, result);
         Assert.Contains("does not exist", stderr);
-        Assert.False(File.Exists(Path.Combine(_outputDir, "openapi.json")), "--verify must never write");
+        Assert.False(
+            File.Exists(Path.Combine(_outputDir, "openapi.json")),
+            "--verify must never write"
+        );
     }
 
     [Theory]
@@ -195,15 +270,22 @@ public sealed class EmitPipelineTests : IDisposable
     [InlineData(new[] { "bad name=bearer" }, "invalid --security value")]
     [InlineData(new[] { "a/b=bearer" }, "invalid --security value")]
     [InlineData(new[] { "admin=bearer", "admin=cookie:sid" }, "duplicate --security scheme name")]
-    public void Invalid_Security_Returns_Controlled_Error(string[] securitySchemes, string expectedError)
+    public void Invalid_Security_Returns_Controlled_Error(
+        string[] securitySchemes,
+        string expectedError
+    )
     {
         var input = BuildEmitInput(DuplicateInlineEndpoints());
         var result = -1;
         var stderr = CompilationHelper.CaptureStdErr(() =>
-            result = EmitPipeline.RunAsync(
-                input,
-                new RivetOptions(".", _outputDir, [], SecuritySchemes: securitySchemes))
-                .GetAwaiter().GetResult());
+            result = EmitPipeline
+                .RunAsync(
+                    input,
+                    new RivetOptions(".", _outputDir, [], SecuritySchemes: securitySchemes)
+                )
+                .GetAwaiter()
+                .GetResult()
+        );
 
         Assert.Equal(1, result);
         Assert.Contains(expectedError, stderr);
@@ -218,14 +300,21 @@ public sealed class EmitPipelineTests : IDisposable
         var specDir = Path.Combine(_outputDir, "spec-home");
         var overridePath = Path.Combine(specDir, "api-spec.json");
         var input = BuildEmitInput(DuplicateInlineEndpoints());
-        var options = new RivetOptions(".", Path.Combine(_outputDir, "rivet"), [], OpenApiPath: overridePath);
+        var options = new RivetOptions(
+            ".",
+            Path.Combine(_outputDir, "rivet"),
+            [],
+            OpenApiPath: overridePath
+        );
 
         var result = await EmitPipeline.RunAsync(input, options);
 
         Assert.Equal(0, result);
         Assert.True(File.Exists(overridePath), "--openapi <abs path> must be honored");
-        Assert.False(File.Exists(Path.Combine(_outputDir, "rivet", "openapi.json")),
-            "--openapi is the sole writer when given");
+        Assert.False(
+            File.Exists(Path.Combine(_outputDir, "rivet", "openapi.json")),
+            "--openapi is the sole writer when given"
+        );
 
         using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(overridePath));
         Assert.Equal("3.1.0", doc.RootElement.GetProperty("openapi").GetString());
@@ -238,7 +327,12 @@ public sealed class EmitPipelineTests : IDisposable
         // resolved against --output lands the spec next to the output directory.
         var outputDir = Path.Combine(_outputDir, "client", "generated", "rivet");
         var input = BuildEmitInput(DuplicateInlineEndpoints());
-        var options = new RivetOptions(".", outputDir, [], OpenApiPath: Path.Combine("..", "openapi.json"));
+        var options = new RivetOptions(
+            ".",
+            outputDir,
+            [],
+            OpenApiPath: Path.Combine("..", "openapi.json")
+        );
 
         var result = await EmitPipeline.RunAsync(input, options);
 

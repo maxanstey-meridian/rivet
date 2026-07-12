@@ -6,8 +6,8 @@ namespace Rivet.Tests;
 
 public sealed class ContractEndpointTests
 {
-    private static IReadOnlyList<TsEndpointDefinition> Generate(string source)
-        => CompilationHelper.WalkContract(source).Endpoints;
+    private static IReadOnlyList<TsEndpointDefinition> Generate(string source) =>
+        CompilationHelper.WalkContract(source).Endpoints;
 
     [Fact]
     public void Get_WithInputAndOutput_RouteAndQueryParams()
@@ -310,7 +310,8 @@ public sealed class ContractEndpointTests
         // The silent drop must be loud: a warning naming the status and the endpoint.
         Assert.Contains(
             "warning RIV1002: ignoring response example for undeclared status 422 on contract endpoint 'getTask'",
-            stderr);
+            stderr
+        );
     }
 
     [Fact]
@@ -556,7 +557,10 @@ public sealed class ContractEndpointTests
         Assert.Equal("application/x-www-form-urlencoded", requestExample.MediaType);
         Assert.Null(requestExample.Json);
         Assert.Equal("login-request", requestExample.ComponentExampleId);
-        Assert.Equal("""{"email":"ada@example.com","password":"secret"}""", requestExample.ResolvedJson);
+        Assert.Equal(
+            """{"email":"ada@example.com","password":"secret"}""",
+            requestExample.ResolvedJson
+        );
 
         var response = endpoint.Responses.First(r => r.StatusCode == 422);
         var responseExample = Assert.Single(response.Examples!);
@@ -594,7 +598,9 @@ public sealed class ContractEndpointTests
         var endpoints = Generate(source);
 
         var ep = Assert.Single(endpoints);
-        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(ep.RequestExamples);
+        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(
+            ep.RequestExamples
+        );
         Assert.Equal(2, requestExamples.Count);
 
         Assert.Equal("inline", requestExamples[0].Name);
@@ -1031,7 +1037,9 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var error = Assert.Throws<InvalidOperationException>(() => CompilationHelper.CreateCompilation(source));
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            CompilationHelper.CreateCompilation(source)
+        );
 
         Assert.Contains("RequestExampleRef", error.Message);
         Assert.Contains("ResponseExampleRef", error.Message);
@@ -1161,7 +1169,6 @@ public sealed class ContractEndpointTests
         Assert.True(ep.Params[0].Type is TsType.Primitive { Name: "string" });
 
         Assert.Null(ep.ReturnType);
-
     }
 
     [Fact]
@@ -1229,7 +1236,10 @@ public sealed class ContractEndpointTests
         Assert.Single(endpoints);
         var ep = endpoints[0];
         Assert.True(ep.ReturnType is TsType.TypeRef { Name: "CreatedDto" });
-        Assert.Contains(ep.Responses, r => r.StatusCode == 201 && r.DataType is TsType.TypeRef { Name: "CreatedDto" });
+        Assert.Contains(
+            ep.Responses,
+            r => r.StatusCode == 201 && r.DataType is TsType.TypeRef { Name: "CreatedDto" }
+        );
     }
 
     [Fact]
@@ -1297,7 +1307,6 @@ public sealed class ContractEndpointTests
         Assert.Single(endpoints);
         Assert.Equal("caseStatuses", endpoints[0].ControllerName);
         Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "ItemDto" });
-
     }
 
     [Fact]
@@ -1531,9 +1540,18 @@ public sealed class ContractEndpointTests
         Assert.Single(endpoints);
         Assert.Equal("Retrieve a task", endpoints[0].Description);
         Assert.True(endpoints[0].ReturnType is TsType.TypeRef { Name: "TaskDto" });
-        Assert.True(endpoints[0].Responses.First(r => r.StatusCode == 200).DataType is TsType.TypeRef { Name: "TaskDto" });
-        Assert.True(endpoints[0].Responses.First(r => r.StatusCode == 404).DataType is TsType.TypeRef { Name: "NotFoundDto" });
-        Assert.Equal("Task not found", endpoints[0].Responses.First(r => r.StatusCode == 404).Description);
+        Assert.True(
+            endpoints[0].Responses.First(r => r.StatusCode == 200).DataType
+                is TsType.TypeRef { Name: "TaskDto" }
+        );
+        Assert.True(
+            endpoints[0].Responses.First(r => r.StatusCode == 404).DataType
+                is TsType.TypeRef { Name: "NotFoundDto" }
+        );
+        Assert.Equal(
+            "Task not found",
+            endpoints[0].Responses.First(r => r.StatusCode == 404).Description
+        );
     }
 
     // --- Abstract base class contract tests ---
@@ -1829,7 +1847,6 @@ public sealed class ContractEndpointTests
         Assert.Single(ep.Params);
         Assert.Equal("file", ep.Params[0].Name);
         Assert.Equal(ParamSource.File, ep.Params[0].Source);
-
     }
 
     [Fact]
@@ -1864,7 +1881,6 @@ public sealed class ContractEndpointTests
         Assert.Equal(ParamSource.Route, ep.Params[0].Source);
         Assert.Equal("file", ep.Params[1].Name);
         Assert.Equal(ParamSource.File, ep.Params[1].Source);
-
     }
 
     [Fact]
@@ -1897,8 +1913,6 @@ public sealed class ContractEndpointTests
         Assert.Equal("GET", ep.HttpMethod);
         Assert.Equal("application/octet-stream", ep.FileContentType);
         Assert.Null(ep.ReturnType);
-
-
 
         // Error response should still be typed
         Assert.Single(ep.Responses, r => r.StatusCode == 404);
@@ -1951,7 +1965,13 @@ public sealed class ContractEndpointTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         // Success response should use application/pdf with binary schema
         Assert.Contains("application/pdf", json);
@@ -2036,7 +2056,13 @@ public sealed class ContractEndpointTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         Assert.Contains("application/octet-stream", json);
         Assert.Contains("\"format\": \"binary\"", json);
@@ -2090,7 +2116,13 @@ public sealed class ContractEndpointTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         Assert.Contains("application/octet-stream", json);
         Assert.Contains("\"format\": \"binary\"", json);
@@ -2162,7 +2194,6 @@ public sealed class ContractEndpointTests
         var categoryParam = ep.Params.FirstOrDefault(p => p.Name == "categoryId");
         Assert.NotNull(categoryParam);
         Assert.Equal(ParamSource.FormField, categoryParam.Source);
-
     }
 
     [Fact]
@@ -2215,7 +2246,6 @@ public sealed class ContractEndpointTests
         var ep = Assert.Single(endpoints);
 
         Assert.True(ep.IsFormEncoded, "Endpoint should have IsFormEncoded=true");
-
     }
 
     [Fact]
@@ -2244,10 +2274,19 @@ public sealed class ContractEndpointTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         Assert.Contains("application/x-www-form-urlencoded", json);
-        Assert.DoesNotContain("\"application/json\"", json.Split("requestBody")[1].Split("responses")[0]);
+        Assert.DoesNotContain(
+            "\"application/json\"",
+            json.Split("requestBody")[1].Split("responses")[0]
+        );
     }
 
     // ========== GAP-2: Void error responses forward pipeline ==========
@@ -2286,7 +2325,6 @@ public sealed class ContractEndpointTests
         var resp409 = ep.Responses.FirstOrDefault(r => r.StatusCode == 409);
         Assert.NotNull(resp409);
         Assert.Null(resp409.DataType);
-
     }
 
     [Fact]
@@ -2312,16 +2350,26 @@ public sealed class ContractEndpointTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         var doc = System.Text.Json.JsonDocument.Parse(json);
 
-        var resp404 = doc.RootElement
-            .GetProperty("paths").GetProperty("/api/items/{id}")
-            .GetProperty("put").GetProperty("responses")
+        var resp404 = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/items/{id}")
+            .GetProperty("put")
+            .GetProperty("responses")
             .GetProperty("404");
 
-        Assert.False(resp404.TryGetProperty("content", out _),
-            "Void 404 response should have no content block");
+        Assert.False(
+            resp404.TryGetProperty("content", out _),
+            "Void 404 response should have no content block"
+        );
     }
 
     // ========== GAP-3: JsonStringEnumMemberName forward pipeline ==========
@@ -2419,7 +2467,9 @@ public sealed class ContractEndpointTests
 
         var outputEndpoints = Generate(outputSource);
         var outputEp = Assert.Single(outputEndpoints);
-        var outputSuccess = outputEp.Responses.FirstOrDefault(r => r.StatusCode is >= 200 and < 300);
+        var outputSuccess = outputEp.Responses.FirstOrDefault(r =>
+            r.StatusCode is >= 200 and < 300
+        );
         Assert.NotNull(outputSuccess);
         Assert.Equal(200, outputSuccess.StatusCode);
     }
@@ -2553,15 +2603,24 @@ public sealed class ContractEndpointTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = Rivet.Tool.Emit.OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         var doc = System.Text.Json.JsonDocument.Parse(json);
 
-        var operation = doc.RootElement
-            .GetProperty("paths").GetProperty("/api/items/{id}")
+        var operation = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/items/{id}")
             .GetProperty("get");
 
         Assert.Equal("Get an item", operation.GetProperty("summary").GetString());
-        Assert.Equal("Retrieves a single item by its unique identifier",
-            operation.GetProperty("description").GetString());
+        Assert.Equal(
+            "Retrieves a single item by its unique identifier",
+            operation.GetProperty("description").GetString()
+        );
     }
 }

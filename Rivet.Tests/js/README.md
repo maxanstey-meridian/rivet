@@ -1,6 +1,6 @@
 # Rivet.Tests/js
 
-Vendored node tooling for the test suite. Run `npm install` in this directory once;
+Vendored node tooling for the test suite. Run `pnpm install` in this directory once;
 everything the tests shell out to is then local and offline-deterministic
 (no `npx` downloads at test time):
 

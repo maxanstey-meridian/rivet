@@ -12,22 +12,36 @@ namespace Rivet.Tool.Import;
 /// </summary>
 internal static class SchemaClassifier
 {
-    private static readonly HashSet<string> BrandFormats = ["email", "uri", "url", "uri-reference"];
+    private static readonly HashSet<string> _brandFormats =
+    [
+        "email",
+        "uri",
+        "url",
+        "uri-reference",
+    ];
 
     // --- Predicates ---
 
     internal static bool IsStringEnum(IOpenApiSchema schema)
     {
         if (schema.Enum is not { Count: > 0 })
+        {
             return false;
+        }
 
         // Explicit type: string
         if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.String))
+        {
             return true;
+        }
 
         // No type declared — infer from values (common in real-world specs)
         if (!schema.Type.HasValue)
-            return schema.Enum.All(v => v is null || v is JsonNode node && node.GetValueKind() == JsonValueKind.String);
+        {
+            return schema.Enum.All(v =>
+                v is null || v is JsonNode node && node.GetValueKind() == JsonValueKind.String
+            );
+        }
 
         return false;
     }
@@ -35,14 +49,20 @@ internal static class SchemaClassifier
     internal static bool IsIntEnum(IOpenApiSchema schema)
     {
         if (schema.Enum is not { Count: > 1 })
+        {
             return false;
+        }
 
         if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Integer))
+        {
             return schema.Enum.All(v => v is JsonNode node && IsWholeInt32(node));
+        }
 
         // No explicit type — infer from values
         if (!schema.Type.HasValue)
+        {
             return schema.Enum.All(v => v is JsonNode node && IsWholeInt32(node));
+        }
 
         return false;
     }
@@ -50,7 +70,9 @@ internal static class SchemaClassifier
     private static bool IsWholeInt32(JsonNode node)
     {
         if (node.GetValueKind() != JsonValueKind.Number)
+        {
             return false;
+        }
 
         var value = node.GetValue<double>();
         return value == Math.Floor(value) && value >= int.MinValue && value <= int.MaxValue;
@@ -70,7 +92,7 @@ internal static class SchemaClassifier
             return false;
         }
 
-        return schema.Format is not null && BrandFormats.Contains(schema.Format);
+        return schema.Format is not null && _brandFormats.Contains(schema.Format);
     }
 
     internal static bool IsObject(IOpenApiSchema schema)
@@ -299,8 +321,8 @@ internal static class SchemaClassifier
             "System.Text.Json.JsonElement" => "Object",
             _ when csharpType.StartsWith("List<") || csharpType.StartsWith("IReadOnlyList<") =>
                 "ListOf" + Naming.StripInvalidIdentifierChars(csharpType),
-            _ when csharpType.StartsWith("Dictionary<string,") =>
-                "DictionaryOf" + Naming.StripInvalidIdentifierChars(csharpType),
+            _ when csharpType.StartsWith("Dictionary<string,") => "DictionaryOf"
+                + Naming.StripInvalidIdentifierChars(csharpType),
             _ => Naming.StripInvalidIdentifierChars(Naming.ToPascalCaseFromSegments(csharpType)),
         };
     }
@@ -330,26 +352,40 @@ internal static class SchemaClassifier
     internal static List<string>? GetExtensionStringArray(IOpenApiSchema schema, string key)
     {
         if (schema.Extensions is null || !schema.Extensions.TryGetValue(key, out var ext))
+        {
             return null;
+        }
 
         if (ext is not JsonNodeExtension jsonExt || jsonExt.Node is not JsonArray arr)
+        {
             return null;
+        }
 
         var result = new List<string>(arr.Count);
         foreach (var item in arr)
         {
             var val = item?.GetValue<string>();
-            if (val is null) return null; // any non-string element → bail
+            if (val is null)
+            {
+                return null; // any non-string element → bail
+            }
+
             result.Add(val);
         }
 
         return result;
     }
 
-    internal static bool TryGetGenericExtension(IOpenApiSchema schema, out GenericTemplateInfo? info)
+    internal static bool TryGetGenericExtension(
+        IOpenApiSchema schema,
+        out GenericTemplateInfo? info
+    )
     {
         info = null;
-        if (schema.Extensions is null || !schema.Extensions.TryGetValue("x-rivet-generic", out var ext))
+        if (
+            schema.Extensions is null
+            || !schema.Extensions.TryGetValue("x-rivet-generic", out var ext)
+        )
         {
             return false;
         }
@@ -412,8 +448,7 @@ internal static class SchemaClassifier
                 do
                 {
                     name = $"{prop.Name}_{suffix++}";
-                }
-                while (!used.Add(name));
+                } while (!used.Add(name));
 
                 nextSuffix[prop.Name] = suffix;
             }
@@ -455,7 +490,11 @@ internal static class SchemaClassifier
                 // 'Ready' (Pascal == original, old check skipped the pin) still
                 // emits as 'ready' — a silent case-mangle both directions
                 // (FABLE_ROUNDTRIP #3, 63 properties on the github corpus).
-                var originalName = string.Equals(Naming.ToCamelCase(sanitized), original, StringComparison.Ordinal)
+                var originalName = string.Equals(
+                    Naming.ToCamelCase(sanitized),
+                    original,
+                    StringComparison.Ordinal
+                )
                     ? null
                     : original;
                 members.Add(new GeneratedEnumMember(sanitized, originalName));
@@ -482,9 +521,10 @@ internal static class SchemaClassifier
             }
 
             var intVal = memberNode.GetValue<int>();
-            var csharpName = useVarnames
-                ? Naming.ToPascalCaseFromSegments(varnames![index])
-                : intVal < 0 ? $"ValueNeg{Math.Abs(intVal)}" : $"Value{intVal}";
+            var csharpName =
+                useVarnames ? Naming.ToPascalCaseFromSegments(varnames![index])
+                : intVal < 0 ? $"ValueNeg{Math.Abs(intVal)}"
+                : $"Value{intVal}";
 
             if (!emitted.Add(csharpName))
             {
@@ -518,11 +558,15 @@ internal static class SchemaClassifier
     {
         // Build e.g. "PagedResult<TaskDto>" from template name and args
         var argStrings = info.TypeParams.Select(tp =>
-            info.Args.TryGetValue(tp, out var concrete) ? concrete : tp);
+            info.Args.TryGetValue(tp, out var concrete) ? concrete : tp
+        );
         return $"{info.Name}<{string.Join(", ", argStrings)}>";
     }
 
-    internal static string ReverseSubstituteTypes(string csharpType, Dictionary<string, string> reverseMap)
+    internal static string ReverseSubstituteTypes(
+        string csharpType,
+        Dictionary<string, string> reverseMap
+    )
     {
         // Replace concrete type names with type parameter names using word-boundary
         // matching to avoid corrupting types that contain the concrete name as a substring

@@ -16,7 +16,9 @@ public sealed class FromContractTests
         Directory.CreateDirectory(tempDir);
         var contractPath = Path.Combine(tempDir, "contract.json");
         var outputDir = Path.Combine(tempDir, "generated");
-        await File.WriteAllTextAsync(contractPath, """
+        await File.WriteAllTextAsync(
+            contractPath,
+            """
             {
               "types": [{
                 "name": "SettingsDto",
@@ -36,21 +38,27 @@ public sealed class FromContractTests
               "enums": [],
               "endpoints": []
             }
-            """);
+            """
+        );
 
         try
         {
             var (exitCode, output) = await PublishFixture.RunProcessAsync(
                 "dotnet",
                 $"run --project \"{csproj}\" -- --from \"{contractPath}\" --output \"{outputDir}\"",
-                repoRoot);
+                repoRoot
+            );
             Assert.True(exitCode == 0, $"--from failed (exit {exitCode}):\n{output}");
 
             using var document = System.Text.Json.JsonDocument.Parse(
-                await File.ReadAllTextAsync(Path.Combine(outputDir, "openapi.json")));
-            var property = document.RootElement
-                .GetProperty("components").GetProperty("schemas").GetProperty("SettingsDto")
-                .GetProperty("properties").GetProperty("idleTimeoutMs");
+                await File.ReadAllTextAsync(Path.Combine(outputDir, "openapi.json"))
+            );
+            var property = document
+                .RootElement.GetProperty("components")
+                .GetProperty("schemas")
+                .GetProperty("SettingsDto")
+                .GetProperty("properties")
+                .GetProperty("idleTimeoutMs");
             var oneOf = property.GetProperty("oneOf");
             Assert.Equal("number", oneOf[0].GetProperty("type").GetString());
             Assert.False(oneOf[1].GetProperty("const").GetBoolean());
@@ -71,7 +79,8 @@ public sealed class FromContractTests
         var (exitCode, output) = await PublishFixture.RunProcessAsync(
             "dotnet",
             $"run --project \"{csproj}\" -- --from \"{fixture}\"",
-            repoRoot);
+            repoRoot
+        );
 
         Assert.True(exitCode == 0, $"--from failed (exit {exitCode}):\n{output}");
         Assert.Contains("\"openapi\"", output);
@@ -93,7 +102,8 @@ public sealed class FromContractTests
             var (exitCode, output) = await PublishFixture.RunProcessAsync(
                 "dotnet",
                 $"run --project \"{csproj}\" -- --from \"{fixture}\" --output \"{outputDir}\"",
-                repoRoot);
+                repoRoot
+            );
 
             Assert.True(exitCode == 0, $"--from --output failed (exit {exitCode}):\n{output}");
 
@@ -110,7 +120,9 @@ public sealed class FromContractTests
         finally
         {
             if (Directory.Exists(outputDir))
+            {
                 Directory.Delete(outputDir, recursive: true);
+            }
         }
     }
 
@@ -120,7 +132,10 @@ public sealed class FromContractTests
         var repoRoot = PublishFixture.FindRepoRoot();
         var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
         var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
-        var outputDir = Path.Combine(Path.GetTempPath(), $"rivet-from-openapi-test-{Guid.NewGuid():N}");
+        var outputDir = Path.Combine(
+            Path.GetTempPath(),
+            $"rivet-from-openapi-test-{Guid.NewGuid():N}"
+        );
         var openApiFileName = "openapi.json";
 
         try
@@ -128,18 +143,30 @@ public sealed class FromContractTests
             var (exitCode, output) = await PublishFixture.RunProcessAsync(
                 "dotnet",
                 $"run --project \"{csproj}\" -- --from \"{fixture}\" --openapi \"{openApiFileName}\" --output \"{outputDir}\"",
-                repoRoot);
+                repoRoot
+            );
 
-            Assert.True(exitCode == 0, $"--from --openapi --output failed (exit {exitCode}):\n{output}");
+            Assert.True(
+                exitCode == 0,
+                $"--from --openapi --output failed (exit {exitCode}):\n{output}"
+            );
 
             var expectedOpenApiPath = Path.Combine(outputDir, openApiFileName);
-            Assert.True(File.Exists(expectedOpenApiPath), $"expected OpenAPI file at {expectedOpenApiPath}");
-            Assert.Contains("\"openapi\": \"3.1.0\"", await File.ReadAllTextAsync(expectedOpenApiPath));
+            Assert.True(
+                File.Exists(expectedOpenApiPath),
+                $"expected OpenAPI file at {expectedOpenApiPath}"
+            );
+            Assert.Contains(
+                "\"openapi\": \"3.1.0\"",
+                await File.ReadAllTextAsync(expectedOpenApiPath)
+            );
         }
         finally
         {
             if (Directory.Exists(outputDir))
+            {
                 Directory.Delete(outputDir, recursive: true);
+            }
         }
     }
 
@@ -153,7 +180,8 @@ public sealed class FromContractTests
         var (exitCode, output) = await PublishFixture.RunProcessAsync(
             "dotnet",
             $"run --project \"{csproj}\" -- --from \"{fixture}\" --quiet",
-            repoRoot);
+            repoRoot
+        );
 
         Assert.True(exitCode == 0, $"--from --quiet failed (exit {exitCode}):\n{output}");
         Assert.DoesNotContain("ProductDto", output);
@@ -169,7 +197,8 @@ public sealed class FromContractTests
         var (exitCode, output) = await PublishFixture.RunProcessAsync(
             "dotnet",
             $"run --project \"{csproj}\" -- --from \"{fixture}\" --compile",
-            repoRoot);
+            repoRoot
+        );
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("removed in v2", output);
@@ -180,16 +209,25 @@ public sealed class FromContractTests
     public async Task FromContract_TaggedUnion_OpenApi_Has_Discriminator()
     {
         var repoRoot = PublishFixture.FindRepoRoot();
-        var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-tagged-union.json");
+        var fixture = Path.Combine(
+            repoRoot,
+            "Rivet.Tests",
+            "Fixtures",
+            "contract-tagged-union.json"
+        );
         var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
-        var outputDir = Path.Combine(Path.GetTempPath(), $"rivet-from-tagged-union-{Guid.NewGuid():N}");
+        var outputDir = Path.Combine(
+            Path.GetTempPath(),
+            $"rivet-from-tagged-union-{Guid.NewGuid():N}"
+        );
 
         try
         {
             var (exitCode, output) = await PublishFixture.RunProcessAsync(
                 "dotnet",
                 $"run --project \"{csproj}\" -- --from \"{fixture}\" --output \"{outputDir}\" --openapi openapi.json",
-                repoRoot);
+                repoRoot
+            );
 
             Assert.True(exitCode == 0, $"--from tagged union failed (exit {exitCode}):\n{output}");
 
@@ -203,7 +241,9 @@ public sealed class FromContractTests
         finally
         {
             if (Directory.Exists(outputDir))
+            {
                 Directory.Delete(outputDir, recursive: true);
+            }
         }
     }
 
@@ -216,7 +256,8 @@ public sealed class FromContractTests
         var (exitCode, output) = await PublishFixture.RunProcessAsync(
             "dotnet",
             $"run --project \"{csproj}\" -- --from /nonexistent/contract.json",
-            repoRoot);
+            repoRoot
+        );
 
         Assert.NotEqual(0, exitCode);
         Assert.DoesNotContain("Unhandled exception", output);

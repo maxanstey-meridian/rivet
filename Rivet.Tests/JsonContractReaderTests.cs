@@ -35,7 +35,10 @@ public sealed class JsonContractReaderTests
         var settings = Assert.Single(result.Types);
         var union = Assert.IsType<TsType.Union>(Assert.Single(settings.Properties).Type);
         Assert.IsType<TsType.Primitive>(union.Variants[0]);
-        Assert.Equal(JsonValueKind.False, Assert.IsType<TsType.Literal>(union.Variants[1]).Value.ValueKind);
+        Assert.Equal(
+            JsonValueKind.False,
+            Assert.IsType<TsType.Literal>(union.Variants[1]).Value.ValueKind
+        );
     }
 
     [Fact]
@@ -207,24 +210,31 @@ public sealed class JsonContractReaderTests
     public void RequestType_Survives_RoundTrip()
     {
         var withRequestType = new TsEndpointDefinition(
-            "createBuyer", "POST", "/buyers",
+            "createBuyer",
+            "POST",
+            "/buyers",
             Params: [],
             ReturnType: null,
             ControllerName: "buyer",
             Responses: [],
-            RequestType: new TsType.TypeRef("CreateBuyerRequest"));
+            RequestType: new TsType.TypeRef("CreateBuyerRequest")
+        );
 
         var withoutRequestType = new TsEndpointDefinition(
-            "getProduct", "GET", "/products/{id}",
+            "getProduct",
+            "GET",
+            "/products/{id}",
             Params: [],
             ReturnType: null,
             ControllerName: "product",
-            Responses: []);
+            Responses: []
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [withRequestType, withoutRequestType]);
+            [withRequestType, withoutRequestType]
+        );
 
         var result = JsonContractReader.Read(json);
 
@@ -240,17 +250,24 @@ public sealed class JsonContractReaderTests
     public void RequestType_InlineObject_Survives_RoundTrip()
     {
         var endpoint = new TsEndpointDefinition(
-            "createBuyer", "POST", "/buyers",
+            "createBuyer",
+            "POST",
+            "/buyers",
             Params: [],
             ReturnType: null,
             ControllerName: "buyer",
             Responses: [],
-            RequestType: new TsType.InlineObject([("id", new TsType.Primitive("number", "int32")), ("name", new TsType.Primitive("string"))]));
+            RequestType: new TsType.InlineObject([
+                ("id", new TsType.Primitive("number", "int32")),
+                ("name", new TsType.Primitive("string")),
+            ])
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [endpoint]);
+            [endpoint]
+        );
 
         var result = JsonContractReader.Read(json);
 
@@ -334,7 +351,9 @@ public sealed class JsonContractReaderTests
 
         var createdResponse = endpoint.Responses[0];
         Assert.Equal(201, createdResponse.StatusCode);
-        var createdExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(createdResponse.Examples);
+        var createdExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(
+            createdResponse.Examples
+        );
         Assert.Equal(2, createdExamples.Count);
         Assert.Equal("created", createdExamples[0].Name);
         Assert.Equal("""{"id":"ord_123"}""", createdExamples[0].Json);
@@ -453,7 +472,9 @@ public sealed class JsonContractReaderTests
         var result = JsonContractReader.Read(json);
 
         var endpoint = Assert.Single(result.Endpoints);
-        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(endpoint.RequestExamples);
+        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(
+            endpoint.RequestExamples
+        );
         Assert.Equal(2, requestExamples.Count);
 
         Assert.Equal("inline", requestExamples[0].Name);
@@ -474,7 +495,13 @@ public sealed class JsonContractReaderTests
             "createOrder",
             "POST",
             "/orders",
-            [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            [
+                new TsEndpointParam(
+                    "body",
+                    new TsType.TypeRef("CreateOrderRequest"),
+                    ParamSource.Body
+                ),
+            ],
             new TsType.TypeRef("CreateOrderResponse"),
             "orders",
             [
@@ -483,9 +510,14 @@ public sealed class JsonContractReaderTests
                     new TsType.TypeRef("CreateOrderResponse"),
                     Examples:
                     [
-                        new TsEndpointExample("application/json", "created", """{"id":"ord_123"}"""),
+                        new TsEndpointExample(
+                            "application/json",
+                            "created",
+                            """{"id":"ord_123"}"""
+                        ),
                         new TsEndpointExample("application/json", "queued", """{"id":"ord_124"}"""),
-                    ]),
+                    ]
+                ),
                 new TsResponseType(
                     422,
                     new TsType.TypeRef("ValidationProblem"),
@@ -495,18 +527,22 @@ public sealed class JsonContractReaderTests
                             "application/json",
                             "validationProblem",
                             ComponentExampleId: "validation-problem",
-                            ResolvedJson: """{"message":"Validation failed"}"""),
-                    ]),
+                            ResolvedJson: """{"message":"Validation failed"}"""
+                        ),
+                    ]
+                ),
             ],
             RequestExamples:
             [
                 new TsEndpointExample("application/json", Json: """{"customerId":"cus_123"}"""),
-            ]);
+            ]
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [endpoint]);
+            [endpoint]
+        );
 
         var result = JsonContractReader.Read(json);
 
@@ -516,7 +552,9 @@ public sealed class JsonContractReaderTests
         Assert.Equal("""{"customerId":"cus_123"}""", requestExample.Json);
 
         var createdResponse = roundTripped.Responses[0];
-        var createdExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(createdResponse.Examples);
+        var createdExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(
+            createdResponse.Examples
+        );
         Assert.Equal(2, createdExamples.Count);
         Assert.Equal("created", createdExamples[0].Name);
         Assert.Equal("""{"id":"ord_123"}""", createdExamples[0].Json);
@@ -537,7 +575,13 @@ public sealed class JsonContractReaderTests
             "createOrder",
             "POST",
             "/orders",
-            [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            [
+                new TsEndpointParam(
+                    "body",
+                    new TsType.TypeRef("CreateOrderRequest"),
+                    ParamSource.Body
+                ),
+            ],
             new TsType.TypeRef("CreateOrderResponse"),
             "orders",
             [new TsResponseType(201, new TsType.TypeRef("CreateOrderResponse"))],
@@ -548,18 +592,23 @@ public sealed class JsonContractReaderTests
                     "application/json",
                     "refBacked",
                     ComponentExampleId: "create-order-example",
-                    ResolvedJson: """{"customerId":"cus_456"}"""),
-            ]);
+                    ResolvedJson: """{"customerId":"cus_456"}"""
+                ),
+            ]
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [endpoint]);
+            [endpoint]
+        );
 
         var result = JsonContractReader.Read(json);
 
         var roundTripped = Assert.Single(result.Endpoints);
-        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(roundTripped.RequestExamples);
+        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(
+            roundTripped.RequestExamples
+        );
         Assert.Equal(2, requestExamples.Count);
 
         Assert.Equal("inline", requestExamples[0].Name);
@@ -636,18 +685,25 @@ public sealed class JsonContractReaderTests
                             "application/problem+json",
                             "problem",
                             ComponentExampleId: "problem-example",
-                            ResolvedJson: """{"title":"Bad request"}"""),
-                    ]),
+                            ResolvedJson: """{"title":"Bad request"}"""
+                        ),
+                    ]
+                ),
             ],
             RequestExamples:
             [
-                new TsEndpointExample("application/problem+json", Json: """{"title":"Bad request"}"""),
-            ]);
+                new TsEndpointExample(
+                    "application/problem+json",
+                    Json: """{"title":"Bad request"}"""
+                ),
+            ]
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [endpoint]);
+            [endpoint]
+        );
 
         var result = JsonContractReader.Read(json);
 
@@ -694,16 +750,20 @@ public sealed class JsonContractReaderTests
     public void RequestType_Null_Omitted_From_Serialized_Json()
     {
         var endpoint = new TsEndpointDefinition(
-            "getProduct", "GET", "/products/{id}",
+            "getProduct",
+            "GET",
+            "/products/{id}",
             Params: [],
             ReturnType: null,
             ControllerName: "product",
-            Responses: []);
+            Responses: []
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [endpoint]);
+            [endpoint]
+        );
 
         Assert.DoesNotContain("requestType", json);
     }
@@ -712,18 +772,22 @@ public sealed class JsonContractReaderTests
     public void RequestType_With_IsFormEncoded_Survives_RoundTrip()
     {
         var endpoint = new TsEndpointDefinition(
-            "submitForm", "POST", "/forms",
+            "submitForm",
+            "POST",
+            "/forms",
             Params: [],
             ReturnType: null,
             ControllerName: "form",
             Responses: [],
             IsFormEncoded: true,
-            RequestType: new TsType.TypeRef("SubmitFormRequest"));
+            RequestType: new TsType.TypeRef("SubmitFormRequest")
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [endpoint]);
+            [endpoint]
+        );
 
         var result = JsonContractReader.Read(json);
 
@@ -800,12 +864,14 @@ public sealed class JsonContractReaderTests
             null,
             "media",
             [new TsResponseType(200, null)],
-            QueryAuth: new QueryAuthMetadata("token"));
+            QueryAuth: new QueryAuthMetadata("token")
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [endpoint]);
+            [endpoint]
+        );
 
         var result = JsonContractReader.Read(json);
 
@@ -821,18 +887,21 @@ public sealed class JsonContractReaderTests
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType.Brand>(),
             new Dictionary<string, TsType>(),
-            security: null);
+            security: null
+        );
 
         using var doc = JsonDocument.Parse(openApi);
-        var operation = doc.RootElement
-            .GetProperty("paths")
+        var operation = doc
+            .RootElement.GetProperty("paths")
             .GetProperty("/api/media/{id}/stream")
             .GetProperty("get");
 
         var queryAuth = operation.GetProperty("x-rivet-query-auth");
         Assert.Equal("token", queryAuth.GetProperty("parameterName").GetString());
 
-        var tokenParam = operation.GetProperty("parameters").EnumerateArray()
+        var tokenParam = operation
+            .GetProperty("parameters")
+            .EnumerateArray()
             .Single(p => p.GetProperty("name").GetString() == "token");
         Assert.Equal("query", tokenParam.GetProperty("in").GetString());
         Assert.True(tokenParam.GetProperty("required").GetBoolean());
@@ -850,12 +919,14 @@ public sealed class JsonContractReaderTests
             "files",
             [new TsResponseType(200, null)],
             FileContentType: "application/pdf",
-            IsFileEndpoint: true);
+            IsFileEndpoint: true
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [endpoint]);
+            [endpoint]
+        );
 
         var result = JsonContractReader.Read(json);
 
@@ -868,7 +939,8 @@ public sealed class JsonContractReaderTests
         var reEmitted = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [roundTripped]);
+            [roundTripped]
+        );
 
         using var doc = JsonDocument.Parse(reEmitted);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
@@ -880,11 +952,12 @@ public sealed class JsonContractReaderTests
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType.Brand>(),
             new Dictionary<string, TsType>(),
-            security: null);
+            security: null
+        );
 
         using var openApiDoc = JsonDocument.Parse(openApi);
-        var response200 = openApiDoc.RootElement
-            .GetProperty("paths")
+        var response200 = openApiDoc
+            .RootElement.GetProperty("paths")
             .GetProperty("/api/files/{id}")
             .GetProperty("get")
             .GetProperty("responses")
@@ -929,7 +1002,8 @@ public sealed class JsonContractReaderTests
             ContractEmitter.Emit(
                 result.Types.ToDictionary(type => type.Name),
                 result.Enums,
-                result.Endpoints);
+                result.Endpoints
+            );
         });
 
         var responses = Assert.Single(endpoints!).Responses;
@@ -953,21 +1027,29 @@ public sealed class JsonContractReaderTests
             "/api/items",
             [
                 new TsEndpointParam("q", new TsType.Primitive("string"), ParamSource.Query),
-                new TsEndpointParam("limit", new TsType.Primitive("number"), ParamSource.Query, IsOptional: true),
+                new TsEndpointParam(
+                    "limit",
+                    new TsType.Primitive("number"),
+                    ParamSource.Query,
+                    IsOptional: true
+                ),
             ],
             null,
             "items",
-            [new TsResponseType(200, null)]);
+            [new TsResponseType(200, null)]
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [endpoint]);
+            [endpoint]
+        );
 
         // The wire key is "isOptional" (the rivet-ts interop contract shape)
         using (var contractDoc = JsonDocument.Parse(json))
         {
-            var limitParam = contractDoc.RootElement.GetProperty("endpoints")[0]
+            var limitParam = contractDoc
+                .RootElement.GetProperty("endpoints")[0]
                 .GetProperty("params")[1];
             Assert.True(limitParam.GetProperty("isOptional").GetBoolean());
         }
@@ -984,19 +1066,24 @@ public sealed class JsonContractReaderTests
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType.Brand>(),
             new Dictionary<string, TsType>(),
-            security: null);
+            security: null
+        );
 
         using var doc = JsonDocument.Parse(openApi);
-        var parameters = doc.RootElement
-            .GetProperty("paths")
+        var parameters = doc
+            .RootElement.GetProperty("paths")
             .GetProperty("/api/items")
             .GetProperty("get")
             .GetProperty("parameters");
 
-        var qParam = parameters.EnumerateArray().Single(p => p.GetProperty("name").GetString() == "q");
+        var qParam = parameters
+            .EnumerateArray()
+            .Single(p => p.GetProperty("name").GetString() == "q");
         Assert.True(qParam.GetProperty("required").GetBoolean());
 
-        var limitQueryParam = parameters.EnumerateArray().Single(p => p.GetProperty("name").GetString() == "limit");
+        var limitQueryParam = parameters
+            .EnumerateArray()
+            .Single(p => p.GetProperty("name").GetString() == "limit");
         Assert.False(limitQueryParam.GetProperty("required").GetBoolean());
     }
 
@@ -1012,22 +1099,35 @@ public sealed class JsonContractReaderTests
                     "id",
                     new TsType.Primitive("string"),
                     ParamSource.Route,
-                    BodyPropertyName: "member_key"),
-                new TsEndpointParam("body", new TsType.TypeRef("UpdateRoleInput"), ParamSource.Body),
+                    BodyPropertyName: "member_key"
+                ),
+                new TsEndpointParam(
+                    "body",
+                    new TsType.TypeRef("UpdateRoleInput"),
+                    ParamSource.Body
+                ),
             ],
             null,
             "members",
-            []);
+            []
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [endpoint]);
+            [endpoint]
+        );
 
         using (var contractDoc = JsonDocument.Parse(json))
         {
-            Assert.Equal("member_key", contractDoc.RootElement.GetProperty("endpoints")[0]
-                .GetProperty("params")[0].GetProperty("bodyPropertyName").GetString());
+            Assert.Equal(
+                "member_key",
+                contractDoc
+                    .RootElement.GetProperty("endpoints")[0]
+                    .GetProperty("params")[0]
+                    .GetProperty("bodyPropertyName")
+                    .GetString()
+            );
         }
 
         var roundTripped = Assert.Single(JsonContractReader.Read(json).Endpoints);

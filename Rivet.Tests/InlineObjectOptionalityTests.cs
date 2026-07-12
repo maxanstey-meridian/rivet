@@ -7,7 +7,7 @@ namespace Rivet.Tests;
 
 public sealed class InlineObjectOptionalityTests
 {
-    private static readonly JsonSerializerOptions Options = new()
+    private static readonly JsonSerializerOptions _options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -21,7 +21,11 @@ public sealed class InlineObjectOptionalityTests
             new("required", new TsType.Primitive("string")),
             new("optional", new TsType.Primitive("string"), Optional: true),
             new("requiredNullable", new TsType.Nullable(new TsType.Primitive("string"))),
-            new("optionalNullable", new TsType.Nullable(new TsType.Primitive("string")), Optional: true),
+            new(
+                "optionalNullable",
+                new TsType.Nullable(new TsType.Primitive("string")),
+                Optional: true
+            ),
         ]);
 
         var schema = OpenApiEmitter.MapTsTypeToJsonSchema(type);
@@ -32,7 +36,12 @@ public sealed class InlineObjectOptionalityTests
             ["string", "null"],
             Assert.IsType<List<string>>(
                 Assert.IsType<Dictionary<string, object>>(
-                    Assert.IsType<Dictionary<string, object>>(schema["properties"])["requiredNullable"])["type"]));
+                    Assert.IsType<Dictionary<string, object>>(schema["properties"])[
+                        "requiredNullable"
+                    ]
+                )["type"]
+            )
+        );
     }
 
     [Fact]
@@ -43,9 +52,10 @@ public sealed class InlineObjectOptionalityTests
             new("optional", new TsType.Primitive("string"), Optional: true),
         ]);
 
-        var json = JsonSerializer.Serialize(type, Options);
+        var json = JsonSerializer.Serialize(type, _options);
         var roundTripped = Assert.IsType<TsType.InlineObject>(
-            JsonSerializer.Deserialize<TsType>(json, Options));
+            JsonSerializer.Deserialize<TsType>(json, _options)
+        );
 
         Assert.False(roundTripped.Fields[0].Optional);
         Assert.True(roundTripped.Fields[1].Optional);
@@ -72,7 +82,8 @@ public sealed class InlineObjectOptionalityTests
             """;
 
         var type = Assert.IsType<TsType.InlineObject>(
-            JsonSerializer.Deserialize<TsType>(json, Options));
+            JsonSerializer.Deserialize<TsType>(json, _options)
+        );
 
         Assert.True(type.Fields[0].Optional);
     }
@@ -80,7 +91,10 @@ public sealed class InlineObjectOptionalityTests
     [Fact]
     public void Tuple_Syntax_Does_Not_Infer_Optionality_From_Nullability()
     {
-        TsType.InlineObjectField field = ("value", new TsType.Nullable(new TsType.Primitive("number")));
+        TsType.InlineObjectField field = (
+            "value",
+            new TsType.Nullable(new TsType.Primitive("number"))
+        );
 
         Assert.False(field.Optional);
     }
@@ -88,16 +102,15 @@ public sealed class InlineObjectOptionalityTests
     [Fact]
     public void CanonicalHash_Distinguishes_Optionality()
     {
-        var required = new TsType.InlineObject([
-            new("value", new TsType.Primitive("string")),
-        ]);
+        var required = new TsType.InlineObject([new("value", new TsType.Primitive("string"))]);
         var optional = new TsType.InlineObject([
             new("value", new TsType.Primitive("string"), Optional: true),
         ]);
 
         Assert.NotEqual(
             InlineTypeExtractor.CanonicalHash(required),
-            InlineTypeExtractor.CanonicalHash(optional));
+            InlineTypeExtractor.CanonicalHash(optional)
+        );
     }
 
     [Fact]
@@ -112,6 +125,7 @@ public sealed class InlineObjectOptionalityTests
 
         Assert.NotEqual(
             InlineTypeExtractor.CanonicalHash(questionMarkInName),
-            InlineTypeExtractor.CanonicalHash(optional));
+            InlineTypeExtractor.CanonicalHash(optional)
+        );
     }
 }

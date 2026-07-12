@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -110,7 +109,10 @@ public sealed class Wp12GapFillTests
 
         var (_, walker) = CompilationHelper.WalkContract(source);
 
-        var label = Assert.Single(walker.Definitions["DerivedDto"].Properties, p => p.Name == "label");
+        var label = Assert.Single(
+            walker.Definitions["DerivedDto"].Properties,
+            p => p.Name == "label"
+        );
         // Derived (non-nullable) wins; base (nullable) would be TsType.Nullable
         Assert.IsType<TsType.Primitive>(label.Type);
         Assert.False(label.IsOptional);
@@ -229,14 +231,21 @@ public sealed class Wp12GapFillTests
 
         using var doc = CompilationHelper.EmitOpenApi(source);
 
-        var schema = doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("TaskDto");
+        var schema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("TaskDto");
         var properties = schema.GetProperty("properties");
 
         Assert.True(properties.TryGetProperty("id", out _));
         Assert.True(properties.TryGetProperty("note", out _));
         Assert.True(properties.TryGetProperty("name", out _));
 
-        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        var required = schema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Contains("id", required);
         Assert.Contains("name", required);
         Assert.DoesNotContain("note", required); // nullable → optional
@@ -273,7 +282,10 @@ public sealed class Wp12GapFillTests
         var (endpoints, _) = CompilationHelper.WalkContract(source);
 
         var list = Assert.Single(endpoints);
-        var queryParams = list.Params.Where(p => p.Source == ParamSource.Query).Select(p => p.Name).ToList();
+        var queryParams = list
+            .Params.Where(p => p.Source == ParamSource.Query)
+            .Select(p => p.Name)
+            .ToList();
 
         Assert.Contains("page", queryParams);
         Assert.Contains("pageSize", queryParams);
@@ -347,7 +359,10 @@ public sealed class Wp12GapFillTests
 
         var upload = Assert.Single(endpoints);
         Assert.Single(upload.Params, p => p.Name == "file" && p.Source == ParamSource.File);
-        Assert.Single(upload.Params, p => p.Name == "category" && p.Source == ParamSource.FormField);
+        Assert.Single(
+            upload.Params,
+            p => p.Name == "category" && p.Source == ParamSource.FormField
+        );
     }
 
     [Fact]
@@ -399,27 +414,27 @@ public sealed class Wp12GapFillTests
         var sources = new[]
         {
             """
-            using Rivet;
-            namespace Foo.Models
-            {
-                [RivetType]
-                public sealed record Item(string Name);
+                using Rivet;
+                namespace Foo.Models
+                {
+                    [RivetType]
+                    public sealed record Item(string Name);
 
-                [RivetType]
-                public sealed record FooWrapper(Item Item);
-            }
-            """,
+                    [RivetType]
+                    public sealed record FooWrapper(Item Item);
+                }
+                """,
             """
-            using Rivet;
-            namespace Bar.Models
-            {
-                [RivetType]
-                public sealed record Item(int Count);
+                using Rivet;
+                namespace Bar.Models
+                {
+                    [RivetType]
+                    public sealed record Item(int Count);
 
-                [RivetType]
-                public sealed record BarWrapper(Item Item);
-            }
-            """,
+                    [RivetType]
+                    public sealed record BarWrapper(Item Item);
+                }
+                """,
         };
 
         var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
@@ -440,11 +455,13 @@ public sealed class Wp12GapFillTests
 
         // References point at the right disambiguated schema
         var fooRef = Assert.IsType<TsType.TypeRef>(
-            Assert.Single(walker.Definitions["FooWrapper"].Properties).Type);
+            Assert.Single(walker.Definitions["FooWrapper"].Properties).Type
+        );
         Assert.Equal("Item", fooRef.Name);
 
         var barRef = Assert.IsType<TsType.TypeRef>(
-            Assert.Single(walker.Definitions["BarWrapper"].Properties).Type);
+            Assert.Single(walker.Definitions["BarWrapper"].Properties).Type
+        );
         Assert.Equal("Item2", barRef.Name);
     }
 
@@ -454,25 +471,25 @@ public sealed class Wp12GapFillTests
         var sources = new[]
         {
             """
-            using Rivet;
-            namespace Foo.Models
-            {
-                public enum Status { Active, Closed }
+                using Rivet;
+                namespace Foo.Models
+                {
+                    public enum Status { Active, Closed }
 
-                [RivetType]
-                public sealed record FooDto(Status Status);
-            }
-            """,
+                    [RivetType]
+                    public sealed record FooDto(Status Status);
+                }
+                """,
             """
-            using Rivet;
-            namespace Bar.Models
-            {
-                public enum Status { Draft, Published, Archived }
+                using Rivet;
+                namespace Bar.Models
+                {
+                    public enum Status { Draft, Published, Archived }
 
-                [RivetType]
-                public sealed record BarDto(Status Status);
-            }
-            """,
+                    [RivetType]
+                    public sealed record BarDto(Status Status);
+                }
+                """,
         };
 
         var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
@@ -492,9 +509,13 @@ public sealed class Wp12GapFillTests
         Assert.Equal(3, second.Members.Count);
 
         // Each DTO references its own enum
-        var fooRef = Assert.IsType<TsType.TypeRef>(Assert.Single(walker.Definitions["FooDto"].Properties).Type);
+        var fooRef = Assert.IsType<TsType.TypeRef>(
+            Assert.Single(walker.Definitions["FooDto"].Properties).Type
+        );
         Assert.Equal("Status", fooRef.Name);
-        var barRef = Assert.IsType<TsType.TypeRef>(Assert.Single(walker.Definitions["BarDto"].Properties).Type);
+        var barRef = Assert.IsType<TsType.TypeRef>(
+            Assert.Single(walker.Definitions["BarDto"].Properties).Type
+        );
         Assert.Equal("Status2", barRef.Name);
     }
 
@@ -523,7 +544,7 @@ public sealed class Wp12GapFillTests
         });
 
         Assert.Contains("collision", stderr);
-        Assert.Equal(1, walker.Definitions["Result"].Properties.Count);
+        Assert.Single(walker.Definitions["Result"].Properties);
         Assert.Equal(2, walker.Definitions["Result2"].Properties.Count);
         Assert.Equal(["T"], walker.Definitions["Result2"].TypeParameters);
     }
@@ -806,8 +827,10 @@ public sealed class Wp12GapFillTests
         });
 
         var amount = Assert.Single(walker.Definitions["PriceDto"].Properties);
-        Assert.True(amount.Constraints is null
-            || (amount.Constraints.Minimum is null && amount.Constraints.Maximum is null));
+        Assert.True(
+            amount.Constraints is null
+                || (amount.Constraints.Minimum is null && amount.Constraints.Maximum is null)
+        );
         Assert.Contains("Range", stderr);
     }
 
@@ -1054,7 +1077,14 @@ public sealed class Wp12GapFillTests
         Assert.Contains("PagedResult_MessageDto", schemaNames);
 
         // No dangling $refs anywhere in the document
-        foreach (var match in System.Text.RegularExpressions.Regex.Matches(json, "\"\\$ref\":\\s*\"#/components/schemas/([^\"]+)\"").Cast<System.Text.RegularExpressions.Match>())
+        foreach (
+            var match in System
+                .Text.RegularExpressions.Regex.Matches(
+                    json,
+                    "\"\\$ref\":\\s*\"#/components/schemas/([^\"]+)\""
+                )
+                .Cast<System.Text.RegularExpressions.Match>()
+        )
         {
             Assert.Contains(match.Groups[1].Value, schemaNames);
         }
@@ -1094,8 +1124,13 @@ public sealed class Wp12GapFillTests
         Assert.True(page.IsOptional, "C# default-valued param must set IsOptional (E8)");
 
         using var doc = CompilationHelper.EmitOpenApi(source);
-        var parameters = doc.RootElement.GetProperty("paths").GetProperty("/api/tasks")
-            .GetProperty("get").GetProperty("parameters").EnumerateArray().ToList();
+        var parameters = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/tasks")
+            .GetProperty("get")
+            .GetProperty("parameters")
+            .EnumerateArray()
+            .ToList();
 
         var pageParam = Assert.Single(parameters, p => p.GetProperty("name").GetString() == "page");
         Assert.False(pageParam.GetProperty("required").GetBoolean());
@@ -1126,11 +1161,19 @@ public sealed class Wp12GapFillTests
 
         var (endpoints, _) = CompilationHelper.WalkContract(source);
         var page = Assert.Single(Assert.Single(endpoints).Params, p => p.Name == "page");
-        Assert.True(page.IsOptional, "[RivetOptional] non-nullable query property must set IsOptional (E8)");
+        Assert.True(
+            page.IsOptional,
+            "[RivetOptional] non-nullable query property must set IsOptional (E8)"
+        );
 
         using var doc = CompilationHelper.EmitOpenApi(source);
-        var parameters = doc.RootElement.GetProperty("paths").GetProperty("/api/tasks")
-            .GetProperty("get").GetProperty("parameters").EnumerateArray().ToList();
+        var parameters = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/tasks")
+            .GetProperty("get")
+            .GetProperty("parameters")
+            .EnumerateArray()
+            .ToList();
 
         var pageParam = Assert.Single(parameters, p => p.GetProperty("name").GetString() == "page");
         Assert.False(pageParam.GetProperty("required").GetBoolean());
@@ -1181,7 +1224,8 @@ public sealed class Wp12GapFillTests
     [Fact]
     public void I1_RefAliasSchema_ConsumerResolvesToTarget_AndCompiles()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Real": {
                 "type": "object",
                 "properties": { "value": { "type": "string" } },
@@ -1192,7 +1236,8 @@ public sealed class Wp12GapFillTests
                 "type": "object",
                 "properties": { "thing": { "$ref": "#/components/schemas/Alias" } }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -1211,7 +1256,8 @@ public sealed class Wp12GapFillTests
     [Fact]
     public void I1_AliasChain_ChasesToFinalTarget()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Real": {
                 "type": "object",
                 "properties": { "value": { "type": "string" } }
@@ -1222,7 +1268,8 @@ public sealed class Wp12GapFillTests
                 "type": "object",
                 "properties": { "thing": { "$ref": "#/components/schemas/Outer" } }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -1237,7 +1284,8 @@ public sealed class Wp12GapFillTests
     [Fact]
     public void I1_AliasToEnum_ConsumerResolvesToEnum()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Status": {
                 "type": "string",
                 "enum": ["active", "closed"]
@@ -1247,7 +1295,8 @@ public sealed class Wp12GapFillTests
                 "type": "object",
                 "properties": { "status": { "$ref": "#/components/schemas/StatusAlias" } }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -1261,20 +1310,26 @@ public sealed class Wp12GapFillTests
     [Fact]
     public void I1_AliasCycle_DoesNotHang_WarnsLoudly()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "A": { "$ref": "#/components/schemas/B" },
             "B": { "$ref": "#/components/schemas/A" },
             "Holder": {
                 "type": "object",
                 "properties": { "thing": { "$ref": "#/components/schemas/A" } }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
 
         // Cycle is diagnosed, not silently dropped (and the import must terminate)
-        Assert.Contains(result.Warnings, w => w.Contains("cycle", StringComparison.OrdinalIgnoreCase)
-            || w.Contains("circular", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.Contains("cycle", StringComparison.OrdinalIgnoreCase)
+                || w.Contains("circular", StringComparison.OrdinalIgnoreCase)
+        );
 
         CompilationHelper.CompileImportResult(result);
     }

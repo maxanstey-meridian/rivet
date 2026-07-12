@@ -443,7 +443,10 @@ public sealed class ControllerEndpointTests
         var example = Assert.Single(response.Examples!);
         Assert.Equal("ok", example.Name);
         Assert.Equal("application/json", example.MediaType);
-        Assert.Equal("""{"id":"550e8400-e29b-41d4-a716-446655440000","name":"Ada"}""", example.Json);
+        Assert.Equal(
+            """{"id":"550e8400-e29b-41d4-a716-446655440000","name":"Ada"}""",
+            example.Json
+        );
         Assert.Null(example.ComponentExampleId);
         Assert.Null(example.ResolvedJson);
     }
@@ -560,7 +563,8 @@ public sealed class ControllerEndpointTests
         // The silent drop must be loud: a warning naming the status and the endpoint.
         Assert.Contains(
             "warning RIV1004: ignoring response example for undeclared status 422 on controller endpoint 'get'",
-            stderr);
+            stderr
+        );
     }
 
     [Fact]
@@ -627,10 +631,16 @@ public sealed class ControllerEndpointTests
         var endpoints = WalkEndpoints(source);
 
         var endpoint = Assert.Single(endpoints);
-        Assert.True(endpoint.ReturnType is TsType.Array { Element: TsType.TypeRef { Name: "SearchResultDto" } });
+        Assert.True(
+            endpoint.ReturnType
+                is TsType.Array { Element: TsType.TypeRef { Name: "SearchResultDto" } }
+        );
         var response = Assert.Single(endpoint.Responses);
         Assert.Equal(200, response.StatusCode);
-        Assert.True(response.DataType is TsType.Array { Element: TsType.TypeRef { Name: "SearchResultDto" } });
+        Assert.True(
+            response.DataType
+                is TsType.Array { Element: TsType.TypeRef { Name: "SearchResultDto" } }
+        );
         var requestExample = Assert.Single(endpoint.RequestExamples!);
         Assert.Equal("filter", requestExample.Name);
         Assert.Equal("application/json", requestExample.MediaType);
@@ -773,7 +783,9 @@ public sealed class ControllerEndpointTests
         var endpoints = WalkEndpoints(source);
 
         var endpoint = Assert.Single(endpoints);
-        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(endpoint.RequestExamples);
+        var requestExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(
+            endpoint.RequestExamples
+        );
         Assert.Equal(2, requestExamples.Count);
         Assert.Equal("starter", requestExamples[0].Name);
         Assert.Equal("""{"name":"Ada"}""", requestExamples[0].Json);
@@ -781,7 +793,9 @@ public sealed class ControllerEndpointTests
         Assert.Equal("""{"name":"Bea"}""", requestExamples[1].Json);
 
         var response = endpoint.Responses.Single(r => r.StatusCode == 422);
-        var responseExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(response.Examples);
+        var responseExamples = Assert.IsAssignableFrom<IReadOnlyList<TsEndpointExample>>(
+            response.Examples
+        );
         Assert.Equal(2, responseExamples.Count);
         Assert.Equal("validationProblem", responseExamples[0].Name);
         Assert.Equal("""{"title":"Validation failed"}""", responseExamples[0].Json);
@@ -908,14 +922,18 @@ public sealed class ControllerEndpointTests
         var endpoint = Assert.Single(endpoints);
         Assert.Equal(2, endpoint.Responses.Count);
         Assert.Equal(200, endpoint.Responses[0].StatusCode);
-        Assert.True(endpoint.Responses[0].DataType is Rivet.Tool.Model.TsType.TypeRef { Name: "ItemDto" },
-            $"200 response DataType should be TypeRef(ItemDto), got {endpoint.Responses[0].DataType}");
+        Assert.True(
+            endpoint.Responses[0].DataType is Rivet.Tool.Model.TsType.TypeRef { Name: "ItemDto" },
+            $"200 response DataType should be TypeRef(ItemDto), got {endpoint.Responses[0].DataType}"
+        );
         Assert.Equal(404, endpoint.Responses[1].StatusCode);
         Assert.Null(endpoint.Responses[1].DataType);
 
         // ReturnType should be the unwrapped success type
-        Assert.True(endpoint.ReturnType is Rivet.Tool.Model.TsType.TypeRef { Name: "ItemDto" },
-            $"ReturnType should be TypeRef(ItemDto), got {endpoint.ReturnType}");
+        Assert.True(
+            endpoint.ReturnType is Rivet.Tool.Model.TsType.TypeRef { Name: "ItemDto" },
+            $"ReturnType should be TypeRef(ItemDto), got {endpoint.ReturnType}"
+        );
     }
 
     [Fact]
@@ -951,11 +969,15 @@ public sealed class ControllerEndpointTests
         var endpoint = Assert.Single(endpoints);
         Assert.Equal(2, endpoint.Responses.Count);
         Assert.Equal(201, endpoint.Responses[0].StatusCode);
-        Assert.True(endpoint.Responses[0].DataType is Rivet.Tool.Model.TsType.TypeRef { Name: "ItemDto" },
-            $"201 response DataType should be TypeRef(ItemDto), got {endpoint.Responses[0].DataType}");
+        Assert.True(
+            endpoint.Responses[0].DataType is Rivet.Tool.Model.TsType.TypeRef { Name: "ItemDto" },
+            $"201 response DataType should be TypeRef(ItemDto), got {endpoint.Responses[0].DataType}"
+        );
         Assert.Equal(409, endpoint.Responses[1].StatusCode);
-        Assert.True(endpoint.Responses[1].DataType is Rivet.Tool.Model.TsType.TypeRef { Name: "ErrorDto" },
-            $"409 response DataType should be TypeRef(ErrorDto), got {endpoint.Responses[1].DataType}");
+        Assert.True(
+            endpoint.Responses[1].DataType is Rivet.Tool.Model.TsType.TypeRef { Name: "ErrorDto" },
+            $"409 response DataType should be TypeRef(ErrorDto), got {endpoint.Responses[1].DataType}"
+        );
     }
 
     [Fact]

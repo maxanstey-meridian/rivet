@@ -50,16 +50,14 @@ tasks:
     format:
         desc: Format C# projects
         cmds:
-            - dotnet format ./Rivet.slnx style --severity warn
+            - dotnet csharpier format .
             - dotnet format ./Rivet.slnx analyzers --severity warn
-            - dotnet format ./Rivet.slnx whitespace
 
     format:verbose:
         desc: Verify C# formatting
         cmds:
-            - dotnet format ./Rivet.slnx style --severity warn --verify-no-changes --verbosity minimal
+            - dotnet csharpier check .
             - dotnet format ./Rivet.slnx analyzers --severity warn --verify-no-changes --verbosity minimal
-            - dotnet format ./Rivet.slnx whitespace --verify-no-changes --verbosity minimal
 
     check:
         desc: Run build, tests, samples, and docs build
@@ -78,5 +76,7 @@ tasks:
     install:
         desc: Install JavaScript dependencies
         cmds:
+            - dotnet tool restore
+            - pnpm install
             - pnpm --dir docs install
-            - npm install --prefix Rivet.Tests/js
+            - pnpm --dir Rivet.Tests/js install

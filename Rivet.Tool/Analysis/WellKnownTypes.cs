@@ -96,24 +96,44 @@ public sealed class WellKnownTypes
         HttpGet = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.HttpGetAttribute");
         HttpPost = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.HttpPostAttribute");
         HttpPut = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.HttpPutAttribute");
-        HttpDelete = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.HttpDeleteAttribute");
-        HttpPatch = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.HttpPatchAttribute");
+        HttpDelete = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Mvc.HttpDeleteAttribute"
+        );
+        HttpPatch = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Mvc.HttpPatchAttribute"
+        );
 
         // Binding attributes
         Route = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.RouteAttribute");
         FromBody = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromBodyAttribute");
         FromForm = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromFormAttribute");
-        FromQuery = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromQueryAttribute");
-        FromRoute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromRouteAttribute");
-        FromHeader = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromHeaderAttribute");
-        FromServices = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromServicesAttribute");
+        FromQuery = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Mvc.FromQueryAttribute"
+        );
+        FromRoute = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Mvc.FromRouteAttribute"
+        );
+        FromHeader = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Mvc.FromHeaderAttribute"
+        );
+        FromServices = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Mvc.FromServicesAttribute"
+        );
 
         // Response metadata
-        ProducesResponseType = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute");
+        ProducesResponseType = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute"
+        );
         // A7: the .NET 7+ generic [ProducesResponseType<T>] is a distinct symbol
-        ProducesResponseTypeOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute`1");
-        RivetRequestExample = compilation.GetTypeByMetadataName("Rivet.RivetRequestExampleAttribute");
-        RivetResponseExample = compilation.GetTypeByMetadataName("Rivet.RivetResponseExampleAttribute");
+        ProducesResponseTypeOfT = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute`1"
+        );
+        RivetRequestExample = compilation.GetTypeByMetadataName(
+            "Rivet.RivetRequestExampleAttribute"
+        );
+        RivetResponseExample = compilation.GetTypeByMetadataName(
+            "Rivet.RivetResponseExampleAttribute"
+        );
 
         // Task wrappers
         TaskOfT = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task`1");
@@ -122,7 +142,9 @@ public sealed class WellKnownTypes
         ValueTask = compilation.GetTypeByMetadataName("System.Threading.Tasks.ValueTask");
 
         // MVC result types
-        ActionResultOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ActionResult`1");
+        ActionResultOfT = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Mvc.ActionResult`1"
+        );
         ActionResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ActionResult");
         IActionResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.IActionResult");
 
@@ -132,31 +154,71 @@ public sealed class WellKnownTypes
 
         // Typed HTTP results — generic
         OkOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.Ok`1");
-        CreatedOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.Created`1");
-        AcceptedOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.Accepted`1");
-        BadRequestOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.BadRequest`1");
-        NotFoundOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.NotFound`1");
-        ConflictOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.Conflict`1");
-        UnprocessableEntityOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.UnprocessableEntity`1");
+        CreatedOfT = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.Created`1"
+        );
+        AcceptedOfT = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.Accepted`1"
+        );
+        BadRequestOfT = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.BadRequest`1"
+        );
+        NotFoundOfT = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.NotFound`1"
+        );
+        ConflictOfT = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.Conflict`1"
+        );
+        UnprocessableEntityOfT = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.UnprocessableEntity`1"
+        );
 
         // Typed HTTP results — non-generic
         Ok = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.Ok");
-        Created = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.Created");
-        Accepted = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.Accepted");
-        NoContent = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.NoContent");
-        BadRequest = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.BadRequest");
-        Unauthorized = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.UnauthorizedHttpResult");
-        NotFound = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.NotFound");
-        Conflict = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.Conflict");
-        UnprocessableEntity = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.UnprocessableEntity");
+        Created = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.Created"
+        );
+        Accepted = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.Accepted"
+        );
+        NoContent = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.NoContent"
+        );
+        BadRequest = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.BadRequest"
+        );
+        Unauthorized = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.UnauthorizedHttpResult"
+        );
+        NotFound = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.NotFound"
+        );
+        Conflict = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.Conflict"
+        );
+        UnprocessableEntity = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.UnprocessableEntity"
+        );
 
         // A8: typed results that were missing from the mapping table
-        ProblemHttpResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult");
-        ValidationProblem = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.ValidationProblem");
-        ForbidHttpResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.ForbidHttpResult");
-        InternalServerError = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.InternalServerError");
-        InternalServerErrorOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.InternalServerError`1");
-        JsonHttpResultOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.JsonHttpResult`1");
+        ProblemHttpResult = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult"
+        );
+        ValidationProblem = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.ValidationProblem"
+        );
+        ForbidHttpResult = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.ForbidHttpResult"
+        );
+        InternalServerError = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.InternalServerError"
+        );
+        InternalServerErrorOfT = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.InternalServerError`1"
+        );
+        JsonHttpResultOfT = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.JsonHttpResult`1"
+        );
 
         // Build convenience dictionaries
         HttpMethodAttributes = BuildHttpMethodAttributes();
@@ -166,7 +228,9 @@ public sealed class WellKnownTypes
 
     private ImmutableDictionary<INamedTypeSymbol, string> BuildHttpMethodAttributes()
     {
-        var builder = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, string>(SymbolEqualityComparer.Default);
+        var builder = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, string>(
+            SymbolEqualityComparer.Default
+        );
         TryAdd(builder, HttpGet, "GET");
         TryAdd(builder, HttpPost, "POST");
         TryAdd(builder, HttpPut, "PUT");
@@ -177,7 +241,9 @@ public sealed class WellKnownTypes
 
     private ImmutableDictionary<INamedTypeSymbol, int> BuildTypedResultStatusCodes()
     {
-        var builder = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, int>(SymbolEqualityComparer.Default);
+        var builder = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, int>(
+            SymbolEqualityComparer.Default
+        );
         TryAdd(builder, OkOfT, 200);
         TryAdd(builder, Ok, 200);
         TryAdd(builder, CreatedOfT, 201);
@@ -208,19 +274,31 @@ public sealed class WellKnownTypes
 
     private static ImmutableHashSet<INamedTypeSymbol> BuildResultsArities(Compilation compilation)
     {
-        var builder = ImmutableHashSet.CreateBuilder<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+        var builder = ImmutableHashSet.CreateBuilder<INamedTypeSymbol>(
+            SymbolEqualityComparer.Default
+        );
         for (var arity = 2; arity <= 6; arity++)
         {
-            var symbol = compilation.GetTypeByMetadataName($"Microsoft.AspNetCore.Http.HttpResults.Results`{arity}");
+            var symbol = compilation.GetTypeByMetadataName(
+                $"Microsoft.AspNetCore.Http.HttpResults.Results`{arity}"
+            );
             if (symbol is not null)
+            {
                 builder.Add(symbol);
+            }
         }
         return builder.ToImmutable();
     }
 
-    private static void TryAdd<T>(ImmutableDictionary<INamedTypeSymbol, T>.Builder builder, INamedTypeSymbol? symbol, T value)
+    private static void TryAdd<T>(
+        ImmutableDictionary<INamedTypeSymbol, T>.Builder builder,
+        INamedTypeSymbol? symbol,
+        T value
+    )
     {
         if (symbol is not null)
+        {
             builder.Add(symbol, value);
+        }
     }
 }

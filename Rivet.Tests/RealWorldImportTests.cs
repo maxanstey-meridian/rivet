@@ -11,8 +11,7 @@ public sealed class RealWorldImportTests
 {
     private static string LoadFixture(string name)
     {
-        return File.ReadAllText(
-            Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
+        return File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
     }
 
     // Stub types for imported code that references ASP.NET Core or newer runtime types
@@ -35,14 +34,13 @@ public sealed class RealWorldImportTests
     {
         // Identical-content duplicates are tolerated (importer may emit the same shared schema
         // twice); same-name-different-content duplicates are the I3 corruption shape and fail loudly.
-        var uniqueFiles = DeduplicateFiles(result)
-            .Append(ImportStubs)
-            .ToArray();
+        var uniqueFiles = DeduplicateFiles(result).Append(ImportStubs).ToArray();
 
         try
         {
             var compilation = CompilationHelper.CreateCompilationFromMultiple(uniqueFiles);
-            return compilation.GetDiagnostics()
+            return compilation
+                .GetDiagnostics()
                 .Where(d => d.Severity == DiagnosticSeverity.Error)
                 .ToList();
         }
@@ -51,9 +49,14 @@ public sealed class RealWorldImportTests
             // CompilationHelper throws on errors — we want the error list instead
             // Re-compile without throwing
             var trees = uniqueFiles
-                .Select(s => Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
-                    s, new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
-                        Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest)))
+                .Select(s =>
+                    Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+                        s,
+                        new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
+                            Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest
+                        )
+                    )
+                )
                 .ToList();
 
             var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
@@ -79,7 +82,9 @@ public sealed class RealWorldImportTests
                     refFiles.Add(path);
                 }
             }
-            var refs = refFiles.Select(f => (MetadataReference)MetadataReference.CreateFromFile(f)).ToArray();
+            var refs = refFiles
+                .Select(f => (MetadataReference)MetadataReference.CreateFromFile(f))
+                .ToArray();
 
             var compilation = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
                 "TestAssembly",
@@ -87,9 +92,12 @@ public sealed class RealWorldImportTests
                 refs,
                 new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(
                     OutputKind.DynamicallyLinkedLibrary,
-                    nullableContextOptions: NullableContextOptions.Enable));
+                    nullableContextOptions: NullableContextOptions.Enable
+                )
+            );
 
-            return compilation.GetDiagnostics()
+            return compilation
+                .GetDiagnostics()
                 .Where(d => d.Severity == DiagnosticSeverity.Error)
                 .ToList();
         }
@@ -104,7 +112,8 @@ public sealed class RealWorldImportTests
         string EmittedJson,
         ImportResult Import2,
         IReadOnlyList<TsEndpointDefinition> Endpoints2,
-        TypeWalker Walker2);
+        TypeWalker Walker2
+    );
 
     /// <summary>
     /// Full belt-and-braces round-trip: OpenAPI JSON → import → compile → walk → emit OpenAPI → re-import → compile → walk.
@@ -122,7 +131,13 @@ public sealed class RealWorldImportTests
 
         // Emit OpenAPI from walked model
         var security = ImportedSecurity(json, eps1);
-        var emittedJson = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, security);
+        var emittedJson = OpenApiEmitter.Emit(
+            eps1,
+            wlk1.Definitions,
+            wlk1.Brands,
+            wlk1.Enums,
+            security
+        );
 
         // Pass 2: Re-import emitted OpenAPI → compile → walk
         var import2 = CompilationHelper.Import(emittedJson, ns);
@@ -146,29 +161,43 @@ public sealed class RealWorldImportTests
         // Pass 1
         var sources1 = DeduplicateFiles(import1);
         var comp1 = CreateCompilationLenient(sources1);
-        var errors1 = comp1.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        var errors1 = comp1
+            .GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
         if (errors1.Count > 0)
         {
             throw new InvalidOperationException(
-                $"Pass 1 compilation errors ({errors1.Count}):\n" +
-                string.Join("\n", errors1.Take(10).Select(e => e.ToString())));
+                $"Pass 1 compilation errors ({errors1.Count}):\n"
+                    + string.Join("\n", errors1.Take(10).Select(e => e.ToString()))
+            );
         }
 
         var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
         var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
         var security = ImportedSecurity(json, eps1);
-        var emittedJson = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, security);
+        var emittedJson = OpenApiEmitter.Emit(
+            eps1,
+            wlk1.Definitions,
+            wlk1.Brands,
+            wlk1.Enums,
+            security
+        );
 
         // Pass 2
         var import2 = CompilationHelper.Import(emittedJson, ns);
         var sources2 = DeduplicateFiles(import2);
         var comp2 = CreateCompilationLenient(sources2);
-        var errors2 = comp2.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        var errors2 = comp2
+            .GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
         if (errors2.Count > 0)
         {
             throw new InvalidOperationException(
-                $"Pass 2 compilation errors ({errors2.Count}):\n" +
-                string.Join("\n", errors2.Take(10).Select(e => e.ToString())));
+                $"Pass 2 compilation errors ({errors2.Count}):\n"
+                    + string.Join("\n", errors2.Take(10).Select(e => e.ToString()))
+            );
         }
 
         var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(comp2);
@@ -179,24 +208,33 @@ public sealed class RealWorldImportTests
 
     private static SecurityConfig? ImportedSecurity(
         string sourceJson,
-        IReadOnlyList<TsEndpointDefinition> endpoints)
+        IReadOnlyList<TsEndpointDefinition> endpoints
+    )
     {
         using var document = JsonDocument.Parse(sourceJson);
-        if (!document.RootElement.TryGetProperty("components", out var components)
-            || !components.TryGetProperty("securitySchemes", out var sourceSchemes))
+        if (
+            !document.RootElement.TryGetProperty("components", out var components)
+            || !components.TryGetProperty("securitySchemes", out var sourceSchemes)
+        )
         {
             return null;
         }
 
-        var referenced = endpoints.Select(endpoint => endpoint.Security?.Scheme)
+        var referenced = endpoints
+            .Select(endpoint => endpoint.Security?.Scheme)
             .Where(name => name is not null)
             .ToHashSet(StringComparer.Ordinal);
-        var definitions = sourceSchemes.EnumerateObject()
+        var definitions = sourceSchemes
+            .EnumerateObject()
             .Where(scheme => referenced.Contains(scheme.Name))
             .ToDictionary(
                 scheme => scheme.Name,
-                scheme => JsonSerializer.Deserialize<Dictionary<string, object>>(scheme.Value.GetRawText())!,
-                StringComparer.Ordinal);
+                scheme =>
+                    JsonSerializer.Deserialize<Dictionary<string, object>>(
+                        scheme.Value.GetRawText()
+                    )!,
+                StringComparer.Ordinal
+            );
         if (definitions.Count == 0)
         {
             return null;
@@ -214,35 +252,43 @@ public sealed class RealWorldImportTests
     /// </summary>
     private static string[] DeduplicateFiles(ImportResult result)
     {
-        var conflicting = result.Files
-            .GroupBy(f => f.FileName)
+        var conflicting = result
+            .Files.GroupBy(f => f.FileName)
             .Where(g => g.Select(f => f.Content).Distinct(StringComparer.Ordinal).Count() > 1)
             .Select(g => g.Key)
             .ToList();
 
         Assert.True(
             conflicting.Count == 0,
-            "Importer emitted the same filename with different content (I3 collision — one consumer " +
-            $"would silently get the wrong type): {string.Join(", ", conflicting)}");
+            "Importer emitted the same filename with different content (I3 collision — one consumer "
+                + $"would silently get the wrong type): {string.Join(", ", conflicting)}"
+        );
 
-        return result.Files
-            .GroupBy(f => f.FileName)
-            .Select(g => g.First().Content)
-            .ToArray();
+        return result.Files.GroupBy(f => f.FileName).Select(g => g.First().Content).ToArray();
     }
 
     private static Compilation CreateCompilationLenient(string[] sources)
     {
         var trees = sources
-            .Select(s => Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
-                s, new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
-                    Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest)))
+            .Select(s =>
+                Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+                    s,
+                    new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
+                        Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest
+                    )
+                )
+            )
             .ToList();
 
         // Add ASP.NET stubs from CompilationHelper (via reflection would be messy, so inline the stub tree)
-        trees.Add(Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
-            ImportStubs, new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
-                Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest)));
+        trees.Add(
+            Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+                ImportStubs,
+                new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
+                    Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest
+                )
+            )
+        );
 
         var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
         var refFiles = new List<string>
@@ -266,7 +312,9 @@ public sealed class RealWorldImportTests
             }
         }
 
-        var refs = refFiles.Select(f => (MetadataReference)MetadataReference.CreateFromFile(f)).ToArray();
+        var refs = refFiles
+            .Select(f => (MetadataReference)MetadataReference.CreateFromFile(f))
+            .ToArray();
 
         return Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
             "TestAssembly",
@@ -274,7 +322,9 @@ public sealed class RealWorldImportTests
             refs,
             new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable));
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
     }
 
     /// <summary>
@@ -284,8 +334,10 @@ public sealed class RealWorldImportTests
     private static void AssertFullRoundTrip(RoundTripResult r, string specName)
     {
         // --- Pass 1: endpoints + types discovered ---
-        Assert.True(r.Endpoints1.Count > 0,
-            $"{specName}: Pass 1 should discover endpoints (got 0)");
+        Assert.True(
+            r.Endpoints1.Count > 0,
+            $"{specName}: Pass 1 should discover endpoints (got 0)"
+        );
 
         // --- Emitted OpenAPI is well-formed JSON ---
         JsonElement emittedDoc;
@@ -295,15 +347,19 @@ public sealed class RealWorldImportTests
         }
         catch (JsonException ex)
         {
-            throw new InvalidOperationException($"{specName}: Emitted OpenAPI is not valid JSON: {ex.Message}");
+            throw new InvalidOperationException(
+                $"{specName}: Emitted OpenAPI is not valid JSON: {ex.Message}"
+            );
         }
 
         // --- All $refs resolve ---
         var allRefs = new List<string>();
         CollectRefs(emittedDoc, allRefs);
         var schemaNames = new HashSet<string>();
-        if (emittedDoc.TryGetProperty("components", out var components) &&
-            components.TryGetProperty("schemas", out var schemas))
+        if (
+            emittedDoc.TryGetProperty("components", out var components)
+            && components.TryGetProperty("schemas", out var schemas)
+        )
         {
             foreach (var s in schemas.EnumerateObject())
             {
@@ -315,23 +371,29 @@ public sealed class RealWorldImportTests
             .Where(r2 => r2.StartsWith("#/components/schemas/"))
             .Where(r2 => !schemaNames.Contains(r2["#/components/schemas/".Length..]))
             .ToList();
-        Assert.True(brokenRefs.Count == 0,
-            $"{specName}: {brokenRefs.Count} broken $refs in emitted OpenAPI:\n" +
-            string.Join("\n", brokenRefs.Take(10)));
+        Assert.True(
+            brokenRefs.Count == 0,
+            $"{specName}: {brokenRefs.Count} broken $refs in emitted OpenAPI:\n"
+                + string.Join("\n", brokenRefs.Take(10))
+        );
 
         // --- Pass 2: endpoints + types discovered ---
-        Assert.True(r.Endpoints2.Count > 0,
-            $"{specName}: Pass 2 should discover endpoints (got 0)");
+        Assert.True(
+            r.Endpoints2.Count > 0,
+            $"{specName}: Pass 2 should discover endpoints (got 0)"
+        );
 
         // --- Structural stability: endpoints ---
         Assert.Equal(r.Endpoints1.Count, r.Endpoints2.Count);
 
-        var routes1 = r.Endpoints1
-            .Select(e => $"{e.HttpMethod} {e.RouteTemplate}")
-            .OrderBy(x => x).ToList();
-        var routes2 = r.Endpoints2
-            .Select(e => $"{e.HttpMethod} {e.RouteTemplate}")
-            .OrderBy(x => x).ToList();
+        var routes1 = r
+            .Endpoints1.Select(e => $"{e.HttpMethod} {e.RouteTemplate}")
+            .OrderBy(x => x)
+            .ToList();
+        var routes2 = r
+            .Endpoints2.Select(e => $"{e.HttpMethod} {e.RouteTemplate}")
+            .OrderBy(x => x)
+            .ToList();
         Assert.Equal(routes1, routes2);
 
         // --- Structural stability: endpoint-referenced types survive ---
@@ -357,22 +419,30 @@ public sealed class RealWorldImportTests
         }
 
         var lostDefs = referencedNames
-            .Where(n => r.Walker1.Definitions.ContainsKey(n) && !r.Walker2.Definitions.ContainsKey(n))
+            .Where(n =>
+                r.Walker1.Definitions.ContainsKey(n) && !r.Walker2.Definitions.ContainsKey(n)
+            )
             .ToList();
-        Assert.True(lostDefs.Count == 0,
-            $"{specName}: Lost endpoint-referenced types on round-trip: {string.Join(", ", lostDefs)}");
+        Assert.True(
+            lostDefs.Count == 0,
+            $"{specName}: Lost endpoint-referenced types on round-trip: {string.Join(", ", lostDefs)}"
+        );
 
         var lostEnums = referencedNames
             .Where(n => r.Walker1.Enums.ContainsKey(n) && !r.Walker2.Enums.ContainsKey(n))
             .ToList();
-        Assert.True(lostEnums.Count == 0,
-            $"{specName}: Lost enums on round-trip: {string.Join(", ", lostEnums)}");
+        Assert.True(
+            lostEnums.Count == 0,
+            $"{specName}: Lost enums on round-trip: {string.Join(", ", lostEnums)}"
+        );
 
         var lostBrands = referencedNames
             .Where(n => r.Walker1.Brands.ContainsKey(n) && !r.Walker2.Brands.ContainsKey(n))
             .ToList();
-        Assert.True(lostBrands.Count == 0,
-            $"{specName}: Lost brands on round-trip: {string.Join(", ", lostBrands)}");
+        Assert.True(
+            lostBrands.Count == 0,
+            $"{specName}: Lost brands on round-trip: {string.Join(", ", lostBrands)}"
+        );
 
         // --- Structural stability: nothing lost per endpoint ---
         // Params and responses may be GAINED on round-trip (normalization adds synthetic entries)
@@ -380,15 +450,20 @@ public sealed class RealWorldImportTests
         foreach (var ep1 in r.Endpoints1)
         {
             var ep2 = r.Endpoints2.FirstOrDefault(e =>
-                e.HttpMethod == ep1.HttpMethod && e.RouteTemplate == ep1.RouteTemplate);
+                e.HttpMethod == ep1.HttpMethod && e.RouteTemplate == ep1.RouteTemplate
+            );
             Assert.NotNull(ep2);
-            Assert.True(ep2.Params.Count >= ep1.Params.Count,
-                $"{specName}: {ep1.HttpMethod} {ep1.RouteTemplate} lost params: " +
-                $"pass1={ep1.Params.Count} [{string.Join(", ", ep1.Params.Select(p => $"{p.Name}:{p.Source}"))}] " +
-                $"vs pass2={ep2.Params.Count} [{string.Join(", ", ep2.Params.Select(p => $"{p.Name}:{p.Source}"))}]");
-            Assert.True(ep2.Responses.Count >= ep1.Responses.Count,
-                $"{specName}: {ep1.HttpMethod} {ep1.RouteTemplate} lost responses: " +
-                $"pass1={ep1.Responses.Count} vs pass2={ep2.Responses.Count}");
+            Assert.True(
+                ep2.Params.Count >= ep1.Params.Count,
+                $"{specName}: {ep1.HttpMethod} {ep1.RouteTemplate} lost params: "
+                    + $"pass1={ep1.Params.Count} [{string.Join(", ", ep1.Params.Select(p => $"{p.Name}:{p.Source}"))}] "
+                    + $"vs pass2={ep2.Params.Count} [{string.Join(", ", ep2.Params.Select(p => $"{p.Name}:{p.Source}"))}]"
+            );
+            Assert.True(
+                ep2.Responses.Count >= ep1.Responses.Count,
+                $"{specName}: {ep1.HttpMethod} {ep1.RouteTemplate} lost responses: "
+                    + $"pass1={ep1.Responses.Count} vs pass2={ep2.Responses.Count}"
+            );
         }
 
         // --- Structural stability: type property counts (only for surviving types) ---
@@ -447,14 +522,15 @@ public sealed class RealWorldImportTests
     public void Duplicate_Route_Params_Produce_Unique_Field_Names()
     {
         var result = CompilationHelper.Import(LoadFixture("openapi-duplicate-routes.json"));
-        var contractFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("AnythingContract.cs"));
+        var contractFile = result.Files.FirstOrDefault(f =>
+            f.FileName.EndsWith("AnythingContract.cs")
+        );
         Assert.NotNull(contractFile);
 
         var content = contractFile.Content;
 
         // Should have two distinct field names — not two "GetAnything"
-        var fieldCount = content.Split('\n')
-            .Count(line => line.Contains("public static readonly"));
+        var fieldCount = content.Split('\n').Count(line => line.Contains("public static readonly"));
         Assert.Equal(2, fieldCount);
 
         // The two names should differ
@@ -502,7 +578,9 @@ public sealed class RealWorldImportTests
     {
         var result = CompilationHelper.Import(LoadFixture("openapi-multiline-desc.json"));
 
-        var contractFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("HealthContract.cs"));
+        var contractFile = result.Files.FirstOrDefault(f =>
+            f.FileName.EndsWith("HealthContract.cs")
+        );
         Assert.NotNull(contractFile);
         Assert.Contains("\\n", contractFile.Content);
         Assert.Contains("\\t", contractFile.Content);
@@ -539,7 +617,8 @@ public sealed class RealWorldImportTests
         var content = rollupFile.Content;
 
         // Both +1 and -1 strip to _1 — dedup should make the second _1_2
-        var propLines = content.Split('\n')
+        var propLines = content
+            .Split('\n')
             .Where(l => l.Trim().StartsWith("long") || l.Trim().StartsWith("string"))
             .ToList();
 
@@ -564,7 +643,9 @@ public sealed class RealWorldImportTests
         Assert.DoesNotContain("??", allContent);
 
         // Specifically check the doubleNullable property's union record
-        var itemResponseFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("ItemResponse.cs"));
+        var itemResponseFile = result.Files.FirstOrDefault(f =>
+            f.FileName.EndsWith("ItemResponse.cs")
+        );
         Assert.NotNull(itemResponseFile);
 
         // doubleNullable is oneOf: [string|null, null] — should resolve to string? not string??
@@ -655,14 +736,15 @@ public sealed class RealWorldImportTests
     {
         // "widgets_list_items" and "widgets_ListItems" both → "ListItems" after stripping tag prefix
         var result = CompilationHelper.Import(LoadFixture("openapi-duplicate-routes.json"));
-        var widgetsFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("WidgetsContract.cs"));
+        var widgetsFile = result.Files.FirstOrDefault(f =>
+            f.FileName.EndsWith("WidgetsContract.cs")
+        );
         Assert.NotNull(widgetsFile);
 
         var content = widgetsFile.Content;
 
         // Should have 2 fields, not a compile error from duplicate names
-        var fieldCount = content.Split('\n')
-            .Count(line => line.Contains("public static readonly"));
+        var fieldCount = content.Split('\n').Count(line => line.Contains("public static readonly"));
         Assert.Equal(2, fieldCount);
 
         // One should be the original, the other suffixed
@@ -703,7 +785,8 @@ public sealed class RealWorldImportTests
         var r = FullRoundTripLenient("openapi-github.json", "GitHub");
         var emitted = JsonSerializer.Deserialize<JsonElement>(r.EmittedJson);
 
-        var requestExamples = emitted.GetProperty("paths")
+        var requestExamples = emitted
+            .GetProperty("paths")
             .GetProperty("/enterprises/{enterprise}/actions/cache/retention-limit")
             .GetProperty("put")
             .GetProperty("requestBody")
@@ -712,16 +795,23 @@ public sealed class RealWorldImportTests
             .GetProperty("examples");
         Assert.Equal(
             "#/components/examples/actions-cache-retention-limit",
-            requestExamples.GetProperty("selected_actions").GetProperty("$ref").GetString());
+            requestExamples.GetProperty("selected_actions").GetProperty("$ref").GetString()
+        );
 
-        var requestComponentExample = emitted.GetProperty("components")
+        var requestComponentExample = emitted
+            .GetProperty("components")
             .GetProperty("examples")
             .GetProperty("actions-cache-retention-limit");
         Assert.Equal(
             80,
-            requestComponentExample.GetProperty("value").GetProperty("max_cache_retention_days").GetInt32());
+            requestComponentExample
+                .GetProperty("value")
+                .GetProperty("max_cache_retention_days")
+                .GetInt32()
+        );
 
-        var responseExamples = emitted.GetProperty("paths")
+        var responseExamples = emitted
+            .GetProperty("paths")
             .GetProperty("/organizations/{org}/settings/billing/budgets/{budget_id}")
             .GetProperty("delete")
             .GetProperty("responses")
@@ -731,18 +821,22 @@ public sealed class RealWorldImportTests
             .GetProperty("examples");
         Assert.Equal(
             "#/components/examples/delete-budget",
-            responseExamples.GetProperty("default").GetProperty("$ref").GetString());
+            responseExamples.GetProperty("default").GetProperty("$ref").GetString()
+        );
 
-        var responseComponentExample = emitted.GetProperty("components")
+        var responseComponentExample = emitted
+            .GetProperty("components")
             .GetProperty("examples")
             .GetProperty("delete-budget");
         Assert.Equal(
             "Budget successfully deleted.",
-            responseComponentExample.GetProperty("value").GetProperty("message").GetString());
+            responseComponentExample.GetProperty("value").GetProperty("message").GetString()
+        );
 
         var requestEndpoint = r.Endpoints2.Single(endpoint =>
-            endpoint.HttpMethod == "PUT" &&
-            endpoint.RouteTemplate == "/enterprises/{enterprise}/actions/cache/retention-limit");
+            endpoint.HttpMethod == "PUT"
+            && endpoint.RouteTemplate == "/enterprises/{enterprise}/actions/cache/retention-limit"
+        );
         var requestExample = Assert.Single(requestEndpoint.RequestExamples!);
         Assert.Equal("selected_actions", requestExample.Name);
         Assert.Equal("application/json", requestExample.MediaType);
@@ -751,8 +845,9 @@ public sealed class RealWorldImportTests
         Assert.Equal("""{"max_cache_retention_days":80}""", requestExample.ResolvedJson);
 
         var responseEndpoint = r.Endpoints2.Single(endpoint =>
-            endpoint.HttpMethod == "DELETE" &&
-            endpoint.RouteTemplate == "/organizations/{org}/settings/billing/budgets/{budget_id}");
+            endpoint.HttpMethod == "DELETE"
+            && endpoint.RouteTemplate == "/organizations/{org}/settings/billing/budgets/{budget_id}"
+        );
         var response = responseEndpoint.Responses.Single(rsp => rsp.StatusCode == 200);
         var responseExample = Assert.Single(response.Examples!);
         Assert.Equal("default", responseExample.Name);
@@ -761,7 +856,8 @@ public sealed class RealWorldImportTests
         Assert.Equal("delete-budget", responseExample.ComponentExampleId);
         Assert.Equal(
             """{"message":"Budget successfully deleted.","budget_id":"2c1feb79-3947-4dc8-a16e-80cbd732cc0b"}""",
-            responseExample.ResolvedJson);
+            responseExample.ResolvedJson
+        );
     }
 
     [Fact]
@@ -771,7 +867,8 @@ public sealed class RealWorldImportTests
         var r = FullRoundTripLenient("openapi-github.json", "GitHub");
         var emitted = JsonSerializer.Deserialize<JsonElement>(r.EmittedJson);
 
-        var responseExamples = emitted.GetProperty("paths")
+        var responseExamples = emitted
+            .GetProperty("paths")
             .GetProperty("/organizations/{org}/settings/billing/budgets/{budget_id}")
             .GetProperty("patch")
             .GetProperty("responses")
@@ -782,14 +879,26 @@ public sealed class RealWorldImportTests
 
         Assert.Equal(
             "Budget with ID 550e8400-e29b-41d4-a716-446655440000 not found.",
-            responseExamples.GetProperty("budget-not-found").GetProperty("value").GetProperty("message").GetString());
+            responseExamples
+                .GetProperty("budget-not-found")
+                .GetProperty("value")
+                .GetProperty("message")
+                .GetString()
+        );
         Assert.Equal(
             "Not Found",
-            responseExamples.GetProperty("feature-not-enabled").GetProperty("value").GetProperty("message").GetString());
+            responseExamples
+                .GetProperty("feature-not-enabled")
+                .GetProperty("value")
+                .GetProperty("message")
+                .GetString()
+        );
 
         var endpoint = r.Endpoints2.Single(candidate =>
-            candidate.HttpMethod == "PATCH" &&
-            candidate.RouteTemplate == "/organizations/{org}/settings/billing/budgets/{budget_id}");
+            candidate.HttpMethod == "PATCH"
+            && candidate.RouteTemplate
+                == "/organizations/{org}/settings/billing/budgets/{budget_id}"
+        );
 
         var response = endpoint.Responses.Single(rsp => rsp.StatusCode == 404);
         Assert.NotNull(response.Examples);
@@ -799,7 +908,10 @@ public sealed class RealWorldImportTests
             {
                 Assert.Equal("budget-not-found", first.Name);
                 Assert.Equal("application/json", first.MediaType);
-                Assert.Equal("""{"message":"Budget with ID 550e8400-e29b-41d4-a716-446655440000 not found.","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""", first.Json);
+                Assert.Equal(
+                    """{"message":"Budget with ID 550e8400-e29b-41d4-a716-446655440000 not found.","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""",
+                    first.Json
+                );
                 Assert.Null(first.ComponentExampleId);
                 Assert.Null(first.ResolvedJson);
             },
@@ -807,10 +919,14 @@ public sealed class RealWorldImportTests
             {
                 Assert.Equal("feature-not-enabled", second.Name);
                 Assert.Equal("application/json", second.MediaType);
-                Assert.Equal("""{"message":"Not Found","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""", second.Json);
+                Assert.Equal(
+                    """{"message":"Not Found","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""",
+                    second.Json
+                );
                 Assert.Null(second.ComponentExampleId);
                 Assert.Null(second.ResolvedJson);
-            });
+            }
+        );
     }
 
     // ========== Large real-world specs — full round-trip ==========
@@ -844,7 +960,8 @@ public sealed class RealWorldImportTests
         var r = FullRoundTripLenient("openapi-twilio.json", "Twilio");
         var emitted = JsonSerializer.Deserialize<JsonElement>(r.EmittedJson);
 
-        var requestExamples = emitted.GetProperty("paths")
+        var requestExamples = emitted
+            .GetProperty("paths")
             .GetProperty("/2010-04-01/Accounts.json")
             .GetProperty("post")
             .GetProperty("requestBody")
@@ -853,11 +970,14 @@ public sealed class RealWorldImportTests
             .GetProperty("examples");
 
         Assert.True(requestExamples.TryGetProperty("create", out var createExample));
-        Assert.Equal("friendly_name", createExample.GetProperty("value").GetProperty("FriendlyName").GetString());
+        Assert.Equal(
+            "friendly_name",
+            createExample.GetProperty("value").GetProperty("FriendlyName").GetString()
+        );
 
         var reimportedEndpoint = r.Endpoints2.Single(endpoint =>
-            endpoint.HttpMethod == "POST" &&
-            endpoint.RouteTemplate == "/2010-04-01/Accounts.json");
+            endpoint.HttpMethod == "POST" && endpoint.RouteTemplate == "/2010-04-01/Accounts.json"
+        );
         var reimportedExample = Assert.Single(reimportedEndpoint.RequestExamples!);
         Assert.Equal("create", reimportedExample.Name);
         Assert.Equal("application/x-www-form-urlencoded", reimportedExample.MediaType);
@@ -879,7 +999,9 @@ public sealed class RealWorldImportTests
     public void NamingEdgeCases_ReservedWords_AreEscaped()
     {
         var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
-        var reservedFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("ReservedWords.cs"));
+        var reservedFile = result.Files.FirstOrDefault(f =>
+            f.FileName.EndsWith("ReservedWords.cs")
+        );
         Assert.NotNull(reservedFile);
 
         var content = reservedFile.Content;
@@ -893,7 +1015,9 @@ public sealed class RealWorldImportTests
     public void NamingEdgeCases_SpecialCharProperties_AreValid()
     {
         var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
-        var specialFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("SpecialCharsModel.cs"));
+        var specialFile = result.Files.FirstOrDefault(f =>
+            f.FileName.EndsWith("SpecialCharsModel.cs")
+        );
         Assert.NotNull(specialFile);
 
         var content = specialFile.Content;
@@ -914,8 +1038,10 @@ public sealed class RealWorldImportTests
         // DuplicatingEnum: "foo-bar" and "foo_bar" both → FooBar — needs dedup
         // Should compile without errors
         var errors = GetCompilationErrors(result);
-        Assert.True(errors.Count == 0,
-            $"Duplicate enum compilation errors:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+        Assert.True(
+            errors.Count == 0,
+            $"Duplicate enum compilation errors:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}"
+        );
     }
 
     [Fact]
@@ -954,8 +1080,10 @@ public sealed class RealWorldImportTests
         Assert.Contains("FooBarSchema_2? PascalCase", consumer);
 
         var errors = GetCompilationErrors(result);
-        Assert.True(errors.Count == 0,
-            $"Schema collision errors:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}");
+        Assert.True(
+            errors.Count == 0,
+            $"Schema collision errors:\n{string.Join("\n", errors.Take(10).Select(e => e.ToString()))}"
+        );
     }
 
     // ========== P2 wave 5 — header preservation against the local corpus ==========
@@ -969,19 +1097,31 @@ public sealed class RealWorldImportTests
         // [RivetHeader] property, no location-erasure marker) and re-emits as in: header
         // with the original casing.
         var specPath = Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", "openapi", "notion.json");
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "openapi",
+            "notion.json"
+        );
         var result = CompilationHelper.Import(File.ReadAllText(specPath), "Notion");
 
-        var allContracts = string.Join("\n", result.Files
-            .Where(f => f.FileName.StartsWith("Contracts/"))
-            .Select(f => f.Content));
+        var allContracts = string.Join(
+            "\n",
+            result.Files.Where(f => f.FileName.StartsWith("Contracts/")).Select(f => f.Content)
+        );
         // No location erasure for headers (cookies keep theirs). Two operations with
         // unmergeable Dictionary bodies legitimately keep dropped-unmergeable-body markers.
-        Assert.DoesNotContain("param name=Notion-Version in=header reason=location-erased", allContracts);
+        Assert.DoesNotContain(
+            "param name=Notion-Version in=header reason=location-erased",
+            allContracts
+        );
 
-        var allTypes = string.Join("\n", result.Files
-            .Where(f => f.FileName.StartsWith("Types/"))
-            .Select(f => f.Content));
+        var allTypes = string.Join(
+            "\n",
+            result.Files.Where(f => f.FileName.StartsWith("Types/")).Select(f => f.Content)
+        );
         Assert.Contains("[property: RivetHeader(\"Notion-Version\")]", allTypes);
 
         // Re-emit and pin the wire shape on a representative operation. Lenient compile:
@@ -991,7 +1131,12 @@ public sealed class RealWorldImportTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var emitted = OpenApiEmitter.Emit(
-            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         var doc = JsonSerializer.Deserialize<JsonElement>(emitted);
         var parameters = doc.GetProperty("paths")
@@ -999,7 +1144,8 @@ public sealed class RealWorldImportTests
             .GetProperty("get")
             .GetProperty("parameters");
 
-        var headerParam = parameters.EnumerateArray()
+        var headerParam = parameters
+            .EnumerateArray()
             .Single(p => p.GetProperty("in").GetString() == "header");
         Assert.Equal("Notion-Version", headerParam.GetProperty("name").GetString());
     }

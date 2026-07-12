@@ -12,7 +12,7 @@ namespace Rivet.Tests;
 /// </summary>
 public static class CompilationHelper
 {
-    private static readonly MetadataReference[] CoreReferences = GetCoreReferences();
+    private static readonly MetadataReference[] _coreReferences = GetCoreReferences();
 
     /// <summary>
     /// Compiles multiple C# source files, each as a separate syntax tree.
@@ -23,18 +23,23 @@ public static class CompilationHelper
         var trees = new List<SyntaxTree>();
         foreach (var source in sources)
         {
-            trees.Add(CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest)));
+            trees.Add(
+                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest))
+            );
         }
 
         var compilation = CSharpCompilation.Create(
             "TestAssembly",
             trees,
-            CoreReferences,
+            _coreReferences,
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable));
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
 
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
 
@@ -60,13 +65,16 @@ public static class CompilationHelper
         var compilation = CSharpCompilation.Create(
             "TestAssembly",
             syntaxTrees,
-            CoreReferences,
+            _coreReferences,
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable));
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
 
         // Verify no compilation errors (warnings are OK)
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
 
@@ -82,7 +90,9 @@ public static class CompilationHelper
     /// <summary>
     /// Runs single-pass discovery and creates a TypeWalker — the same path as Program.cs.
     /// </summary>
-    public static (DiscoveredSymbols Discovered, TypeWalker Walker) DiscoverAndWalk(Compilation compilation)
+    public static (DiscoveredSymbols Discovered, TypeWalker Walker) DiscoverAndWalk(
+        Compilation compilation
+    )
     {
         var discovered = SymbolDiscovery.Discover(compilation);
         var walker = TypeWalker.Create(compilation, discovered.RivetTypes);
@@ -90,21 +100,29 @@ public static class CompilationHelper
     }
 
     public static IReadOnlyList<TsEndpointDefinition> WalkEndpoints(
-        Compilation compilation, DiscoveredSymbols discovered, TypeWalker walker)
+        Compilation compilation,
+        DiscoveredSymbols discovered,
+        TypeWalker walker
+    )
     {
         var wkt = new WellKnownTypes(compilation);
         return EndpointWalker.Walk(wkt, walker, discovered.EndpointMethods, discovered.ClientTypes);
     }
 
     public static IReadOnlyList<TsEndpointDefinition> WalkContracts(
-        Compilation compilation, DiscoveredSymbols discovered, TypeWalker walker)
+        Compilation compilation,
+        DiscoveredSymbols discovered,
+        TypeWalker walker
+    )
     {
         var wkt = new WellKnownTypes(compilation);
         return ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
     }
 
     public static IReadOnlyList<CoverageWarning> CheckCoverage(
-        Compilation compilation, IReadOnlyList<TsEndpointDefinition> contractEndpoints)
+        Compilation compilation,
+        IReadOnlyList<TsEndpointDefinition> contractEndpoints
+    )
     {
         var wkt = new WellKnownTypes(compilation);
         return CoverageChecker.Check(compilation, wkt, contractEndpoints);
@@ -115,7 +133,9 @@ public static class CompilationHelper
     /// <summary>
     /// Compiles source and runs the contract walker — the canonical analysis-side oracle.
     /// </summary>
-    public static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker) WalkContract(string source)
+    public static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker) WalkContract(
+        string source
+    )
     {
         var compilation = CreateCompilation(source);
         var (discovered, walker) = DiscoverAndWalk(compilation);
@@ -127,7 +147,9 @@ public static class CompilationHelper
     /// Compiles source, runs both walkers, and merges via the production EndpointMerger —
     /// the same pipeline as Program.cs.
     /// </summary>
-    public static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker) WalkMerged(string source)
+    public static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker) WalkMerged(
+        string source
+    )
     {
         var compilation = CreateCompilation(source);
         var (discovered, walker) = DiscoverAndWalk(compilation);
@@ -144,11 +166,17 @@ public static class CompilationHelper
     public static System.Text.Json.JsonDocument EmitOpenApi(string source)
     {
         var (endpoints, walker) = WalkMerged(source);
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         return System.Text.Json.JsonDocument.Parse(json);
     }
 
-    private static readonly object StdErrLock = new();
+    private static readonly object _stdErrLock = new();
 
     /// <summary>
     /// Captures everything written to Console.Error while <paramref name="action"/> runs.
@@ -158,7 +186,7 @@ public static class CompilationHelper
     /// </summary>
     public static string CaptureStdErr(Action action)
     {
-        lock (StdErrLock)
+        lock (_stdErrLock)
         {
             var original = Console.Error;
             using var writer = new StringWriter();
@@ -176,7 +204,7 @@ public static class CompilationHelper
         }
     }
 
-    private static readonly object StdOutLock = new();
+    private static readonly object _stdOutLock = new();
 
     /// <summary>
     /// Captures everything written to Console.Out while <paramref name="action"/> runs.
@@ -187,7 +215,7 @@ public static class CompilationHelper
     /// </summary>
     public static string CaptureStdOut(Action action)
     {
-        lock (StdOutLock)
+        lock (_stdOutLock)
         {
             var original = Console.Out;
             using var writer = new StringWriter();
@@ -209,26 +237,39 @@ public static class CompilationHelper
     /// Creates a compilation where domainSource lives in a separate "project" (CompilationReference),
     /// simulating types from a referenced project assembly.
     /// </summary>
-    public static Compilation CreateCompilationWithProjectReference(string mainSource, string domainSource)
+    public static Compilation CreateCompilationWithProjectReference(
+        string mainSource,
+        string domainSource
+    )
     {
-        var domainTree = CSharpSyntaxTree.ParseText(domainSource, new CSharpParseOptions(LanguageVersion.Latest));
+        var domainTree = CSharpSyntaxTree.ParseText(
+            domainSource,
+            new CSharpParseOptions(LanguageVersion.Latest)
+        );
         var domainCompilation = CSharpCompilation.Create(
             "DomainAssembly",
             [domainTree],
-            CoreReferences,
+            _coreReferences,
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable));
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
         ThrowOnErrors(domainCompilation, "Domain test source");
 
-        var mainTree = CSharpSyntaxTree.ParseText(mainSource, new CSharpParseOptions(LanguageVersion.Latest));
+        var mainTree = CSharpSyntaxTree.ParseText(
+            mainSource,
+            new CSharpParseOptions(LanguageVersion.Latest)
+        );
         var mainCompilation = CSharpCompilation.Create(
             "TestAssembly",
             [mainTree],
-            [.. CoreReferences, domainCompilation.ToMetadataReference()],
+            [.. _coreReferences, domainCompilation.ToMetadataReference()],
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable));
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
         ThrowOnErrors(mainCompilation, "Main test source");
 
         return mainCompilation;
@@ -236,7 +277,8 @@ public static class CompilationHelper
 
     private static void ThrowOnErrors(Compilation compilation, string label)
     {
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
 
@@ -249,8 +291,8 @@ public static class CompilationHelper
 
     // --- Import pipeline helpers ---
 
-    public static ImportResult Import(string json, string ns = "Test", string? security = null)
-        => OpenApiImporter.Import(json, new ImportOptions(ns, security));
+    public static ImportResult Import(string json, string ns = "Test", string? security = null) =>
+        OpenApiImporter.Import(json, new ImportOptions(ns, security));
 
     public static string FindFile(ImportResult result, string fileName)
     {
@@ -259,18 +301,20 @@ public static class CompilationHelper
         return file.Content;
     }
 
-    public static Compilation CompileImportResult(ImportResult result)
-        => CreateCompilationFromMultiple(result.Files.Select(f => f.Content).ToArray());
+    public static Compilation CompileImportResult(ImportResult result) =>
+        CreateCompilationFromMultiple(result.Files.Select(f => f.Content).ToArray());
 
-    public static string BuildSpec(string? schemas = null, string? paths = null, string title = "Test")
+    public static string BuildSpec(
+        string? schemas = null,
+        string? paths = null,
+        string title = "Test"
+    )
     {
         var schemasBlock = schemas is not null
             ? $"\"components\": {{ \"schemas\": {{ {schemas} }} }},"
             : "";
 
-        var pathsBlock = paths is not null
-            ? $"\"paths\": {{ {paths} }}"
-            : "\"paths\": {}";
+        var pathsBlock = paths is not null ? $"\"paths\": {{ {paths} }}" : "\"paths\": {}";
 
         return $$"""
             {
@@ -288,7 +332,14 @@ public static class CompilationHelper
     {
         var (types, enums, endpoints, brands) = JsonContractReader.Read(json);
         var definitions = types.ToDictionary(t => t.Name);
-        return OpenApiEmitter.Emit(endpoints, definitions, brands, enums, security: null, documentInfo);
+        return OpenApiEmitter.Emit(
+            endpoints,
+            definitions,
+            brands,
+            enums,
+            security: null,
+            documentInfo
+        );
     }
 
     // --- Emission helpers ---
@@ -306,17 +357,39 @@ public static class CompilationHelper
             MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Memory.dll")),
             MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "netstandard.dll")),
             MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Private.Uri.dll")),
-            MetadataReference.CreateFromFile(Path.Combine(runtimeDir, "System.Runtime.Numerics.dll")),
+            MetadataReference.CreateFromFile(
+                Path.Combine(runtimeDir, "System.Runtime.Numerics.dll")
+            ),
             MetadataReference.CreateFromFile(typeof(RivetTypeAttribute).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(System.ComponentModel.DataAnnotations.RequiredAttribute).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Mvc.ControllerBase).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Mvc.IActionResult).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Http.IResult).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Http.IFormFile).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Http.HttpResults.Ok<>).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Microsoft.AspNetCore.Routing.RouteData).Assembly.Location),
+            MetadataReference.CreateFromFile(
+                typeof(System.ComponentModel.DataAnnotations.RequiredAttribute).Assembly.Location
+            ),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.AspNetCore.Mvc.ControllerBase).Assembly.Location
+            ),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.AspNetCore.Mvc.IActionResult).Assembly.Location
+            ),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.AspNetCore.Http.IResult).Assembly.Location
+            ),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.AspNetCore.Http.IFormFile).Assembly.Location
+            ),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.AspNetCore.Http.HttpResults.Ok<>).Assembly.Location
+            ),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions)
+                    .Assembly
+                    .Location
+            ),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder).Assembly.Location
+            ),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.AspNetCore.Routing.RouteData).Assembly.Location
+            ),
         ];
     }
 }

@@ -5,5 +5,4 @@ using Rivet;
 namespace ImportDemo;
 
 [RivetType]
-public sealed record GetByIdInput(
-    string Id);
+public sealed record GetByIdInput(string Id);

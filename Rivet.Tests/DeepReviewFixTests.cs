@@ -1,7 +1,5 @@
 using System.Text.Json;
-using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
-using Rivet.Tool.Import;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -19,12 +17,18 @@ public sealed class DeepReviewFixTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         return JsonDocument.Parse(json);
     }
 
-    private static IReadOnlyList<TsEndpointDefinition> WalkEndpoints(string source)
-        => CompilationHelper.WalkContract(source).Endpoints;
+    private static IReadOnlyList<TsEndpointDefinition> WalkEndpoints(string source) =>
+        CompilationHelper.WalkContract(source).Endpoints;
 
     // ========== Bug 1: Scalar format metadata ==========
 
@@ -49,9 +53,12 @@ public sealed class DeepReviewFixTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var idProp = doc.RootElement
-            .GetProperty("components").GetProperty("schemas")
-            .GetProperty("ItemDto").GetProperty("properties").GetProperty("id");
+        var idProp = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ItemDto")
+            .GetProperty("properties")
+            .GetProperty("id");
 
         Assert.Equal("string", idProp.GetProperty("type").GetString());
         Assert.Equal("uuid", idProp.GetProperty("format").GetString());
@@ -78,9 +85,11 @@ public sealed class DeepReviewFixTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var props = doc.RootElement
-            .GetProperty("components").GetProperty("schemas")
-            .GetProperty("EventDto").GetProperty("properties");
+        var props = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("EventDto")
+            .GetProperty("properties");
 
         Assert.Equal("date-time", props.GetProperty("createdAt").GetProperty("format").GetString());
         Assert.Equal("date", props.GetProperty("eventDate").GetProperty("format").GetString());
@@ -106,9 +115,11 @@ public sealed class DeepReviewFixTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var props = doc.RootElement
-            .GetProperty("components").GetProperty("schemas")
-            .GetProperty("PriceDto").GetProperty("properties");
+        var props = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("PriceDto")
+            .GetProperty("properties");
 
         Assert.Equal("int32", props.GetProperty("quantity").GetProperty("format").GetString());
         Assert.Equal("int64", props.GetProperty("total").GetProperty("format").GetString());
@@ -140,16 +151,20 @@ public sealed class DeepReviewFixTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var payload = doc.RootElement
-            .GetProperty("components").GetProperty("schemas")
-            .GetProperty("FlexDto").GetProperty("properties").GetProperty("payload");
+        var payload = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("FlexDto")
+            .GetProperty("properties")
+            .GetProperty("payload");
 
         // 3.1: the empty schema already admits null — no 'nullable', no 'type' (and
         // never { "type": "unknown" }, which is not a valid JSON Schema type).
-        Assert.False(payload.TryGetProperty("nullable", out _),
-            "3.1 must not emit nullable: true");
-        Assert.False(payload.TryGetProperty("type", out _),
-            "Nullable unknown should not emit a 'type' field — 'unknown' is not a valid OpenAPI type");
+        Assert.False(payload.TryGetProperty("nullable", out _), "3.1 must not emit nullable: true");
+        Assert.False(
+            payload.TryGetProperty("type", out _),
+            "Nullable unknown should not emit a 'type' field — 'unknown' is not a valid OpenAPI type"
+        );
     }
 
     // ========== Bug 3: Multipart required array ==========
@@ -180,20 +195,29 @@ public sealed class DeepReviewFixTests
         using var doc = EmitOpenApi(source);
 
         // Multipart with named input type emits $ref to component schema
-        var multipart = doc.RootElement
-            .GetProperty("paths").GetProperty("/api/files")
-            .GetProperty("post").GetProperty("requestBody")
-            .GetProperty("content").GetProperty("multipart/form-data")
+        var multipart = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/files")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("multipart/form-data")
             .GetProperty("schema");
-        Assert.True(multipart.TryGetProperty("$ref", out var refVal),
-            "Named multipart input should emit as $ref");
+        Assert.True(
+            multipart.TryGetProperty("$ref", out var refVal),
+            "Named multipart input should emit as $ref"
+        );
         Assert.Equal("#/components/schemas/UploadInput", refVal.GetString());
 
         // The component schema has the required array
-        var uploadSchema = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("UploadInput");
-        Assert.True(uploadSchema.TryGetProperty("required", out var required),
-            "UploadInput schema should include a 'required' array");
+        var uploadSchema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("UploadInput");
+        Assert.True(
+            uploadSchema.TryGetProperty("required", out var required),
+            "UploadInput schema should include a 'required' array"
+        );
 
         var requiredFields = required.EnumerateArray().Select(e => e.GetString()).ToList();
         Assert.Contains("document", requiredFields);
@@ -308,24 +332,25 @@ public sealed class DeepReviewFixTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/items/{id}/archive": {
-                    "post": {
-                        "operationId": "items_archiveItem",
-                        "tags": ["Items"],
-                        "parameters": [
-                            {
-                                "name": "id",
-                                "in": "path",
-                                "required": true,
-                                "schema": { "type": "string" }
-                            }
-                        ],
-                        "responses": {
-                            "200": { "description": "Success" }
+            "/api/items/{id}/archive": {
+                "post": {
+                    "operationId": "items_archiveItem",
+                    "tags": ["Items"],
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "string" }
                         }
+                    ],
+                    "responses": {
+                        "200": { "description": "Success" }
                     }
                 }
-                """);
+            }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "ItemsContract.cs");
@@ -410,8 +435,10 @@ public sealed class DeepReviewFixTests
             """;
 
         var doc = EmitOpenApi(source);
-        var schema = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("SensorDto");
+        var schema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("SensorDto");
         var props = schema.GetProperty("properties");
 
         Assert.Equal("integer", props.GetProperty("temp").GetProperty("type").GetString());
@@ -470,7 +497,10 @@ public sealed class DeepReviewFixTests
 
         // taskId should NOT appear as a FormField
         var formFields = ep.Params.Where(p => p.Source == ParamSource.FormField).ToList();
-        Assert.DoesNotContain(formFields, f => string.Equals(f.Name, "taskId", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            formFields,
+            f => string.Equals(f.Name, "taskId", StringComparison.OrdinalIgnoreCase)
+        );
 
         // document is File, title is FormField
         Assert.Single(ep.Params, p => p.Source == ParamSource.File);
@@ -502,7 +532,10 @@ public sealed class DeepReviewFixTests
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
         // Tuple elements remain structurally required even when their values are nullable.
-        var pairProp = schemas.GetProperty("WithNullableTuple").GetProperty("properties").GetProperty("pair");
+        var pairProp = schemas
+            .GetProperty("WithNullableTuple")
+            .GetProperty("properties")
+            .GetProperty("pair");
         var required = pairProp.GetProperty("required");
         var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
         Assert.Contains("key", requiredNames);
@@ -537,32 +570,47 @@ public sealed class DeepReviewFixTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         // Verify extension is emitted
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
-        var emptySchema = doc.GetProperty("components").GetProperty("schemas").GetProperty("EmptyMarker");
-        Assert.True(emptySchema.TryGetProperty("x-rivet-empty-record", out var ext),
-            "EmptyMarker should have x-rivet-empty-record extension");
+        var emptySchema = doc.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("EmptyMarker");
+        Assert.True(
+            emptySchema.TryGetProperty("x-rivet-empty-record", out var ext),
+            "EmptyMarker should have x-rivet-empty-record extension"
+        );
         Assert.True(ext.GetBoolean());
 
         // Reverse: OpenAPI → import → compile → walk
         var importResult = CompilationHelper.Import(json);
         var recompilation = CompilationHelper.CreateCompilationFromMultiple(
-            importResult.Files.Select(f => f.Content).ToArray());
+            importResult.Files.Select(f => f.Content).ToArray()
+        );
         var (reDiscovered, rewalker) = CompilationHelper.DiscoverAndWalk(recompilation);
 
         // EmptyMarker should survive as a definition (not collapsed to Dictionary)
-        Assert.True(rewalker.Definitions.ContainsKey("EmptyMarker"),
-            "EmptyMarker should survive round-trip as a type definition");
+        Assert.True(
+            rewalker.Definitions.ContainsKey("EmptyMarker"),
+            "EmptyMarker should survive round-trip as a type definition"
+        );
         var emptyDef = rewalker.Definitions["EmptyMarker"];
         Assert.Empty(emptyDef.Properties);
 
         // ItemDto should reference EmptyMarker, not Dictionary<string, JsonElement>
         var itemDef = rewalker.Definitions["ItemDto"];
         var markerProp = itemDef.Properties.First(p => p.Name == "marker");
-        Assert.True(markerProp.Type is TsType.TypeRef { Name: "EmptyMarker" },
-            $"ItemDto.marker should be TypeRef(EmptyMarker), got {markerProp.Type}");
+        Assert.True(
+            markerProp.Type is TsType.TypeRef { Name: "EmptyMarker" },
+            $"ItemDto.marker should be TypeRef(EmptyMarker), got {markerProp.Type}"
+        );
     }
 
     // --- Nullable JsonNode import fix ---
@@ -571,7 +619,8 @@ public sealed class DeepReviewFixTests
     public void NullableCSharpType_Survives_Import()
     {
         // Verify that nullable: true + x-rivet-csharp-type works for pure null type schemas
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "FlexDto": {
                 "type": "object",
                 "properties": {
@@ -580,7 +629,8 @@ public sealed class DeepReviewFixTests
                 },
                 "required": ["required"]
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = result.Files.First(f => f.Content.Contains("FlexDto")).Content;
@@ -610,8 +660,10 @@ public sealed class DeepReviewFixTests
             """;
 
         var doc = EmitOpenApi(source);
-        var schema = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("ItemDto");
+        var schema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ItemDto");
         var required = schema.GetProperty("required");
         var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
 
@@ -646,14 +698,14 @@ public sealed class DeepReviewFixTests
             """;
 
         var doc = EmitOpenApi(source);
-        var schemas = doc.RootElement
-            .GetProperty("components").GetProperty("schemas");
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
         // Both fields are required — Value is nullable but still a required constructor param
         var monoName = "WrapperOfNullableString";
         if (!schemas.TryGetProperty(monoName, out var monoSchema))
         {
-            monoName = schemas.EnumerateObject()
+            monoName = schemas
+                .EnumerateObject()
                 .First(p => p.Name.Contains("Wrapper") && p.Name != "OptionalWrapper")
                 .Name;
             monoSchema = schemas.GetProperty(monoName);

@@ -5,7 +5,8 @@ using Rivet.Tool.Model;
 public sealed record ExtractionResult(
     IReadOnlyList<TsEndpointDefinition> Endpoints,
     IReadOnlyList<TsTypeDefinition> ExtractedTypes,
-    IReadOnlyDictionary<string, string?> TypeNamespaces);
+    IReadOnlyDictionary<string, string?> TypeNamespaces
+);
 
 public static class InlineTypeExtractor
 {
@@ -17,32 +18,52 @@ public static class InlineTypeExtractor
     {
         return type switch
         {
-            TsType.Primitive p => $"P:{Encode(p.Name)}F:{Encode(p.Format ?? "")}C:{Encode(p.CSharpType ?? "")}",
+            TsType.Primitive p =>
+                $"P:{Encode(p.Name)}F:{Encode(p.Format ?? "")}C:{Encode(p.CSharpType ?? "")}",
             TsType.Nullable n => $"N:{CanonicalHash(n.Inner)}",
             TsType.Array a => $"A:{CanonicalHash(a.Element)}",
             // Keyless dictionaries keep the historical hash so existing names stay stable
             TsType.Dictionary d => d.Key is null
                 ? $"D:{CanonicalHash(d.Value)}"
                 : $"D[{CanonicalHash(d.Key)}]:{CanonicalHash(d.Value)}",
-            TsType.StringUnion su => "SU:" + string.Concat(su.Members.OrderBy(m => m).Select(Encode)),
+            TsType.StringUnion su => "SU:"
+                + string.Concat(su.Members.OrderBy(m => m).Select(Encode)),
             TsType.IntUnion iu => "IU:" + string.Join(",", iu.Members.OrderBy(m => m)),
-            TsType.Literal literal => $"L:{literal.Value.ValueKind}:{Encode(literal.Value.ToString())}",
+            TsType.Literal literal =>
+                $"L:{literal.Value.ValueKind}:{Encode(literal.Value.ToString())}",
             TsType.TypeRef r => $"R:{Encode(r.Name)}",
-            TsType.Generic g => $"G:{Encode(g.Name)}<{string.Join(",", g.TypeArguments.Select(CanonicalHash))}>",
+            TsType.Generic g =>
+                $"G:{Encode(g.Name)}<{string.Join(",", g.TypeArguments.Select(CanonicalHash))}>",
             TsType.TypeParam tp => $"TP:{Encode(tp.Name)}",
             TsType.Brand b => $"B:{Encode(b.Name)}({CanonicalHash(b.Inner)})",
-            TsType.InlineObject obj => "IO:{" + string.Join(",",
-                obj.Fields.OrderBy(f => f.Name)
-                    .Select(f => $"N:{Encode(f.Name)}O:{(f.Optional ? 1 : 0)}T:{CanonicalHash(f.Type)}")) + "}",
-            TsType.TaggedUnion tu => "TU:" + Encode(tu.Discriminator) + "[" + string.Join(",",
-                tu.Variants.OrderBy(v => v.Tag).Select(v => $"{Encode(v.Tag)}:{CanonicalHash(v.Type)}")) + "]",
-            TsType.Union u => "U:[" + string.Join(",", u.Variants.Select(CanonicalHash).OrderBy(h => h)) + "]",
+            TsType.InlineObject obj => "IO:{"
+                + string.Join(
+                    ",",
+                    obj.Fields.OrderBy(f => f.Name)
+                        .Select(f =>
+                            $"N:{Encode(f.Name)}O:{(f.Optional ? 1 : 0)}T:{CanonicalHash(f.Type)}"
+                        )
+                )
+                + "}",
+            TsType.TaggedUnion tu => "TU:"
+                + Encode(tu.Discriminator)
+                + "["
+                + string.Join(
+                    ",",
+                    tu.Variants.OrderBy(v => v.Tag)
+                        .Select(v => $"{Encode(v.Tag)}:{CanonicalHash(v.Type)}")
+                )
+                + "]",
+            TsType.Union u => "U:["
+                + string.Join(",", u.Variants.Select(CanonicalHash).OrderBy(h => h))
+                + "]",
             _ => throw new NotSupportedException($"Unknown TsType variant: {type.GetType().Name}"),
         };
     }
 
     public static List<(TsType.InlineObject Type, string Context)> CollectInlineObjects(
-        IReadOnlyList<TsEndpointDefinition> endpoints)
+        IReadOnlyList<TsEndpointDefinition> endpoints
+    )
     {
         var results = new List<(TsType.InlineObject, string)>();
 
@@ -51,13 +72,23 @@ public static class InlineTypeExtractor
             CollectFromType(e.ReturnType, $"{e.ControllerName}.{e.Name}.return", results);
 
             foreach (var r in e.Responses)
-                CollectFromType(r.DataType, $"{e.ControllerName}.{e.Name}.response.{r.StatusCode}", results);
+            {
+                CollectFromType(
+                    r.DataType,
+                    $"{e.ControllerName}.{e.Name}.response.{r.StatusCode}",
+                    results
+                );
+            }
 
             foreach (var p in e.Params)
+            {
                 CollectFromType(p.Type, $"{e.ControllerName}.{e.Name}.param.{p.Name}", results);
+            }
 
             if (e.RequestType is not null)
+            {
                 CollectFromType(e.RequestType, $"{e.ControllerName}.{e.Name}.requestType", results);
+            }
         }
 
         return results;
@@ -66,7 +97,8 @@ public static class InlineTypeExtractor
     public static string GenerateName(
         string controllerName,
         IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences,
-        HashSet<string> usedNames)
+        HashSet<string> usedNames
+    )
     {
         var baseName = DeriveBaseName(controllerName, occurrences);
         var suffix = IsResponseWrapper(occurrences, occurrences[0].Type) ? "Response" : "Dto";
@@ -79,7 +111,8 @@ public static class InlineTypeExtractor
         HashSet<string> usedNames,
         Dictionary<string, TsType.InlineObject> nameTypes,
         TsType.InlineObject type,
-        HashSet<string>? arrayElementHashes = null)
+        HashSet<string>? arrayElementHashes = null
+    )
     {
         var baseName = DeriveBaseName(controllerName, occurrences);
         var suffix = IsResponseWrapper(occurrences, type) ? "Response" : "Dto";
@@ -105,11 +138,15 @@ public static class InlineTypeExtractor
         HashSet<string> usedNames,
         Dictionary<string, TsType.InlineObject> nameTypes,
         TsType.InlineObject type,
-        HashSet<string>? arrayElementHashes)
+        HashSet<string>? arrayElementHashes
+    )
     {
         var name = baseName + suffix;
         if (usedNames.Contains(name))
+        {
             name = DisambiguateCollision(name, usedNames, nameTypes, type, arrayElementHashes);
+        }
+
         usedNames.Add(name);
         nameTypes[name] = type;
         return name;
@@ -117,14 +154,17 @@ public static class InlineTypeExtractor
 
     private static string DeriveBaseName(
         string controllerName,
-        IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences)
+        IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences
+    )
     {
         var nestedOccurrence = occurrences.FirstOrDefault(o => o.Context.Contains(".field."));
         if (nestedOccurrence != default)
         {
             var fieldName = nestedOccurrence.Context.Split(".field.").Last().Split('.').First();
             if (fieldName != "data")
+            {
                 return ToPascalCase(Singularize(fieldName));
+            }
         }
 
         // Extract method name from context path: "Controller.Method.return" → segments[1]
@@ -133,24 +173,38 @@ public static class InlineTypeExtractor
         return ToPascalCase(Singularize(controllerName)) + ToPascalCase(methodName);
     }
 
-    private static readonly HashSet<string> ResponseWrapperFields = ["data", "message", "error", "status"];
+    private static readonly HashSet<string> _responseWrapperFields =
+    [
+        "data",
+        "message",
+        "error",
+        "status",
+    ];
 
     internal static bool IsResponseWrapper(
         IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences,
-        TsType.InlineObject type)
+        TsType.InlineObject type
+    )
     {
         // Condition 1: all occurrences are top-level (no .field. in context)
         // and context matches *.return or *.response.*
         var allTopLevel = occurrences.All(o =>
         {
             var ctx = o.Context;
-            if (ctx.Contains(".field.")) return false;
+            if (ctx.Contains(".field."))
+            {
+                return false;
+            }
+
             return ctx.EndsWith(".return") || ctx.Contains(".response.");
         });
-        if (!allTopLevel) return false;
+        if (!allTopLevel)
+        {
+            return false;
+        }
 
         // Condition 2: type has at least one wrapper field
-        return type.Fields.Any(f => ResponseWrapperFields.Contains(f.Name));
+        return type.Fields.Any(f => _responseWrapperFields.Contains(f.Name));
     }
 
     internal static string DisambiguateCollision(
@@ -158,10 +212,12 @@ public static class InlineTypeExtractor
         HashSet<string> usedNames,
         Dictionary<string, TsType.InlineObject> nameTypes,
         TsType.InlineObject type,
-        HashSet<string>? arrayElementHashes = null)
+        HashSet<string>? arrayElementHashes = null
+    )
     {
         // Strip known suffix to get baseName and suffix
-        string baseName, suffix;
+        string baseName,
+            suffix;
         if (name.EndsWith("Response"))
         {
             baseName = name[..^8];
@@ -183,7 +239,9 @@ public static class InlineTypeExtractor
         {
             var candidate = baseName + "Ref" + suffix;
             if (!usedNames.Contains(candidate))
+            {
                 return candidate;
+            }
         }
 
         if (nameTypes.TryGetValue(name, out var existing))
@@ -192,14 +250,18 @@ public static class InlineTypeExtractor
             {
                 var candidate = baseName + "Summary" + suffix;
                 if (!usedNames.Contains(candidate) && !HasStutter(candidate))
+                {
                     return candidate;
+                }
             }
 
             if (type.Fields.Count > existing.Fields.Count)
             {
                 var candidate = baseName + "Detail" + suffix;
                 if (!usedNames.Contains(candidate) && !HasStutter(candidate))
+                {
                     return candidate;
+                }
             }
 
             // Strategy: same field names but different optionality → Ref for the more-optional variant
@@ -211,24 +273,32 @@ public static class InlineTypeExtractor
                 {
                     var candidate = baseName + "Ref" + suffix;
                     if (!usedNames.Contains(candidate))
+                    {
                         return candidate;
+                    }
                 }
                 else if (typeOptional < existingOptional)
                 {
                     var candidate = baseName + "Detail" + suffix;
                     if (!usedNames.Contains(candidate))
+                    {
                         return candidate;
+                    }
                 }
             }
 
             // Find a distinguishing field name
             var existingFieldNames = existing.Fields.Select(f => f.Name).ToHashSet();
-            var distinguishing = type.Fields.FirstOrDefault(f => !existingFieldNames.Contains(f.Name));
+            var distinguishing = type.Fields.FirstOrDefault(f =>
+                !existingFieldNames.Contains(f.Name)
+            );
             if (distinguishing != default)
             {
                 var candidate = baseName + ToPascalCase(distinguishing.Name) + suffix;
                 if (!usedNames.Contains(candidate) && !HasStutter(candidate))
+                {
                     return candidate;
+                }
             }
         }
 
@@ -239,8 +309,13 @@ public static class InlineTypeExtractor
     {
         var words = SplitPascalCase(name);
         for (var i = 1; i < words.Count; i++)
+        {
             if (words[i].Equals(words[i - 1], StringComparison.OrdinalIgnoreCase))
+            {
                 return true;
+            }
+        }
+
         return false;
     }
 
@@ -262,59 +337,89 @@ public static class InlineTypeExtractor
 
     private static string ResolveCollision(string name, HashSet<string> usedNames)
     {
-        if (!usedNames.Contains(name)) return name;
+        if (!usedNames.Contains(name))
+        {
+            return name;
+        }
+
         var i = 2;
-        while (usedNames.Contains(name + i)) i++;
+        while (usedNames.Contains(name + i))
+        {
+            i++;
+        }
+
         return name + i;
     }
 
-    private static readonly HashSet<string> CommonFields =
-        new(StringComparer.OrdinalIgnoreCase) { "id", "created_at", "updated_at" };
+    private static readonly HashSet<string> _commonFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "id",
+        "created_at",
+        "updated_at",
+    };
 
     internal static string DeriveStructuralName(TsType.InlineObject type)
     {
         var fields = type.Fields.Where(f => f.Name != "data").ToList();
         // Don't strip data when it's the only field — "Object" is never useful
         if (fields.Count == 0)
+        {
             fields = type.Fields.ToList();
+        }
+
         if (fields.Count == 0)
+        {
             return "Object";
+        }
 
         // Prefer distinctive fields over common boilerplate
-        var distinctive = fields.Where(f => !CommonFields.Contains(f.Name)).ToList();
+        var distinctive = fields.Where(f => !_commonFields.Contains(f.Name)).ToList();
         var naming = distinctive.Count > 0 ? distinctive : fields;
 
         if (naming.Count <= 2)
+        {
             return string.Concat(naming.Select(f => ToPascalCase(f.Name)));
+        }
         // Cap at 2 fields — no Plus{N} suffix
         return string.Concat(naming.Take(2).Select(f => ToPascalCase(f.Name)));
     }
 
     internal static string ToPascalCase(string s) =>
-        string.Concat(s.Split('_', StringSplitOptions.RemoveEmptyEntries)
-            .Select(seg => char.ToUpperInvariant(seg[0]) + seg[1..]));
+        string.Concat(
+            s.Split('_', StringSplitOptions.RemoveEmptyEntries)
+                .Select(seg => char.ToUpperInvariant(seg[0]) + seg[1..])
+        );
 
     public static string Singularize(string name)
     {
-        if (name.Length <= 3) return name;
+        if (name.Length <= 3)
+        {
+            return name;
+        }
+
         if (name.EndsWith("ies"))
+        {
             return name[..^3] + "y";
+        }
+
         if (name.EndsWith("s"))
+        {
             return name[..^1];
+        }
+
         return name;
     }
 
     public static ExtractionResult Extract(
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyList<TsTypeDefinition> existingDefinitions,
-        int fieldThreshold = 5)
+        int fieldThreshold = 5
+    )
     {
         var collected = CollectInlineObjects(endpoints);
 
         // Group by canonical hash
-        var groups = collected
-            .GroupBy(c => CanonicalHash(c.Type))
-            .ToList();
+        var groups = collected.GroupBy(c => CanonicalHash(c.Type)).ToList();
 
         var usedNames = new HashSet<string>(existingDefinitions.Select(d => d.Name));
         var nameTypes = new Dictionary<string, TsType.InlineObject>();
@@ -329,7 +434,9 @@ public static class InlineTypeExtractor
             var representative = items[0].Type;
 
             if (items.Count < 2 && representative.Fields.Count < fieldThreshold)
+            {
                 continue;
+            }
 
             var distinctControllers = items.Select(i => i.Context.Split('.')[0]).Distinct().Count();
             var suffix = IsResponseWrapper(items, representative) ? "Response" : "Dto";
@@ -337,12 +444,26 @@ public static class InlineTypeExtractor
             if (distinctControllers >= CrossControllerThreshold)
             {
                 var structuralBase = DeriveStructuralName(representative);
-                name = GenerateName(structuralBase, suffix, usedNames, nameTypes, representative, arrayElementHashes);
+                name = GenerateName(
+                    structuralBase,
+                    suffix,
+                    usedNames,
+                    nameTypes,
+                    representative,
+                    arrayElementHashes
+                );
             }
             else
             {
                 var controllerName = items[0].Context.Split('.')[0];
-                name = GenerateName(controllerName, items, usedNames, nameTypes, representative, arrayElementHashes);
+                name = GenerateName(
+                    controllerName,
+                    items,
+                    usedNames,
+                    nameTypes,
+                    representative,
+                    arrayElementHashes
+                );
             }
 
             replacements[group.Key] = new TsType.TypeRef(name);
@@ -353,11 +474,12 @@ public static class InlineTypeExtractor
         foreach (var (hash, typeRef) in replacements)
         {
             var representative = collected.First(c => CanonicalHash(c.Type) == hash).Type;
-            var properties = representative.Fields
-                .Select(f => new TsPropertyDefinition(
+            var properties = representative
+                .Fields.Select(f => new TsPropertyDefinition(
                     f.Name,
                     ReplaceInType(f.Type, replacements),
-                    IsOptional: f.Optional))
+                    IsOptional: f.Optional
+                ))
                 .ToList();
 
             extractedTypes.Add(new TsTypeDefinition(typeRef.Name, [], properties));
@@ -371,20 +493,26 @@ public static class InlineTypeExtractor
 
     private static TsEndpointDefinition ReplaceInEndpoint(
         TsEndpointDefinition endpoint,
-        Dictionary<string, TsType.TypeRef> replacements)
+        Dictionary<string, TsType.TypeRef> replacements
+    )
     {
         var returnType = endpoint.ReturnType is not null
             ? ReplaceInType(endpoint.ReturnType, replacements)
             : null;
 
-        var responses = endpoint.Responses
-            .Select(r => r.DataType is not null
-                ? r with { DataType = ReplaceInType(r.DataType, replacements) }
-                : r)
+        var responses = endpoint
+            .Responses.Select(r =>
+                r.DataType is not null
+                    ? r with
+                    {
+                        DataType = ReplaceInType(r.DataType, replacements),
+                    }
+                    : r
+            )
             .ToList();
 
-        var parameters = endpoint.Params
-            .Select(p => p with { Type = ReplaceInType(p.Type, replacements) })
+        var parameters = endpoint
+            .Params.Select(p => p with { Type = ReplaceInType(p.Type, replacements) })
             .ToList();
 
         var requestType = endpoint.RequestType is not null
@@ -400,17 +528,26 @@ public static class InlineTypeExtractor
         };
     }
 
-    private static TsType ReplaceInType(TsType type, Dictionary<string, TsType.TypeRef> replacements)
+    private static TsType ReplaceInType(
+        TsType type,
+        Dictionary<string, TsType.TypeRef> replacements
+    )
     {
         switch (type)
         {
             case TsType.InlineObject io:
                 var hash = CanonicalHash(io);
                 if (replacements.TryGetValue(hash, out var typeRef))
+                {
                     return typeRef;
-                var replacedFields = io.Fields
-                    .Select(f => new TsType.InlineObjectField(
-                        f.Name, ReplaceInType(f.Type, replacements), f.Optional))
+                }
+
+                var replacedFields = io
+                    .Fields.Select(f => new TsType.InlineObjectField(
+                        f.Name,
+                        ReplaceInType(f.Type, replacements),
+                        f.Optional
+                    ))
                     .ToList();
                 return new TsType.InlineObject(replacedFields);
 
@@ -424,7 +561,9 @@ public static class InlineTypeExtractor
                 return new TsType.Dictionary(ReplaceInType(d.Value, replacements), d.Key);
 
             case TsType.Generic g:
-                var replacedArgs = g.TypeArguments.Select(a => ReplaceInType(a, replacements)).ToList();
+                var replacedArgs = g
+                    .TypeArguments.Select(a => ReplaceInType(a, replacements))
+                    .ToList();
                 return new TsType.Generic(g.Name, replacedArgs);
 
             case TsType.Brand b:
@@ -433,28 +572,45 @@ public static class InlineTypeExtractor
             case TsType.TaggedUnion tu:
                 return new TsType.TaggedUnion(
                     tu.Discriminator,
-                    tu.Variants.Select(v => new TsType.TaggedUnionVariant(v.Tag, ReplaceInType(v.Type, replacements))).ToList());
+                    tu.Variants.Select(v => new TsType.TaggedUnionVariant(
+                            v.Tag,
+                            ReplaceInType(v.Type, replacements)
+                        ))
+                        .ToList()
+                );
 
             case TsType.Union u:
-                return new TsType.Union(u.Variants.Select(v => ReplaceInType(v, replacements)).ToList());
+                return new TsType.Union(
+                    u.Variants.Select(v => ReplaceInType(v, replacements)).ToList()
+                );
 
             default:
                 return type;
         }
     }
 
-    private static HashSet<string> CollectArrayElementHashes(IReadOnlyList<TsEndpointDefinition> endpoints)
+    private static HashSet<string> CollectArrayElementHashes(
+        IReadOnlyList<TsEndpointDefinition> endpoints
+    )
     {
         var hashes = new HashSet<string>();
         foreach (var e in endpoints)
         {
             CollectArrayElements(e.ReturnType, hashes);
             foreach (var r in e.Responses)
+            {
                 CollectArrayElements(r.DataType, hashes);
+            }
+
             foreach (var p in e.Params)
+            {
                 CollectArrayElements(p.Type, hashes);
+            }
+
             if (e.RequestType is not null)
+            {
                 CollectArrayElements(e.RequestType, hashes);
+            }
         }
         return hashes;
     }
@@ -465,12 +621,18 @@ public static class InlineTypeExtractor
         {
             case TsType.Array a:
                 if (a.Element is TsType.InlineObject io)
+                {
                     hashes.Add(CanonicalHash(io));
+                }
+
                 CollectArrayElements(a.Element, hashes);
                 break;
             case TsType.InlineObject obj:
                 foreach (var field in obj.Fields)
+                {
                     CollectArrayElements(field.Type, hashes);
+                }
+
                 break;
             case TsType.Nullable n:
                 CollectArrayElements(n.Inner, hashes);
@@ -480,31 +642,46 @@ public static class InlineTypeExtractor
                 break;
             case TsType.Generic g:
                 foreach (var arg in g.TypeArguments)
+                {
                     CollectArrayElements(arg, hashes);
+                }
+
                 break;
             case TsType.Brand b:
                 CollectArrayElements(b.Inner, hashes);
                 break;
             case TsType.TaggedUnion tu:
                 foreach (var variant in tu.Variants)
+                {
                     CollectArrayElements(variant.Type, hashes);
+                }
+
                 break;
             case TsType.Union u:
                 foreach (var variant in u.Variants)
+                {
                     CollectArrayElements(variant, hashes);
+                }
+
                 break;
         }
     }
 
-    private static void CollectFromType(TsType? type, string context,
-        List<(TsType.InlineObject, string)> results)
+    private static void CollectFromType(
+        TsType? type,
+        string context,
+        List<(TsType.InlineObject, string)> results
+    )
     {
         switch (type)
         {
             case TsType.InlineObject io:
                 results.Add((io, context));
                 foreach (var field in io.Fields)
+                {
                     CollectFromType(field.Type, $"{context}.field.{field.Name}", results);
+                }
+
                 break;
             case TsType.Array a:
                 CollectFromType(a.Element, context, results);
@@ -517,18 +694,27 @@ public static class InlineTypeExtractor
                 break;
             case TsType.Generic g:
                 foreach (var arg in g.TypeArguments)
+                {
                     CollectFromType(arg, context, results);
+                }
+
                 break;
             case TsType.Brand b:
                 CollectFromType(b.Inner, context, results);
                 break;
             case TsType.TaggedUnion tu:
                 foreach (var variant in tu.Variants)
+                {
                     CollectFromType(variant.Type, $"{context}.variant.{variant.Tag}", results);
+                }
+
                 break;
             case TsType.Union u:
                 for (var index = 0; index < u.Variants.Count; index++)
+                {
                     CollectFromType(u.Variants[index], $"{context}.variant{index}", results);
+                }
+
                 break;
         }
     }

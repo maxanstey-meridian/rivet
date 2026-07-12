@@ -9,10 +9,15 @@ namespace Rivet.Tool.Import;
 /// </summary>
 internal sealed class RecordSynthesizer(
     ResolutionContext ctx,
-    Func<IOpenApiSchema, string?, string> resolveType)
+    Func<IOpenApiSchema, string?, string> resolveType
+)
 {
     public GeneratedRecord ResolveAllOfRecord(
-        string name, IList<IOpenApiSchema> allOfList, HashSet<string>? visited = null, ISet<string>? inheritedRequired = null)
+        string name,
+        IList<IOpenApiSchema> allOfList,
+        HashSet<string>? visited = null,
+        ISet<string>? inheritedRequired = null
+    )
     {
         if (!ctx.Resolving.Add(name))
         {
@@ -45,7 +50,12 @@ internal sealed class RecordSynthesizer(
                 {
                     var childRequired = UnionRequired(element.Required, inheritedRequired);
                     var nested = ResolveAllOfRecord(refName, element.AllOf, visited, childRequired);
-                    nested = MergeWithSiblingProperties(nested, element, refName, inheritedRequired);
+                    nested = MergeWithSiblingProperties(
+                        nested,
+                        element,
+                        refName,
+                        inheritedRequired
+                    );
                     props = nested.Properties.ToList();
                 }
                 else
@@ -78,7 +88,10 @@ internal sealed class RecordSynthesizer(
 
         foreach (var variant in variants)
         {
-            if (variant is OpenApiSchemaReference variantRef && SchemaClassifier.WouldGenerateType(variantRef))
+            if (
+                variant is OpenApiSchemaReference variantRef
+                && SchemaClassifier.WouldGenerateType(variantRef)
+            )
             {
                 var refName = SanitizeName(variantRef.Reference.Id!);
                 properties.Add(new RecordProperty($"As{refName}", $"{refName}?", false));
@@ -102,16 +115,25 @@ internal sealed class RecordSynthesizer(
             }
         }
 
-        return new GeneratedRecord(name, SchemaClassifier.DeduplicateProperties(properties), IsUnion: true);
+        return new GeneratedRecord(
+            name,
+            SchemaClassifier.DeduplicateProperties(properties),
+            IsUnion: true
+        );
     }
 
-    public List<RecordProperty> ExtractProperties(IOpenApiSchema schema, string context, ISet<string>? inheritedRequired = null)
+    public List<RecordProperty> ExtractProperties(
+        IOpenApiSchema schema,
+        string context,
+        ISet<string>? inheritedRequired = null
+    )
     {
         var properties = new List<RecordProperty>();
         // I8: a composing schema's top-level `required` applies to the whole composed
         // instance — union it with the element's own `required` so requiredness is
         // decided before the "?" suffix is appended.
-        var requiredSet = UnionRequired(schema.Required, inheritedRequired)
+        var requiredSet =
+            UnionRequired(schema.Required, inheritedRequired)
             ?? (ISet<string>)new HashSet<string>();
 
         if (schema.Properties is not null)
@@ -153,7 +175,9 @@ internal sealed class RecordSynthesizer(
                 var constraints = ExtractConstraints(propSchema);
 
                 // Preserve description, example, readOnly, writeOnly
-                var description = string.IsNullOrEmpty(propSchema.Description) ? null : propSchema.Description;
+                var description = string.IsNullOrEmpty(propSchema.Description)
+                    ? null
+                    : propSchema.Description;
 
                 // 3.1 emits the JSON Schema 2020-12 `examples` array; legacy specs may
                 // still carry the deprecated schema-level `example`.
@@ -176,8 +200,22 @@ internal sealed class RecordSynthesizer(
                 // keys, and renamed properties all need the original key pinned.
                 var wireName = Naming.ToCamelCase(propName) == propKey ? null : propKey;
 
-                properties.Add(new RecordProperty(propName, csharpType, isRequired, isDeprecated, format, defaultValue, constraints,
-                    description, example, isReadOnly, isWriteOnly, WireName: wireName));
+                properties.Add(
+                    new RecordProperty(
+                        propName,
+                        csharpType,
+                        isRequired,
+                        isDeprecated,
+                        format,
+                        defaultValue,
+                        constraints,
+                        description,
+                        example,
+                        isReadOnly,
+                        isWriteOnly,
+                        WireName: wireName
+                    )
+                );
             }
         }
 
@@ -202,7 +240,11 @@ internal sealed class RecordSynthesizer(
     }
 
     public GeneratedRecord MergeWithSiblingProperties(
-        GeneratedRecord record, IOpenApiSchema schema, string name, ISet<string>? inheritedRequired = null)
+        GeneratedRecord record,
+        IOpenApiSchema schema,
+        string name,
+        ISet<string>? inheritedRequired = null
+    )
     {
         if (schema.Properties is not { Count: > 0 })
         {
@@ -239,13 +281,17 @@ internal sealed class RecordSynthesizer(
     public GeneratedRecord? BuildGenericTemplateRecord(
         string templateName,
         GenericTemplateInfo info,
-        IDictionary<string, IOpenApiSchema> schemas)
+        IDictionary<string, IOpenApiSchema> schemas
+    )
     {
         // Find the first monomorphised instance to derive the template properties
         IOpenApiSchema? firstInstance = null;
         foreach (var (key, schema) in schemas)
         {
-            if (SchemaClassifier.TryGetGenericExtension(schema, out var schemaInfo) && schemaInfo!.Name == templateName)
+            if (
+                SchemaClassifier.TryGetGenericExtension(schema, out var schemaInfo)
+                && schemaInfo!.Name == templateName
+            )
             {
                 firstInstance = schema;
                 break;
@@ -265,7 +311,10 @@ internal sealed class RecordSynthesizer(
         var templateProps = new List<RecordProperty>();
         foreach (var prop in monoProps)
         {
-            var templatedType = SchemaClassifier.ReverseSubstituteTypes(prop.CSharpType, reverseMap);
+            var templatedType = SchemaClassifier.ReverseSubstituteTypes(
+                prop.CSharpType,
+                reverseMap
+            );
             templateProps.Add(prop with { CSharpType = templatedType });
         }
 
@@ -278,14 +327,50 @@ internal sealed class RecordSynthesizer(
             MinLength: schema.MinLength.HasValue ? (int)schema.MinLength.Value : null,
             MaxLength: schema.MaxLength.HasValue ? (int)schema.MaxLength.Value : null,
             Pattern: schema.Pattern,
-            Minimum: double.TryParse(schema.Minimum?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var min) ? min : null,
-            Maximum: double.TryParse(schema.Maximum?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var max) ? max : null,
-            ExclusiveMinimum: double.TryParse(schema.ExclusiveMinimum?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var exMin) ? exMin : null,
-            ExclusiveMaximum: double.TryParse(schema.ExclusiveMaximum?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var exMax) ? exMax : null,
-            MultipleOf: double.TryParse(schema.MultipleOf?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mulOf) ? mulOf : null,
+            Minimum: double.TryParse(
+                schema.Minimum?.ToString(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var min
+            )
+                ? min
+                : null,
+            Maximum: double.TryParse(
+                schema.Maximum?.ToString(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var max
+            )
+                ? max
+                : null,
+            ExclusiveMinimum: double.TryParse(
+                schema.ExclusiveMinimum?.ToString(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var exMin
+            )
+                ? exMin
+                : null,
+            ExclusiveMaximum: double.TryParse(
+                schema.ExclusiveMaximum?.ToString(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var exMax
+            )
+                ? exMax
+                : null,
+            MultipleOf: double.TryParse(
+                schema.MultipleOf?.ToString(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var mulOf
+            )
+                ? mulOf
+                : null,
             MinItems: schema.MinItems.HasValue ? (int)schema.MinItems.Value : null,
             MaxItems: schema.MaxItems.HasValue ? (int)schema.MaxItems.Value : null,
-            UniqueItems: schema.UniqueItems == true ? true : null);
+            UniqueItems: schema.UniqueItems == true ? true : null
+        );
 
         return c.HasAny ? c : null;
     }

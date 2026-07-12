@@ -1,7 +1,5 @@
 using System.Diagnostics;
 using System.Text;
-using Rivet.Tool.Analysis;
-using Rivet.Tool.Emit;
 
 namespace Rivet.Tests;
 
@@ -19,15 +17,18 @@ namespace Rivet.Tests;
 /// died with the TS emitters at Phase 3.)
 ///
 /// Tooling is vendored in Rivet.Tests/js (openapi-fetch added as a devDependency
-/// for this suite); runs offline after one `npm install` there.
+/// for this suite); runs offline after one `pnpm install` there.
 /// </summary>
 [Trait("Category", "Local")]
 public sealed class SampleProjectOpenApiFetchTests : IDisposable
 {
-    private static readonly string RepoRoot = FindRepoRoot();
-    private static readonly string SampleDir = Path.Combine(RepoRoot, "samples", "ContractApi");
-    private static readonly string JsDir = Path.Combine(RepoRoot, "Rivet.Tests", "js");
-    private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"rivet-oaf-test-{Guid.NewGuid():N}");
+    private static readonly string _repoRoot = FindRepoRoot();
+    private static readonly string _sampleDir = Path.Combine(_repoRoot, "samples", "ContractApi");
+    private static readonly string _jsDir = Path.Combine(_repoRoot, "Rivet.Tests", "js");
+    private readonly string _tempDir = Path.Combine(
+        Path.GetTempPath(),
+        $"rivet-oaf-test-{Guid.NewGuid():N}"
+    );
 
     public void Dispose()
     {
@@ -47,10 +48,15 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         await WriteTsConfig(_tempDir);
         LinkNodeModules(_tempDir);
 
-        var tsc = Path.Combine(JsDir, "node_modules", ".bin", "tsc");
-        var (tscExit, tscOut, tscErr) = RunNode(tsc, ["--project", Path.Combine(_tempDir, "tsconfig.json")]);
-        Assert.True(tscExit == 0,
-            $"tsc --strict rejected the openapi-fetch consumer:\n{tscOut}\n{tscErr}");
+        var tsc = Path.Combine(_jsDir, "node_modules", "typescript", "bin", "tsc");
+        var (tscExit, tscOut, tscErr) = RunNode(
+            tsc,
+            ["--project", Path.Combine(_tempDir, "tsconfig.json")]
+        );
+        Assert.True(
+            tscExit == 0,
+            $"tsc --strict rejected the openapi-fetch consumer:\n{tscOut}\n{tscErr}"
+        );
     }
 
     // ═════════ Single-arm run: openapi-fetch consumer against the live server ═════════
@@ -72,8 +78,11 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         LinkNodeModules(_tempDir);
 
         // 2. Compile TS → JS
-        var tsc = Path.Combine(JsDir, "node_modules", ".bin", "tsc");
-        var (tscExit, tscOut, tscErr) = RunNode(tsc, ["--project", Path.Combine(_tempDir, "tsconfig.json")]);
+        var tsc = Path.Combine(_jsDir, "node_modules", "typescript", "bin", "tsc");
+        var (tscExit, tscOut, tscErr) = RunNode(
+            tsc,
+            ["--project", Path.Combine(_tempDir, "tsconfig.json")]
+        );
         Assert.True(tscExit == 0, $"tsc failed:\n{tscOut}\n{tscErr}");
 
         // 3. Boot the real ContractApi server
@@ -86,8 +95,10 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(_tempDir, "single-run.mjs"), SingleRunScript);
 
         var (nodeExit, nodeOutput) = await RunProcessAsync(
-            "node", $"\"{Path.Combine(_tempDir, "single-run.mjs")}\" {url}",
-            workingDir: _tempDir);
+            "node",
+            $"\"{Path.Combine(_tempDir, "single-run.mjs")}\" {url}",
+            workingDir: _tempDir
+        );
 
         Assert.True(nodeExit == 0, $"openapi-fetch run found mismatches:\n{nodeOutput}");
     }
@@ -101,19 +112,25 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
     private async Task GenerateOpenApiFetchArtifacts(string dir)
     {
         Assert.True(
-            File.Exists(Path.Combine(JsDir, "node_modules", "openapi-fetch", "package.json")),
-            "openapi-fetch not installed — run 'npm install' in Rivet.Tests/js/");
+            File.Exists(Path.Combine(_jsDir, "node_modules", "openapi-fetch", "package.json")),
+            "openapi-fetch not installed — run 'pnpm install' in Rivet.Tests/js/"
+        );
 
         // Emit the sample's OpenAPI 3.1 (same emission path as `rivet --openapi`).
         var specPath = Path.Combine(dir, "openapi.json");
-        await File.WriteAllTextAsync(specPath, OpenApiConformanceTests.EmitSpec("contractapi-sample"));
+        await File.WriteAllTextAsync(
+            specPath,
+            OpenApiConformanceTests.EmitSpec("contractapi-sample")
+        );
 
         // openapi-typescript over it (vendored, offline).
-        var openapiTs = Path.Combine(JsDir, "node_modules", ".bin", "openapi-typescript");
+        var openapiTs = Path.Combine(_jsDir, "node_modules", "openapi-typescript", "bin", "cli.js");
         var schemaPath = Path.Combine(dir, "schema.d.ts");
         var (genExit, genOut, genErr) = RunNode(openapiTs, [specPath, "-o", schemaPath]);
-        Assert.True(genExit == 0 && File.Exists(schemaPath),
-            $"openapi-typescript failed (exit {genExit}):\n{genOut}\n{genErr}");
+        Assert.True(
+            genExit == 0 && File.Exists(schemaPath),
+            $"openapi-typescript failed (exit {genExit}):\n{genOut}\n{genErr}"
+        );
 
         // Hand-written consumer module (the WP-5a shape: createClient<paths>).
         await File.WriteAllTextAsync(Path.Combine(dir, "consumer.ts"), ConsumerModuleSource);
@@ -121,11 +138,16 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
 
     private static async Task WriteTsConfig(string dir)
     {
-        await File.WriteAllTextAsync(Path.Combine(dir, "package.json"), """
+        await File.WriteAllTextAsync(
+            Path.Combine(dir, "package.json"),
+            """
             { "type": "module" }
-            """);
+            """
+        );
 
-        await File.WriteAllTextAsync(Path.Combine(dir, "tsconfig.json"), """
+        await File.WriteAllTextAsync(
+            Path.Combine(dir, "tsconfig.json"),
+            """
             {
               "compilerOptions": {
                 "target": "ES2022",
@@ -139,7 +161,8 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
               "include": ["./**/*.ts"],
               "exclude": ["node_modules", "dist"]
             }
-            """);
+            """
+        );
     }
 
     private static void LinkNodeModules(string dir)
@@ -147,7 +170,7 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         var link = Path.Combine(dir, "node_modules");
         if (!Directory.Exists(link))
         {
-            Directory.CreateSymbolicLink(link, Path.Combine(JsDir, "node_modules"));
+            Directory.CreateSymbolicLink(link, Path.Combine(_jsDir, "node_modules"));
         }
     }
 
@@ -332,18 +355,22 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         return dir ?? throw new InvalidOperationException("Could not find repo root (Rivet.slnx)");
     }
 
-    private static (int ExitCode, string StdOut, string StdErr) RunNode(string script, string[] args)
+    private static (int ExitCode, string StdOut, string StdErr) RunNode(
+        string script,
+        string[] args
+    )
     {
         if (!File.Exists(script))
         {
             throw new InvalidOperationException(
-                $"Node tool not found: {script}. Run 'npm install' in {JsDir} (see its README).");
+                $"Node tool not found: {script}. Run 'pnpm install' in {_jsDir} (see its README)."
+            );
         }
 
         var psi = new ProcessStartInfo
         {
             FileName = "node",
-            WorkingDirectory = JsDir,
+            WorkingDirectory = _jsDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -355,7 +382,8 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
             psi.ArgumentList.Add(arg);
         }
 
-        using var process = Process.Start(psi)
+        using var process =
+            Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start node {script}");
 
         // Drain both pipes concurrently — sequential ReadToEnd deadlocks when the
@@ -368,13 +396,17 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
     }
 
     private static async Task<(int ExitCode, string Output)> RunProcessAsync(
-        string fileName, string arguments, string? workingDir = null, CancellationToken ct = default)
+        string fileName,
+        string arguments,
+        string? workingDir = null,
+        CancellationToken ct = default
+    )
     {
         var psi = new ProcessStartInfo
         {
             FileName = fileName,
             Arguments = arguments,
-            WorkingDirectory = workingDir ?? RepoRoot,
+            WorkingDirectory = workingDir ?? _repoRoot,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -382,7 +414,8 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         };
         SampleProjectTests.MakeBuildHermetic(psi);
 
-        using var process = Process.Start(psi)
+        using var process =
+            Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start {fileName}");
 
         // Drain both pipes CONCURRENTLY: reading stdout to EOF before touching
@@ -394,8 +427,10 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
 
-        var output = string.Join("\n",
-            new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var output = string.Join(
+            "\n",
+            new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s))
+        );
 
         return (process.ExitCode, output);
     }
@@ -405,8 +440,9 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"run --project \"{Path.Combine(SampleDir, "ContractApi.csproj")}\" --urls {url}",
-            WorkingDirectory = RepoRoot,
+            Arguments =
+                $"run --project \"{Path.Combine(_sampleDir, "ContractApi.csproj")}\" --urls {url}",
+            WorkingDirectory = _repoRoot,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -414,7 +450,8 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         };
         SampleProjectTests.MakeBuildHermetic(psi);
 
-        var process = Process.Start(psi)
+        var process =
+            Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start sample server");
 
         var started = false;
@@ -443,7 +480,8 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
             {
                 var stderr = await process.StandardError.ReadToEndAsync(ct);
                 throw new InvalidOperationException(
-                    $"Server did not start. Output:\n{output}\nStderr:\n{stderr}");
+                    $"Server did not start. Output:\n{output}\nStderr:\n{stderr}"
+                );
             }
         }
         catch

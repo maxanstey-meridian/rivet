@@ -17,11 +17,14 @@ public sealed record CoverageWarning(
     string FieldName,
     string? Expected,
     string? Actual,
-    Location? Location);
+    Location? Location
+);
 
 public static class CoverageChecker
 {
-    private static readonly Dictionary<string, string> MinimalApiMethodMap = new(StringComparer.Ordinal)
+    private static readonly Dictionary<string, string> _minimalApiMethodMap = new(
+        StringComparer.Ordinal
+    )
     {
         ["MapGet"] = "GET",
         ["MapPost"] = "POST",
@@ -33,7 +36,8 @@ public static class CoverageChecker
     public static IReadOnlyList<CoverageWarning> Check(
         Compilation compilation,
         WellKnownTypes wkt,
-        IReadOnlyList<TsEndpointDefinition> contractEndpoints)
+        IReadOnlyList<TsEndpointDefinition> contractEndpoints
+    )
     {
         // Step 1 — Build contract field symbol → endpoint map
         var contractAttr = compilation.GetTypeByMetadataName("Rivet.RivetContractAttribute");
@@ -44,13 +48,17 @@ public static class CoverageChecker
             return [];
         }
 
-        var fieldMap = new Dictionary<IFieldSymbol, TsEndpointDefinition>(SymbolEqualityComparer.Default);
+        var fieldMap = new Dictionary<IFieldSymbol, TsEndpointDefinition>(
+            SymbolEqualityComparer.Default
+        );
 
         // Scope to source assembly — Rivet attributes only exist on user code
         foreach (var type in RoslynExtensions.GetAllTypes(compilation.Assembly.GlobalNamespace))
         {
-            if (!type.GetAttributes().Any(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, contractAttr)))
+            if (
+                !type.GetAttributes()
+                    .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, contractAttr))
+            )
             {
                 continue;
             }
@@ -78,7 +86,8 @@ public static class CoverageChecker
 
                 // Join to TsEndpointDefinition by controllerName + fieldName
                 var endpoint = contractEndpoints.FirstOrDefault(e =>
-                    e.ControllerName == controllerName && e.Name == fieldName);
+                    e.ControllerName == controllerName && e.Name == fieldName
+                );
 
                 if (endpoint is not null)
                 {
@@ -93,7 +102,9 @@ public static class CoverageChecker
         }
 
         // Step 2 — Find all .Invoke() call sites
-        var covered = new Dictionary<IFieldSymbol, List<InvocationExpressionSyntax>>(SymbolEqualityComparer.Default);
+        var covered = new Dictionary<IFieldSymbol, List<InvocationExpressionSyntax>>(
+            SymbolEqualityComparer.Default
+        );
 
         foreach (var tree in compilation.SyntaxTrees)
         {
@@ -115,7 +126,10 @@ public static class CoverageChecker
                 var symbolInfo = semanticModel.GetSymbolInfo(memberAccess.Expression);
                 var receiverSymbol = symbolInfo.Symbol;
 
-                if (receiverSymbol is IFieldSymbol receiverField && fieldMap.ContainsKey(receiverField))
+                if (
+                    receiverSymbol is IFieldSymbol receiverField
+                    && fieldMap.ContainsKey(receiverField)
+                )
                 {
                     if (!covered.TryGetValue(receiverField, out var list))
                     {
@@ -135,13 +149,16 @@ public static class CoverageChecker
         {
             if (!covered.TryGetValue(field, out var invocations))
             {
-                warnings.Add(new CoverageWarning(
-                    CoverageWarningKind.MissingImplementation,
-                    field.ContainingType.Name,
-                    field.Name,
-                    Expected: $"{endpoint.HttpMethod} {endpoint.RouteTemplate}",
-                    Actual: "(none)",
-                    Location: field.Locations.FirstOrDefault()));
+                warnings.Add(
+                    new CoverageWarning(
+                        CoverageWarningKind.MissingImplementation,
+                        field.ContainingType.Name,
+                        field.Name,
+                        Expected: $"{endpoint.HttpMethod} {endpoint.RouteTemplate}",
+                        Actual: "(none)",
+                        Location: field.Locations.FirstOrDefault()
+                    )
+                );
                 continue;
             }
 
@@ -155,26 +172,39 @@ public static class CoverageChecker
                     continue; // Can't determine context — skip validation
                 }
 
-                if (httpMethod is not null && !string.Equals(httpMethod, endpoint.HttpMethod, StringComparison.OrdinalIgnoreCase))
+                if (
+                    httpMethod is not null
+                    && !string.Equals(
+                        httpMethod,
+                        endpoint.HttpMethod,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
                 {
-                    warnings.Add(new CoverageWarning(
-                        CoverageWarningKind.HttpMethodMismatch,
-                        field.ContainingType.Name,
-                        field.Name,
-                        Expected: endpoint.HttpMethod,
-                        Actual: httpMethod,
-                        Location: invocation.GetLocation()));
+                    warnings.Add(
+                        new CoverageWarning(
+                            CoverageWarningKind.HttpMethodMismatch,
+                            field.ContainingType.Name,
+                            field.Name,
+                            Expected: endpoint.HttpMethod,
+                            Actual: httpMethod,
+                            Location: invocation.GetLocation()
+                        )
+                    );
                 }
 
                 if (route is not null && !RoutesMatch(endpoint.RouteTemplate, route))
                 {
-                    warnings.Add(new CoverageWarning(
-                        CoverageWarningKind.RouteMismatch,
-                        field.ContainingType.Name,
-                        field.Name,
-                        Expected: endpoint.RouteTemplate,
-                        Actual: route,
-                        Location: invocation.GetLocation()));
+                    warnings.Add(
+                        new CoverageWarning(
+                            CoverageWarningKind.RouteMismatch,
+                            field.ContainingType.Name,
+                            field.Name,
+                            Expected: endpoint.RouteTemplate,
+                            Actual: route,
+                            Location: invocation.GetLocation()
+                        )
+                    );
                 }
             }
         }
@@ -185,7 +215,8 @@ public static class CoverageChecker
     private static (string? HttpMethod, string? Route) ResolveImplementation(
         WellKnownTypes wkt,
         InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel)
+        SemanticModel semanticModel
+    )
     {
         // Try controller path: walk up to containing method with HTTP attributes
         var controllerResult = TryResolveController(wkt, invocation, semanticModel);
@@ -201,7 +232,8 @@ public static class CoverageChecker
     private static (string? HttpMethod, string? Route) TryResolveController(
         WellKnownTypes wkt,
         InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel)
+        SemanticModel semanticModel
+    )
     {
         var method = invocation.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
         if (method is null)
@@ -220,7 +252,10 @@ public static class CoverageChecker
             return (null, null);
         }
 
-        var controllerRoute = EndpointWalker.ExtractControllerRoute(wkt, methodSymbol.ContainingType);
+        var controllerRoute = EndpointWalker.ExtractControllerRoute(
+            wkt,
+            methodSymbol.ContainingType
+        );
         var fullRoute = EndpointWalker.CombineRoutes(controllerRoute, methodRoute);
 
         if (fullRoute is not null)
@@ -233,7 +268,8 @@ public static class CoverageChecker
 
     private static (string? HttpMethod, string? Route) TryResolveMinimalApi(
         InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel)
+        SemanticModel semanticModel
+    )
     {
         // Walk up: Invoke() is inside a lambda → lambda is an argument → argument is in MapGet(...) call
         SyntaxNode? current = invocation;
@@ -242,12 +278,14 @@ public static class CoverageChecker
         {
             current = current.Parent;
 
-            if (current is InvocationExpressionSyntax parentInvocation
-                && parentInvocation.Expression is MemberAccessExpressionSyntax parentMemberAccess)
+            if (
+                current is InvocationExpressionSyntax parentInvocation
+                && parentInvocation.Expression is MemberAccessExpressionSyntax parentMemberAccess
+            )
             {
                 var methodName = parentMemberAccess.Name.Identifier.Text;
 
-                if (MinimalApiMethodMap.TryGetValue(methodName, out var httpMethod))
+                if (_minimalApiMethodMap.TryGetValue(methodName, out var httpMethod))
                 {
                     // Extract route from first argument
                     string? route = null;
@@ -274,7 +312,8 @@ public static class CoverageChecker
         return string.Equals(
             NormalizeRoute(contractRoute),
             NormalizeRoute(implRoute),
-            StringComparison.OrdinalIgnoreCase);
+            StringComparison.OrdinalIgnoreCase
+        );
     }
 
     private static string NormalizeRoute(string route)
@@ -282,5 +321,4 @@ public static class CoverageChecker
         route = RouteParser.StripRouteConstraints(route);
         return "/" + route.Trim('/');
     }
-
 }

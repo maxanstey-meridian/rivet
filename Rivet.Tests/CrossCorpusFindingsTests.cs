@@ -37,8 +37,9 @@ public sealed class CrossCorpusFindingsTests
             """;
 
         IReadOnlyList<TsEndpointDefinition> endpoints = null!;
-        var stderr = CompilationHelper.CaptureStdErr(
-            () => endpoints = CompilationHelper.WalkContract(source).Endpoints);
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            endpoints = CompilationHelper.WalkContract(source).Endpoints
+        );
 
         Assert.Contains("RIV1020", stderr);
         Assert.Contains("/dict-input-things/", stderr);
@@ -71,8 +72,9 @@ public sealed class CrossCorpusFindingsTests
             """;
 
         IReadOnlyList<TsEndpointDefinition> endpoints = null!;
-        var stderr = CompilationHelper.CaptureStdErr(
-            () => endpoints = CompilationHelper.WalkContract(source).Endpoints);
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            endpoints = CompilationHelper.WalkContract(source).Endpoints
+        );
 
         Assert.Contains("RIV1020", stderr);
         Assert.Contains("/list-input-things", stderr);
@@ -101,8 +103,7 @@ public sealed class CrossCorpusFindingsTests
             }
             """;
 
-        var stderr = CompilationHelper.CaptureStdErr(
-            () => CompilationHelper.WalkContract(source));
+        var stderr = CompilationHelper.CaptureStdErr(() => CompilationHelper.WalkContract(source));
 
         // endpoint-unique needle: stderr capture is process-global under
         // parallel test classes (see ParamWireNamePinningTests)
@@ -116,35 +117,39 @@ public sealed class CrossCorpusFindingsTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ItemDto": { "type": "object", "properties": { "id": { "type": "string" } } }
-                """,
+            "ItemDto": { "type": "object", "properties": { "id": { "type": "string" } } }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "listItems",
-                        "parameters": [
-                            {"name": "page_size", "in": "query", "required": false, "schema": {"type": "integer"}}
-                        ],
-                        "requestBody": {
-                            "content": {"application/x-www-form-urlencoded": {"schema": {"type": "object", "additionalProperties": true}}}
-                        },
-                        "responses": {
-                            "200": {
-                                "description": "ok",
-                                "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemDto"}}}
-                            }
+            "/api/items": {
+                "get": {
+                    "operationId": "listItems",
+                    "parameters": [
+                        {"name": "page_size", "in": "query", "required": false, "schema": {"type": "integer"}}
+                    ],
+                    "requestBody": {
+                        "content": {"application/x-www-form-urlencoded": {"schema": {"type": "object", "additionalProperties": true}}}
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "ok",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemDto"}}}
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "DefaultContract.cs");
 
         // the real query param survives as the input; the unexpressable body goes, loudly
         Assert.Contains("Define.Get<ListItemsInput,", contract);
-        Assert.Contains("[rivet:unsupported body method=GET reason=opaque-body-dropped-params-kept", contract);
+        Assert.Contains(
+            "[rivet:unsupported body method=GET reason=opaque-body-dropped-params-kept",
+            contract
+        );
         Assert.DoesNotContain("reason=dropped-unmergeable-body", contract);
         // the dropped body takes its serialization metadata with it
         Assert.DoesNotContain(".FormEncoded()", contract);
@@ -158,28 +163,35 @@ public sealed class CrossCorpusFindingsTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
-                """,
+            "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
+            """,
             paths: """
-                "/api/tunnels/{tunnel_id}": {
-                    "delete": {
-                        "operationId": "deleteTunnel",
-                        "parameters": [
-                            {"name": "tunnel_id", "in": "path", "required": true, "schema": {"type": "string"}}
-                        ],
-                        "requestBody": {
-                            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
-                        },
-                        "responses": { "204": { "description": "deleted" } }
-                    }
+            "/api/tunnels/{tunnel_id}": {
+                "delete": {
+                    "operationId": "deleteTunnel",
+                    "parameters": [
+                        {"name": "tunnel_id", "in": "path", "required": true, "schema": {"type": "string"}}
+                    ],
+                    "requestBody": {
+                        "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+                    },
+                    "responses": { "204": { "description": "deleted" } }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var contract = CompilationHelper.FindFile(CompilationHelper.Import(spec), "DefaultContract.cs");
+        var contract = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "DefaultContract.cs"
+        );
 
         Assert.Contains("DeleteTunnelInput", contract);
-        Assert.Contains("[rivet:unsupported body method=DELETE reason=opaque-body-dropped-params-kept", contract);
+        Assert.Contains(
+            "[rivet:unsupported body method=DELETE reason=opaque-body-dropped-params-kept",
+            contract
+        );
         // nothing relocates to the query string, so the DELETE body-location marker must not also fire
         Assert.DoesNotContain("reason=body-lowered-to-query-params", contract);
     }
@@ -189,26 +201,30 @@ public sealed class CrossCorpusFindingsTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
-                """,
+            "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
+            """,
             paths: """
-                "/api/ingest": {
-                    "post": {
-                        "operationId": "ingestBlob",
-                        "parameters": [
-                            {"name": "tag", "in": "query", "required": false, "schema": {"type": "string"}}
-                        ],
-                        "requestBody": {
-                            "required": true,
-                            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
-                        },
-                        "responses": { "202": { "description": "accepted" } }
-                    }
+            "/api/ingest": {
+                "post": {
+                    "operationId": "ingestBlob",
+                    "parameters": [
+                        {"name": "tag", "in": "query", "required": false, "schema": {"type": "string"}}
+                    ],
+                    "requestBody": {
+                        "required": true,
+                        "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+                    },
+                    "responses": { "202": { "description": "accepted" } }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var contract = CompilationHelper.FindFile(CompilationHelper.Import(spec), "DefaultContract.cs");
+        var contract = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "DefaultContract.cs"
+        );
 
         // on a body-carrying method TInput re-emits as the JSON body — body wins, params drop loudly
         Assert.Contains("reason=dropped-unmergeable-body", contract);
@@ -222,30 +238,34 @@ public sealed class CrossCorpusFindingsTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ErrorDto": { "type": "object", "properties": { "message": { "type": "string" } } },
-                "ItemDto": { "type": "object", "properties": { "id": { "type": "string" } } }
-                """,
+            "ErrorDto": { "type": "object", "properties": { "message": { "type": "string" } } },
+            "ItemDto": { "type": "object", "properties": { "id": { "type": "string" } } }
+            """,
             paths: """
-                "/api/items/{id}": {
-                    "get": {
-                        "operationId": "getItem",
-                        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
-                        "responses": {
-                            "200": {
-                                "description": "ok",
-                                "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemDto"}}}
-                            },
-                            "4xx": {
-                                "description": "client error",
-                                "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorDto"}}}
-                            }
+            "/api/items/{id}": {
+                "get": {
+                    "operationId": "getItem",
+                    "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+                    "responses": {
+                        "200": {
+                            "description": "ok",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemDto"}}}
+                        },
+                        "4xx": {
+                            "description": "client error",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorDto"}}}
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var contract = CompilationHelper.FindFile(CompilationHelper.Import(spec), "DefaultContract.cs");
+        var contract = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "DefaultContract.cs"
+        );
 
         Assert.Contains(".Returns<ErrorDto>(400", contract);
         Assert.Contains("[rivet:unsupported error status-range=4xx projected=400]", contract);
@@ -258,19 +278,23 @@ public sealed class CrossCorpusFindingsTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
-                """,
+            "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
+            """,
             paths: """
-                "/api/stream": {
-                    "get": {
-                        "operationId": "openStream",
-                        "responses": { "101": { "description": "switching protocols" } }
-                    }
+            "/api/stream": {
+                "get": {
+                    "operationId": "openStream",
+                    "responses": { "101": { "description": "switching protocols" } }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var contract = CompilationHelper.FindFile(CompilationHelper.Import(spec), "DefaultContract.cs");
+        var contract = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "DefaultContract.cs"
+        );
 
         Assert.Contains(".Status(101)", contract);
         Assert.DoesNotContain(".Status(200)", contract);
@@ -282,28 +306,35 @@ public sealed class CrossCorpusFindingsTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ItemDto": { "type": "object", "properties": { "id": { "type": "string" } } }
-                """,
+            "ItemDto": { "type": "object", "properties": { "id": { "type": "string" } } }
+            """,
             paths: """
-                "/api/maybe-stream": {
-                    "get": {
-                        "operationId": "maybeStream",
-                        "responses": {
-                            "101": { "description": "switching protocols" },
-                            "200": {
-                                "description": "ok",
-                                "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemDto"}}}
-                            }
+            "/api/maybe-stream": {
+                "get": {
+                    "operationId": "maybeStream",
+                    "responses": {
+                        "101": { "description": "switching protocols" },
+                        "200": {
+                            "description": "ok",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemDto"}}}
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var contract = CompilationHelper.FindFile(CompilationHelper.Import(spec), "DefaultContract.cs");
+        var contract = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "DefaultContract.cs"
+        );
 
         // 200 is the success (the builder's default — no .Status call); the 101 drops loudly
         Assert.DoesNotContain(".Status(101)", contract);
-        Assert.Contains("[rivet:unsupported response status=101 reason=informational-status-dropped]", contract);
+        Assert.Contains(
+            "[rivet:unsupported response status=101 reason=informational-status-dropped]",
+            contract
+        );
     }
 }

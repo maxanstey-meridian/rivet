@@ -9,16 +9,23 @@ public sealed record TsEndpointExample
         string? Name = null,
         string? Json = null,
         string? ComponentExampleId = null,
-        string? ResolvedJson = null)
+        string? ResolvedJson = null
+    )
     {
         var hasJson = Json is not null;
         var hasComponentExampleId = ComponentExampleId is not null;
 
         if (hasJson == hasComponentExampleId)
-            throw new ArgumentException("Exactly one of json or componentExampleId must be provided.");
+        {
+            throw new ArgumentException(
+                "Exactly one of json or componentExampleId must be provided."
+            );
+        }
 
         if (ResolvedJson is not null && !hasComponentExampleId)
+        {
             throw new ArgumentException("resolvedJson is only valid for ref-backed examples.");
+        }
 
         this.MediaType = MediaType;
         this.Name = Name;

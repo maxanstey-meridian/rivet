@@ -25,10 +25,12 @@ internal static class CompilationLoader
         Console.Error.WriteLine($"Loading {fullPath}...");
 
         var project = await workspace.OpenProjectAsync(fullPath);
-        var compilation = await project.GetCompilationAsync()
+        var compilation =
+            await project.GetCompilationAsync()
             ?? throw new InvalidOperationException("Failed to get compilation.");
 
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
 
@@ -91,7 +93,8 @@ internal static class CompilationLoader
                 continue;
             }
 
-            var sdkDirectories = Directory.GetDirectories(sdkRoot)
+            var sdkDirectories = Directory
+                .GetDirectories(sdkRoot)
                 .OrderByDescending(static path => ParseVersion(Path.GetFileName(path)));
 
             foreach (var sdkDirectory in sdkDirectories)
@@ -116,13 +119,15 @@ internal static class CompilationLoader
             }
         }
 
-        foreach (var root in new[]
-                 {
-                     "/usr/local/share/dotnet",
-                     "/usr/local/share/dotnet/x64",
-                     "/opt/homebrew/share/dotnet",
-                     "/opt/homebrew/opt/dotnet/libexec",
-                 })
+        foreach (
+            var root in new[]
+            {
+                "/usr/local/share/dotnet",
+                "/usr/local/share/dotnet/x64",
+                "/opt/homebrew/share/dotnet",
+                "/opt/homebrew/opt/dotnet/libexec",
+            }
+        )
         {
             if (Directory.Exists(root))
             {
@@ -136,8 +141,11 @@ internal static class CompilationLoader
             yield break;
         }
 
-        foreach (var cellarInstall in Directory.GetDirectories(homebrewCellar)
-                     .OrderByDescending(static path => ParseVersion(Path.GetFileName(path))))
+        foreach (
+            var cellarInstall in Directory
+                .GetDirectories(homebrewCellar)
+                .OrderByDescending(static path => ParseVersion(Path.GetFileName(path)))
+        )
         {
             var libexecPath = Path.Combine(cellarInstall, "libexec");
             if (Directory.Exists(libexecPath))
@@ -149,9 +157,7 @@ internal static class CompilationLoader
 
     private static Version ParseVersion(string value)
     {
-        return Version.TryParse(value, out var version)
-            ? version
-            : new Version(0, 0);
+        return Version.TryParse(value, out var version) ? version : new Version(0, 0);
     }
 
     /// <summary>
@@ -165,9 +171,11 @@ internal static class CompilationLoader
         {
             if (Directory.Exists(path))
             {
-                foreach (var file in Directory
-                             .EnumerateFiles(path, "*.cs", SearchOption.AllDirectories)
-                             .OrderBy(static file => file, StringComparer.Ordinal))
+                foreach (
+                    var file in Directory
+                        .EnumerateFiles(path, "*.cs", SearchOption.AllDirectories)
+                        .OrderBy(static file => file, StringComparer.Ordinal)
+                )
                 {
                     yield return file;
                 }
@@ -241,7 +249,9 @@ internal static class CompilationLoader
             }
 
             var source = File.ReadAllText(path);
-            syntaxTrees.Add(CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest)));
+            syntaxTrees.Add(
+                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest))
+            );
         }
 
         var references = CollectFrameworkReferences();
@@ -252,9 +262,12 @@ internal static class CompilationLoader
             references,
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable));
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
 
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
 

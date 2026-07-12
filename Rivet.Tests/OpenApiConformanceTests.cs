@@ -21,7 +21,7 @@ namespace Rivet.Tests;
 /// Check 4 (foreign-spec importer stability) lives in RealWorldImportTests.
 ///
 /// Tooling is vendored in Rivet.Tests/js (see its README) — runs offline once
-/// <c>npm install</c> has been done there.
+/// <c>pnpm install</c> has been done there.
 ///
 /// Phase 0 marked failing rows <c>Skip="CONFORMANCE-GAP: …"</c> (catalogued in
 /// FABLE_PHASE0.md). As of Phase 1 (WP-1.1) all gaps are fixed and every row runs
@@ -30,8 +30,10 @@ namespace Rivet.Tests;
 public sealed class OpenApiConformanceTests : IDisposable
 {
     private readonly ITestOutputHelper _output;
-    private readonly string _tempDir =
-        Path.Combine(Path.GetTempPath(), $"rivet-conformance-{Guid.NewGuid():N}");
+    private readonly string _tempDir = Path.Combine(
+        Path.GetTempPath(),
+        $"rivet-conformance-{Guid.NewGuid():N}"
+    );
 
     public OpenApiConformanceTests(ITestOutputHelper output) => _output = output;
 
@@ -49,36 +51,61 @@ public sealed class OpenApiConformanceTests : IDisposable
     // OpenAPI emission, plus the ContractApi sample project and the contract-JSON
     // fixtures. One name → one emitted spec.
 
-    private static readonly string RepoRoot = FindRepoRoot();
-    private static readonly string JsDir = Path.Combine(RepoRoot, "Rivet.Tests", "js");
+    private static readonly string _repoRoot = FindRepoRoot();
+    private static readonly string _jsDir = Path.Combine(_repoRoot, "Rivet.Tests", "js");
 
     // Conformance fixtures are emitted the way a real deployment would invoke the
     // tool: --title/--version/--server set. This is what lets the spectral gate
-    // assert oas3-api-servers absent (see DeniedWarningCodes).
-    private static readonly OpenApiDocumentInfo FixtureDocumentInfo = new(
-        "Rivet Conformance Fixture", "1.2.3", ["https://api.example.com"]);
+    // assert oas3-api-servers absent (see _deniedWarningCodes).
+    private static readonly OpenApiDocumentInfo _fixtureDocumentInfo = new(
+        "Rivet Conformance Fixture",
+        "1.2.3",
+        ["https://api.example.com"]
+    );
 
-    public static string EmitSpec(string fixtureName) => fixtureName switch
-    {
-        "maximal-contract" => EmitFromSources([MaximalContractSource], "bearer,admin=bearer"),
-        "controller-annotations" => EmitFromSources([ControllerAnnotationsSource], null),
-        "typed-results" => EmitFromSources([TypedResultsSource], null),
-        "mixed-contracts-controllers" => EmitFromSources([MixedContractsControllersSource], null),
-        "file-endpoints-query-auth" => EmitFromSources([FileEndpointsQueryAuthSource], "bearer"),
-        "validation-metadata" => EmitFromSources([ValidationMetadataSource], null),
-        "polymorphic-shapes" => EmitFromSources([PolymorphicShapesSource], "bearer"),
-        "header-contracts" => EmitFromSources([HeaderContractsSource], "bearer"),
-        "contractapi-sample" => EmitFromSources(LoadContractApiSampleSources(), "bearer"),
-        "contract-sample-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-sample.json"), FixtureDocumentInfo),
-        "contract-tagged-union-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-tagged-union.json"), FixtureDocumentInfo),
-        "php-golden-contract-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("php-golden-contract.json"), FixtureDocumentInfo),
-        // TS-lowerer-shaped contract JSON: brands appear only as inline kind:"brand"
-        // nodes, and multipart inputs are decomposed into params with an inputTypeName
-        // that has NO matching entry in types[] (mirrors rivet-ts output; BUG-1/BUG-2).
-        "contract-ts-brands-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-ts-brands.json"), FixtureDocumentInfo),
-        "contract-ts-multipart-json" => CompilationHelper.EmitOpenApiFromJson(LoadFixture("contract-ts-multipart.json"), FixtureDocumentInfo),
-        _ => throw new ArgumentException($"Unknown conformance fixture '{fixtureName}'"),
-    };
+    public static string EmitSpec(string fixtureName) =>
+        fixtureName switch
+        {
+            "maximal-contract" => EmitFromSources([MaximalContractSource], "bearer,admin=bearer"),
+            "controller-annotations" => EmitFromSources([ControllerAnnotationsSource], null),
+            "typed-results" => EmitFromSources([TypedResultsSource], null),
+            "mixed-contracts-controllers" => EmitFromSources(
+                [MixedContractsControllersSource],
+                null
+            ),
+            "file-endpoints-query-auth" => EmitFromSources(
+                [FileEndpointsQueryAuthSource],
+                "bearer"
+            ),
+            "validation-metadata" => EmitFromSources([ValidationMetadataSource], null),
+            "polymorphic-shapes" => EmitFromSources([PolymorphicShapesSource], "bearer"),
+            "header-contracts" => EmitFromSources([HeaderContractsSource], "bearer"),
+            "contractapi-sample" => EmitFromSources(LoadContractApiSampleSources(), "bearer"),
+            "contract-sample-json" => CompilationHelper.EmitOpenApiFromJson(
+                LoadFixture("contract-sample.json"),
+                _fixtureDocumentInfo
+            ),
+            "contract-tagged-union-json" => CompilationHelper.EmitOpenApiFromJson(
+                LoadFixture("contract-tagged-union.json"),
+                _fixtureDocumentInfo
+            ),
+            "php-golden-contract-json" => CompilationHelper.EmitOpenApiFromJson(
+                LoadFixture("php-golden-contract.json"),
+                _fixtureDocumentInfo
+            ),
+            // TS-lowerer-shaped contract JSON: brands appear only as inline kind:"brand"
+            // nodes, and multipart inputs are decomposed into params with an inputTypeName
+            // that has NO matching entry in types[] (mirrors rivet-ts output; BUG-1/BUG-2).
+            "contract-ts-brands-json" => CompilationHelper.EmitOpenApiFromJson(
+                LoadFixture("contract-ts-brands.json"),
+                _fixtureDocumentInfo
+            ),
+            "contract-ts-multipart-json" => CompilationHelper.EmitOpenApiFromJson(
+                LoadFixture("contract-ts-multipart.json"),
+                _fixtureDocumentInfo
+            ),
+            _ => throw new ArgumentException($"Unknown conformance fixture '{fixtureName}'"),
+        };
 
     private static string EmitFromSources(string[] sources, string? security)
     {
@@ -87,16 +114,25 @@ public sealed class OpenApiConformanceTests : IDisposable
         var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var annotationEndpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var merged = EndpointMerger.Merge(contractEndpoints, annotationEndpoints);
-        var securityConfig = security is null ? null : SecurityParser.ParseMany(security.Split(','));
-        return OpenApiEmitter.Emit(merged, walker.Definitions, walker.Brands, walker.Enums, securityConfig, FixtureDocumentInfo);
+        var securityConfig = security is null
+            ? null
+            : SecurityParser.ParseMany(security.Split(','));
+        return OpenApiEmitter.Emit(
+            merged,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            securityConfig,
+            _fixtureDocumentInfo
+        );
     }
 
-    private static string LoadFixture(string name)
-        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
+    private static string LoadFixture(string name) =>
+        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
 
     private static string[] LoadContractApiSampleSources()
     {
-        var sampleDir = Path.Combine(RepoRoot, "samples", "ContractApi");
+        var sampleDir = Path.Combine(_repoRoot, "samples", "ContractApi");
         // Contracts + Models + Domain are the contract surface; Program.cs and
         // Controllers pull in the full ASP.NET hosting model the in-memory
         // compilation doesn't reference (and contribute no endpoints).
@@ -111,7 +147,9 @@ public sealed class OpenApiConformanceTests : IDisposable
             """;
 
         return new[] { "Contracts", "Models", "Domain" }
-            .SelectMany(d => Directory.GetFiles(Path.Combine(sampleDir, d), "*.cs"))
+            .SelectMany(d =>
+                Directory.GetFiles(Path.Combine(sampleDir, d), "*.cs", SearchOption.AllDirectories)
+            )
             .OrderBy(f => f, StringComparer.Ordinal)
             .Select(File.ReadAllText)
             .Prepend(implicitUsings)
@@ -155,7 +193,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     // info.title/info.version are schema-required (missing ones are already
     // severity-error), and info-contact / info-description need contact/description
     // data no flag provides — those stay reported-but-not-failing.
-    private static readonly string[] DeniedWarningCodes = ["oas3-api-servers"];
+    private static readonly string[] _deniedWarningCodes = ["oas3-api-servers"];
 
     [Theory]
     [InlineData("maximal-contract")]
@@ -175,11 +213,20 @@ public sealed class OpenApiConformanceTests : IDisposable
     public void Spectral_Lint_Has_Zero_Errors(string fixtureName)
     {
         var specPath = WriteSpec(fixtureName);
-        var ruleset = Path.Combine(JsDir, ".spectral.yaml");
-        var spectral = Path.Combine(JsDir, "node_modules", ".bin", "spectral");
+        var ruleset = Path.Combine(_jsDir, ".spectral.yaml");
+        var spectral = Path.Combine(
+            _jsDir,
+            "node_modules",
+            "@stoplight",
+            "spectral-cli",
+            "dist",
+            "index.js"
+        );
 
         var (exitCode, stdout, stderr) = RunNode(
-            spectral, ["lint", "--ruleset", ruleset, "--format", "json", specPath]);
+            spectral,
+            ["lint", "--ruleset", ruleset, "--format", "json", specPath]
+        );
 
         // --format json prints a findings array on stdout regardless of exit code.
         JsonArray findings;
@@ -189,7 +236,9 @@ public sealed class OpenApiConformanceTests : IDisposable
         }
         catch (Exception)
         {
-            Assert.Fail($"spectral did not produce JSON output (exit {exitCode}):\n{stdout}\n{stderr}");
+            Assert.Fail(
+                $"spectral did not produce JSON output (exit {exitCode}):\n{stdout}\n{stderr}"
+            );
             return;
         }
 
@@ -199,8 +248,10 @@ public sealed class OpenApiConformanceTests : IDisposable
         // Severity 0 = error (the gate); 1+ = warning/info/hint (reported, not
         // failing) — except the denylisted codes, which fail at any severity.
         var errors = findings
-            .Where(f => f?["severity"]?.GetValue<int>() == 0
-                || DeniedWarningCodes.Contains(f?["code"]?.GetValue<string>()))
+            .Where(f =>
+                f?["severity"]?.GetValue<int>() == 0
+                || _deniedWarningCodes.Contains(f?["code"]?.GetValue<string>())
+            )
             .ToList();
         var warnings = findings.Except(errors).ToList();
 
@@ -209,9 +260,11 @@ public sealed class OpenApiConformanceTests : IDisposable
             _output.WriteLine($"spectral warning [{fixtureName}]: {Describe(warning)}");
         }
 
-        Assert.True(errors.Count == 0,
+        Assert.True(
+            errors.Count == 0,
             $"spectral found {errors.Count} error(s) in '{fixtureName}':\n"
-            + string.Join("\n", errors.Select(Describe)));
+                + string.Join("\n", errors.Select(Describe))
+        );
     }
 
     // ════════ Check 2 — openapi-typescript + tsc --strict consumption ═══════
@@ -236,22 +289,34 @@ public sealed class OpenApiConformanceTests : IDisposable
         var specPath = WriteSpec(fixtureName);
         var typesPath = Path.Combine(_tempDir, $"{fixtureName}.ts");
 
-        var openapiTs = Path.Combine(JsDir, "node_modules", ".bin", "openapi-typescript");
+        var openapiTs = Path.Combine(_jsDir, "node_modules", "openapi-typescript", "bin", "cli.js");
         var (genExit, genOut, genErr) = RunNode(openapiTs, [specPath, "-o", typesPath]);
-        Assert.True(genExit == 0 && File.Exists(typesPath),
-            $"openapi-typescript failed for '{fixtureName}' (exit {genExit}):\n{genOut}\n{genErr}");
+        Assert.True(
+            genExit == 0 && File.Exists(typesPath),
+            $"openapi-typescript failed for '{fixtureName}' (exit {genExit}):\n{genOut}\n{genErr}"
+        );
 
-        var tsc = Path.Combine(JsDir, "node_modules", ".bin", "tsc");
-        var (tscExit, tscOut, tscErr) = RunNode(tsc,
-        [
-            "--noEmit", "--strict",
-            "--target", "es2022", "--module", "es2022",
-            "--moduleResolution", "bundler", "--skipLibCheck",
-            typesPath,
-        ]);
+        var tsc = Path.Combine(_jsDir, "node_modules", "typescript", "bin", "tsc");
+        var (tscExit, tscOut, tscErr) = RunNode(
+            tsc,
+            [
+                "--noEmit",
+                "--strict",
+                "--target",
+                "es2022",
+                "--module",
+                "es2022",
+                "--moduleResolution",
+                "bundler",
+                "--skipLibCheck",
+                typesPath,
+            ]
+        );
 
-        Assert.True(tscExit == 0,
-            $"tsc --strict rejected openapi-typescript output for '{fixtureName}':\n{tscOut}\n{tscErr}");
+        Assert.True(
+            tscExit == 0,
+            $"tsc --strict rejected openapi-typescript output for '{fixtureName}':\n{tscOut}\n{tscErr}"
+        );
     }
 
     // ═════════════════ Check 3 — self-loop emit/import stability ════════════
@@ -284,36 +349,51 @@ public sealed class OpenApiConformanceTests : IDisposable
         var node1 = JsonNode.Parse(json1);
         var node2 = JsonNode.Parse(json2);
 
-        Assert.True(JsonNode.DeepEquals(node1, node2),
+        Assert.True(
+            JsonNode.DeepEquals(node1, node2),
             $"emit∘import is not a fixed point for '{fixtureName}'.\n"
-            + $"--- after one import ---\n{json1}\n--- after two imports ---\n{json2}");
+                + $"--- after one import ---\n{json1}\n--- after two imports ---\n{json2}"
+        );
     }
 
     private static string ReEmitThroughImporter(string openApiJson, string security)
     {
         var securityConfig = SecurityParser.ParseMany(security.Split(','));
-        var result = CompilationHelper.Import(openApiJson, ns: "ConformanceLoop", securityConfig?.SchemeName);
+        var result = CompilationHelper.Import(
+            openApiJson,
+            ns: "ConformanceLoop",
+            securityConfig?.SchemeName
+        );
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         return OpenApiEmitter.Emit(
-            endpoints, walker.Definitions, walker.Brands, walker.Enums, securityConfig);
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            securityConfig
+        );
     }
 
     // ═══════════════════════════ Process plumbing ═══════════════════════════
 
-    private static (int ExitCode, string StdOut, string StdErr) RunNode(string script, string[] args)
+    private static (int ExitCode, string StdOut, string StdErr) RunNode(
+        string script,
+        string[] args
+    )
     {
         if (!File.Exists(script))
         {
             throw new InvalidOperationException(
-                $"Node tool not found: {script}. Run 'npm install' in {JsDir} (see its README).");
+                $"Node tool not found: {script}. Run 'pnpm install' in {_jsDir} (see its README)."
+            );
         }
 
         var psi = new ProcessStartInfo
         {
             FileName = "node",
-            WorkingDirectory = JsDir,
+            WorkingDirectory = _jsDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -325,7 +405,8 @@ public sealed class OpenApiConformanceTests : IDisposable
             psi.ArgumentList.Add(arg);
         }
 
-        using var process = Process.Start(psi)
+        using var process =
+            Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start node {script}");
 
         var stdout = process.StandardOutput.ReadToEnd();

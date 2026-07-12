@@ -1,5 +1,5 @@
-using Rivet;
 using AnnotationApi.Domain;
+using Rivet;
 
 namespace AnnotationApi.Application.CreateTask;
 
@@ -7,10 +7,11 @@ namespace AnnotationApi.Application.CreateTask;
 [RivetType]
 public sealed record CreateTaskCommand(
     string Title,
-    string? Description,       // → string | null
-    Priority Priority,          // → "Low" | "Medium" | "High" | "Critical"
-    Guid? AssigneeId,           // → string | null
-    List<string> LabelNames);   // → string[]
+    string? Description, // → string | null
+    Priority Priority, // → "Low" | "Medium" | "High" | "Critical"
+    Guid? AssigneeId, // → string | null
+    List<string> LabelNames
+); // → string[]
 
 /// TS: { id: string; createdAt: string }
 [RivetType]
@@ -20,6 +21,8 @@ public sealed class CreateTaskUseCase
 {
     public Task<CreateTaskResult> ExecuteAsync(CreateTaskCommand command, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(command);
+        ct.ThrowIfCancellationRequested();
         // In a real app: validate, persist, return
         return Task.FromResult(new CreateTaskResult(Guid.NewGuid(), DateTime.UtcNow));
     }

@@ -11,24 +11,38 @@ namespace Rivet.Tool.Emit;
 /// </summary>
 public static class JsonContractReader
 {
-    private static readonly JsonSerializerOptions Options = new()
+    private static readonly JsonSerializerOptions _options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new TsTypeJsonConverter(), new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
+        Converters =
+        {
+            new TsTypeJsonConverter(),
+            new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
+        },
     };
 
-    public static (IReadOnlyList<TsTypeDefinition> Types, Dictionary<string, TsType> Enums, IReadOnlyList<TsEndpointDefinition> Endpoints, Dictionary<string, TsType.Brand> Brands) Read(string json)
+    public static (
+        IReadOnlyList<TsTypeDefinition> Types,
+        Dictionary<string, TsType> Enums,
+        IReadOnlyList<TsEndpointDefinition> Endpoints,
+        Dictionary<string, TsType.Brand> Brands
+    ) Read(string json)
     {
-        var contract = JsonSerializer.Deserialize<ContractEmitter.RivetContract>(json, Options)
+        var contract =
+            JsonSerializer.Deserialize<ContractEmitter.RivetContract>(json, _options)
             ?? throw new JsonException("Failed to deserialize contract JSON.");
 
         var enums = new Dictionary<string, TsType>();
         foreach (var e in contract.Enums)
         {
             if (e.IntValues is not null)
+            {
                 enums[e.Name] = new TsType.IntUnion(e.IntValues);
+            }
             else
+            {
                 enums[e.Name] = new TsType.StringUnion(e.Values!);
+            }
         }
 
         var endpoints = contract.Endpoints?.Select(ToEndpointDefinition).ToList() ?? [];
@@ -45,7 +59,8 @@ public static class JsonContractReader
 
     private static Dictionary<string, TsType.Brand> CollectBrands(
         IReadOnlyList<TsTypeDefinition> types,
-        IReadOnlyList<TsEndpointDefinition> endpoints)
+        IReadOnlyList<TsEndpointDefinition> endpoints
+    )
     {
         var brands = new Dictionary<string, TsType.Brand>();
 
@@ -102,7 +117,8 @@ public static class JsonContractReader
                     {
                         Diagnostics.Warn(
                             Diagnostics.BrandConflictingUnderlyingTypes,
-                            $"brand '{b.Name}' declared with conflicting underlying types — first declaration wins");
+                            $"brand '{b.Name}' declared with conflicting underlying types — first declaration wins"
+                        );
                     }
                 }
                 else
@@ -156,11 +172,14 @@ public static class JsonContractReader
         }
     }
 
-    private static TsEndpointDefinition ToEndpointDefinition(ContractEmitter.ContractEndpoint endpoint)
+    private static TsEndpointDefinition ToEndpointDefinition(
+        ContractEmitter.ContractEndpoint endpoint
+    )
     {
         var responses = ResponseStatusValidation.NormalizeIrKeepingFirst(
             endpoint.Responses.Select(ToResponseType),
-            endpoint.Name);
+            endpoint.Name
+        );
 
         return new TsEndpointDefinition(
             endpoint.Name,
@@ -186,7 +205,8 @@ public static class JsonContractReader
             // contract-JSON round-trip like IsFileEndpoint/QueryAuth above.
             endpoint.BinaryRequestContentType,
             endpoint.RequestContentTypeOverride,
-            endpoint.ResponseContentTypeOverride);
+            endpoint.ResponseContentTypeOverride
+        );
     }
 
     private static TsResponseType ToResponseType(ContractEmitter.ContractResponseType response)
@@ -198,23 +218,39 @@ public static class JsonContractReader
             response.Examples?.Select(ToEndpointExample).ToList(),
             // P2 wave 5: headers are optional in contract JSON — absence (old contracts,
             // TS lowerer output) deserializes to null and is tolerated everywhere.
-            response.Headers);
+            response.Headers
+        );
     }
 
-    private static TsEndpointExample ToEndpointExample(ContractEmitter.ContractEndpointExample example)
+    private static TsEndpointExample ToEndpointExample(
+        ContractEmitter.ContractEndpointExample example
+    )
     {
         return new TsEndpointExample(
             example.MediaType,
             example.Name,
             example.Json,
             example.ComponentExampleId,
-            example.ResolvedJson);
+            example.ResolvedJson
+        );
     }
 
-    private static TsTypeDefinition ToTypeDefinition(ContractEmitter.ContractTypeDefinition definition)
+    private static TsTypeDefinition ToTypeDefinition(
+        ContractEmitter.ContractTypeDefinition definition
+    )
     {
         return definition.Type is not null
-            ? new TsTypeDefinition(definition.Name, definition.TypeParameters, definition.Type, definition.Description)
-            : new TsTypeDefinition(definition.Name, definition.TypeParameters, definition.Properties ?? [], definition.Description);
+            ? new TsTypeDefinition(
+                definition.Name,
+                definition.TypeParameters,
+                definition.Type,
+                definition.Description
+            )
+            : new TsTypeDefinition(
+                definition.Name,
+                definition.TypeParameters,
+                definition.Properties ?? [],
+                definition.Description
+            );
     }
 }

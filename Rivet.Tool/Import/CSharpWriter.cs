@@ -15,19 +15,22 @@ internal static class CSharpWriter
         var sb = new StringBuilder();
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
-        if (record.Properties.Any(p => p.Constraints is { } cc && HasStandardConstraints(cc))
-            || record.Properties.Any(p => p.Format is "email" or "uri"))
+        if (
+            record.Properties.Any(p => p.Constraints is { } cc && HasStandardConstraints(cc))
+            || record.Properties.Any(p => p.Format is "email" or "uri")
+        )
         {
             sb.AppendLine("using System.ComponentModel.DataAnnotations;");
         }
-        if (record.Polymorphism is not null
-            || record.Properties.Any(p => p.WireName is not null))
+        if (record.Polymorphism is not null || record.Properties.Any(p => p.WireName is not null))
         {
             sb.AppendLine("using System.Text.Json.Serialization;");
         }
         // I6: substring match — IFormFile can appear nested (List<IFormFile>,
         // Dictionary<string, IFormFile>), not only as the bare property type.
-        if (record.Properties.Any(p => p.CSharpType.Contains("IFormFile", StringComparison.Ordinal)))
+        if (
+            record.Properties.Any(p => p.CSharpType.Contains("IFormFile", StringComparison.Ordinal))
+        )
         {
             sb.AppendLine("using Microsoft.AspNetCore.Http;");
         }
@@ -41,10 +44,14 @@ internal static class CSharpWriter
         }
         if (record.Polymorphism is { } poly)
         {
-            sb.AppendLine($"[JsonPolymorphic(TypeDiscriminatorPropertyName = \"{EscapeString(poly.DiscriminatorPropertyName)}\")]");
+            sb.AppendLine(
+                $"[JsonPolymorphic(TypeDiscriminatorPropertyName = \"{EscapeString(poly.DiscriminatorPropertyName)}\")]"
+            );
             foreach (var variant in poly.Variants)
             {
-                sb.AppendLine($"[JsonDerivedType(typeof({variant.TypeName}), \"{EscapeString(variant.Tag)}\")]");
+                sb.AppendLine(
+                    $"[JsonDerivedType(typeof({variant.TypeName}), \"{EscapeString(variant.Tag)}\")]"
+                );
             }
         }
         if (record.IsUnion)
@@ -88,10 +95,11 @@ internal static class CSharpWriter
                 var requiredKeyword = prop.IsRequired ? "required " : "";
                 // Optional non-nullable properties need a suppressed default — there is
                 // no constructor parameter to satisfy the nullable analysis anymore.
-                var initializer = !prop.IsRequired && !prop.CSharpType.EndsWith('?')
-                    ? " = default!;"
-                    : "";
-                sb.AppendLine($"    public {requiredKeyword}{prop.CSharpType} {prop.Name} {{ get; init; }}{initializer}");
+                var initializer =
+                    !prop.IsRequired && !prop.CSharpType.EndsWith('?') ? " = default!;" : "";
+                sb.AppendLine(
+                    $"    public {requiredKeyword}{prop.CSharpType} {prop.Name} {{ get; init; }}{initializer}"
+                );
             }
             sb.AppendLine("}");
             return sb.ToString();
@@ -125,9 +133,10 @@ internal static class CSharpWriter
     /// EmailAddress/Url from formats, or [RivetConstraints] (a ValidationAttribute
     /// since the inbound-enforcement work).
     /// </summary>
-    private static bool CarriesValidationAttribute(GeneratedRecord record)
-        => record.Properties.Any(p =>
-            p.Format is "email" or "uri" || p.Constraints is { HasAny: true });
+    private static bool CarriesValidationAttribute(GeneratedRecord record) =>
+        record.Properties.Any(p =>
+            p.Format is "email" or "uri" || p.Constraints is { HasAny: true }
+        );
 
     /// <summary>
     /// Required-and-nullable is only expressible with the `required` keyword
@@ -135,8 +144,8 @@ internal static class CSharpWriter
     /// optional to the walker, so records with such properties take the
     /// non-positional required/init form where the keyword carries the axis.
     /// </summary>
-    private static bool HasRequiredNullableProperty(GeneratedRecord record)
-        => record.Properties.Any(p => p.IsRequired && p.CSharpType.EndsWith('?'));
+    private static bool HasRequiredNullableProperty(GeneratedRecord record) =>
+        record.Properties.Any(p => p.IsRequired && p.CSharpType.EndsWith('?'));
 
     private static void EmitPropertyAttributes(StringBuilder sb, RecordProperty prop, string target)
     {
@@ -208,7 +217,10 @@ internal static class CSharpWriter
         sb.AppendLine($"namespace {ns};");
         sb.AppendLine();
         if (isIntBacked)
+        {
             sb.AppendLine($"[JsonConverter(typeof(JsonNumberEnumConverter<{enumDef.Name}>))]");
+        }
+
         sb.AppendLine($"public enum {enumDef.Name}");
         sb.AppendLine("{");
 
@@ -235,9 +247,11 @@ internal static class CSharpWriter
         sb.AppendLine();
         sb.AppendLine($"public sealed record {brand.Name}({brand.InnerType} Value)");
         sb.AppendLine("{");
-        sb.AppendLine(brand.InnerType == "string"
-            ? "    public override string ToString() => Value;"
-            : "    public override string ToString() => Value.ToString();");
+        sb.AppendLine(
+            brand.InnerType == "string"
+                ? "    public override string ToString() => Value;"
+                : "    public override string ToString() => Value.ToString();"
+        );
         sb.AppendLine("}");
         return sb.ToString();
     }
@@ -248,9 +262,12 @@ internal static class CSharpWriter
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
         // I6: substring match — IFormFile can appear nested (List<IFormFile>), not only bare.
-        if (contract.Fields.Any(f =>
-            f.InputType?.Contains("IFormFile", StringComparison.Ordinal) == true
-            || f.OutputType?.Contains("IFormFile", StringComparison.Ordinal) == true))
+        if (
+            contract.Fields.Any(f =>
+                f.InputType?.Contains("IFormFile", StringComparison.Ordinal) == true
+                || f.OutputType?.Contains("IFormFile", StringComparison.Ordinal) == true
+            )
+        )
         {
             sb.AppendLine("using Microsoft.AspNetCore.Http;");
         }
@@ -288,7 +305,9 @@ internal static class CSharpWriter
         if (field.RequestBodyType is not null)
         {
             var requiredArgument = field.RequestBodyRequired is false ? ", false" : "";
-            sb.AppendLine($"    [RivetRequestBody(typeof({field.RequestBodyType}){requiredArgument})]");
+            sb.AppendLine(
+                $"    [RivetRequestBody(typeof({field.RequestBodyType}){requiredArgument})]"
+            );
         }
 
         // Field type: RouteDefinition<TIn, TOut>, RouteDefinition<TOut>, FileRouteDefinition, etc.
@@ -305,7 +324,9 @@ internal static class CSharpWriter
         else
         {
             var typeArgs = BuildTypeArgs(field.InputType, field.OutputType);
-            sb.Append($"        Define.{field.HttpMethod}{typeArgs}(\"{EscapeString(field.Route)}\")");
+            sb.Append(
+                $"        Define.{field.HttpMethod}{typeArgs}(\"{EscapeString(field.Route)}\")"
+            );
         }
 
         // Builder chain
@@ -326,7 +347,11 @@ internal static class CSharpWriter
         }
     }
 
-    private static string BuildFieldType(string? inputType, string? outputType, bool isFileEndpoint = false)
+    private static string BuildFieldType(
+        string? inputType,
+        string? outputType,
+        bool isFileEndpoint = false
+    )
     {
         if (isFileEndpoint)
         {
@@ -396,10 +421,14 @@ internal static class CSharpWriter
             field.SuccessStatus is not null
             && field.OutputType is null
             && field.FileContentType is null
-            && field.ResponseExamples.Any(example => example.StatusCode == field.SuccessStatus.Value);
+            && field.ResponseExamples.Any(example =>
+                example.StatusCode == field.SuccessStatus.Value
+            );
 
-        if (field.SuccessStatus is not null
-            && (field.SuccessStatus != defaultStatus || needsExplicitSuccessStatusForExamples))
+        if (
+            field.SuccessStatus is not null
+            && (field.SuccessStatus != defaultStatus || needsExplicitSuccessStatusForExamples)
+        )
         {
             calls.Add($".Status({field.SuccessStatus})");
         }
@@ -426,7 +455,9 @@ internal static class CSharpWriter
             {
                 if (error.Description is not null)
                 {
-                    calls.Add($".Returns<{error.TypeName}>({error.StatusCode}, \"{EscapeString(error.Description)}\")");
+                    calls.Add(
+                        $".Returns<{error.TypeName}>({error.StatusCode}, \"{EscapeString(error.Description)}\")"
+                    );
                 }
                 else
                 {
@@ -437,7 +468,9 @@ internal static class CSharpWriter
             {
                 if (error.Description is not null)
                 {
-                    calls.Add($".Returns({error.StatusCode}, \"{EscapeString(error.Description)}\")");
+                    calls.Add(
+                        $".Returns({error.StatusCode}, \"{EscapeString(error.Description)}\")"
+                    );
                 }
                 else
                 {
@@ -568,7 +601,9 @@ internal static class CSharpWriter
         return null;
     }
 
-    private static string? BuildResponseExampleCall(GeneratedEndpointResponseExample responseExample)
+    private static string? BuildResponseExampleCall(
+        GeneratedEndpointResponseExample responseExample
+    )
     {
         var example = responseExample.Example;
 
@@ -587,21 +622,28 @@ internal static class CSharpWriter
 
     private static string BuildOptionalExampleArguments(Rivet.Tool.Model.TsEndpointExample example)
     {
-        return example.Name is not null
-            ? $", name: \"{EscapeString(example.Name)}\""
-            : "";
+        return example.Name is not null ? $", name: \"{EscapeString(example.Name)}\"" : "";
     }
 
-    private static bool HasStandardConstraints(TsPropertyConstraints c)
-        => c.MinLength.HasValue || c.MaxLength.HasValue || c.Pattern is not null
-           || c.Minimum.HasValue || c.Maximum.HasValue;
+    private static bool HasStandardConstraints(TsPropertyConstraints c) =>
+        c.MinLength.HasValue
+        || c.MaxLength.HasValue
+        || c.Pattern is not null
+        || c.Minimum.HasValue
+        || c.Maximum.HasValue;
 
-    private static void EmitConstraintAttributes(StringBuilder sb, TsPropertyConstraints c, string target)
+    private static void EmitConstraintAttributes(
+        StringBuilder sb,
+        TsPropertyConstraints c,
+        string target
+    )
     {
         // StringLength when both min and max length are present
         if (c.MinLength.HasValue && c.MaxLength.HasValue)
         {
-            sb.AppendLine($"    [{target}StringLength({c.MaxLength}, MinimumLength = {c.MinLength})]");
+            sb.AppendLine(
+                $"    [{target}StringLength({c.MaxLength}, MinimumLength = {c.MinLength})]"
+            );
         }
         else if (c.MinLength.HasValue)
         {
@@ -616,15 +658,21 @@ internal static class CSharpWriter
         // Use RangeAttribute (not Range) to disambiguate from System.Range
         if (c.Minimum.HasValue && c.Maximum.HasValue)
         {
-            sb.AppendLine($"    [{target}RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]");
+            sb.AppendLine(
+                $"    [{target}RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]"
+            );
         }
         else if (c.Minimum.HasValue)
         {
-            sb.AppendLine($"    [{target}RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, double.MaxValue)]");
+            sb.AppendLine(
+                $"    [{target}RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, double.MaxValue)]"
+            );
         }
         else if (c.Maximum.HasValue)
         {
-            sb.AppendLine($"    [{target}RangeAttribute(double.MinValue, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]");
+            sb.AppendLine(
+                $"    [{target}RangeAttribute(double.MinValue, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]"
+            );
         }
 
         // Pattern
@@ -636,17 +684,40 @@ internal static class CSharpWriter
         // Exotic constraints → RivetConstraints
         var exoticParts = new List<string>();
         if (c.ExclusiveMinimum.HasValue)
-            exoticParts.Add($"ExclusiveMinimum = {c.ExclusiveMinimum.Value.ToString(CultureInfo.InvariantCulture)}");
+        {
+            exoticParts.Add(
+                $"ExclusiveMinimum = {c.ExclusiveMinimum.Value.ToString(CultureInfo.InvariantCulture)}"
+            );
+        }
+
         if (c.ExclusiveMaximum.HasValue)
-            exoticParts.Add($"ExclusiveMaximum = {c.ExclusiveMaximum.Value.ToString(CultureInfo.InvariantCulture)}");
+        {
+            exoticParts.Add(
+                $"ExclusiveMaximum = {c.ExclusiveMaximum.Value.ToString(CultureInfo.InvariantCulture)}"
+            );
+        }
+
         if (c.MultipleOf.HasValue)
-            exoticParts.Add($"MultipleOf = {c.MultipleOf.Value.ToString(CultureInfo.InvariantCulture)}");
+        {
+            exoticParts.Add(
+                $"MultipleOf = {c.MultipleOf.Value.ToString(CultureInfo.InvariantCulture)}"
+            );
+        }
+
         if (c.MinItems.HasValue)
+        {
             exoticParts.Add($"MinItems = {c.MinItems}");
+        }
+
         if (c.MaxItems.HasValue)
+        {
             exoticParts.Add($"MaxItems = {c.MaxItems}");
+        }
+
         if (c.UniqueItems == true)
+        {
             exoticParts.Add("UniqueItems = true");
+        }
 
         if (exoticParts.Count > 0)
         {

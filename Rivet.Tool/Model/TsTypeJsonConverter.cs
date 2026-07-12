@@ -5,92 +5,119 @@ namespace Rivet.Tool.Model;
 
 public sealed class TsTypeJsonConverter : JsonConverter<TsType>
 {
-    private static TsType DeserializeInner(JsonElement root, string propertyName, JsonSerializerOptions options) =>
+    private static TsType DeserializeInner(
+        JsonElement root,
+        string propertyName,
+        JsonSerializerOptions options
+    ) =>
         JsonSerializer.Deserialize<TsType>(root.GetProperty(propertyName).GetRawText(), options)
         ?? throw new JsonException($"Failed to deserialize '{propertyName}' as TsType.");
 
-    public override TsType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    public override TsType Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options
+    )
     {
         using var doc = JsonDocument.ParseValue(ref reader);
         var root = doc.RootElement;
 
         if (!root.TryGetProperty("kind", out var kindElement))
+        {
             throw new JsonException("Missing 'kind' property on TsType.");
-        var kind = kindElement.GetString()
-            ?? throw new JsonException("'kind' property must be a string.");
+        }
+
+        var kind =
+            kindElement.GetString() ?? throw new JsonException("'kind' property must be a string.");
 
         return kind switch
         {
             "primitive" => new TsType.Primitive(
                 root.GetProperty("type").GetString()!,
                 root.TryGetProperty("format", out var f) ? f.GetString() : null,
-                root.TryGetProperty("csharpType", out var c) ? c.GetString() : null),
+                root.TryGetProperty("csharpType", out var c) ? c.GetString() : null
+            ),
 
-            "nullable" => new TsType.Nullable(
-                DeserializeInner(root, "inner", options)),
+            "nullable" => new TsType.Nullable(DeserializeInner(root, "inner", options)),
 
-            "array" => new TsType.Array(
-                DeserializeInner(root, "element", options)),
+            "array" => new TsType.Array(DeserializeInner(root, "element", options)),
 
             // "key" is optional — the TS lowerer's contract JSON never emits it
             "dictionary" => new TsType.Dictionary(
                 DeserializeInner(root, "value", options),
                 root.TryGetProperty("key", out var k)
                     ? JsonSerializer.Deserialize<TsType>(k.GetRawText(), options)
-                    : null),
+                    : null
+            ),
 
             "stringUnion" => new TsType.StringUnion(
-                root.GetProperty("values").EnumerateArray()
-                    .Select(e => e.GetString()!).ToArray()),
+                root.GetProperty("values").EnumerateArray().Select(e => e.GetString()!).ToArray()
+            ),
 
             "intUnion" => new TsType.IntUnion(
-                root.GetProperty("values").EnumerateArray()
-                    .Select(e => e.GetInt32()).ToArray()),
+                root.GetProperty("values").EnumerateArray().Select(e => e.GetInt32()).ToArray()
+            ),
 
-            "literal" => new TsType.Literal(
-                root.GetProperty("value").Clone()),
+            "literal" => new TsType.Literal(root.GetProperty("value").Clone()),
 
-            "ref" => new TsType.TypeRef(
-                root.GetProperty("name").GetString()!),
+            "ref" => new TsType.TypeRef(root.GetProperty("name").GetString()!),
 
             "generic" => new TsType.Generic(
                 root.GetProperty("name").GetString()!,
-                root.GetProperty("typeArgs").EnumerateArray()
-                    .Select(e => JsonSerializer.Deserialize<TsType>(e.GetRawText(), options)!).ToArray()),
+                root.GetProperty("typeArgs")
+                    .EnumerateArray()
+                    .Select(e => JsonSerializer.Deserialize<TsType>(e.GetRawText(), options)!)
+                    .ToArray()
+            ),
 
-            "typeParam" => new TsType.TypeParam(
-                root.GetProperty("name").GetString()!),
+            "typeParam" => new TsType.TypeParam(root.GetProperty("name").GetString()!),
 
             "brand" => new TsType.Brand(
                 root.GetProperty("name").GetString()!,
-                DeserializeInner(root, "underlying", options)),
+                DeserializeInner(root, "underlying", options)
+            ),
 
             "inlineObject" => new TsType.InlineObject(
-                root.GetProperty("properties").EnumerateArray()
+                root.GetProperty("properties")
+                    .EnumerateArray()
                     .Select(e =>
                     {
                         var type = JsonSerializer.Deserialize<TsType>(
-                            e.GetProperty("type").GetRawText(), options)!;
+                            e.GetProperty("type").GetRawText(),
+                            options
+                        )!;
                         var optional = e.TryGetProperty("optional", out var optionalElement)
                             ? optionalElement.GetBoolean()
                             : type is TsType.Nullable;
                         return new TsType.InlineObjectField(
-                            e.GetProperty("name").GetString()!, type, optional);
+                            e.GetProperty("name").GetString()!,
+                            type,
+                            optional
+                        );
                     })
-                    .ToArray()),
+                    .ToArray()
+            ),
 
             "taggedUnion" => new TsType.TaggedUnion(
                 root.GetProperty("discriminator").GetString()!,
-                root.GetProperty("variants").EnumerateArray()
+                root.GetProperty("variants")
+                    .EnumerateArray()
                     .Select(e => new TsType.TaggedUnionVariant(
                         e.GetProperty("tag").GetString()!,
-                        JsonSerializer.Deserialize<TsType>(e.GetProperty("type").GetRawText(), options)!))
-                    .ToArray()),
+                        JsonSerializer.Deserialize<TsType>(
+                            e.GetProperty("type").GetRawText(),
+                            options
+                        )!
+                    ))
+                    .ToArray()
+            ),
 
             "union" => new TsType.Union(
-                root.GetProperty("variants").EnumerateArray()
+                root.GetProperty("variants")
+                    .EnumerateArray()
                     .Select(e => JsonSerializer.Deserialize<TsType>(e.GetRawText(), options)!)
-                    .ToArray()),
+                    .ToArray()
+            ),
 
             _ => throw new JsonException($"Unknown TsType kind: '{kind}'."),
         };
@@ -106,9 +133,15 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 writer.WriteString("kind", "primitive");
                 writer.WriteString("type", p.Name);
                 if (p.Format is not null)
+                {
                     writer.WriteString("format", p.Format);
+                }
+
                 if (p.CSharpType is not null)
+                {
                     writer.WriteString("csharpType", p.CSharpType);
+                }
+
                 break;
 
             case TsType.Nullable n:
@@ -138,7 +171,10 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 writer.WriteString("kind", "stringUnion");
                 writer.WriteStartArray("values");
                 foreach (var member in su.Members)
+                {
                     writer.WriteStringValue(member);
+                }
+
                 writer.WriteEndArray();
                 break;
 
@@ -146,7 +182,10 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 writer.WriteString("kind", "intUnion");
                 writer.WriteStartArray("values");
                 foreach (var member in iu.Members)
+                {
                     writer.WriteNumberValue(member);
+                }
+
                 writer.WriteEndArray();
                 break;
 
@@ -166,7 +205,10 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 writer.WriteString("name", g.Name);
                 writer.WriteStartArray("typeArgs");
                 foreach (var arg in g.TypeArguments)
+                {
                     JsonSerializer.Serialize(writer, arg, options);
+                }
+
                 writer.WriteEndArray();
                 break;
 

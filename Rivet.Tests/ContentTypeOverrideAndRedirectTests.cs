@@ -45,25 +45,52 @@ public sealed class ContentTypeOverrideAndRedirectTests
     public void ContentType_Overrides_Survive_Contract_And_OpenApi_RoundTrip()
     {
         var endpoint = new TsEndpointDefinition(
-            "renderRaw", "POST", "/render/raw", [], new TsType.Primitive("string"),
-            "RenderController", [new TsResponseType(200, new TsType.Primitive("string"))],
+            "renderRaw",
+            "POST",
+            "/render/raw",
+            [],
+            new TsType.Primitive("string"),
+            "RenderController",
+            [new TsResponseType(200, new TsType.Primitive("string"))],
             RequestType: new TsType.Primitive("string"),
             RequestContentTypeOverride: "text/plain",
-            ResponseContentTypeOverride: "text/html");
+            ResponseContentTypeOverride: "text/html"
+        );
 
         var contractJson = ContractEmitter.Emit(
-            new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         var readEndpoint = Assert.Single(JsonContractReader.Read(contractJson).Endpoints);
         Assert.Equal("text/plain", readEndpoint.RequestContentTypeOverride);
         Assert.Equal("text/html", readEndpoint.ResponseContentTypeOverride);
 
         var openApiJson = OpenApiEmitter.Emit(
-            [readEndpoint], new Dictionary<string, TsTypeDefinition>(),
-            new Dictionary<string, TsType.Brand>(), new Dictionary<string, TsType>(), null);
+            [readEndpoint],
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            null
+        );
         using var document = JsonDocument.Parse(openApiJson);
-        var operation = document.RootElement.GetProperty("paths").GetProperty("/render/raw").GetProperty("post");
-        Assert.True(operation.GetProperty("requestBody").GetProperty("content").TryGetProperty("text/plain", out _));
-        Assert.True(operation.GetProperty("responses").GetProperty("200").GetProperty("content").TryGetProperty("text/html", out _));
+        var operation = document
+            .RootElement.GetProperty("paths")
+            .GetProperty("/render/raw")
+            .GetProperty("post");
+        Assert.True(
+            operation
+                .GetProperty("requestBody")
+                .GetProperty("content")
+                .TryGetProperty("text/plain", out _)
+        );
+        Assert.True(
+            operation
+                .GetProperty("responses")
+                .GetProperty("200")
+                .GetProperty("content")
+                .TryGetProperty("text/html", out _)
+        );
     }
 
     [Fact]
@@ -71,20 +98,24 @@ public sealed class ContentTypeOverrideAndRedirectTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
-                """,
+            "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
+            """,
             paths: """
-                "/download/{artifact_id}": {
-                    "get": {
-                        "operationId": "downloadArtifact",
-                        "parameters": [{"name": "artifact_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
-                        "responses": { "302": { "description": "redirect to blob storage" } }
-                    }
+            "/download/{artifact_id}": {
+                "get": {
+                    "operationId": "downloadArtifact",
+                    "parameters": [{"name": "artifact_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
+                    "responses": { "302": { "description": "redirect to blob storage" } }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var contract = CompilationHelper.FindFile(CompilationHelper.Import(spec), "DefaultContract.cs");
+        var contract = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "DefaultContract.cs"
+        );
 
         Assert.Contains(".Status(302)", contract);
         Assert.DoesNotContain(".Returns(302", contract); // promoted, not double-declared
@@ -95,22 +126,26 @@ public sealed class ContentTypeOverrideAndRedirectTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
-                """,
+            "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
+            """,
             paths: """
-                "/render/raw": {
-                    "post": {
-                        "operationId": "renderRaw",
-                        "requestBody": {"required": true, "content": {"text/plain": {"schema": {"type": "string"}}}},
-                        "responses": {
-                            "200": { "description": "rendered", "content": { "text/html": { "schema": { "type": "string" } } } }
-                        }
+            "/render/raw": {
+                "post": {
+                    "operationId": "renderRaw",
+                    "requestBody": {"required": true, "content": {"text/plain": {"schema": {"type": "string"}}}},
+                    "responses": {
+                        "200": { "description": "rendered", "content": { "text/html": { "schema": { "type": "string" } } } }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var contract = CompilationHelper.FindFile(CompilationHelper.Import(spec), "DefaultContract.cs");
+        var contract = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "DefaultContract.cs"
+        );
 
         Assert.Contains(".AcceptsContentType(\"text/plain\")", contract);
         Assert.Contains(".ProducesContentType(\"text/html\")", contract);
@@ -121,23 +156,27 @@ public sealed class ContentTypeOverrideAndRedirectTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
-                """,
+            "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
+            """,
             paths: """
-                "/echo": {
-                    "post": {
-                        "operationId": "echo",
-                        "requestBody": {"required": true, "content": {"application/json": {
-                            "schema": {"type": "object", "properties": {"x": {"type": "string"}}},
-                            "examples": {"default": {"value": null}}
-                        }}},
-                        "responses": { "200": { "description": "ok" } }
-                    }
+            "/echo": {
+                "post": {
+                    "operationId": "echo",
+                    "requestBody": {"required": true, "content": {"application/json": {
+                        "schema": {"type": "object", "properties": {"x": {"type": "string"}}},
+                        "examples": {"default": {"value": null}}
+                    }}},
+                    "responses": { "200": { "description": "ok" } }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var contract = CompilationHelper.FindFile(CompilationHelper.Import(spec), "DefaultContract.cs");
+        var contract = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "DefaultContract.cs"
+        );
 
         Assert.DoesNotContain("openapi-json-null-sentinel", contract);
         Assert.Contains(".RequestExampleJson(\"null\"", contract);
@@ -149,7 +188,8 @@ public sealed class ContentTypeOverrideAndRedirectTests
     public void AcceptsContentType_Rejects_Combination_With_FormEncoded()
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>
-            Rivet.Define.Post("/x").FormEncoded().AcceptsContentType("text/plain"));
+            Rivet.Define.Post("/x").FormEncoded().AcceptsContentType("text/plain")
+        );
 
         Assert.Contains("AcceptsContentType", ex.Message);
     }
@@ -158,7 +198,8 @@ public sealed class ContentTypeOverrideAndRedirectTests
     public void ProducesContentType_Rejects_Combination_With_ProducesFile()
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>
-            Rivet.Define.Get("/x").ProducesFile("application/pdf").ProducesContentType("text/html"));
+            Rivet.Define.Get("/x").ProducesFile("application/pdf").ProducesContentType("text/html")
+        );
 
         Assert.Contains("ProducesContentType", ex.Message);
     }

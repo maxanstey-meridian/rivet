@@ -5,12 +5,14 @@ namespace Rivet.Tool.Import;
 internal sealed record GenericTemplateInfo(
     string Name,
     IReadOnlyList<string> TypeParams,
-    Dictionary<string, string> Args);
+    Dictionary<string, string> Args
+);
 
 internal sealed record SchemaMapResult(
     IReadOnlyList<GeneratedRecord> Records,
     IReadOnlyList<GeneratedEnum> Enums,
-    IReadOnlyList<GeneratedBrand> Brands);
+    IReadOnlyList<GeneratedBrand> Brands
+);
 
 internal sealed record GeneratedRecord(
     string Name,
@@ -21,7 +23,8 @@ internal sealed record GeneratedRecord(
     string? BaseTypeName = null,
     // Undiscriminated-oneOf wrapper (As* properties) — emitted with [RivetUnion]
     // so the walker re-emits oneOf and the runtime serializes the bare variant.
-    bool IsUnion = false);
+    bool IsUnion = false
+);
 
 /// <summary>
 /// Reversal of an emitted oneOf + discriminator + mapping union: the record becomes an
@@ -30,7 +33,8 @@ internal sealed record GeneratedRecord(
 /// </summary>
 internal sealed record PolymorphismInfo(
     string DiscriminatorPropertyName,
-    IReadOnlyList<PolymorphicVariantRef> Variants);
+    IReadOnlyList<PolymorphicVariantRef> Variants
+);
 
 internal sealed record PolymorphicVariantRef(string TypeName, string Tag);
 
@@ -53,24 +57,24 @@ internal sealed record RecordProperty(
     // already-PascalCase keys, reserved-member renames). Written as
     // [property: JsonPropertyName("...")] so both the runtime serializer and the
     // walker's re-emit keep the original wire name.
-    string? WireName = null);
+    string? WireName = null
+);
 
 internal sealed record GeneratedEnumMember(
     string CSharpName,
     string? OriginalName,
-    int? IntValue = null);
+    int? IntValue = null
+);
 
-internal sealed record GeneratedEnum(
-    string Name,
-    IReadOnlyList<GeneratedEnumMember> Members);
+internal sealed record GeneratedEnum(string Name, IReadOnlyList<GeneratedEnumMember> Members);
 
-internal sealed record GeneratedBrand(
-    string Name,
-    string InnerType);
+internal sealed record GeneratedBrand(string Name, string InnerType);
 
 internal sealed record GeneratedContract(
+    string ModuleName,
     string ClassName,
-    IReadOnlyList<GeneratedEndpointField> Fields);
+    IReadOnlyList<GeneratedEndpointField> Fields
+);
 
 internal sealed record GeneratedEndpointField(
     string FieldName,
@@ -96,26 +100,29 @@ internal sealed record GeneratedEndpointField(
     string? RequestContentType = null,
     string? ResponseContentType = null,
     string? RequestBodyType = null,
-    bool? RequestBodyRequired = null)
+    bool? RequestBodyRequired = null
+)
 {
     public IReadOnlyList<string> UnsupportedMarkers { get; init; } = UnsupportedMarkers ?? [];
     public IReadOnlyList<TsEndpointExample> RequestExamples { get; init; } = RequestExamples ?? [];
-    public IReadOnlyList<GeneratedEndpointResponseExample> ResponseExamples { get; init; } = ResponseExamples ?? [];
-    public IReadOnlyList<GeneratedResponseHeader> ResponseHeaders { get; init; } = ResponseHeaders ?? [];
+    public IReadOnlyList<GeneratedEndpointResponseExample> ResponseExamples { get; init; } =
+        ResponseExamples ?? [];
+    public IReadOnlyList<GeneratedResponseHeader> ResponseHeaders { get; init; } =
+        ResponseHeaders ?? [];
 }
 
 internal sealed record GeneratedErrorResponse(
     int StatusCode,
     string? TypeName,
-    string? Description);
+    string? Description
+);
 
-internal sealed record GeneratedEndpointResponseExample(
-    int StatusCode,
-    TsEndpointExample Example);
+internal sealed record GeneratedEndpointResponseExample(int StatusCode, TsEndpointExample Example);
 
 /// <summary>P2 wave 5: a response header re-emitted as a .WithResponseHeader(...) chain call.</summary>
 internal sealed record GeneratedResponseHeader(
     int StatusCode,
     string Name,
     string? Description,
-    bool Required);
+    bool Required
+);

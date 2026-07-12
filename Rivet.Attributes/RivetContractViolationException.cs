@@ -8,4 +8,5 @@ namespace Rivet;
 /// blocks and tests keep working. Map it to the structured failure envelope with
 /// <see cref="RivetContractViolationHandler"/>.
 /// </summary>
-public sealed class RivetContractViolationException(string message) : InvalidOperationException(message);
+public sealed class RivetContractViolationException(string message)
+    : InvalidOperationException(message);

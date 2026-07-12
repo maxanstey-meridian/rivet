@@ -9,7 +9,10 @@ namespace Rivet.Tool.Emit;
 /// </summary>
 internal static class SchemaEnricher
 {
-    public static void EnrichPropertySchema(Dictionary<string, object> propSchema, TsPropertyDefinition prop)
+    public static void EnrichPropertySchema(
+        Dictionary<string, object> propSchema,
+        TsPropertyDefinition prop
+    )
     {
         if (prop.Description is not null)
         {
@@ -64,17 +67,60 @@ internal static class SchemaEnricher
 
         if (prop.Constraints is { } cc)
         {
-            if (cc.MinLength.HasValue) propSchema["minLength"] = cc.MinLength.Value;
-            if (cc.MaxLength.HasValue) propSchema["maxLength"] = cc.MaxLength.Value;
-            if (cc.Pattern is not null) propSchema["pattern"] = cc.Pattern;
-            if (cc.Minimum.HasValue) propSchema["minimum"] = cc.Minimum.Value;
-            if (cc.Maximum.HasValue) propSchema["maximum"] = cc.Maximum.Value;
-            if (cc.ExclusiveMinimum.HasValue) propSchema["exclusiveMinimum"] = cc.ExclusiveMinimum.Value;
-            if (cc.ExclusiveMaximum.HasValue) propSchema["exclusiveMaximum"] = cc.ExclusiveMaximum.Value;
-            if (cc.MultipleOf.HasValue) propSchema["multipleOf"] = cc.MultipleOf.Value;
-            if (cc.MinItems.HasValue) propSchema["minItems"] = cc.MinItems.Value;
-            if (cc.MaxItems.HasValue) propSchema["maxItems"] = cc.MaxItems.Value;
-            if (cc.UniqueItems == true) propSchema["uniqueItems"] = true;
+            if (cc.MinLength.HasValue)
+            {
+                propSchema["minLength"] = cc.MinLength.Value;
+            }
+
+            if (cc.MaxLength.HasValue)
+            {
+                propSchema["maxLength"] = cc.MaxLength.Value;
+            }
+
+            if (cc.Pattern is not null)
+            {
+                propSchema["pattern"] = cc.Pattern;
+            }
+
+            if (cc.Minimum.HasValue)
+            {
+                propSchema["minimum"] = cc.Minimum.Value;
+            }
+
+            if (cc.Maximum.HasValue)
+            {
+                propSchema["maximum"] = cc.Maximum.Value;
+            }
+
+            if (cc.ExclusiveMinimum.HasValue)
+            {
+                propSchema["exclusiveMinimum"] = cc.ExclusiveMinimum.Value;
+            }
+
+            if (cc.ExclusiveMaximum.HasValue)
+            {
+                propSchema["exclusiveMaximum"] = cc.ExclusiveMaximum.Value;
+            }
+
+            if (cc.MultipleOf.HasValue)
+            {
+                propSchema["multipleOf"] = cc.MultipleOf.Value;
+            }
+
+            if (cc.MinItems.HasValue)
+            {
+                propSchema["minItems"] = cc.MinItems.Value;
+            }
+
+            if (cc.MaxItems.HasValue)
+            {
+                propSchema["maxItems"] = cc.MaxItems.Value;
+            }
+
+            if (cc.UniqueItems == true)
+            {
+                propSchema["uniqueItems"] = true;
+            }
         }
 
         if (prop.Format is not null)

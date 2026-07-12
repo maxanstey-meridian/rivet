@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "warn"
+  },
+  "rules": {
+    "no-unused-vars": "warn",
+    "curly": ["error", "all"]
+  },
+  "ignorePatterns": [
+    "-/**",
+    "Rivet.Tests/js/schemas.fixture.ts",
+    "samples/ImportDemo/Generated/**"
+  ]
+}

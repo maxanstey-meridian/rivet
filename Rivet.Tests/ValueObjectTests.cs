@@ -9,8 +9,8 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class ValueObjectTests
 {
-    private static JsonElement GetSchema(JsonDocument doc, string name)
-        => doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty(name);
+    private static JsonElement GetSchema(JsonDocument doc, string name) =>
+        doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty(name);
 
     [Fact]
     public void SingleValueProperty_EmitsAsBrand()
@@ -53,7 +53,12 @@ public sealed class ValueObjectTests
         var userSchema = GetSchema(doc, "UserDto");
         Assert.Equal(
             "#/components/schemas/Email",
-            userSchema.GetProperty("properties").GetProperty("email").GetProperty("$ref").GetString());
+            userSchema
+                .GetProperty("properties")
+                .GetProperty("email")
+                .GetProperty("$ref")
+                .GetString()
+        );
     }
 
     [Fact]
@@ -89,7 +94,8 @@ public sealed class ValueObjectTests
         var orderSchema = GetSchema(doc, "OrderDto");
         Assert.Equal(
             "#/components/schemas/Quantity",
-            orderSchema.GetProperty("properties").GetProperty("qty").GetProperty("$ref").GetString());
+            orderSchema.GetProperty("properties").GetProperty("qty").GetProperty("$ref").GetString()
+        );
     }
 
     [Fact]
@@ -225,12 +231,14 @@ public sealed class ValueObjectTests
         var emailSchema = contactSchema.GetProperty("properties").GetProperty("email");
         var oneOf = emailSchema.GetProperty("oneOf");
         Assert.Equal(2, oneOf.GetArrayLength());
-        Assert.Equal(
-            "#/components/schemas/Email",
-            oneOf[0].GetProperty("$ref").GetString());
+        Assert.Equal("#/components/schemas/Email", oneOf[0].GetProperty("$ref").GetString());
         Assert.Equal("null", oneOf[1].GetProperty("type").GetString());
 
-        var required = contactSchema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        var required = contactSchema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Contains("name", required);
         Assert.DoesNotContain("email", required);
     }

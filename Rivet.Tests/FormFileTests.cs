@@ -9,14 +9,17 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class FormFileTests
 {
-    private static JsonElement GetOperation(JsonDocument doc, string path, string method)
-        => doc.RootElement.GetProperty("paths").GetProperty(path).GetProperty(method);
+    private static JsonElement GetOperation(JsonDocument doc, string path, string method) =>
+        doc.RootElement.GetProperty("paths").GetProperty(path).GetProperty(method);
 
     private static JsonElement GetMultipartSchema(JsonElement operation)
     {
         var requestBody = operation.GetProperty("requestBody");
         Assert.True(requestBody.GetProperty("required").GetBoolean());
-        return requestBody.GetProperty("content").GetProperty("multipart/form-data").GetProperty("schema");
+        return requestBody
+            .GetProperty("content")
+            .GetProperty("multipart/form-data")
+            .GetProperty("schema");
     }
 
     private static void AssertBinaryFileProperty(JsonElement schema, string name)
@@ -25,7 +28,11 @@ public sealed class FormFileTests
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("binary", prop.GetProperty("format").GetString());
         Assert.True(prop.GetProperty("x-rivet-file").GetBoolean());
-        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        var required = schema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Contains(name, required);
     }
 
@@ -76,9 +83,15 @@ public sealed class FormFileTests
         // Response type is correct
         Assert.Equal(
             "#/components/schemas/FileUploadResult",
-            operation.GetProperty("responses").GetProperty("201")
-                .GetProperty("content").GetProperty("application/json")
-                .GetProperty("schema").GetProperty("$ref").GetString());
+            operation
+                .GetProperty("responses")
+                .GetProperty("201")
+                .GetProperty("content")
+                .GetProperty("application/json")
+                .GetProperty("schema")
+                .GetProperty("$ref")
+                .GetString()
+        );
     }
 
     [Fact]
@@ -127,7 +140,8 @@ public sealed class FormFileTests
         var operation = GetOperation(doc, "/api/tasks/{id}/attachments", "post");
         var idParam = Assert.Single(
             operation.GetProperty("parameters").EnumerateArray(),
-            p => p.GetProperty("name").GetString() == "id");
+            p => p.GetProperty("name").GetString() == "id"
+        );
         Assert.Equal("path", idParam.GetProperty("in").GetString());
         Assert.True(idParam.GetProperty("required").GetBoolean());
 
@@ -233,7 +247,11 @@ public sealed class FormFileTests
         var titleProp = schema.GetProperty("properties").GetProperty("title");
         Assert.Equal("string", titleProp.GetProperty("type").GetString());
         Assert.False(titleProp.TryGetProperty("format", out _));
-        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        var required = schema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Contains("title", required);
     }
 
@@ -275,16 +293,28 @@ public sealed class FormFileTests
         using var doc = CompilationHelper.EmitOpenApi(source);
         var operation = GetOperation(doc, "/api/files", "post");
         var schema = GetMultipartSchema(operation);
-        Assert.Equal("#/components/schemas/FileUploadRequest", schema.GetProperty("$ref").GetString());
+        Assert.Equal(
+            "#/components/schemas/FileUploadRequest",
+            schema.GetProperty("$ref").GetString()
+        );
 
-        var component = doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("FileUploadRequest");
+        var component = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("FileUploadRequest");
         AssertBinaryFileProperty(component, "file");
 
         Assert.Equal(
             "#/components/schemas/FileUploadResult",
-            operation.GetProperty("responses").GetProperty("201")
-                .GetProperty("content").GetProperty("application/json")
-                .GetProperty("schema").GetProperty("$ref").GetString());
+            operation
+                .GetProperty("responses")
+                .GetProperty("201")
+                .GetProperty("content")
+                .GetProperty("application/json")
+                .GetProperty("schema")
+                .GetProperty("$ref")
+                .GetString()
+        );
     }
 
     [Fact]
@@ -327,21 +357,31 @@ public sealed class FormFileTests
         var operation = GetOperation(doc, "/api/tasks/{id}/attachments", "post");
         var idParam = Assert.Single(
             operation.GetProperty("parameters").EnumerateArray(),
-            p => p.GetProperty("name").GetString() == "id");
+            p => p.GetProperty("name").GetString() == "id"
+        );
         Assert.Equal("path", idParam.GetProperty("in").GetString());
         Assert.True(idParam.GetProperty("required").GetBoolean());
 
         var schema = GetMultipartSchema(operation);
         Assert.Equal("#/components/schemas/AttachRequest", schema.GetProperty("$ref").GetString());
 
-        var component = doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("AttachRequest");
+        var component = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("AttachRequest");
         AssertBinaryFileProperty(component, "file");
 
         Assert.Equal(
             "#/components/schemas/AttachmentResult",
-            operation.GetProperty("responses").GetProperty("201")
-                .GetProperty("content").GetProperty("application/json")
-                .GetProperty("schema").GetProperty("$ref").GetString());
+            operation
+                .GetProperty("responses")
+                .GetProperty("201")
+                .GetProperty("content")
+                .GetProperty("application/json")
+                .GetProperty("schema")
+                .GetProperty("$ref")
+                .GetString()
+        );
     }
 
     private static void AssertBinaryFileArrayProperty(JsonElement schema, string name)
@@ -390,8 +430,10 @@ public sealed class FormFileTests
         var ep = Assert.Single(endpoints);
         var filesParam = Assert.Single(ep.Params, p => p.Name == "files");
         Assert.Equal(ParamSource.File, filesParam.Source);
-        Assert.True(filesParam.Type is TsType.Array { Element: TsType.Primitive { Name: "File" } },
-            $"Expected Array(File) but got {filesParam.Type}");
+        Assert.True(
+            filesParam.Type is TsType.Array { Element: TsType.Primitive { Name: "File" } },
+            $"Expected Array(File) but got {filesParam.Type}"
+        );
         var albumParam = Assert.Single(ep.Params, p => p.Name == "album");
         Assert.Equal(ParamSource.FormField, albumParam.Source);
 
@@ -399,9 +441,15 @@ public sealed class FormFileTests
         using var doc = CompilationHelper.EmitOpenApi(source);
         var operation = GetOperation(doc, "/api/photos", "post");
         var schema = GetMultipartSchema(operation);
-        Assert.Equal("#/components/schemas/BatchUploadRequest", schema.GetProperty("$ref").GetString());
+        Assert.Equal(
+            "#/components/schemas/BatchUploadRequest",
+            schema.GetProperty("$ref").GetString()
+        );
 
-        var component = doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("BatchUploadRequest");
+        var component = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("BatchUploadRequest");
         AssertBinaryFileArrayProperty(component, "files");
     }
 
@@ -435,8 +483,10 @@ public sealed class FormFileTests
         var ep = Assert.Single(endpoints);
         var filesParam = Assert.Single(ep.Params, p => p.Name == "files");
         Assert.Equal(ParamSource.File, filesParam.Source);
-        Assert.True(filesParam.Type is TsType.Array { Element: TsType.Primitive { Name: "File" } },
-            $"Expected Array(File) for {propertyType} but got {filesParam.Type}");
+        Assert.True(
+            filesParam.Type is TsType.Array { Element: TsType.Primitive { Name: "File" } },
+            $"Expected Array(File) for {propertyType} but got {filesParam.Type}"
+        );
     }
 
     [Fact]
@@ -474,8 +524,10 @@ public sealed class FormFileTests
         var ep = Assert.Single(endpoints);
         var photosParam = Assert.Single(ep.Params, p => p.Name == "photos");
         Assert.Equal(ParamSource.File, photosParam.Source);
-        Assert.True(photosParam.Type is TsType.Array { Element: TsType.Primitive { Name: "File" } },
-            $"Expected Array(File) but got {photosParam.Type}");
+        Assert.True(
+            photosParam.Type is TsType.Array { Element: TsType.Primitive { Name: "File" } },
+            $"Expected Array(File) but got {photosParam.Type}"
+        );
         var albumParam = Assert.Single(ep.Params, p => p.Name == "album");
         Assert.Equal(ParamSource.FormField, albumParam.Source);
 
@@ -484,7 +536,11 @@ public sealed class FormFileTests
         var operation = GetOperation(doc, "/api/photos", "post");
         var schema = GetMultipartSchema(operation);
         AssertBinaryFileArrayProperty(schema, "photos");
-        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        var required = schema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Contains("photos", required);
         Assert.Contains("album", required);
     }
@@ -558,8 +614,14 @@ public sealed class FormFileTests
 
         Assert.Equal(
             "#/components/schemas/AvatarResult",
-            operation.GetProperty("responses").GetProperty("201")
-                .GetProperty("content").GetProperty("application/json")
-                .GetProperty("schema").GetProperty("$ref").GetString());
+            operation
+                .GetProperty("responses")
+                .GetProperty("201")
+                .GetProperty("content")
+                .GetProperty("application/json")
+                .GetProperty("schema")
+                .GetProperty("$ref")
+                .GetString()
+        );
     }
 }

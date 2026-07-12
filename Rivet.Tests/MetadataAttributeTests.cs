@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Rivet.Tool.Analysis;
-using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -16,7 +15,9 @@ public sealed class MetadataAttributeTests
 
     private static JsonDocument EmitOpenApi(string source) => CompilationHelper.EmitOpenApi(source);
 
-    private static (TypeWalker Walker, IReadOnlyList<TsEndpointDefinition> Endpoints) WalkSource(string source)
+    private static (TypeWalker Walker, IReadOnlyList<TsEndpointDefinition> Endpoints) WalkSource(
+        string source
+    )
     {
         var (endpoints, walker) = CompilationHelper.WalkContract(source);
         return (walker, endpoints);
@@ -43,10 +44,15 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var schema = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("ItemDto");
-        var required = schema.GetProperty("required")
-            .EnumerateArray().Select(e => e.GetString()).ToList();
+        var schema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ItemDto");
+        var required = schema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
 
         Assert.Contains("name", required);
         Assert.DoesNotContain("nickname", required);
@@ -72,8 +78,10 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var schema = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("UserDto");
+        var schema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("UserDto");
 
         Assert.Equal("A user in the system", schema.GetProperty("description").GetString());
     }
@@ -96,9 +104,12 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var prop = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("UserDto")
-            .GetProperty("properties").GetProperty("name");
+        var prop = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("UserDto")
+            .GetProperty("properties")
+            .GetProperty("name");
 
         Assert.Equal("The user's full name", prop.GetProperty("description").GetString());
     }
@@ -125,8 +136,10 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var props = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("ItemDto")
+        var props = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ItemDto")
             .GetProperty("properties");
 
         var name = props.GetProperty("name");
@@ -161,8 +174,10 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var props = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("ConfigDto")
+        var props = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ConfigDto")
             .GetProperty("properties");
 
         Assert.Equal("en", props.GetProperty("locale").GetProperty("default").GetString());
@@ -189,9 +204,12 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var prop = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("UserDto")
-            .GetProperty("properties").GetProperty("email");
+        var prop = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("UserDto")
+            .GetProperty("properties")
+            .GetProperty("email");
 
         // 3.1: schema-level examples is a JSON Schema 2020-12 array
         var examples = prop.GetProperty("examples");
@@ -221,8 +239,10 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var props = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("UserDto")
+        var props = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("UserDto")
             .GetProperty("properties");
 
         Assert.True(props.GetProperty("id").GetProperty("readOnly").GetBoolean());
@@ -251,9 +271,12 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var prop = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("LinkDto")
-            .GetProperty("properties").GetProperty("href");
+        var prop = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("LinkDto")
+            .GetProperty("properties")
+            .GetProperty("href");
 
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("uri-template", prop.GetProperty("format").GetString());
@@ -329,10 +352,15 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var enumSchema = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("Status");
-        var values = enumSchema.GetProperty("enum")
-            .EnumerateArray().Select(v => v.GetString()!).ToList();
+        var enumSchema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Status");
+        var values = enumSchema
+            .GetProperty("enum")
+            .EnumerateArray()
+            .Select(v => v.GetString()!)
+            .ToList();
 
         Assert.Contains("in-progress", values);
         Assert.Contains("active", values);
@@ -364,18 +392,26 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var responses = doc.RootElement
-            .GetProperty("paths").GetProperty("/api/items/{id}")
-            .GetProperty("put").GetProperty("responses");
+        var responses = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/items/{id}")
+            .GetProperty("put")
+            .GetProperty("responses");
 
         // 404 — void with description
         var resp404 = responses.GetProperty("404");
         Assert.Equal("Not found", resp404.GetProperty("description").GetString());
-        Assert.False(resp404.TryGetProperty("content", out _), "Void response should have no content");
+        Assert.False(
+            resp404.TryGetProperty("content", out _),
+            "Void response should have no content"
+        );
 
         // 409 — void without description
         var resp409 = responses.GetProperty("409");
-        Assert.False(resp409.TryGetProperty("content", out _), "Void response should have no content");
+        Assert.False(
+            resp409.TryGetProperty("content", out _),
+            "Void response should have no content"
+        );
     }
 
     // ========== FormEncoded ==========
@@ -402,15 +438,21 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var requestBody = doc.RootElement
-            .GetProperty("paths").GetProperty("/api/auth/login")
-            .GetProperty("post").GetProperty("requestBody")
+        var requestBody = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/auth/login")
+            .GetProperty("post")
+            .GetProperty("requestBody")
             .GetProperty("content");
 
-        Assert.True(requestBody.TryGetProperty("application/x-www-form-urlencoded", out _),
-            "Form-encoded endpoint should use application/x-www-form-urlencoded");
-        Assert.False(requestBody.TryGetProperty("application/json", out _),
-            "Form-encoded endpoint should not use application/json");
+        Assert.True(
+            requestBody.TryGetProperty("application/x-www-form-urlencoded", out _),
+            "Form-encoded endpoint should use application/x-www-form-urlencoded"
+        );
+        Assert.False(
+            requestBody.TryGetProperty("application/json", out _),
+            "Form-encoded endpoint should not use application/json"
+        );
     }
 
     // ========== Combined metadata round-trip ==========
@@ -450,15 +492,20 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var schema = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("ProductDto");
+        var schema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ProductDto");
 
         // Type-level description
         Assert.Equal("A product listing", schema.GetProperty("description").GetString());
 
         // Required: id, name, price are required; internalNotes is optional
-        var required = schema.GetProperty("required")
-            .EnumerateArray().Select(e => e.GetString()).ToList();
+        var required = schema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Contains("id", required);
         Assert.Contains("name", required);
         Assert.Contains("price", required);
@@ -508,13 +555,18 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var prop = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("LinkDto")
-            .GetProperty("properties").GetProperty("href");
+        var prop = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("LinkDto")
+            .GetProperty("properties")
+            .GetProperty("href");
 
         Assert.Equal("uri", prop.GetProperty("format").GetString());
-        Assert.Equal(["string", "null"],
-            prop.GetProperty("type").EnumerateArray().Select(t => t.GetString()!).ToArray());
+        Assert.Equal(
+            ["string", "null"],
+            prop.GetProperty("type").EnumerateArray().Select(t => t.GetString()!).ToArray()
+        );
     }
 
     // ========== Monomorphised generic metadata ==========
@@ -549,8 +601,7 @@ public sealed class MetadataAttributeTests
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
         // Find the monomorphised schema
-        var monoName = schemas.EnumerateObject()
-            .First(p => p.Name.Contains("PagedResult")).Name;
+        var monoName = schemas.EnumerateObject().First(p => p.Name.Contains("PagedResult")).Name;
         var mono = schemas.GetProperty(monoName);
         var items = mono.GetProperty("properties").GetProperty("items");
 
@@ -583,12 +634,17 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var prop = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("ConfigDto")
-            .GetProperty("properties").GetProperty("mode");
+        var prop = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ConfigDto")
+            .GetProperty("properties")
+            .GetProperty("mode");
 
-        Assert.True(prop.TryGetProperty("default", out var def),
-            "default should be present even for invalid JSON");
+        Assert.True(
+            prop.TryGetProperty("default", out var def),
+            "default should be present even for invalid JSON"
+        );
         Assert.Equal("not-valid-json", def.GetString());
     }
 
@@ -614,9 +670,12 @@ public sealed class MetadataAttributeTests
             """;
 
         using var doc = EmitOpenApi(source);
-        var prop = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("ItemDto")
-            .GetProperty("properties").GetProperty("score");
+        var prop = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ItemDto")
+            .GetProperty("properties")
+            .GetProperty("score");
 
         // User constraints should override int32 range (-2147483648 to 2147483647)
         Assert.Equal(0, prop.GetProperty("minimum").GetDouble());
@@ -624,5 +683,4 @@ public sealed class MetadataAttributeTests
     }
 
     // ========== Helpers ==========
-
 }

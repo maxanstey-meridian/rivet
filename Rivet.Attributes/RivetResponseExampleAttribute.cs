@@ -1,12 +1,17 @@
 namespace Rivet;
 
-[AttributeUsage(AttributeTargets.Method | AttributeTargets.Field, AllowMultiple = true, Inherited = false)]
+[AttributeUsage(
+    AttributeTargets.Method | AttributeTargets.Field,
+    AllowMultiple = true,
+    Inherited = false
+)]
 public sealed class RivetResponseExampleAttribute(
     int statusCode,
     string json,
     string? componentExampleId = null,
     string? name = null,
-    string? mediaType = null) : Attribute
+    string? mediaType = null
+) : Attribute
 {
     public int StatusCode { get; } = statusCode;
 

@@ -12,7 +12,9 @@ dotnet rivet --from-openapi spec.json --namespace MyApp.Contracts --output ./src
 ```
 
 Omit `--output` to preview the generated C# on stdout. `--namespace` defaults to
-`Generated`.
+`Generated`. Contracts are grouped by tag under
+`Contracts/{Module}/{Module}Contract.cs`; DTOs and value objects are written to
+`Types/` and `Domain/` respectively.
 
 What imports cleanly, every diagnostic category, and what is out of scope are
 documented in the [Import Profile](/reference/import-profile). The quality gate:

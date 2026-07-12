@@ -33,7 +33,13 @@ public sealed class OpenApiDocumentInfoTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         return OpenApiEmitter.Emit(
-            endpoints, walker.Definitions, walker.Brands, walker.Enums, null, documentInfo);
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null,
+            documentInfo
+        );
     }
 
     [Fact]
@@ -49,8 +55,9 @@ public sealed class OpenApiDocumentInfoTests
     [Fact]
     public void Servers_Emitted_In_Order_When_Given()
     {
-        using var doc = JsonDocument.Parse(Emit(new OpenApiDocumentInfo(
-            Servers: ["https://api.example.com", "/relative-base"])));
+        using var doc = JsonDocument.Parse(
+            Emit(new OpenApiDocumentInfo(Servers: ["https://api.example.com", "/relative-base"]))
+        );
 
         var servers = doc.RootElement.GetProperty("servers");
         Assert.Equal(2, servers.GetArrayLength());
@@ -60,7 +67,7 @@ public sealed class OpenApiDocumentInfoTests
 
     [Theory]
     [InlineData(false)] // no documentInfo at all
-    [InlineData(true)]  // documentInfo present but Servers empty
+    [InlineData(true)] // documentInfo present but Servers empty
     public void No_Servers_Block_Unless_A_Server_Was_Given(bool emptyList)
     {
         var json = Emit(emptyList ? new OpenApiDocumentInfo(Servers: []) : null);
@@ -96,7 +103,8 @@ public sealed class OpenApiDocumentInfoTests
             endpoints,
             walker.TypeNamespaces,
             walker.Definitions,
-            walker.Brands);
+            walker.Brands
+        );
 
         var exit = await EmitPipeline.RunAsync(input, options);
         Assert.Equal(0, exit);
@@ -111,18 +119,26 @@ public sealed class OpenApiDocumentInfoTests
         var tempDir = Path.Combine(Path.GetTempPath(), $"rivet-docinfo-{Guid.NewGuid():N}");
         try
         {
-            var spec = await RunPipeline(new RivetOptions(
-                "ignored", tempDir, [],
-                Quiet: true,
-                Title: "Orders API", Version: "2.3.0",
-                Servers: ["https://api.example.com"]));
+            var spec = await RunPipeline(
+                new RivetOptions(
+                    "ignored",
+                    tempDir,
+                    [],
+                    Quiet: true,
+                    Title: "Orders API",
+                    Version: "2.3.0",
+                    Servers: ["https://api.example.com"]
+                )
+            );
 
             using var doc = JsonDocument.Parse(spec);
             var root = doc.RootElement;
             Assert.Equal("Orders API", root.GetProperty("info").GetProperty("title").GetString());
             Assert.Equal("2.3.0", root.GetProperty("info").GetProperty("version").GetString());
-            Assert.Equal("https://api.example.com",
-                root.GetProperty("servers")[0].GetProperty("url").GetString());
+            Assert.Equal(
+                "https://api.example.com",
+                root.GetProperty("servers")[0].GetProperty("url").GetString()
+            );
         }
         finally
         {

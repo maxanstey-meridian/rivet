@@ -44,10 +44,14 @@ public sealed class TransitiveEndpointTests
         var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
 
         // Types should be discovered transitively via endpoint params/return types
-        Assert.True(walker.Definitions.ContainsKey("CreateItemRequest"),
-            $"CreateItemRequest not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
-        Assert.True(walker.Definitions.ContainsKey("ItemDto"),
-            $"ItemDto not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
+        Assert.True(
+            walker.Definitions.ContainsKey("CreateItemRequest"),
+            $"CreateItemRequest not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]"
+        );
+        Assert.True(
+            walker.Definitions.ContainsKey("ItemDto"),
+            $"ItemDto not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]"
+        );
 
         var request = walker.Definitions["CreateItemRequest"];
         var nameProp = Assert.Single(request.Properties, p => p.Name == "name");
@@ -104,12 +108,16 @@ public sealed class TransitiveEndpointTests
         // PostDto discovered via endpoint
         var ep = Assert.Single(endpoints);
         Assert.Equal("PostDto", Assert.IsType<TsType.TypeRef>(ep.ReturnType).Name);
-        Assert.True(walker.Definitions.ContainsKey("PostDto"),
-            $"PostDto not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
+        Assert.True(
+            walker.Definitions.ContainsKey("PostDto"),
+            $"PostDto not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]"
+        );
 
         // AuthorInfo discovered transitively via PostDto
-        Assert.True(walker.Definitions.ContainsKey("AuthorInfo"),
-            $"AuthorInfo not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
+        Assert.True(
+            walker.Definitions.ContainsKey("AuthorInfo"),
+            $"AuthorInfo not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]"
+        );
         var postDto = walker.Definitions["PostDto"];
         var authorProp = Assert.Single(postDto.Properties, p => p.Name == "author");
         Assert.Equal("AuthorInfo", Assert.IsType<TsType.TypeRef>(authorProp.Type).Name);
@@ -161,7 +169,10 @@ public sealed class TransitiveEndpointTests
             }
             """;
 
-        var compilation = CompilationHelper.CreateCompilationWithProjectReference(mainSource, domainSource);
+        var compilation = CompilationHelper.CreateCompilationWithProjectReference(
+            mainSource,
+            domainSource
+        );
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
@@ -171,10 +182,14 @@ public sealed class TransitiveEndpointTests
         Assert.NotNull(endpoints[0].ReturnType);
 
         // Types from the referenced project should be walked transitively
-        Assert.True(walker.Definitions.ContainsKey("CaseSearchResult"),
-            $"CaseSearchResult not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
-        Assert.True(walker.Definitions.ContainsKey("CaseDocumentMeta"),
-            $"CaseDocumentMeta not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
+        Assert.True(
+            walker.Definitions.ContainsKey("CaseSearchResult"),
+            $"CaseSearchResult not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]"
+        );
+        Assert.True(
+            walker.Definitions.ContainsKey("CaseDocumentMeta"),
+            $"CaseDocumentMeta not discovered. Definitions: [{string.Join(", ", walker.Definitions.Keys)}]"
+        );
 
         // CaseSearchResult should have the Documents property
         var csr = walker.Definitions["CaseSearchResult"];

@@ -16,13 +16,12 @@ namespace Rivet.Tests;
 [Trait("Category", "Local")] // needs the gitignored openapi/ corpus on disk
 public sealed class CliPipelineTests
 {
-    private static string SpecPath(string name) =>
-        CliRunner.RepoPath("openapi", $"{name}.json");
+    private static string SpecPath(string name) => CliRunner.RepoPath("openapi", $"{name}.json");
 
     private static (int ExitCode, string StdOut, string StdErr) RunCli(
         string workingDirectory,
-        IReadOnlyList<string> args) =>
-        CliRunner.RunCli(workingDirectory, args);
+        IReadOnlyList<string> args
+    ) => CliRunner.RunCli(workingDirectory, args);
 
     [Theory]
     [InlineData("notion")]
@@ -38,15 +37,16 @@ public sealed class CliPipelineTests
             // 1. Import via the real CLI, writing C# to disk.
             var import = RunCli(
                 workDir.FullName,
-                ["--from-openapi", SpecPath(spec), "--output", srcDir, "--namespace", "Generated"]);
+                ["--from-openapi", SpecPath(spec), "--output", srcDir, "--namespace", "Generated"]
+            );
             Assert.True(import.ExitCode == 0, $"import failed:\n{import.StdErr}");
 
             // 2. Every file the CLI claims to have generated must actually exist
             //    afterwards. On a case-insensitive filesystem (APFS/NTFS — i.e.
             //    most dev machines) two names differing only by case clobber
             //    each other at write time, leaving dangling type references.
-            var generatedLine = import.StdOut
-                .Split('\n')
+            var generatedLine = import
+                .StdOut.Split('\n')
                 .Select(line => line.Trim())
                 .FirstOrDefault(line => line.StartsWith("Generated ") && line.EndsWith("file(s)."));
             Assert.NotNull(generatedLine);
@@ -73,8 +73,10 @@ public sealed class CliPipelineTests
             var emitArgs = new List<string> { srcDir, "--openapi", "--output", outDir };
             var securitySchemeNames = new HashSet<string>(StringComparer.Ordinal);
             var sourceSecuritySchemes = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-            if (sourceDocument.RootElement.TryGetProperty("components", out var components)
-                && components.TryGetProperty("securitySchemes", out var securitySchemes))
+            if (
+                sourceDocument.RootElement.TryGetProperty("components", out var components)
+                && components.TryGetProperty("securitySchemes", out var securitySchemes)
+            )
             {
                 foreach (var securityScheme in securitySchemes.EnumerateObject())
                 {
@@ -87,11 +89,11 @@ public sealed class CliPipelineTests
             foreach (var securitySchemeName in securitySchemeNames.Order(StringComparer.Ordinal))
             {
                 emitArgs.Add("--security");
-                emitArgs.Add(ToCliSecuritySpec(securitySchemeName, sourceSecuritySchemes, degradedSchemes));
+                emitArgs.Add(
+                    ToCliSecuritySpec(securitySchemeName, sourceSecuritySchemes, degradedSchemes)
+                );
             }
-            var emit = RunCli(
-                workDir.FullName,
-                emitArgs);
+            var emit = RunCli(workDir.FullName, emitArgs);
             Assert.True(emit.ExitCode == 0, $"compile/emit failed:\n{emit.StdErr}");
 
             // 4. The round-tripped spec must be internally consistent: every
@@ -102,8 +104,10 @@ public sealed class CliPipelineTests
             using var document = JsonDocument.Parse(File.ReadAllText(specPath));
             foreach (var degradedScheme in degradedSchemes)
             {
-                var emittedScheme = document.RootElement.GetProperty("components")
-                    .GetProperty("securitySchemes").GetProperty(degradedScheme);
+                var emittedScheme = document
+                    .RootElement.GetProperty("components")
+                    .GetProperty("securitySchemes")
+                    .GetProperty(degradedScheme);
                 Assert.Equal("http", emittedScheme.GetProperty("type").GetString());
                 Assert.Equal("bearer", emittedScheme.GetProperty("scheme").GetString());
             }
@@ -120,21 +124,28 @@ public sealed class CliPipelineTests
     private static string ToCliSecuritySpec(
         string name,
         IReadOnlyDictionary<string, JsonElement> sourceSchemes,
-        List<string> degradedSchemes)
+        List<string> degradedSchemes
+    )
     {
-        if (sourceSchemes.TryGetValue(name, out var scheme)
-            && scheme.TryGetProperty("type", out var type))
+        if (
+            sourceSchemes.TryGetValue(name, out var scheme)
+            && scheme.TryGetProperty("type", out var type)
+        )
         {
-            if (type.GetString() == "http"
+            if (
+                type.GetString() == "http"
                 && scheme.TryGetProperty("scheme", out var httpScheme)
-                && httpScheme.GetString() == "bearer")
+                && httpScheme.GetString() == "bearer"
+            )
             {
                 return $"{name}=bearer";
             }
 
-            if (type.GetString() == "apiKey"
+            if (
+                type.GetString() == "apiKey"
                 && scheme.TryGetProperty("in", out var location)
-                && scheme.TryGetProperty("name", out var parameterName))
+                && scheme.TryGetProperty("name", out var parameterName)
+            )
             {
                 return $"{name}=apikey:{location.GetString()}:{parameterName.GetString()}";
             }
@@ -152,7 +163,10 @@ public sealed class CliPipelineTests
         {
             foreach (var property in node.EnumerateObject())
             {
-                if (property.NameEquals("security") && property.Value.ValueKind == JsonValueKind.Array)
+                if (
+                    property.NameEquals("security")
+                    && property.Value.ValueKind == JsonValueKind.Array
+                )
                 {
                     foreach (var requirement in property.Value.EnumerateArray())
                     {
@@ -183,18 +197,21 @@ public sealed class CliPipelineTests
     private static void CollectDanglingRefs(
         JsonElement node,
         JsonElement root,
-        List<string> dangling)
+        List<string> dangling
+    )
     {
         switch (node.ValueKind)
         {
             case JsonValueKind.Object:
                 foreach (var property in node.EnumerateObject())
                 {
-                    if (property.Name == "$ref"
+                    if (
+                        property.Name == "$ref"
                         && property.Value.ValueKind == JsonValueKind.String
                         && property.Value.GetString() is { } reference
                         && reference.StartsWith("#/")
-                        && !ResolvesInDocument(reference, root))
+                        && !ResolvesInDocument(reference, root)
+                    )
                     {
                         dangling.Add(reference);
                     }
@@ -229,9 +246,11 @@ public sealed class CliPipelineTests
             }
             else if (current.ValueKind == JsonValueKind.Array)
             {
-                if (!int.TryParse(segment, out var index)
+                if (
+                    !int.TryParse(segment, out var index)
                     || index < 0
-                    || index >= current.GetArrayLength())
+                    || index >= current.GetArrayLength()
+                )
                 {
                     return false;
                 }

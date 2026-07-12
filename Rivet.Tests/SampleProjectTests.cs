@@ -2,8 +2,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using Rivet.Tool.Analysis;
-using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -15,9 +13,12 @@ namespace Rivet.Tests;
 [Trait("Category", "Local")]
 public sealed class SampleProjectTests : IDisposable
 {
-    private static readonly string RepoRoot = FindRepoRoot();
-    private static readonly string SampleDir = Path.Combine(RepoRoot, "samples", "ContractApi");
-    private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"rivet-sample-test-{Guid.NewGuid():N}");
+    private static readonly string _repoRoot = FindRepoRoot();
+    private static readonly string _sampleDir = Path.Combine(_repoRoot, "samples", "ContractApi");
+    private readonly string _tempDir = Path.Combine(
+        Path.GetTempPath(),
+        $"rivet-sample-test-{Guid.NewGuid():N}"
+    );
 
     public void Dispose()
     {
@@ -33,7 +34,9 @@ public sealed class SampleProjectTests : IDisposable
     public async Task SampleProject_Builds()
     {
         var (exitCode, output) = await RunProcessAsync(
-            "dotnet", $"build \"{Path.Combine(SampleDir, "ContractApi.csproj")}\" --verbosity quiet");
+            "dotnet",
+            $"build \"{Path.Combine(_sampleDir, "ContractApi.csproj")}\" --verbosity quiet"
+        );
 
         Assert.True(exitCode == 0, $"dotnet build failed:\n{output}");
     }
@@ -41,9 +44,11 @@ public sealed class SampleProjectTests : IDisposable
     [Fact]
     public async Task ImportDemo_Builds()
     {
-        var importDemoDir = Path.Combine(RepoRoot, "samples", "ImportDemo");
+        var importDemoDir = Path.Combine(_repoRoot, "samples", "ImportDemo");
         var (exitCode, output) = await RunProcessAsync(
-            "dotnet", $"build \"{Path.Combine(importDemoDir, "ImportDemo.csproj")}\" --verbosity quiet");
+            "dotnet",
+            $"build \"{Path.Combine(importDemoDir, "ImportDemo.csproj")}\" --verbosity quiet"
+        );
 
         Assert.True(exitCode == 0, $"ImportDemo build failed:\n{output}");
     }
@@ -127,7 +132,9 @@ public sealed class SampleProjectTests : IDisposable
         // POST /api/members → 201 + JSON with Id
         var invitePayload = new StringContent(
             """{"email":{"value":"test@example.com"},"role":"admin","nickname":"tester"}""",
-            Encoding.UTF8, "application/json");
+            Encoding.UTF8,
+            "application/json"
+        );
         var inviteResponse = await http.PostAsync("/api/members", invitePayload, cts.Token);
         Assert.Equal(HttpStatusCode.Created, inviteResponse.StatusCode);
         var inviteBody = await inviteResponse.Content.ReadAsStringAsync(cts.Token);
@@ -140,8 +147,15 @@ public sealed class SampleProjectTests : IDisposable
 
         // PUT /api/members/{id}/role → 204
         var updatePayload = new StringContent(
-            """{"role":"viewer"}""", Encoding.UTF8, "application/json");
-        var updateResponse = await http.PutAsync($"/api/members/{Guid.NewGuid()}/role", updatePayload, cts.Token);
+            """{"role":"viewer"}""",
+            Encoding.UTF8,
+            "application/json"
+        );
+        var updateResponse = await http.PutAsync(
+            $"/api/members/{Guid.NewGuid()}/role",
+            updatePayload,
+            cts.Token
+        );
         Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
     }
 
@@ -160,10 +174,14 @@ public sealed class SampleProjectTests : IDisposable
         // ValidationErrorDto with field errors; handler not invoked (no id, no 201).
         var invalidPayload = new StringContent(
             """{"email":{"value":"test@example.com"},"role":"x","nickname":"z"}""",
-            Encoding.UTF8, "application/json");
+            Encoding.UTF8,
+            "application/json"
+        );
         var invalidResponse = await http.PostAsync("/api/members", invalidPayload, cts.Token);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, invalidResponse.StatusCode);
-        using (var doc = JsonDocument.Parse(await invalidResponse.Content.ReadAsStringAsync(cts.Token)))
+        using (
+            var doc = JsonDocument.Parse(await invalidResponse.Content.ReadAsStringAsync(cts.Token))
+        )
         {
             Assert.Equal("Validation failed", doc.RootElement.GetProperty("message").GetString());
             var errors = doc.RootElement.GetProperty("errors");
@@ -177,10 +195,20 @@ public sealed class SampleProjectTests : IDisposable
         // proving the ValidationAttribute participates in MVC model validation.
         var duplicateTagsPayload = new StringContent(
             """{"email":{"value":"test@example.com"},"role":"admin","nickname":"tester","tags":["a","a"]}""",
-            Encoding.UTF8, "application/json");
-        var duplicateTagsResponse = await http.PostAsync("/api/members", duplicateTagsPayload, cts.Token);
+            Encoding.UTF8,
+            "application/json"
+        );
+        var duplicateTagsResponse = await http.PostAsync(
+            "/api/members",
+            duplicateTagsPayload,
+            cts.Token
+        );
         Assert.Equal(HttpStatusCode.UnprocessableEntity, duplicateTagsResponse.StatusCode);
-        using (var doc = JsonDocument.Parse(await duplicateTagsResponse.Content.ReadAsStringAsync(cts.Token)))
+        using (
+            var doc = JsonDocument.Parse(
+                await duplicateTagsResponse.Content.ReadAsStringAsync(cts.Token)
+            )
+        )
         {
             Assert.True(doc.RootElement.GetProperty("errors").TryGetProperty("tags", out _));
         }
@@ -188,17 +216,27 @@ public sealed class SampleProjectTests : IDisposable
         // (b continued) MaxItems = 5 violated → 422.
         var tooManyTagsPayload = new StringContent(
             """{"email":{"value":"test@example.com"},"role":"admin","nickname":"tester","tags":["a","b","c","d","e","f"]}""",
-            Encoding.UTF8, "application/json");
-        var tooManyTagsResponse = await http.PostAsync("/api/members", tooManyTagsPayload, cts.Token);
+            Encoding.UTF8,
+            "application/json"
+        );
+        var tooManyTagsResponse = await http.PostAsync(
+            "/api/members",
+            tooManyTagsPayload,
+            cts.Token
+        );
         Assert.Equal(HttpStatusCode.UnprocessableEntity, tooManyTagsResponse.StatusCode);
 
         // (c) Valid request (with tags) still succeeds → 201 + id.
         var validPayload = new StringContent(
             """{"email":{"value":"test@example.com"},"role":"admin","nickname":"tester","tags":["a","b"]}""",
-            Encoding.UTF8, "application/json");
+            Encoding.UTF8,
+            "application/json"
+        );
         var validResponse = await http.PostAsync("/api/members", validPayload, cts.Token);
         Assert.Equal(HttpStatusCode.Created, validResponse.StatusCode);
-        using (var doc = JsonDocument.Parse(await validResponse.Content.ReadAsStringAsync(cts.Token)))
+        using (
+            var doc = JsonDocument.Parse(await validResponse.Content.ReadAsStringAsync(cts.Token))
+        )
         {
             Assert.True(doc.RootElement.TryGetProperty("id", out _));
         }
@@ -235,9 +273,14 @@ public sealed class SampleProjectTests : IDisposable
 
         return
         [
-            implicitUsings + File.ReadAllText(Path.Combine(SampleDir, "Domain", "ValueObjects.cs")),
-            implicitUsings + File.ReadAllText(Path.Combine(SampleDir, "Models", "MemberModels.cs")),
-            implicitUsings + File.ReadAllText(Path.Combine(SampleDir, "Contracts", "MembersContract.cs")),
+            implicitUsings
+                + File.ReadAllText(Path.Combine(_sampleDir, "Domain", "ValueObjects.cs")),
+            implicitUsings
+                + File.ReadAllText(Path.Combine(_sampleDir, "Models", "MemberModels.cs")),
+            implicitUsings
+                + File.ReadAllText(
+                    Path.Combine(_sampleDir, "Contracts", "Members", "MembersContract.cs")
+                ),
         ];
     }
 
@@ -267,13 +310,17 @@ public sealed class SampleProjectTests : IDisposable
     }
 
     private static async Task<(int ExitCode, string Output)> RunProcessAsync(
-        string fileName, string arguments, string? workingDir = null, CancellationToken ct = default)
+        string fileName,
+        string arguments,
+        string? workingDir = null,
+        CancellationToken ct = default
+    )
     {
         var psi = new ProcessStartInfo
         {
             FileName = fileName,
             Arguments = arguments,
-            WorkingDirectory = workingDir ?? RepoRoot,
+            WorkingDirectory = workingDir ?? _repoRoot,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -281,7 +328,8 @@ public sealed class SampleProjectTests : IDisposable
         };
         MakeBuildHermetic(psi);
 
-        using var process = Process.Start(psi)
+        using var process =
+            Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start {fileName}");
 
         // Drain both pipes CONCURRENTLY: reading stdout to EOF before touching
@@ -293,8 +341,10 @@ public sealed class SampleProjectTests : IDisposable
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
 
-        var output = string.Join("\n",
-            new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var output = string.Join(
+            "\n",
+            new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s))
+        );
 
         return (process.ExitCode, output);
     }
@@ -304,8 +354,9 @@ public sealed class SampleProjectTests : IDisposable
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"run --project \"{Path.Combine(SampleDir, "ContractApi.csproj")}\" --urls {url}",
-            WorkingDirectory = RepoRoot,
+            Arguments =
+                $"run --project \"{Path.Combine(_sampleDir, "ContractApi.csproj")}\" --urls {url}",
+            WorkingDirectory = _repoRoot,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -313,7 +364,8 @@ public sealed class SampleProjectTests : IDisposable
         };
         MakeBuildHermetic(psi);
 
-        var process = Process.Start(psi)
+        var process =
+            Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start sample server");
 
         // Wait for the server to start listening
@@ -343,7 +395,8 @@ public sealed class SampleProjectTests : IDisposable
             {
                 var stderr = await process.StandardError.ReadToEndAsync(ct);
                 throw new InvalidOperationException(
-                    $"Server did not start. Output:\n{output}\nStderr:\n{stderr}");
+                    $"Server did not start. Output:\n{output}\nStderr:\n{stderr}"
+                );
             }
         }
         catch

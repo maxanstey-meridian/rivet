@@ -40,16 +40,20 @@ public sealed class SpecRefResolutionTests
         var refs = new List<(string Pointer, string Ref)>();
         CollectRefs(doc.RootElement, "#", refs);
 
-        var dangling = refs
-            .Where(r => !ResolvesInDocument(doc.RootElement, r.Ref))
-            .ToList();
+        var dangling = refs.Where(r => !ResolvesInDocument(doc.RootElement, r.Ref)).ToList();
 
-        Assert.True(dangling.Count == 0,
+        Assert.True(
+            dangling.Count == 0,
             $"'{fixtureName}' emitted {dangling.Count} dangling $ref(s) — every consumer rejects these:\n"
-            + string.Join("\n", dangling.Select(d => $"  at {d.Pointer}: $ref → {d.Ref}")));
+                + string.Join("\n", dangling.Select(d => $"  at {d.Pointer}: $ref → {d.Ref}"))
+        );
     }
 
-    private static void CollectRefs(JsonElement element, string pointer, List<(string, string)> refs)
+    private static void CollectRefs(
+        JsonElement element,
+        string pointer,
+        List<(string, string)> refs
+    )
     {
         switch (element.ValueKind)
         {
@@ -104,9 +108,11 @@ public sealed class SpecRefResolutionTests
             }
             else if (current.ValueKind == JsonValueKind.Array)
             {
-                if (!int.TryParse(segment, out var idx)
+                if (
+                    !int.TryParse(segment, out var idx)
                     || idx < 0
-                    || idx >= current.GetArrayLength())
+                    || idx >= current.GetArrayLength()
+                )
                 {
                     return false;
                 }

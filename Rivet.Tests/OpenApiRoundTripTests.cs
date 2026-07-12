@@ -39,7 +39,8 @@ public sealed class OpenApiRoundTripTests
         JsonObject sourceDocument,
         JsonObject targetDocument,
         string sectionName,
-        params string[] keys)
+        params string[] keys
+    )
     {
         var sourceSection = sourceDocument["components"]?[sectionName] as JsonObject;
         Assert.NotNull(sourceSection);
@@ -75,15 +76,14 @@ public sealed class OpenApiRoundTripTests
         var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
         var document = CreateFixtureSliceDocument("openapi-github.json");
         var paths = (JsonObject)document["paths"]!;
-        var sourcePath = source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"] as JsonObject;
+        var sourcePath =
+            source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"]
+            as JsonObject;
 
         Assert.NotNull(sourcePath);
 
         var patch = sourcePath["patch"]!.DeepClone()!.AsObject();
-        patch["responses"] = new JsonObject
-        {
-            ["404"] = patch["responses"]!["404"]!.DeepClone(),
-        };
+        patch["responses"] = new JsonObject { ["404"] = patch["responses"]!["404"]!.DeepClone() };
 
         paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
         {
@@ -101,15 +101,14 @@ public sealed class OpenApiRoundTripTests
         var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
         var document = CreateFixtureSliceDocument("openapi-github.json");
         var paths = (JsonObject)document["paths"]!;
-        var sourcePath = source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"] as JsonObject;
+        var sourcePath =
+            source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"]
+            as JsonObject;
 
         Assert.NotNull(sourcePath);
 
         var delete = sourcePath["delete"]!.DeepClone()!.AsObject();
-        delete["responses"] = new JsonObject
-        {
-            ["200"] = delete["responses"]!["200"]!.DeepClone(),
-        };
+        delete["responses"] = new JsonObject { ["200"] = delete["responses"]!["200"]!.DeepClone() };
 
         paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
         {
@@ -129,15 +128,14 @@ public sealed class OpenApiRoundTripTests
         var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
         var document = CreateFixtureSliceDocument("openapi-github.json");
         var paths = (JsonObject)document["paths"]!;
-        var sourcePath = source["paths"]?["/enterprises/{enterprise}/actions/cache/retention-limit"] as JsonObject;
+        var sourcePath =
+            source["paths"]?["/enterprises/{enterprise}/actions/cache/retention-limit"]
+            as JsonObject;
 
         Assert.NotNull(sourcePath);
 
         var put = sourcePath["put"]!.DeepClone()!.AsObject();
-        put["responses"] = new JsonObject
-        {
-            ["204"] = put["responses"]!["204"]!.DeepClone(),
-        };
+        put["responses"] = new JsonObject { ["204"] = put["responses"]!["204"]!.DeepClone() };
 
         paths["/enterprises/{enterprise}/actions/cache/retention-limit"] = new JsonObject
         {
@@ -145,7 +143,12 @@ public sealed class OpenApiRoundTripTests
         };
 
         CopyComponentEntries(source, document, "parameters", "enterprise");
-        CopyComponentEntries(source, document, "schemas", "actions-cache-retention-limit-for-enterprise");
+        CopyComponentEntries(
+            source,
+            document,
+            "schemas",
+            "actions-cache-retention-limit-for-enterprise"
+        );
         CopyComponentEntries(source, document, "examples", "actions-cache-retention-limit");
 
         return document.ToJsonString();
@@ -157,10 +160,19 @@ public sealed class OpenApiRoundTripTests
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var securitySchemes = endpoints.Select(endpoint => endpoint.Security?.Scheme)
-            .Where(scheme => scheme is not null).Distinct().Select(scheme => $"{scheme}=bearer");
+        var securitySchemes = endpoints
+            .Select(endpoint => endpoint.Security?.Scheme)
+            .Where(scheme => scheme is not null)
+            .Distinct()
+            .Select(scheme => $"{scheme}=bearer");
         var security = SecurityParser.ParseMany(securitySchemes);
-        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, security);
+        var emittedJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            security
+        );
         return JsonSerializer.Deserialize<JsonElement>(emittedJson);
     }
 
@@ -169,42 +181,52 @@ public sealed class OpenApiRoundTripTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "UpdateMember": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" },
-                        "role": { "type": "string" }
-                    },
-                    "required": ["id", "role"]
-                }
-                """,
+            "UpdateMember": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "role": { "type": "string" }
+                },
+                "required": ["id", "role"]
+            }
+            """,
             paths: """
-                "/members/{id}": {
-                    "put": {
-                        "operationId": "updateMember",
-                        "tags": ["Members"],
-                        "parameters": [
-                            { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
-                        ],
-                        "requestBody": {
-                            "required": false,
-                            "content": {
-                                "application/json": {
-                                    "schema": { "$ref": "#/components/schemas/UpdateMember" }
-                                }
+            "/members/{id}": {
+                "put": {
+                    "operationId": "updateMember",
+                    "tags": ["Members"],
+                    "parameters": [
+                        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                    ],
+                    "requestBody": {
+                        "required": false,
+                        "content": {
+                            "application/json": {
+                                "schema": { "$ref": "#/components/schemas/UpdateMember" }
                             }
-                        },
-                        "responses": { "204": { "description": "No Content" } }
-                    }
+                        }
+                    },
+                    "responses": { "204": { "description": "No Content" } }
                 }
-                """);
+            }
+            """
+        );
 
         var firstEmission = ImportCompileWalkAndEmit(spec, "SameNameRoundTripFirst");
-        var emitted = ImportCompileWalkAndEmit(firstEmission.GetRawText(), "SameNameRoundTripSecond");
-        var operation = emitted.GetProperty("paths").GetProperty("/members/{id}").GetProperty("put");
+        var emitted = ImportCompileWalkAndEmit(
+            firstEmission.GetRawText(),
+            "SameNameRoundTripSecond"
+        );
+        var operation = emitted
+            .GetProperty("paths")
+            .GetProperty("/members/{id}")
+            .GetProperty("put");
         Assert.False(operation.GetProperty("requestBody").GetProperty("required").GetBoolean());
-        var bodyProperties = emitted.GetProperty("components").GetProperty("schemas")
-            .GetProperty("UpdateMember").GetProperty("properties");
+        var bodyProperties = emitted
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("UpdateMember")
+            .GetProperty("properties");
 
         Assert.True(bodyProperties.TryGetProperty("id", out _));
         Assert.True(bodyProperties.TryGetProperty("role", out _));
@@ -213,31 +235,42 @@ public sealed class OpenApiRoundTripTests
         var input = CompilationHelper.FindFile(imported, "UpdateMemberInput.cs");
         Assert.Contains("string Id", input);
         Assert.Contains("UpdateMember? Body", input);
-        Assert.Contains("[RivetRequestBody(typeof(UpdateMember), false)]", CompilationHelper.FindFile(imported, "MembersContract.cs"));
+        Assert.Contains(
+            "[RivetRequestBody(typeof(UpdateMember), false)]",
+            CompilationHelper.FindFile(imported, "MembersContract.cs")
+        );
     }
 
     private static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker) RoundTrip(
         string csharpSource,
         string? security = null,
-        string? importedSecurityScheme = null)
+        string? importedSecurityScheme = null
+    )
     {
         // Forward: C# → OpenAPI JSON
         var compilation = CompilationHelper.CreateCompilation(csharpSource);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var securityConfig = security is null
-            ? null
-            : security.Contains('=')
-                ? SecurityParser.ParseMany(["bearer", security])
-                : SecurityParser.Parse(security);
+        var securityConfig =
+            security is null ? null
+            : security.Contains('=') ? SecurityParser.ParseMany(["bearer", security])
+            : SecurityParser.Parse(security);
         var openApiJson = OpenApiEmitter.Emit(
-            endpoints, walker.Definitions, walker.Brands, walker.Enums, securityConfig);
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            securityConfig
+        );
 
         // Reverse: OpenAPI → import → compile → walk
         var importResult = OpenApiImporter.Import(
-            openApiJson, new ImportOptions("RoundTrip", importedSecurityScheme));
+            openApiJson,
+            new ImportOptions("RoundTrip", importedSecurityScheme)
+        );
         var recompilation = CompilationHelper.CreateCompilationFromMultiple(
-            importResult.Files.Select(f => f.Content).ToArray());
+            importResult.Files.Select(f => f.Content).ToArray()
+        );
         var (reDiscovered, rewalker) = CompilationHelper.DiscoverAndWalk(recompilation);
         var reEndpoints = CompilationHelper.WalkContracts(recompilation, reDiscovered, rewalker);
 
@@ -285,24 +318,39 @@ public sealed class OpenApiRoundTripTests
         Assert.Equal(4, endpoints.Count);
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks");
-        Assert.Contains(endpoints, e => e.HttpMethod == "PUT" && e.RouteTemplate == "/api/tasks/{id}");
-        Assert.Contains(endpoints, e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{id}");
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "PUT" && e.RouteTemplate == "/api/tasks/{id}"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{id}"
+        );
 
         // Return types survive
         var listTasks = endpoints.First(e => e.HttpMethod == "GET");
-        Assert.True(listTasks.ReturnType is TsType.TypeRef { Name: "TaskDto" },
-            $"Expected TypeRef(TaskDto) but got {listTasks.ReturnType}");
+        Assert.True(
+            listTasks.ReturnType is TsType.TypeRef { Name: "TaskDto" },
+            $"Expected TypeRef(TaskDto) but got {listTasks.ReturnType}"
+        );
 
         var createTask = endpoints.First(e => e.HttpMethod == "POST");
-        Assert.True(createTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
-            $"Expected TypeRef(TaskDto) but got {createTask.ReturnType}");
+        Assert.True(
+            createTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
+            $"Expected TypeRef(TaskDto) but got {createTask.ReturnType}"
+        );
         Assert.Contains(createTask.Responses, r => r.StatusCode == 201);
-        Assert.True(createTask.Responses.First(r => r.StatusCode == 201).DataType is TsType.TypeRef { Name: "TaskDto" },
-            "201 response should carry TaskDto DataType");
+        Assert.True(
+            createTask.Responses.First(r => r.StatusCode == 201).DataType
+                is TsType.TypeRef { Name: "TaskDto" },
+            "201 response should carry TaskDto DataType"
+        );
 
         var updateTask = endpoints.First(e => e.HttpMethod == "PUT");
-        Assert.True(updateTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
-            $"Expected TypeRef(TaskDto) but got {updateTask.ReturnType}");
+        Assert.True(
+            updateTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
+            $"Expected TypeRef(TaskDto) but got {updateTask.ReturnType}"
+        );
         // PUT has a path param
         var putIdParam = Assert.Single(updateTask.Params, p => p.Source == ParamSource.Route);
         Assert.Equal("id", putIdParam.Name);
@@ -314,11 +362,15 @@ public sealed class OpenApiRoundTripTests
         // Property types on TaskDto survive
         var taskDef = walker.Definitions["TaskDto"];
         var idProp = taskDef.Properties.First(p => p.Name == "id");
-        Assert.True(idProp.Type is TsType.Primitive { Name: "string" },
-            $"Expected Primitive(string) but got {idProp.Type}");
+        Assert.True(
+            idProp.Type is TsType.Primitive { Name: "string" },
+            $"Expected Primitive(string) but got {idProp.Type}"
+        );
         var titleProp = taskDef.Properties.First(p => p.Name == "title");
-        Assert.True(titleProp.Type is TsType.Primitive { Name: "string" },
-            $"Expected Primitive(string) but got {titleProp.Type}");
+        Assert.True(
+            titleProp.Type is TsType.Primitive { Name: "string" },
+            $"Expected Primitive(string) but got {titleProp.Type}"
+        );
     }
 
     [Fact]
@@ -354,16 +406,22 @@ public sealed class OpenApiRoundTripTests
         // Property types on TaskDto survive
         var taskDef = walker.Definitions["TaskDto"];
         var idProp = taskDef.Properties.First(p => p.Name == "id");
-        Assert.True(idProp.Type is TsType.Primitive { Name: "string" },
-            $"Expected Primitive(string) but got {idProp.Type}");
+        Assert.True(
+            idProp.Type is TsType.Primitive { Name: "string" },
+            $"Expected Primitive(string) but got {idProp.Type}"
+        );
         var priorityProp = taskDef.Properties.First(p => p.Name == "priority");
-        Assert.True(priorityProp.Type is TsType.TypeRef { Name: "Priority" },
-            $"Expected TypeRef(Priority) but got {priorityProp.Type}");
+        Assert.True(
+            priorityProp.Type is TsType.TypeRef { Name: "Priority" },
+            $"Expected TypeRef(Priority) but got {priorityProp.Type}"
+        );
 
         // Endpoint return type survives
         var getTask = endpoints.First(e => e.HttpMethod == "GET");
-        Assert.True(getTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
-            $"Expected TypeRef(TaskDto) but got {getTask.ReturnType}");
+        Assert.True(
+            getTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
+            $"Expected TypeRef(TaskDto) but got {getTask.ReturnType}"
+        );
     }
 
     [Fact]
@@ -398,7 +456,9 @@ public sealed class OpenApiRoundTripTests
         Assert.True(age.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } });
 
         var address = person.Properties.First(p => p.Name == "address");
-        Assert.True(address.Type is TsType.Nullable { Inner: TsType.TypeRef { Name: "AddressDto" } });
+        Assert.True(
+            address.Type is TsType.Nullable { Inner: TsType.TypeRef { Name: "AddressDto" } }
+        );
     }
 
     [Fact]
@@ -441,23 +501,34 @@ public sealed class OpenApiRoundTripTests
         Assert.True(labels.Type is TsType.Array { Element: TsType.TypeRef { Name: "LabelDto" } });
 
         var metadata = task.Properties.First(p => p.Name == "metadata");
-        Assert.True(metadata.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "string" }, Key: null });
+        Assert.True(
+            metadata.Type
+                is TsType.Dictionary { Value: TsType.Primitive { Name: "string" }, Key: null }
+        );
 
         // Non-string keys survive via propertyNames (P2 wave 3)
         var colorCounts = task.Properties.First(p => p.Name == "colorCounts");
-        Assert.True(colorCounts.Type is TsType.Dictionary
-        {
-            Value: TsType.Primitive { Name: "number" },
-            Key: TsType.TypeRef { Name: "Color" },
-        }, $"Expected enum-keyed dictionary but got {colorCounts.Type}");
+        Assert.True(
+            colorCounts.Type
+                is TsType.Dictionary
+                {
+                    Value: TsType.Primitive { Name: "number" },
+                    Key: TsType.TypeRef { Name: "Color" },
+                },
+            $"Expected enum-keyed dictionary but got {colorCounts.Type}"
+        );
         Assert.True(walker.Enums.ContainsKey("Color"));
 
         var yearNotes = task.Properties.First(p => p.Name == "yearNotes");
-        Assert.True(yearNotes.Type is TsType.Dictionary
-        {
-            Value: TsType.Primitive { Name: "string" },
-            Key: TsType.Primitive { Name: "string", Format: "int32", CSharpType: "int" },
-        }, $"Expected int-keyed dictionary but got {yearNotes.Type}");
+        Assert.True(
+            yearNotes.Type
+                is TsType.Dictionary
+                {
+                    Value: TsType.Primitive { Name: "string" },
+                    Key: TsType.Primitive { Name: "string", Format: "int32", CSharpType: "int" },
+                },
+            $"Expected int-keyed dictionary but got {yearNotes.Type}"
+        );
     }
 
     /// <summary>
@@ -492,18 +563,24 @@ public sealed class OpenApiRoundTripTests
         var (_, walker) = RoundTrip(source);
 
         // The key enum survived as a named schema with its members
-        Assert.True(walker.Enums.ContainsKey("Severity"),
-            $"Severity enum vanished. Enums: [{string.Join(", ", walker.Enums.Keys)}]");
+        Assert.True(
+            walker.Enums.ContainsKey("Severity"),
+            $"Severity enum vanished. Enums: [{string.Join(", ", walker.Enums.Keys)}]"
+        );
         var severity = Assert.IsType<TsType.StringUnion>(walker.Enums["Severity"]);
         Assert.Equal(["low", "high"], severity.Members);
 
         // …and the dictionary still references it as its key
         var tallies = Assert.Single(walker.Definitions["ReportDto"].Properties);
-        Assert.True(tallies.Type is TsType.Dictionary
-        {
-            Value: TsType.Primitive { Name: "number" },
-            Key: TsType.TypeRef { Name: "Severity" },
-        }, $"Expected Severity-keyed dictionary but got {tallies.Type}");
+        Assert.True(
+            tallies.Type
+                is TsType.Dictionary
+                {
+                    Value: TsType.Primitive { Name: "number" },
+                    Key: TsType.TypeRef { Name: "Severity" },
+                },
+            $"Expected Severity-keyed dictionary but got {tallies.Type}"
+        );
     }
 
     /// <summary>
@@ -546,11 +623,15 @@ public sealed class OpenApiRoundTripTests
         Assert.Equal(new TsType.Primitive("string", null, "char"), nullable.Inner);
 
         var tallies = grade.Properties.First(p => p.Name == "talliesByInitial");
-        Assert.True(tallies.Type is TsType.Dictionary
-        {
-            Value: TsType.Primitive { Name: "number" },
-            Key: TsType.Primitive { Name: "string", Format: null, CSharpType: "char" },
-        }, $"Expected char-keyed dictionary but got {tallies.Type}");
+        Assert.True(
+            tallies.Type
+                is TsType.Dictionary
+                {
+                    Value: TsType.Primitive { Name: "number" },
+                    Key: TsType.Primitive { Name: "string", Format: null, CSharpType: "char" },
+                },
+            $"Expected char-keyed dictionary but got {tallies.Type}"
+        );
     }
 
     /// <summary>
@@ -587,7 +668,12 @@ public sealed class OpenApiRoundTripTests
             var (discovered, walker0) = CompilationHelper.DiscoverAndWalk(compilation);
             var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker0);
             json0 = OpenApiEmitter.Emit(
-                endpoints, walker0.Definitions, walker0.Brands, walker0.Enums, null);
+                endpoints,
+                walker0.Definitions,
+                walker0.Brands,
+                walker0.Enums,
+                null
+            );
         });
         Assert.DoesNotContain("RIV1012", stderr);
         Assert.DoesNotContain("RIV2005", stderr);
@@ -595,29 +681,44 @@ public sealed class OpenApiRoundTripTests
         // Wire shape: bare {} for object, no sidecar; object? is identical
         // (the empty schema already admits null).
         using var doc = JsonDocument.Parse(json0);
-        var props = doc.RootElement.GetProperty("components").GetProperty("schemas")
-            .GetProperty("EnvelopeDto").GetProperty("properties");
-        Assert.Equal(0, props.GetProperty("payload").EnumerateObject().Count());
-        Assert.Equal(0, props.GetProperty("extra").EnumerateObject().Count());
+        var props = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("EnvelopeDto")
+            .GetProperty("properties");
+        Assert.Empty(props.GetProperty("payload").EnumerateObject());
+        Assert.Empty(props.GetProperty("extra").EnumerateObject());
 
         // Import: untyped schema → JsonElement, with no fidelity marker and no warning
         var importResult = OpenApiImporter.Import(json0, new ImportOptions("RoundTrip"));
         var dtoFile = importResult.Files.First(f => f.Content.Contains("EnvelopeDto"));
         Assert.Contains("System.Text.Json.JsonElement Payload", dtoFile.Content);
         Assert.DoesNotContain("[rivet:unsupported", dtoFile.Content);
-        Assert.DoesNotContain(importResult.Warnings, w => w.Contains("payload") || w.Contains("extra"));
+        Assert.DoesNotContain(
+            importResult.Warnings,
+            w => w.Contains("payload") || w.Contains("extra")
+        );
 
         // Loop is a fixed point: the re-walked model emits the same untyped schema
         var compilation1 = CompilationHelper.CreateCompilationFromMultiple(
-            importResult.Files.Select(f => f.Content).ToArray());
+            importResult.Files.Select(f => f.Content).ToArray()
+        );
         var (discovered1, walker1) = CompilationHelper.DiscoverAndWalk(compilation1);
         var endpoints1 = CompilationHelper.WalkContracts(compilation1, discovered1, walker1);
         var json1 = OpenApiEmitter.Emit(
-            endpoints1, walker1.Definitions, walker1.Brands, walker1.Enums, null);
+            endpoints1,
+            walker1.Definitions,
+            walker1.Brands,
+            walker1.Enums,
+            null
+        );
         using var doc1 = JsonDocument.Parse(json1);
-        var props1 = doc1.RootElement.GetProperty("components").GetProperty("schemas")
-            .GetProperty("EnvelopeDto").GetProperty("properties");
-        Assert.Equal(0, props1.GetProperty("payload").EnumerateObject().Count());
+        var props1 = doc1
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("EnvelopeDto")
+            .GetProperty("properties");
+        Assert.Empty(props1.GetProperty("payload").EnumerateObject());
     }
 
     [Fact]
@@ -652,7 +753,13 @@ public sealed class OpenApiRoundTripTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var openApiJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var openApiJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         var importResult = OpenApiImporter.Import(openApiJson, new ImportOptions("RoundTrip"));
 
         var baseContent = CompilationHelper.FindFile(importResult, "Shape.cs");
@@ -677,18 +784,27 @@ public sealed class OpenApiRoundTripTests
         Assert.Contains(circleVariant.Fields, f => f.Name == "radius");
 
         var getShape = reEndpoints.First(e => e.HttpMethod == "GET");
-        Assert.True(getShape.ReturnType is TsType.TypeRef { Name: "Shape" },
-            $"Expected TypeRef(Shape) but got {getShape.ReturnType}");
+        Assert.True(
+            getShape.ReturnType is TsType.TypeRef { Name: "Shape" },
+            $"Expected TypeRef(Shape) but got {getShape.ReturnType}"
+        );
 
         // …and the spec emitted from the re-walked model is identical on the union
         var reEmitted = OpenApiEmitter.Emit(
-            reEndpoints, rewalker.Definitions, rewalker.Brands, rewalker.Enums, null);
+            reEndpoints,
+            rewalker.Definitions,
+            rewalker.Brands,
+            rewalker.Enums,
+            null
+        );
         var schemas0 = JsonNode.Parse(openApiJson)!["components"]!["schemas"]!;
         var schemas1 = JsonNode.Parse(reEmitted)!["components"]!["schemas"]!;
         foreach (var component in new[] { "Shape", "Shape_Circle", "Shape_Square" })
         {
-            Assert.True(JsonNode.DeepEquals(schemas0[component], schemas1[component]),
-                $"'{component}' drifted across the round-trip.\n--- first ---\n{schemas0[component]}\n--- second ---\n{schemas1[component]}");
+            Assert.True(
+                JsonNode.DeepEquals(schemas0[component], schemas1[component]),
+                $"'{component}' drifted across the round-trip.\n--- first ---\n{schemas0[component]}\n--- second ---\n{schemas1[component]}"
+            );
         }
     }
 
@@ -779,7 +895,10 @@ public sealed class OpenApiRoundTripTests
         Assert.Equal("loginRequest", requestExample.Name);
         Assert.Null(requestExample.Json);
         Assert.Equal("login-request", requestExample.ComponentExampleId);
-        Assert.Equal("""{"email":"ada@example.com","password":"secret"}""", requestExample.ResolvedJson);
+        Assert.Equal(
+            """{"email":"ada@example.com","password":"secret"}""",
+            requestExample.ResolvedJson
+        );
     }
 
     [Fact]
@@ -833,7 +952,13 @@ public sealed class OpenApiRoundTripTests
                 "createOrder",
                 "POST",
                 "/api/orders",
-                [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+                [
+                    new TsEndpointParam(
+                        "body",
+                        new TsType.TypeRef("CreateOrderRequest"),
+                        ParamSource.Body
+                    ),
+                ],
                 new TsType.TypeRef("OrderDto"),
                 "orders",
                 [
@@ -843,9 +968,11 @@ public sealed class OpenApiRoundTripTests
                         Examples:
                         [
                             new TsEndpointExample("application/json", Json: "{\"id\":\"ord_123\"}"),
-                            new TsEndpointExample("application/json", Json: "{\"id\":\"ord_124\"}")
-                        ])
-                ])
+                            new TsEndpointExample("application/json", Json: "{\"id\":\"ord_124\"}"),
+                        ]
+                    ),
+                ]
+            ),
         };
 
         var definitions = new Dictionary<string, TsTypeDefinition>
@@ -853,11 +980,13 @@ public sealed class OpenApiRoundTripTests
             ["CreateOrderRequest"] = new(
                 "CreateOrderRequest",
                 [],
-                [new TsPropertyDefinition("customerId", new TsType.Primitive("string"), false)]),
+                [new TsPropertyDefinition("customerId", new TsType.Primitive("string"), false)]
+            ),
             ["OrderDto"] = new(
                 "OrderDto",
                 [],
-                [new TsPropertyDefinition("id", new TsType.Primitive("string"), false)])
+                [new TsPropertyDefinition("id", new TsType.Primitive("string"), false)]
+            ),
         };
 
         var json = OpenApiEmitter.Emit(
@@ -865,10 +994,13 @@ public sealed class OpenApiRoundTripTests
             definitions,
             new Dictionary<string, TsType.Brand>(),
             new Dictionary<string, TsType>(),
-            security: null);
+            security: null
+        );
 
         var importResult = OpenApiImporter.Import(json, new ImportOptions("RoundTrip"));
-        var recompilation = CompilationHelper.CreateCompilationFromMultiple(importResult.Files.Select(file => file.Content).ToArray());
+        var recompilation = CompilationHelper.CreateCompilationFromMultiple(
+            importResult.Files.Select(file => file.Content).ToArray()
+        );
         var (reDiscovered, rewalker) = CompilationHelper.DiscoverAndWalk(recompilation);
         var reEndpoints = CompilationHelper.WalkContracts(recompilation, reDiscovered, rewalker);
 
@@ -883,9 +1015,13 @@ public sealed class OpenApiRoundTripTests
     [Fact]
     public void Twilio_CreateAccount_Request_Example_Survives_Import_Compile_Walk_Emit()
     {
-        var emitted = ImportCompileWalkAndEmit(BuildTwilioCreateAccountFixtureSpec(), "TwilioRoundTrip");
+        var emitted = ImportCompileWalkAndEmit(
+            BuildTwilioCreateAccountFixtureSpec(),
+            "TwilioRoundTrip"
+        );
 
-        var content = emitted.GetProperty("paths")
+        var content = emitted
+            .GetProperty("paths")
             .GetProperty("/2010-04-01/Accounts.json")
             .GetProperty("post")
             .GetProperty("requestBody")
@@ -900,9 +1036,13 @@ public sealed class OpenApiRoundTripTests
     [Fact]
     public void GitHub_UpdateBudget_404_Named_Response_Examples_Survive_Import_Compile_Walk_Emit()
     {
-        var emitted = ImportCompileWalkAndEmit(BuildGitHubUpdateBudgetFixtureSpec(), "GitHubRoundTrip");
+        var emitted = ImportCompileWalkAndEmit(
+            BuildGitHubUpdateBudgetFixtureSpec(),
+            "GitHubRoundTrip"
+        );
 
-        var examples = emitted.GetProperty("paths")
+        var examples = emitted
+            .GetProperty("paths")
             .GetProperty("/organizations/{org}/settings/billing/budgets/{budget_id}")
             .GetProperty("patch")
             .GetProperty("responses")
@@ -913,18 +1053,32 @@ public sealed class OpenApiRoundTripTests
 
         Assert.Equal(
             "Budget with ID 550e8400-e29b-41d4-a716-446655440000 not found.",
-            examples.GetProperty("budget-not-found").GetProperty("value").GetProperty("message").GetString());
+            examples
+                .GetProperty("budget-not-found")
+                .GetProperty("value")
+                .GetProperty("message")
+                .GetString()
+        );
         Assert.Equal(
             "Not Found",
-            examples.GetProperty("feature-not-enabled").GetProperty("value").GetProperty("message").GetString());
+            examples
+                .GetProperty("feature-not-enabled")
+                .GetProperty("value")
+                .GetProperty("message")
+                .GetString()
+        );
     }
 
     [Fact]
     public void GitHub_DeleteBudget_RefBacked_Response_Example_Survives_Import_Compile_Walk_Emit()
     {
-        var emitted = ImportCompileWalkAndEmit(BuildGitHubDeleteBudgetFixtureSpec(), "GitHubRoundTrip");
+        var emitted = ImportCompileWalkAndEmit(
+            BuildGitHubDeleteBudgetFixtureSpec(),
+            "GitHubRoundTrip"
+        );
 
-        var examples = emitted.GetProperty("paths")
+        var examples = emitted
+            .GetProperty("paths")
             .GetProperty("/organizations/{org}/settings/billing/budgets/{budget_id}")
             .GetProperty("delete")
             .GetProperty("responses")
@@ -935,15 +1089,18 @@ public sealed class OpenApiRoundTripTests
 
         Assert.Equal(
             "#/components/examples/delete-budget",
-            examples.GetProperty("default").GetProperty("$ref").GetString());
+            examples.GetProperty("default").GetProperty("$ref").GetString()
+        );
         Assert.Equal(
             "Budget successfully deleted.",
-            emitted.GetProperty("components")
+            emitted
+                .GetProperty("components")
                 .GetProperty("examples")
                 .GetProperty("delete-budget")
                 .GetProperty("value")
                 .GetProperty("message")
-                .GetString());
+                .GetString()
+        );
     }
 
     [Fact]
@@ -951,9 +1108,11 @@ public sealed class OpenApiRoundTripTests
     {
         var emitted = ImportCompileWalkAndEmit(
             BuildGitHubSetActionsCacheRetentionLimitFixtureSpec(),
-            "GitHubRoundTrip");
+            "GitHubRoundTrip"
+        );
 
-        var examples = emitted.GetProperty("paths")
+        var examples = emitted
+            .GetProperty("paths")
             .GetProperty("/enterprises/{enterprise}/actions/cache/retention-limit")
             .GetProperty("put")
             .GetProperty("requestBody")
@@ -963,15 +1122,18 @@ public sealed class OpenApiRoundTripTests
 
         Assert.Equal(
             "#/components/examples/actions-cache-retention-limit",
-            examples.GetProperty("selected_actions").GetProperty("$ref").GetString());
+            examples.GetProperty("selected_actions").GetProperty("$ref").GetString()
+        );
         Assert.Equal(
             80,
-            emitted.GetProperty("components")
+            emitted
+                .GetProperty("components")
                 .GetProperty("examples")
                 .GetProperty("actions-cache-retention-limit")
                 .GetProperty("value")
                 .GetProperty("max_cache_retention_days")
-                .GetInt32());
+                .GetInt32()
+        );
     }
 
     [Fact]
@@ -1010,20 +1172,28 @@ public sealed class OpenApiRoundTripTests
 
         // DataType on each response survives
         var ok = getTask.Responses.First(r => r.StatusCode == 200);
-        Assert.True(ok.DataType is TsType.TypeRef { Name: "TaskDto" },
-            $"Expected 200 DataType TypeRef(TaskDto) but got {ok.DataType}");
+        Assert.True(
+            ok.DataType is TsType.TypeRef { Name: "TaskDto" },
+            $"Expected 200 DataType TypeRef(TaskDto) but got {ok.DataType}"
+        );
 
         var notFound = getTask.Responses.First(r => r.StatusCode == 404);
-        Assert.True(notFound.DataType is TsType.TypeRef { Name: "NotFoundDto" },
-            $"Expected 404 DataType TypeRef(NotFoundDto) but got {notFound.DataType}");
+        Assert.True(
+            notFound.DataType is TsType.TypeRef { Name: "NotFoundDto" },
+            $"Expected 404 DataType TypeRef(NotFoundDto) but got {notFound.DataType}"
+        );
 
         var validation = getTask.Responses.First(r => r.StatusCode == 422);
-        Assert.True(validation.DataType is TsType.TypeRef { Name: "ValidationErrorDto" },
-            $"Expected 422 DataType TypeRef(ValidationErrorDto) but got {validation.DataType}");
+        Assert.True(
+            validation.DataType is TsType.TypeRef { Name: "ValidationErrorDto" },
+            $"Expected 422 DataType TypeRef(ValidationErrorDto) but got {validation.DataType}"
+        );
 
         // Endpoint return type is the primary (200) type
-        Assert.True(getTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
-            $"Expected ReturnType TypeRef(TaskDto) but got {getTask.ReturnType}");
+        Assert.True(
+            getTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
+            $"Expected ReturnType TypeRef(TaskDto) but got {getTask.ReturnType}"
+        );
     }
 
     [Fact]
@@ -1083,10 +1253,14 @@ public sealed class OpenApiRoundTripTests
         Assert.Equal("bearer", task.Security.Scheme);
 
         // Return types survive through security round-trip
-        Assert.True(task.ReturnType is TsType.TypeRef { Name: "TaskDto" },
-            $"Expected TypeRef(TaskDto) but got {task.ReturnType}");
-        Assert.True(health.ReturnType is TsType.TypeRef { Name: "StatusDto" },
-            $"Expected TypeRef(StatusDto) but got {health.ReturnType}");
+        Assert.True(
+            task.ReturnType is TsType.TypeRef { Name: "TaskDto" },
+            $"Expected TypeRef(TaskDto) but got {task.ReturnType}"
+        );
+        Assert.True(
+            health.ReturnType is TsType.TypeRef { Name: "StatusDto" },
+            $"Expected TypeRef(StatusDto) but got {health.ReturnType}"
+        );
 
         // Delete with .Status(204) has no return type
         Assert.Null(admin.ReturnType);
@@ -1176,12 +1350,16 @@ public sealed class OpenApiRoundTripTests
         // Route param should exist with correct type and Guid format
         var idParam = Assert.Single(getTask.Params, p => p.Source == ParamSource.Route);
         Assert.Equal("id", idParam.Name);
-        Assert.True(idParam.Type is TsType.Primitive { Name: "string", Format: "uuid" },
-            $"Expected Primitive(string, uuid) but got {idParam.Type}");
+        Assert.True(
+            idParam.Type is TsType.Primitive { Name: "string", Format: "uuid" },
+            $"Expected Primitive(string, uuid) but got {idParam.Type}"
+        );
 
         // Return type survives
-        Assert.True(getTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
-            $"Expected TypeRef(TaskDto) but got {getTask.ReturnType}");
+        Assert.True(
+            getTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
+            $"Expected TypeRef(TaskDto) but got {getTask.ReturnType}"
+        );
     }
 
     [Fact]
@@ -1216,17 +1394,23 @@ public sealed class OpenApiRoundTripTests
 
         var queryParam = Assert.Single(search.Params, p => p.Name == "query");
         Assert.Equal(ParamSource.Query, queryParam.Source);
-        Assert.True(queryParam.Type is TsType.Primitive { Name: "string" },
-            $"Expected Primitive(string) but got {queryParam.Type}");
+        Assert.True(
+            queryParam.Type is TsType.Primitive { Name: "string" },
+            $"Expected Primitive(string) but got {queryParam.Type}"
+        );
 
         var limitParam = Assert.Single(search.Params, p => p.Name == "limit");
         Assert.Equal(ParamSource.Query, limitParam.Source);
-        Assert.True(limitParam.Type is TsType.Primitive { Name: "number", Format: "int32" },
-            $"Expected Primitive(number, int32) but got {limitParam.Type}");
+        Assert.True(
+            limitParam.Type is TsType.Primitive { Name: "number", Format: "int32" },
+            $"Expected Primitive(number, int32) but got {limitParam.Type}"
+        );
 
         // Return type survives
-        Assert.True(search.ReturnType is TsType.TypeRef { Name: "TaskDto" },
-            $"Expected TypeRef(TaskDto) but got {search.ReturnType}");
+        Assert.True(
+            search.ReturnType is TsType.TypeRef { Name: "TaskDto" },
+            $"Expected TypeRef(TaskDto) but got {search.ReturnType}"
+        );
     }
 
     [Fact]
@@ -1262,8 +1446,10 @@ public sealed class OpenApiRoundTripTests
         // Original wire casing survives emit → import → re-walk
         var headerParam = Assert.Single(ep.Params, p => p.Name == "Notion-Version");
         Assert.Equal(ParamSource.Header, headerParam.Source);
-        Assert.True(headerParam.Type is TsType.Primitive { Name: "string" },
-            $"Expected Primitive(string) but got {headerParam.Type}");
+        Assert.True(
+            headerParam.Type is TsType.Primitive { Name: "string" },
+            $"Expected Primitive(string) but got {headerParam.Type}"
+        );
         Assert.False(headerParam.IsOptional);
 
         // Route + query siblings keep their sources
@@ -1346,15 +1532,18 @@ public sealed class OpenApiRoundTripTests
         var (_, walker) = RoundTrip(source);
 
         // Brand should survive as a brand, not collapse to plain string
-        Assert.True(walker.Brands.ContainsKey("Email"),
-            $"Expected brand 'Email' but got brands: [{string.Join(", ", walker.Brands.Keys)}]");
+        Assert.True(
+            walker.Brands.ContainsKey("Email"),
+            $"Expected brand 'Email' but got brands: [{string.Join(", ", walker.Brands.Keys)}]"
+        );
 
         // UserDto should reference Email as a Brand or TypeRef (not plain string)
         var user = walker.Definitions["UserDto"];
         var emailProp = user.Properties.First(p => p.Name == "email");
         Assert.True(
             emailProp.Type is TsType.Brand { Name: "Email" } or TsType.TypeRef { Name: "Email" },
-            $"Expected Brand(Email) or TypeRef(Email) but got {emailProp.Type}");
+            $"Expected Brand(Email) or TypeRef(Email) but got {emailProp.Type}"
+        );
     }
 
     [Fact]
@@ -1386,23 +1575,30 @@ public sealed class OpenApiRoundTripTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var openApiJson = OpenApiEmitter.Emit(
-            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         // Verify the multipart schema uses $ref to the named input type
         var jsonDoc = System.Text.Json.JsonDocument.Parse(openApiJson);
-        var multipartSchema = jsonDoc.RootElement.GetProperty("paths")
+        var multipartSchema = jsonDoc
+            .RootElement.GetProperty("paths")
             .GetProperty("/api/files")
             .GetProperty("post")
             .GetProperty("requestBody")
             .GetProperty("content")
             .GetProperty("multipart/form-data")
             .GetProperty("schema");
-        Assert.Equal("#/components/schemas/UploadInput", multipartSchema.GetProperty("$ref").GetString());
+        Assert.Equal(
+            "#/components/schemas/UploadInput",
+            multipartSchema.GetProperty("$ref").GetString()
+        );
 
         // Reverse: OpenAPI → import → compile → walk
-        var importResult = OpenApiImporter.Import(
-            openApiJson, new ImportOptions("RoundTrip"));
-
+        var importResult = OpenApiImporter.Import(openApiJson, new ImportOptions("RoundTrip"));
 
         // The input type name should be "UploadInput" (not "UploadRequest")
         var contractFile = importResult.Files.First(f => f.FileName.Contains("Contract"));
@@ -1410,7 +1606,8 @@ public sealed class OpenApiRoundTripTests
 
         // Full recompile → walk: verify the record is named UploadInput and the endpoint references it
         var recompilation = CompilationHelper.CreateCompilationFromMultiple(
-            importResult.Files.Select(f => f.Content).ToArray());
+            importResult.Files.Select(f => f.Content).ToArray()
+        );
         var (reDiscovered, reWalker) = CompilationHelper.DiscoverAndWalk(recompilation);
         var reEndpoints = CompilationHelper.WalkContracts(recompilation, reDiscovered, reWalker);
 
@@ -1450,18 +1647,24 @@ public sealed class OpenApiRoundTripTests
         var (endpoints, walker) = RoundTrip(source);
 
         // The generic template should survive
-        Assert.True(walker.Definitions.ContainsKey("PagedResult"),
-            $"Expected generic 'PagedResult' but got definitions: [{string.Join(", ", walker.Definitions.Keys)}]");
+        Assert.True(
+            walker.Definitions.ContainsKey("PagedResult"),
+            $"Expected generic 'PagedResult' but got definitions: [{string.Join(", ", walker.Definitions.Keys)}]"
+        );
 
         var pagedResult = walker.Definitions["PagedResult"];
-        Assert.True(pagedResult.TypeParameters.Count > 0,
-            "PagedResult should have type parameters");
+        Assert.True(
+            pagedResult.TypeParameters.Count > 0,
+            "PagedResult should have type parameters"
+        );
         Assert.Equal("T", pagedResult.TypeParameters[0]);
 
         // Template properties should use type parameter T, not concrete type
         var itemsProp = pagedResult.Properties.First(p => p.Name == "items");
-        Assert.True(itemsProp.Type is TsType.Array { Element: TsType.TypeParam { Name: "T" } },
-            $"Expected Array(TypeParam(T)) but got {itemsProp.Type}");
+        Assert.True(
+            itemsProp.Type is TsType.Array { Element: TsType.TypeParam { Name: "T" } },
+            $"Expected Array(TypeParam(T)) but got {itemsProp.Type}"
+        );
         var countProp = pagedResult.Properties.First(p => p.Name == "totalCount");
         Assert.IsType<TsType.Primitive>(countProp.Type);
 
@@ -1566,17 +1769,29 @@ public sealed class OpenApiRoundTripTests
         var (firstDisc, firstWlk) = CompilationHelper.DiscoverAndWalk(firstCompilation);
         var firstEps = CompilationHelper.WalkContracts(firstCompilation, firstDisc, firstWlk);
         var firstJson = OpenApiEmitter.Emit(
-            firstEps, firstWlk.Definitions, firstWlk.Brands, firstWlk.Enums, null);
+            firstEps,
+            firstWlk.Definitions,
+            firstWlk.Brands,
+            firstWlk.Enums,
+            null
+        );
         var firstImport = OpenApiImporter.Import(firstJson, new ImportOptions("RoundTrip"));
         var secondCompilation = CompilationHelper.CreateCompilationFromMultiple(
-            firstImport.Files.Select(f => f.Content).ToArray());
+            firstImport.Files.Select(f => f.Content).ToArray()
+        );
         var (secondDisc, secondWlk) = CompilationHelper.DiscoverAndWalk(secondCompilation);
         var secondEps = CompilationHelper.WalkContracts(secondCompilation, secondDisc, secondWlk);
         var secondJson = OpenApiEmitter.Emit(
-            secondEps, secondWlk.Definitions, secondWlk.Brands, secondWlk.Enums, null);
+            secondEps,
+            secondWlk.Definitions,
+            secondWlk.Brands,
+            secondWlk.Enums,
+            null
+        );
         var secondImport = OpenApiImporter.Import(secondJson, new ImportOptions("RoundTrip"));
         var thirdCompilation = CompilationHelper.CreateCompilationFromMultiple(
-            secondImport.Files.Select(f => f.Content).ToArray());
+            secondImport.Files.Select(f => f.Content).ToArray()
+        );
         var (thirdDisc, thirdWlk) = CompilationHelper.DiscoverAndWalk(thirdCompilation);
         var thirdEps = CompilationHelper.WalkContracts(thirdCompilation, thirdDisc, thirdWlk);
 
@@ -1587,7 +1802,8 @@ public sealed class OpenApiRoundTripTests
         foreach (var ep1 in firstEndpoints)
         {
             var ep3 = thirdEps.FirstOrDefault(e =>
-                e.HttpMethod == ep1.HttpMethod && e.RouteTemplate == ep1.RouteTemplate);
+                e.HttpMethod == ep1.HttpMethod && e.RouteTemplate == ep1.RouteTemplate
+            );
             Assert.NotNull(ep3);
             Assert.Equal(ep1.Params.Count, ep3.Params.Count);
             Assert.Equal(ep1.Description, ep3.Description);
@@ -1595,15 +1811,19 @@ public sealed class OpenApiRoundTripTests
             // Return type shape preserved with structural match
             if (ep1.ReturnType is TsType.Generic g1)
             {
-                Assert.True(ep3.ReturnType is TsType.Generic g3
-                    && g3.Name == g1.Name
-                    && g3.TypeArguments.Count == g1.TypeArguments.Count,
-                    $"Expected Generic({g1.Name}) but got {ep3.ReturnType}");
+                Assert.True(
+                    ep3.ReturnType is TsType.Generic g3
+                        && g3.Name == g1.Name
+                        && g3.TypeArguments.Count == g1.TypeArguments.Count,
+                    $"Expected Generic({g1.Name}) but got {ep3.ReturnType}"
+                );
             }
             else if (ep1.ReturnType is TsType.TypeRef r1)
             {
-                Assert.True(ep3.ReturnType is TsType.TypeRef r3 && r3.Name == r1.Name,
-                    $"Expected TypeRef({r1.Name}) but got {ep3.ReturnType}");
+                Assert.True(
+                    ep3.ReturnType is TsType.TypeRef r3 && r3.Name == r1.Name,
+                    $"Expected TypeRef({r1.Name}) but got {ep3.ReturnType}"
+                );
             }
             else if (ep1.ReturnType is null)
             {
@@ -1615,46 +1835,84 @@ public sealed class OpenApiRoundTripTests
         }
 
         // Brand survived both round-trips
-        Assert.True(thirdWlk.Brands.ContainsKey("Email"),
-            $"Brand 'Email' lost after double round-trip. Brands: [{string.Join(", ", thirdWlk.Brands.Keys)}]");
+        Assert.True(
+            thirdWlk.Brands.ContainsKey("Email"),
+            $"Brand 'Email' lost after double round-trip. Brands: [{string.Join(", ", thirdWlk.Brands.Keys)}]"
+        );
 
         // Generic survived both round-trips
         Assert.True(thirdWlk.Definitions.ContainsKey("PagedResult"));
-        Assert.True(thirdWlk.Definitions["PagedResult"].TypeParameters.Count > 0,
-            "PagedResult lost type parameters after double round-trip");
+        Assert.True(
+            thirdWlk.Definitions["PagedResult"].TypeParameters.Count > 0,
+            "PagedResult lost type parameters after double round-trip"
+        );
 
         // Enum survived
         Assert.True(thirdWlk.Enums.ContainsKey("Priority"));
 
         // TaskDto property types survive double round-trip
         var taskDef = thirdWlk.Definitions["TaskDto"];
-        Assert.True(taskDef.Properties.First(p => p.Name == "id").Type is TsType.Primitive { Name: "string" });
-        Assert.True(taskDef.Properties.First(p => p.Name == "title").Type is TsType.Primitive { Name: "string" });
+        Assert.True(
+            taskDef.Properties.First(p => p.Name == "id").Type
+                is TsType.Primitive { Name: "string" }
+        );
+        Assert.True(
+            taskDef.Properties.First(p => p.Name == "title").Type
+                is TsType.Primitive { Name: "string" }
+        );
         Assert.True(
             taskDef.Properties.First(p => p.Name == "authorEmail").Type
-                is TsType.Brand { Name: "Email" } or TsType.TypeRef { Name: "Email" },
-            $"Expected Brand/TypeRef(Email) but got {taskDef.Properties.First(p => p.Name == "authorEmail").Type}");
-        Assert.True(taskDef.Properties.First(p => p.Name == "priority").Type is TsType.TypeRef { Name: "Priority" },
-            $"Expected TypeRef(Priority) but got {taskDef.Properties.First(p => p.Name == "priority").Type}");
+                is TsType.Brand { Name: "Email" }
+                    or TsType.TypeRef { Name: "Email" },
+            $"Expected Brand/TypeRef(Email) but got {taskDef.Properties.First(p => p.Name == "authorEmail").Type}"
+        );
+        Assert.True(
+            taskDef.Properties.First(p => p.Name == "priority").Type
+                is TsType.TypeRef { Name: "Priority" },
+            $"Expected TypeRef(Priority) but got {taskDef.Properties.First(p => p.Name == "priority").Type}"
+        );
 
         // OpenAPI JSON idempotency: the second import round-trip should be stable.
         // The first round may introduce synthesized input types (e.g. DeleteTaskInput from path params)
         // that didn't exist in the original hand-written C#. After that, the pipeline should be stable.
         var thirdJson = OpenApiEmitter.Emit(
-            thirdEps, thirdWlk.Definitions, thirdWlk.Brands, thirdWlk.Enums, null);
+            thirdEps,
+            thirdWlk.Definitions,
+            thirdWlk.Brands,
+            thirdWlk.Enums,
+            null
+        );
 
         var secondDoc = JsonSerializer.Deserialize<JsonElement>(secondJson);
         var thirdDoc = JsonSerializer.Deserialize<JsonElement>(thirdJson);
-        var secondSchemas = secondDoc.GetProperty("components").GetProperty("schemas")
-            .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
-        var thirdSchemas = thirdDoc.GetProperty("components").GetProperty("schemas")
-            .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
+        var secondSchemas = secondDoc
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .EnumerateObject()
+            .Select(p => p.Name)
+            .OrderBy(n => n)
+            .ToList();
+        var thirdSchemas = thirdDoc
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .EnumerateObject()
+            .Select(p => p.Name)
+            .OrderBy(n => n)
+            .ToList();
         Assert.Equal(secondSchemas, thirdSchemas);
 
-        var secondPaths = secondDoc.GetProperty("paths")
-            .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
-        var thirdPaths = thirdDoc.GetProperty("paths")
-            .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
+        var secondPaths = secondDoc
+            .GetProperty("paths")
+            .EnumerateObject()
+            .Select(p => p.Name)
+            .OrderBy(n => n)
+            .ToList();
+        var thirdPaths = thirdDoc
+            .GetProperty("paths")
+            .EnumerateObject()
+            .Select(p => p.Name)
+            .OrderBy(n => n)
+            .ToList();
         Assert.Equal(secondPaths, thirdPaths);
     }
 
@@ -1685,14 +1943,21 @@ public sealed class OpenApiRoundTripTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var json = OpenApiEmitter.Emit(
-            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         // Validate: parse as OpenAPI and check for errors
         var readResult = Microsoft.OpenApi.OpenApiDocument.Parse(json, "json");
         Assert.NotNull(readResult.Document);
         var errors = readResult.Diagnostic?.Errors ?? [];
-        Assert.True(errors.Count == 0,
-            $"OpenAPI validation errors:\n{string.Join("\n", errors.Select(e => $"  - {e.Message}"))}");
+        Assert.True(
+            errors.Count == 0,
+            $"OpenAPI validation errors:\n{string.Join("\n", errors.Select(e => $"  - {e.Message}"))}"
+        );
 
         // Verify brand appears as component schema
         var doc = System.Text.Json.JsonDocument.Parse(json);
@@ -1711,8 +1976,10 @@ public sealed class OpenApiRoundTripTests
         foreach (var refValue in refs)
         {
             var schemaName = refValue["#/components/schemas/".Length..];
-            Assert.True(schemaNames.Contains(schemaName),
-                $"Broken $ref: {refValue} — not in schemas [{string.Join(", ", schemaNames)}]");
+            Assert.True(
+                schemaNames.Contains(schemaName),
+                $"Broken $ref: {refValue} — not in schemas [{string.Join(", ", schemaNames)}]"
+            );
         }
     }
 
@@ -1723,7 +1990,10 @@ public sealed class OpenApiRoundTripTests
             case System.Text.Json.JsonValueKind.Object:
                 foreach (var prop in element.EnumerateObject())
                 {
-                    if (prop.Name == "$ref" && prop.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                    if (
+                        prop.Name == "$ref"
+                        && prop.Value.ValueKind == System.Text.Json.JsonValueKind.String
+                    )
                     {
                         refs.Add(prop.Value.GetString()!);
                     }
@@ -1877,7 +2147,13 @@ public sealed class OpenApiRoundTripTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
 
         var schema = doc.GetProperty("components").GetProperty("schemas").GetProperty("MixedDto");
@@ -1898,8 +2174,10 @@ public sealed class OpenApiRoundTripTests
         // Normal does NOT have x-rivet-csharp-type (int is the default for int32)
         var normal = props.GetProperty("normal");
         Assert.Equal("integer", normal.GetProperty("type").GetString());
-        Assert.False(normal.TryGetProperty("x-rivet-csharp-type", out _),
-            "int should not emit x-rivet-csharp-type — it's the default for int32");
+        Assert.False(
+            normal.TryGetProperty("x-rivet-csharp-type", out _),
+            "int should not emit x-rivet-csharp-type — it's the default for int32"
+        );
     }
 
     [Fact]
@@ -1951,13 +2229,15 @@ public sealed class OpenApiRoundTripTests
         var json1 = OpenApiEmitter.Emit(eps, wlk.Definitions, wlk.Brands, wlk.Enums, null);
         var import1 = OpenApiImporter.Import(json1, new ImportOptions("RoundTrip"));
         var recomp1 = CompilationHelper.CreateCompilationFromMultiple(
-            import1.Files.Select(f => f.Content).ToArray());
+            import1.Files.Select(f => f.Content).ToArray()
+        );
         var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(recomp1);
         var eps2 = CompilationHelper.WalkContracts(recomp1, disc2, wlk2);
         var json2 = OpenApiEmitter.Emit(eps2, wlk2.Definitions, wlk2.Brands, wlk2.Enums, null);
         var import2 = OpenApiImporter.Import(json2, new ImportOptions("RoundTrip"));
         var recomp2 = CompilationHelper.CreateCompilationFromMultiple(
-            import2.Files.Select(f => f.Content).ToArray());
+            import2.Files.Select(f => f.Content).ToArray()
+        );
         var (disc3, wlk3) = CompilationHelper.DiscoverAndWalk(recomp2);
         var secondDef = wlk3.Definitions["AllTypesDto"];
 
@@ -2114,20 +2394,36 @@ public sealed class OpenApiRoundTripTests
             }
             """;
 
-        var (endpoints, walker) = RoundTrip(source, "admin=bearer", importedSecurityScheme: "bearer");
+        var (endpoints, walker) = RoundTrip(
+            source,
+            "admin=bearer",
+            importedSecurityScheme: "bearer"
+        );
 
         // --- Endpoint count (6 Items + 1 Health + 1 Admin + 1 Users) ---
         Assert.Equal(9, endpoints.Count);
 
         // --- HTTP methods + routes ---
-        Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/items/{id}");
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/items/{id}"
+        );
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/items");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/items");
-        Assert.Contains(endpoints, e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/items/{id}");
-        Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{id}");
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/items/{id}"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{id}"
+        );
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/files");
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/health");
-        Assert.Contains(endpoints, e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/admin");
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/admin"
+        );
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users");
 
         // --- KitchenSinkDto properties ---
@@ -2178,10 +2474,14 @@ public sealed class OpenApiRoundTripTests
         Assert.True(nullInt.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } });
 
         var nullBool = sink.Properties.First(p => p.Name == "nullableBool");
-        Assert.True(nullBool.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "boolean" } });
+        Assert.True(
+            nullBool.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "boolean" } }
+        );
 
         var nullGuid = sink.Properties.First(p => p.Name == "nullableGuid");
-        Assert.True(nullGuid.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "string" } });
+        Assert.True(
+            nullGuid.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "string" } }
+        );
 
         // Arrays
         var tags = sink.Properties.First(p => p.Name == "tags");
@@ -2195,18 +2495,23 @@ public sealed class OpenApiRoundTripTests
         Assert.True(meta.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "string" } });
 
         var counts = sink.Properties.First(p => p.Name == "counts");
-        Assert.True(counts.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "number" } });
+        Assert.True(
+            counts.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "number" } }
+        );
 
         // Brand reference
         var emailRef = sink.Properties.First(p => p.Name == "authorEmail");
         Assert.True(
             emailRef.Type is TsType.Brand { Name: "Email" } or TsType.TypeRef { Name: "Email" },
-            $"Expected brand/ref Email but got {emailRef.Type}");
+            $"Expected brand/ref Email but got {emailRef.Type}"
+        );
 
         // Enum reference
         var statusRef = sink.Properties.First(p => p.Name == "currentStatus");
-        Assert.True(statusRef.Type is TsType.TypeRef { Name: "Status" },
-            $"Expected TypeRef(Status) but got {statusRef.Type}");
+        Assert.True(
+            statusRef.Type is TsType.TypeRef { Name: "Status" },
+            $"Expected TypeRef(Status) but got {statusRef.Type}"
+        );
 
         // Deprecated property
         var legacy = sink.Properties.First(p => p.Name == "legacyField");
@@ -2220,8 +2525,10 @@ public sealed class OpenApiRoundTripTests
         Assert.Contains("archived", statusEnum.Members);
 
         // --- Brand survived ---
-        Assert.True(walker.Brands.ContainsKey("Email"),
-            $"Expected brand 'Email' but got: [{string.Join(", ", walker.Brands.Keys)}]");
+        Assert.True(
+            walker.Brands.ContainsKey("Email"),
+            $"Expected brand 'Email' but got: [{string.Join(", ", walker.Brands.Keys)}]"
+        );
 
         // --- Generic template survived ---
         Assert.True(walker.Definitions.ContainsKey("PagedResult"));
@@ -2229,22 +2536,30 @@ public sealed class OpenApiRoundTripTests
         Assert.True(paged.TypeParameters.Count > 0, "PagedResult should have type parameters");
         Assert.Equal("T", paged.TypeParameters[0]);
         var itemsProp = paged.Properties.First(p => p.Name == "items");
-        Assert.True(itemsProp.Type is TsType.Array { Element: TsType.TypeParam { Name: "T" } },
-            $"Expected Array(TypeParam(T)) but got {itemsProp.Type}");
+        Assert.True(
+            itemsProp.Type is TsType.Array { Element: TsType.TypeParam { Name: "T" } },
+            $"Expected Array(TypeParam(T)) but got {itemsProp.Type}"
+        );
 
         // --- Multiple generic instantiations ---
-        var searchEp = endpoints.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/items");
+        var searchEp = endpoints.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/items"
+        );
         Assert.IsType<TsType.Generic>(searchEp.ReturnType);
         var searchGeneric = (TsType.Generic)searchEp.ReturnType!;
         Assert.Equal("PagedResult", searchGeneric.Name);
 
-        var usersEp = endpoints.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users");
+        var usersEp = endpoints.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/users"
+        );
         Assert.IsType<TsType.Generic>(usersEp.ReturnType);
         var usersGeneric = (TsType.Generic)usersEp.ReturnType!;
         Assert.Equal("PagedResult", usersGeneric.Name);
 
         // --- Description survived ---
-        var getItem = endpoints.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/items/{id}");
+        var getItem = endpoints.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/items/{id}"
+        );
         Assert.Equal("Get a single item by ID", getItem.Description);
 
         // --- Path parameter ---
@@ -2253,27 +2568,37 @@ public sealed class OpenApiRoundTripTests
         Assert.Equal("id", routeParam.Name);
 
         // --- Query parameters ---
-        var queryEp = endpoints.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/items");
+        var queryEp = endpoints.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/items"
+        );
         Assert.True(queryEp.Params.Count >= 2, "Search endpoint should have query params");
         Assert.Contains(queryEp.Params, p => p.Name == "query" && p.Source == ParamSource.Query);
         Assert.Contains(queryEp.Params, p => p.Name == "limit" && p.Source == ParamSource.Query);
 
         // --- Void endpoint (DELETE 204) ---
-        var deleteEp = endpoints.First(e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/items/{id}");
+        var deleteEp = endpoints.First(e =>
+            e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/items/{id}"
+        );
         Assert.Null(deleteEp.ReturnType);
         Assert.Contains(deleteEp.Responses, r => r.StatusCode == 204);
 
         // --- Status code override (POST 201) ---
-        var createEp = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/items");
+        var createEp = endpoints.First(e =>
+            e.HttpMethod == "POST" && e.RouteTemplate == "/api/items"
+        );
         Assert.Contains(createEp.Responses, r => r.StatusCode == 201);
 
         // --- Multi-response (200 + 404) ---
-        var getUserEp = endpoints.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{id}");
+        var getUserEp = endpoints.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{id}"
+        );
         Assert.Contains(getUserEp.Responses, r => r.StatusCode == 200);
         Assert.Contains(getUserEp.Responses, r => r.StatusCode == 404);
 
         // --- File upload ---
-        var uploadEp = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/files");
+        var uploadEp = endpoints.First(e =>
+            e.HttpMethod == "POST" && e.RouteTemplate == "/api/files"
+        );
         Assert.Contains(uploadEp.Params, p => p.Source == ParamSource.File);
         Assert.Contains(uploadEp.Params, p => p.Source == ParamSource.FormField);
 
@@ -2298,7 +2623,9 @@ public sealed class OpenApiRoundTripTests
         var addrProp = user.Properties.First(p => p.Name == "address");
         Assert.True(addrProp.Type is TsType.TypeRef { Name: "AddressDto" });
         var secAddr = user.Properties.First(p => p.Name == "secondaryAddress");
-        Assert.True(secAddr.Type is TsType.Nullable { Inner: TsType.TypeRef { Name: "AddressDto" } });
+        Assert.True(
+            secAddr.Type is TsType.Nullable { Inner: TsType.TypeRef { Name: "AddressDto" } }
+        );
 
         // --- NotFoundError survived for multi-response ---
         Assert.True(walker.Definitions.ContainsKey("NotFoundError"));
@@ -2515,18 +2842,26 @@ public sealed class OpenApiRoundTripTests
         var json0 = OpenApiEmitter.Emit(eps0, wlk0.Definitions, wlk0.Brands, wlk0.Enums, secCfg);
 
         // Step 1 (round 1): OpenAPI → import → compile → walk → OpenAPI
-        var import1 = OpenApiImporter.Import(json0, new ImportOptions("RoundTrip", secCfg!.SchemeName));
+        var import1 = OpenApiImporter.Import(
+            json0,
+            new ImportOptions("RoundTrip", secCfg!.SchemeName)
+        );
 
         var comp1 = CompilationHelper.CreateCompilationFromMultiple(
-            import1.Files.Select(f => f.Content).ToArray());
+            import1.Files.Select(f => f.Content).ToArray()
+        );
         var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
         var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
         var json1 = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, secCfg);
 
         // Step 2 (round 2): OpenAPI → import → compile → walk → OpenAPI
-        var import2 = OpenApiImporter.Import(json1, new ImportOptions("RoundTrip", secCfg!.SchemeName));
+        var import2 = OpenApiImporter.Import(
+            json1,
+            new ImportOptions("RoundTrip", secCfg!.SchemeName)
+        );
         var comp2 = CompilationHelper.CreateCompilationFromMultiple(
-            import2.Files.Select(f => f.Content).ToArray());
+            import2.Files.Select(f => f.Content).ToArray()
+        );
         var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(comp2);
         var eps2 = CompilationHelper.WalkContracts(comp2, disc2, wlk2);
         var json2 = OpenApiEmitter.Emit(eps2, wlk2.Definitions, wlk2.Brands, wlk2.Enums, secCfg);
@@ -2537,17 +2872,31 @@ public sealed class OpenApiRoundTripTests
         var doc2 = JsonSerializer.Deserialize<JsonElement>(json2);
 
         // Same schema names
-        var schemas1 = doc1.GetProperty("components").GetProperty("schemas")
-            .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
-        var schemas2 = doc2.GetProperty("components").GetProperty("schemas")
-            .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
+        var schemas1 = doc1.GetProperty("components")
+            .GetProperty("schemas")
+            .EnumerateObject()
+            .Select(p => p.Name)
+            .OrderBy(n => n)
+            .ToList();
+        var schemas2 = doc2.GetProperty("components")
+            .GetProperty("schemas")
+            .EnumerateObject()
+            .Select(p => p.Name)
+            .OrderBy(n => n)
+            .ToList();
         Assert.Equal(schemas1, schemas2);
 
         // Same path sets
         var paths1 = doc1.GetProperty("paths")
-            .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
+            .EnumerateObject()
+            .Select(p => p.Name)
+            .OrderBy(n => n)
+            .ToList();
         var paths2 = doc2.GetProperty("paths")
-            .EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToList();
+            .EnumerateObject()
+            .Select(p => p.Name)
+            .OrderBy(n => n)
+            .ToList();
         Assert.Equal(paths1, paths2);
 
         // Deep structural comparison: every schema property and extension must match
@@ -2557,7 +2906,8 @@ public sealed class OpenApiRoundTripTests
             var s2 = doc2.GetProperty("components").GetProperty("schemas").GetProperty(schemaName);
             Assert.Equal(
                 JsonSerializer.Serialize(s1, new JsonSerializerOptions { WriteIndented = true }),
-                JsonSerializer.Serialize(s2, new JsonSerializerOptions { WriteIndented = true }));
+                JsonSerializer.Serialize(s2, new JsonSerializerOptions { WriteIndented = true })
+            );
         }
 
         // Deep path comparison: every operation must match
@@ -2567,7 +2917,8 @@ public sealed class OpenApiRoundTripTests
             var p2 = doc2.GetProperty("paths").GetProperty(pathName);
             Assert.Equal(
                 JsonSerializer.Serialize(p1, new JsonSerializerOptions { WriteIndented = true }),
-                JsonSerializer.Serialize(p2, new JsonSerializerOptions { WriteIndented = true }));
+                JsonSerializer.Serialize(p2, new JsonSerializerOptions { WriteIndented = true })
+            );
         }
 
         // ───── Assertion group 2: Endpoint count and routes ─────
@@ -2579,13 +2930,22 @@ public sealed class OpenApiRoundTripTests
         Assert.Contains(eps2, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/items");
         Assert.Contains(eps2, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/items");
         Assert.Contains(eps2, e => e.HttpMethod == "PUT" && e.RouteTemplate == "/api/items/{id}");
-        Assert.Contains(eps2, e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/items/{id}");
+        Assert.Contains(
+            eps2,
+            e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/items/{id}"
+        );
         Assert.Contains(eps2, e => e.HttpMethod == "PATCH" && e.RouteTemplate == "/api/items/{id}");
         Assert.Contains(eps2, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users");
-        Assert.Contains(eps2, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{userId}");
+        Assert.Contains(
+            eps2,
+            e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{userId}"
+        );
         Assert.Contains(eps2, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/files");
         Assert.Contains(eps2, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/health");
-        Assert.Contains(eps2, e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/admin/cache");
+        Assert.Contains(
+            eps2,
+            e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/admin/cache"
+        );
 
         // ───── Assertion group 3: KitchenSinkDto property types (x-rivet-csharp-type fidelity) ─────
 
@@ -2601,7 +2961,12 @@ public sealed class OpenApiRoundTripTests
             Assert.Equal(csharpType, prim.CSharpType);
         }
 
-        void AssertNullablePrimitive(string propName, string tsName, string? format, string? csharpType)
+        void AssertNullablePrimitive(
+            string propName,
+            string tsName,
+            string? format,
+            string? csharpType
+        )
         {
             var prop = sink.Properties.First(p => p.Name == propName);
             Assert.IsType<TsType.Nullable>(prop.Type);
@@ -2648,22 +3013,31 @@ public sealed class OpenApiRoundTripTests
         Assert.True(scores.Type is TsType.Array { Element: TsType.Primitive { Name: "number" } });
 
         var idList = sink.Properties.First(p => p.Name == "idList");
-        Assert.True(idList.Type is TsType.Array { Element: TsType.Primitive { Name: "string", Format: "uuid" } });
+        Assert.True(
+            idList.Type
+                is TsType.Array { Element: TsType.Primitive { Name: "string", Format: "uuid" } }
+        );
 
         // Dictionaries
         var meta = sink.Properties.First(p => p.Name == "metadata");
         Assert.True(meta.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "string" } });
 
         var counts = sink.Properties.First(p => p.Name == "counts");
-        Assert.True(counts.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "number" } });
+        Assert.True(
+            counts.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "number" } }
+        );
 
         // Enum-keyed dictionary (P2 wave 3): the key survives via propertyNames
         var prioTallies = sink.Properties.First(p => p.Name == "priorityTallies");
-        Assert.True(prioTallies.Type is TsType.Dictionary
-        {
-            Value: TsType.Primitive { Name: "number" },
-            Key: TsType.TypeRef { Name: "Priority" },
-        }, $"Expected Priority-keyed dictionary but got {prioTallies.Type}");
+        Assert.True(
+            prioTallies.Type
+                is TsType.Dictionary
+                {
+                    Value: TsType.Primitive { Name: "number" },
+                    Key: TsType.TypeRef { Name: "Priority" },
+                },
+            $"Expected Priority-keyed dictionary but got {prioTallies.Type}"
+        );
 
         // char (P2 wave 6): single-character string with the exact type pinned
         AssertPrimitive("charVal", "string", null, "char");
@@ -2671,11 +3045,15 @@ public sealed class OpenApiRoundTripTests
 
         // char-keyed dictionary (P2 wave 6): the key survives via propertyNames
         var initialTallies = sink.Properties.First(p => p.Name == "initialTallies");
-        Assert.True(initialTallies.Type is TsType.Dictionary
-        {
-            Value: TsType.Primitive { Name: "number" },
-            Key: TsType.Primitive { Name: "string", CSharpType: "char" },
-        }, $"Expected char-keyed dictionary but got {initialTallies.Type}");
+        Assert.True(
+            initialTallies.Type
+                is TsType.Dictionary
+                {
+                    Value: TsType.Primitive { Name: "number" },
+                    Key: TsType.Primitive { Name: "string", CSharpType: "char" },
+                },
+            $"Expected char-keyed dictionary but got {initialTallies.Type}"
+        );
 
         // object (P2 wave 6): deliberately untyped — imports as JsonElement ("any
         // JSON value"), which re-emits the same bare {} schema
@@ -2685,37 +3063,52 @@ public sealed class OpenApiRoundTripTests
         var emailRef = sink.Properties.First(p => p.Name == "authorEmail");
         Assert.True(
             emailRef.Type is TsType.Brand { Name: "Email" } or TsType.TypeRef { Name: "Email" },
-            $"Expected Email brand/ref but got {emailRef.Type}");
+            $"Expected Email brand/ref but got {emailRef.Type}"
+        );
 
         var qtyRef = sink.Properties.First(p => p.Name == "itemQuantity");
         Assert.True(
             qtyRef.Type is TsType.Brand { Name: "Quantity" } or TsType.TypeRef { Name: "Quantity" },
-            $"Expected Quantity brand/ref but got {qtyRef.Type}");
+            $"Expected Quantity brand/ref but got {qtyRef.Type}"
+        );
 
         // Enum reference
         var priorityRef = sink.Properties.First(p => p.Name == "currentPriority");
-        Assert.True(priorityRef.Type is TsType.TypeRef { Name: "Priority" },
-            $"Expected TypeRef(Priority) but got {priorityRef.Type}");
+        Assert.True(
+            priorityRef.Type is TsType.TypeRef { Name: "Priority" },
+            $"Expected TypeRef(Priority) but got {priorityRef.Type}"
+        );
 
         // Nested type refs
         var homeAddr = sink.Properties.First(p => p.Name == "homeAddress");
         Assert.True(homeAddr.Type is TsType.TypeRef { Name: "AddressDto" });
 
         var workAddr = sink.Properties.First(p => p.Name == "workAddress");
-        Assert.True(workAddr.Type is TsType.Nullable { Inner: TsType.TypeRef { Name: "AddressDto" } });
+        Assert.True(
+            workAddr.Type is TsType.Nullable { Inner: TsType.TypeRef { Name: "AddressDto" } }
+        );
 
         // Deprecated
         var legacy = sink.Properties.First(p => p.Name == "legacyField");
-        Assert.True(legacy.IsDeprecated, "legacyField should survive as deprecated after 2 round-trips");
+        Assert.True(
+            legacy.IsDeprecated,
+            "legacyField should survive as deprecated after 2 round-trips"
+        );
 
         // ───── Assertion group 4: Brands survived ─────
 
-        Assert.True(wlk2.Brands.ContainsKey("Email"),
-            $"Email brand lost. Brands: [{string.Join(", ", wlk2.Brands.Keys)}]");
-        Assert.True(wlk2.Brands.ContainsKey("Uprn"),
-            $"Uprn brand lost. Brands: [{string.Join(", ", wlk2.Brands.Keys)}]");
-        Assert.True(wlk2.Brands.ContainsKey("Quantity"),
-            $"Quantity brand lost. Brands: [{string.Join(", ", wlk2.Brands.Keys)}]");
+        Assert.True(
+            wlk2.Brands.ContainsKey("Email"),
+            $"Email brand lost. Brands: [{string.Join(", ", wlk2.Brands.Keys)}]"
+        );
+        Assert.True(
+            wlk2.Brands.ContainsKey("Uprn"),
+            $"Uprn brand lost. Brands: [{string.Join(", ", wlk2.Brands.Keys)}]"
+        );
+        Assert.True(
+            wlk2.Brands.ContainsKey("Quantity"),
+            $"Quantity brand lost. Brands: [{string.Join(", ", wlk2.Brands.Keys)}]"
+        );
 
         // ───── Assertion group 5: Enum survived with all members ─────
 
@@ -2733,8 +3126,10 @@ public sealed class OpenApiRoundTripTests
         Assert.True(paged.TypeParameters.Count > 0, "PagedResult should retain type parameters");
         Assert.Equal("T", paged.TypeParameters[0]);
         var itemsProp = paged.Properties.First(p => p.Name == "items");
-        Assert.True(itemsProp.Type is TsType.Array { Element: TsType.TypeParam { Name: "T" } },
-            $"Expected Array(TypeParam(T)) but got {itemsProp.Type}");
+        Assert.True(
+            itemsProp.Type is TsType.Array { Element: TsType.TypeParam { Name: "T" } },
+            $"Expected Array(TypeParam(T)) but got {itemsProp.Type}"
+        );
 
         // Both generic instantiations survived
         var searchEp = eps2.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/items");
@@ -2747,13 +3142,17 @@ public sealed class OpenApiRoundTripTests
 
         // ───── Assertion group 7: Descriptions survived ─────
 
-        var getItem = eps2.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/items/{id}");
+        var getItem = eps2.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/items/{id}"
+        );
         Assert.Equal("Retrieve a single item by its unique ID", getItem.Description);
 
         var listUsers = eps2.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users");
         Assert.Equal("List all users with pagination", listUsers.Description);
 
-        var healthCheck = eps2.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/health");
+        var healthCheck = eps2.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/health"
+        );
         Assert.Equal("Health check endpoint", healthCheck.Description);
 
         // ───── Assertion group 8: Security survived ─────
@@ -2774,7 +3173,9 @@ public sealed class OpenApiRoundTripTests
         // ───── Assertion group 9: HTTP verbs + status codes + multi-response ─────
 
         // DELETE 204 + 404
-        var deleteItem = eps2.First(e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/items/{id}");
+        var deleteItem = eps2.First(e =>
+            e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/items/{id}"
+        );
         Assert.Null(deleteItem.ReturnType);
         Assert.Contains(deleteItem.Responses, r => r.StatusCode == 204);
         Assert.Contains(deleteItem.Responses, r => r.StatusCode == 404);
@@ -2785,11 +3186,15 @@ public sealed class OpenApiRoundTripTests
         Assert.Contains(createItem.Responses, r => r.StatusCode == 422);
 
         // PATCH 204
-        var patchItem = eps2.First(e => e.HttpMethod == "PATCH" && e.RouteTemplate == "/api/items/{id}");
+        var patchItem = eps2.First(e =>
+            e.HttpMethod == "PATCH" && e.RouteTemplate == "/api/items/{id}"
+        );
         Assert.Contains(patchItem.Responses, r => r.StatusCode == 204);
 
         // GET user multi-response (200 + 404)
-        var getUser = eps2.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{userId}");
+        var getUser = eps2.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{userId}"
+        );
         Assert.Contains(getUser.Responses, r => r.StatusCode == 200);
         Assert.Contains(getUser.Responses, r => r.StatusCode == 404);
 
@@ -2804,33 +3209,52 @@ public sealed class OpenApiRoundTripTests
 
         // Query params — types and nullability must survive
         var searchParams = searchEp.Params.Where(p => p.Source == ParamSource.Query).ToList();
-        Assert.True(searchParams.Count >= 3, $"Search should have query + limit + offset, got {searchParams.Count}");
+        Assert.True(
+            searchParams.Count >= 3,
+            $"Search should have query + limit + offset, got {searchParams.Count}"
+        );
 
         var queryParam = searchParams.First(p => p.Name == "query");
-        Assert.True(queryParam.Type is TsType.Primitive { Name: "string" },
-            $"query param should be string, got {queryParam.Type}");
+        Assert.True(
+            queryParam.Type is TsType.Primitive { Name: "string" },
+            $"query param should be string, got {queryParam.Type}"
+        );
 
         var limitParam = searchParams.First(p => p.Name == "limit");
-        Assert.True(limitParam.Type is TsType.Primitive { Name: "number" },
-            $"limit param should be number, got {limitParam.Type}");
+        Assert.True(
+            limitParam.Type is TsType.Primitive { Name: "number" },
+            $"limit param should be number, got {limitParam.Type}"
+        );
 
         // CRITICAL: nullable query param must survive as Nullable
         var offsetParam = searchParams.First(p => p.Name == "offset");
-        Assert.True(offsetParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
-            $"offset param should be Nullable(number) — optional query param must survive as nullable, got {offsetParam.Type}");
+        Assert.True(
+            offsetParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
+            $"offset param should be Nullable(number) — optional query param must survive as nullable, got {offsetParam.Type}"
+        );
 
         // File upload: File + FormField params with types
         var uploadEp = eps2.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/files");
         Assert.Contains(uploadEp.Params, p => p.Source == ParamSource.File && p.Name == "document");
 
-        var titleFormField = Assert.Single(uploadEp.Params, p => p.Source == ParamSource.FormField && p.Name == "title");
-        Assert.True(titleFormField.Type is TsType.Primitive { Name: "string" },
-            $"title FormField should be string, got {titleFormField.Type}");
+        var titleFormField = Assert.Single(
+            uploadEp.Params,
+            p => p.Source == ParamSource.FormField && p.Name == "title"
+        );
+        Assert.True(
+            titleFormField.Type is TsType.Primitive { Name: "string" },
+            $"title FormField should be string, got {titleFormField.Type}"
+        );
 
         // CRITICAL: nullable FormField must survive as Nullable
-        var pageCountField = Assert.Single(uploadEp.Params, p => p.Source == ParamSource.FormField && p.Name == "pageCount");
-        Assert.True(pageCountField.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
-            $"pageCount FormField should be Nullable(number) — optional form field must survive as nullable, got {pageCountField.Type}");
+        var pageCountField = Assert.Single(
+            uploadEp.Params,
+            p => p.Source == ParamSource.FormField && p.Name == "pageCount"
+        );
+        Assert.True(
+            pageCountField.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
+            $"pageCount FormField should be Nullable(number) — optional form field must survive as nullable, got {pageCountField.Type}"
+        );
 
         // ───── Assertion group 11: Nested types survived ─────
 
@@ -2845,14 +3269,18 @@ public sealed class OpenApiRoundTripTests
         Assert.True(wlk2.Definitions.ContainsKey("UserDto"));
         var user = wlk2.Definitions["UserDto"];
         var uprnProp = user.Properties.First(p => p.Name == "uprn");
-        Assert.True(uprnProp.Type is TsType.Nullable,
-            $"Uprn should be nullable but got {uprnProp.Type}");
+        Assert.True(
+            uprnProp.Type is TsType.Nullable,
+            $"Uprn should be nullable but got {uprnProp.Type}"
+        );
 
         Assert.True(wlk2.Definitions.ContainsKey("NotFoundError"));
         Assert.True(wlk2.Definitions.ContainsKey("ValidationError"));
         var valErr = wlk2.Definitions["ValidationError"];
         var errorsDict = valErr.Properties.First(p => p.Name == "errors");
-        Assert.True(errorsDict.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "string" } });
+        Assert.True(
+            errorsDict.Type is TsType.Dictionary { Value: TsType.Primitive { Name: "string" } }
+        );
 
         // ───── Assertion group 12: All $refs resolve ─────
 
@@ -2864,8 +3292,10 @@ public sealed class OpenApiRoundTripTests
             if (refValue.StartsWith("#/components/schemas/"))
             {
                 var schemaName = refValue["#/components/schemas/".Length..];
-                Assert.True(allSchemaNames.Contains(schemaName),
-                    $"Broken $ref after double round-trip: {refValue}");
+                Assert.True(
+                    allSchemaNames.Contains(schemaName),
+                    $"Broken $ref after double round-trip: {refValue}"
+                );
             }
         }
     }
@@ -2942,7 +3372,8 @@ public sealed class OpenApiRoundTripTests
 
         // Find the generated input type — should contain nullable params
         var inputFile = importResult.Files.First(f =>
-            f.Content.Contains("SearchItemsInput") || f.Content.Contains("limit"));
+            f.Content.Contains("SearchItemsInput") || f.Content.Contains("limit")
+        );
         var content = inputFile.Content;
 
         // "limit" is required:false → must be int? not int
@@ -2952,7 +3383,8 @@ public sealed class OpenApiRoundTripTests
 
         // Full compile + walk: verify the nullable types survive into TsType model
         var compilation = CompilationHelper.CreateCompilationFromMultiple(
-            importResult.Files.Select(f => f.Content).ToArray());
+            importResult.Files.Select(f => f.Content).ToArray()
+        );
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
@@ -2961,17 +3393,23 @@ public sealed class OpenApiRoundTripTests
 
         // Required param stays non-nullable
         var queryParam = queryParams.First(p => p.Name == "query");
-        Assert.True(queryParam.Type is TsType.Primitive { Name: "string" },
-            $"Required query param should be string, got {queryParam.Type}");
+        Assert.True(
+            queryParam.Type is TsType.Primitive { Name: "string" },
+            $"Required query param should be string, got {queryParam.Type}"
+        );
 
         // Optional params must be nullable
         var limitParam = queryParams.First(p => p.Name == "limit");
-        Assert.True(limitParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
-            $"Optional limit should be Nullable(number), got {limitParam.Type}");
+        Assert.True(
+            limitParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
+            $"Optional limit should be Nullable(number), got {limitParam.Type}"
+        );
 
         var cursorParam = queryParams.First(p => p.Name == "cursor");
-        Assert.True(cursorParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "string" } },
-            $"Optional cursor should be Nullable(string), got {cursorParam.Type}");
+        Assert.True(
+            cursorParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "string" } },
+            $"Optional cursor should be Nullable(string), got {cursorParam.Type}"
+        );
     }
 
     [Fact]
@@ -2981,7 +3419,11 @@ public sealed class OpenApiRoundTripTests
             new("requiredNonNullable", new TsType.Primitive("string")),
             new("requiredNullable", new TsType.Nullable(new TsType.Primitive("string"))),
             new("optionalNonNullable", new TsType.Primitive("string"), Optional: true),
-            new("optionalNullable", new TsType.Nullable(new TsType.Primitive("string")), Optional: true),
+            new(
+                "optionalNullable",
+                new TsType.Nullable(new TsType.Primitive("string")),
+                Optional: true
+            ),
         ]);
 
         var endpoints = new List<TsEndpointDefinition>
@@ -2996,7 +3438,8 @@ public sealed class OpenApiRoundTripTests
                 Responses: [new(200, inlineType, null)],
                 Description: null,
                 Security: null,
-                InputTypeName: null)
+                InputTypeName: null
+            ),
         };
 
         var json = OpenApiEmitter.Emit(
@@ -3004,7 +3447,8 @@ public sealed class OpenApiRoundTripTests
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType.Brand>(),
             new Dictionary<string, TsType>(),
-            null);
+            null
+        );
 
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
         var responseSchema = doc.GetProperty("paths")
@@ -3016,7 +3460,8 @@ public sealed class OpenApiRoundTripTests
             .GetProperty("application/json")
             .GetProperty("schema");
 
-        var requiredArray = responseSchema.GetProperty("required")
+        var requiredArray = responseSchema
+            .GetProperty("required")
             .EnumerateArray()
             .Select(e => e.GetString()!)
             .ToList();
@@ -3026,12 +3471,30 @@ public sealed class OpenApiRoundTripTests
         Assert.Contains("requiredNullable", requiredArray);
         Assert.DoesNotContain("optionalNonNullable", requiredArray);
         Assert.DoesNotContain("optionalNullable", requiredArray);
-        Assert.Equal("string", properties.GetProperty("requiredNonNullable").GetProperty("type").GetString());
-        Assert.Equal("string", properties.GetProperty("optionalNonNullable").GetProperty("type").GetString());
-        Assert.Equal(["string", "null"], properties.GetProperty("requiredNullable")
-            .GetProperty("type").EnumerateArray().Select(type => type.GetString()));
-        Assert.Equal(["string", "null"], properties.GetProperty("optionalNullable")
-            .GetProperty("type").EnumerateArray().Select(type => type.GetString()));
+        Assert.Equal(
+            "string",
+            properties.GetProperty("requiredNonNullable").GetProperty("type").GetString()
+        );
+        Assert.Equal(
+            "string",
+            properties.GetProperty("optionalNonNullable").GetProperty("type").GetString()
+        );
+        Assert.Equal(
+            ["string", "null"],
+            properties
+                .GetProperty("requiredNullable")
+                .GetProperty("type")
+                .EnumerateArray()
+                .Select(type => type.GetString())
+        );
+        Assert.Equal(
+            ["string", "null"],
+            properties
+                .GetProperty("optionalNullable")
+                .GetProperty("type")
+                .EnumerateArray()
+                .Select(type => type.GetString())
+        );
     }
 
     /// <summary>
@@ -3044,33 +3507,72 @@ public sealed class OpenApiRoundTripTests
         // Build the TsType model directly — avoids Roslyn compilation needing System.Text.Json.Nodes
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["DynamicDto"] = new("DynamicDto", [], [
-                new("condition", new TsType.Dictionary(new TsType.Primitive("unknown", CSharpType: "JsonObject")), false),
-                new("items", new TsType.Array(new TsType.Primitive("unknown", CSharpType: "JsonArray")), false),
-                new("payload", new TsType.Primitive("unknown", CSharpType: "JsonNode"), false),
-                new("raw", new TsType.Primitive("unknown"), false),
-                new("nullableCondition", new TsType.Nullable(new TsType.Dictionary(new TsType.Primitive("unknown", CSharpType: "JsonObject"))), true),
-                new("nullablePayload", new TsType.Nullable(new TsType.Primitive("unknown", CSharpType: "JsonNode")), true),
-            ]),
+            ["DynamicDto"] = new(
+                "DynamicDto",
+                [],
+                [
+                    new(
+                        "condition",
+                        new TsType.Dictionary(
+                            new TsType.Primitive("unknown", CSharpType: "JsonObject")
+                        ),
+                        false
+                    ),
+                    new(
+                        "items",
+                        new TsType.Array(new TsType.Primitive("unknown", CSharpType: "JsonArray")),
+                        false
+                    ),
+                    new("payload", new TsType.Primitive("unknown", CSharpType: "JsonNode"), false),
+                    new("raw", new TsType.Primitive("unknown"), false),
+                    new(
+                        "nullableCondition",
+                        new TsType.Nullable(
+                            new TsType.Dictionary(
+                                new TsType.Primitive("unknown", CSharpType: "JsonObject")
+                            )
+                        ),
+                        true
+                    ),
+                    new(
+                        "nullablePayload",
+                        new TsType.Nullable(
+                            new TsType.Primitive("unknown", CSharpType: "JsonNode")
+                        ),
+                        true
+                    ),
+                ]
+            ),
         };
 
         var endpoints = new List<TsEndpointDefinition>
         {
-            new("get", "GET", "/api/dynamic/{id}",
+            new(
+                "get",
+                "GET",
+                "/api/dynamic/{id}",
                 [new("id", new TsType.Primitive("string"), ParamSource.Route)],
-                new TsType.TypeRef("DynamicDto"), "dynamic",
-                [new(200, new TsType.TypeRef("DynamicDto"), null)]),
+                new TsType.TypeRef("DynamicDto"),
+                "dynamic",
+                [new(200, new TsType.TypeRef("DynamicDto"), null)]
+            ),
         };
 
         // Emit OpenAPI
-        var json = OpenApiEmitter.Emit(endpoints, definitions,
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            definitions,
             new Dictionary<string, TsType.Brand>(),
-            new Dictionary<string, TsType>(), null);
+            new Dictionary<string, TsType>(),
+            null
+        );
 
         // Verify OpenAPI JSON has x-rivet-csharp-type on the right schemas
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
-        var props = doc.GetProperty("components").GetProperty("schemas")
-            .GetProperty("DynamicDto").GetProperty("properties");
+        var props = doc.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("DynamicDto")
+            .GetProperty("properties");
 
         // JsonObject → type: object + x-rivet-csharp-type: JsonObject
         var condition = props.GetProperty("condition");
@@ -3085,24 +3587,34 @@ public sealed class OpenApiRoundTripTests
         // JsonNode → x-rivet-csharp-type: JsonNode (no type field)
         var payload = props.GetProperty("payload");
         Assert.Equal("JsonNode", payload.GetProperty("x-rivet-csharp-type").GetString());
-        Assert.False(payload.TryGetProperty("type", out _), "JsonNode should not have a type field");
+        Assert.False(
+            payload.TryGetProperty("type", out _),
+            "JsonNode should not have a type field"
+        );
 
         // JsonElement → bare {} (no x-rivet-csharp-type)
         var raw = props.GetProperty("raw");
-        Assert.False(raw.TryGetProperty("x-rivet-csharp-type", out _),
-            "JsonElement is the default — should not have x-rivet-csharp-type");
+        Assert.False(
+            raw.TryGetProperty("x-rivet-csharp-type", out _),
+            "JsonElement is the default — should not have x-rivet-csharp-type"
+        );
 
         // Nullable JsonObject → type: ["object", "null"] + x-rivet-csharp-type
         var nullCond = props.GetProperty("nullableCondition");
-        Assert.Equal(["object", "null"],
-            nullCond.GetProperty("type").EnumerateArray().Select(t => t.GetString()!).ToArray());
+        Assert.Equal(
+            ["object", "null"],
+            nullCond.GetProperty("type").EnumerateArray().Select(t => t.GetString()!).ToArray()
+        );
         Assert.Equal("JsonObject", nullCond.GetProperty("x-rivet-csharp-type").GetString());
 
         // Nullable JsonNode (typeless) → anyOf [{ x-rivet-csharp-type }, { type: "null" }]
         var nullPayload = props.GetProperty("nullablePayload");
         var nullPayloadAnyOf = nullPayload.GetProperty("anyOf");
         Assert.Equal(2, nullPayloadAnyOf.GetArrayLength());
-        Assert.Equal("JsonNode", nullPayloadAnyOf[0].GetProperty("x-rivet-csharp-type").GetString());
+        Assert.Equal(
+            "JsonNode",
+            nullPayloadAnyOf[0].GetProperty("x-rivet-csharp-type").GetString()
+        );
         Assert.Equal("null", nullPayloadAnyOf[1].GetProperty("type").GetString());
 
         // Import: OpenAPI → C# — verify correct types
@@ -3152,12 +3664,21 @@ public sealed class OpenApiRoundTripTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
         var schema = doc.GetProperty("components").GetProperty("schemas").GetProperty("PersonDto");
-        var required = schema.GetProperty("required")
-            .EnumerateArray().Select(e => e.GetString()!).ToList();
+        var required = schema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString()!)
+            .ToList();
         var props = schema.GetProperty("properties");
 
         // Non-nullable params are required
@@ -3228,7 +3749,13 @@ public sealed class OpenApiRoundTripTests
 
         // Verify ct does not appear anywhere in the OpenAPI output
         var typeFileMap = new Dictionary<string, string>();
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         Assert.DoesNotContain("\"ct\"", json);
         Assert.DoesNotContain("CancellationToken", json);
     }
@@ -3240,66 +3767,76 @@ public sealed class OpenApiRoundTripTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "CreateAccountRequest": {
-                    "type": "object",
-                    "properties": {
-                        "email": { "type": "string" },
-                        "business_profile": {
-                            "type": "object",
-                            "properties": {
-                                "name": { "type": "string" },
-                                "url": { "type": "string" }
+            "CreateAccountRequest": {
+                "type": "object",
+                "properties": {
+                    "email": { "type": "string" },
+                    "business_profile": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "url": { "type": "string" }
+                        }
+                    }
+                },
+                "required": ["email"]
+            },
+            "Account": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "email": { "type": "string" }
+                },
+                "required": ["id", "email"]
+            }
+            """,
+            paths: """
+            "/v1/accounts": {
+                "post": {
+                    "operationId": "CreateAccount",
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/x-www-form-urlencoded": {
+                                "schema": { "$ref": "#/components/schemas/CreateAccountRequest" }
                             }
                         }
                     },
-                    "required": ["email"]
-                },
-                "Account": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" },
-                        "email": { "type": "string" }
-                    },
-                    "required": ["id", "email"]
-                }
-                """,
-            paths: """
-                "/v1/accounts": {
-                    "post": {
-                        "operationId": "CreateAccount",
-                        "requestBody": {
-                            "required": true,
+                    "responses": {
+                        "200": {
+                            "description": "Success",
                             "content": {
-                                "application/x-www-form-urlencoded": {
-                                    "schema": { "$ref": "#/components/schemas/CreateAccountRequest" }
-                                }
-                            }
-                        },
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/Account" }
-                                    }
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/Account" }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "Stripe");
+            }
+            """,
+            title: "Stripe"
+        );
 
         // Import → compile → walk → emit OpenAPI
         var result = CompilationHelper.Import(spec);
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var emittedJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         // The emitted spec must use form-urlencoded, not JSON, for the request body
         Assert.Contains("application/x-www-form-urlencoded", emittedJson);
-        Assert.DoesNotContain("\"application/json\"", emittedJson.Split("requestBody")[1].Split("responses")[0]);
+        Assert.DoesNotContain(
+            "\"application/json\"",
+            emittedJson.Split("requestBody")[1].Split("responses")[0]
+        );
     }
 
     // ========== Void error response round-trip ==========
@@ -3327,7 +3864,13 @@ public sealed class OpenApiRoundTripTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (disc, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, disc, walker);
-        var firstJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var firstJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         // Reverse: OpenAPI → import → compile → walk
         var importResult = CompilationHelper.Import(firstJson);
@@ -3511,20 +4054,33 @@ public sealed class OpenApiRoundTripTests
 
         Assert.True(walker.Definitions.ContainsKey("TaskDto"), "TaskDto should survive");
         Assert.True(walker.Definitions.ContainsKey("AddressDto"), "AddressDto should survive");
-        Assert.True(walker.Definitions.ContainsKey("NotFoundError"), "NotFoundError should survive");
-        Assert.True(walker.Definitions.ContainsKey("ValidationError"), "ValidationError should survive");
-        Assert.True(walker.Definitions.ContainsKey("CreateTaskInput"), "CreateTaskInput should survive");
+        Assert.True(
+            walker.Definitions.ContainsKey("NotFoundError"),
+            "NotFoundError should survive"
+        );
+        Assert.True(
+            walker.Definitions.ContainsKey("ValidationError"),
+            "ValidationError should survive"
+        );
+        Assert.True(
+            walker.Definitions.ContainsKey("CreateTaskInput"),
+            "CreateTaskInput should survive"
+        );
         Assert.True(walker.Definitions.ContainsKey("UploadResult"), "UploadResult should survive");
         Assert.True(walker.Definitions.ContainsKey("UserDto"), "UserDto should survive");
 
         // ===== Brands survived =====
 
         Assert.True(walker.Brands.ContainsKey("Email"), "Email brand should survive");
-        Assert.True(walker.Brands["Email"].Inner is TsType.Primitive { Name: "string" },
-            $"Email brand inner should be string, got {walker.Brands["Email"].Inner}");
+        Assert.True(
+            walker.Brands["Email"].Inner is TsType.Primitive { Name: "string" },
+            $"Email brand inner should be string, got {walker.Brands["Email"].Inner}"
+        );
         Assert.True(walker.Brands.ContainsKey("Quantity"), "Quantity brand should survive");
-        Assert.True(walker.Brands["Quantity"].Inner is TsType.Primitive { Name: "number" },
-            $"Quantity brand inner should be number, got {walker.Brands["Quantity"].Inner}");
+        Assert.True(
+            walker.Brands["Quantity"].Inner is TsType.Primitive { Name: "number" },
+            $"Quantity brand inner should be number, got {walker.Brands["Quantity"].Inner}"
+        );
 
         // ===== Enum survived =====
 
@@ -3546,36 +4102,93 @@ public sealed class OpenApiRoundTripTests
         }
 
         // Primitives
-        AssertProp("id", t => t is TsType.Primitive { Name: "string", Format: "uuid" }, "string(uuid)");
+        AssertProp(
+            "id",
+            t => t is TsType.Primitive { Name: "string", Format: "uuid" },
+            "string(uuid)"
+        );
         AssertProp("title", t => t is TsType.Primitive { Name: "string" }, "string");
-        AssertProp("count", t => t is TsType.Primitive { Name: "number", Format: "int32" }, "number(int32)");
+        AssertProp(
+            "count",
+            t => t is TsType.Primitive { Name: "number", Format: "int32" },
+            "number(int32)"
+        );
         AssertProp("isActive", t => t is TsType.Primitive { Name: "boolean" }, "boolean");
-        AssertProp("createdAt", t => t is TsType.Primitive { Name: "string", Format: "date-time" }, "string(date-time)");
-        AssertProp("dueDate", t => t is TsType.Primitive { Name: "string", Format: "date" }, "string(date)");
+        AssertProp(
+            "createdAt",
+            t => t is TsType.Primitive { Name: "string", Format: "date-time" },
+            "string(date-time)"
+        );
+        AssertProp(
+            "dueDate",
+            t => t is TsType.Primitive { Name: "string", Format: "date" },
+            "string(date)"
+        );
 
         // Nullable primitives
-        AssertProp("description", t => t is TsType.Nullable { Inner: TsType.Primitive { Name: "string" } }, "string | null");
-        AssertProp("optionalCount", t => t is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } }, "number | null");
-        AssertProp("optionalId", t => t is TsType.Nullable { Inner: TsType.Primitive { Name: "string", Format: "uuid" } }, "string(uuid) | null");
+        AssertProp(
+            "description",
+            t => t is TsType.Nullable { Inner: TsType.Primitive { Name: "string" } },
+            "string | null"
+        );
+        AssertProp(
+            "optionalCount",
+            t => t is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
+            "number | null"
+        );
+        AssertProp(
+            "optionalId",
+            t =>
+                t is TsType.Nullable { Inner: TsType.Primitive { Name: "string", Format: "uuid" } },
+            "string(uuid) | null"
+        );
 
         // Brand refs
-        AssertProp("authorEmail", t => t is TsType.Brand { Name: "Email" } or TsType.TypeRef { Name: "Email" }, "Email");
-        AssertProp("itemQuantity", t => t is TsType.Brand { Name: "Quantity" } or TsType.TypeRef { Name: "Quantity" }, "Quantity");
+        AssertProp(
+            "authorEmail",
+            t => t is TsType.Brand { Name: "Email" } or TsType.TypeRef { Name: "Email" },
+            "Email"
+        );
+        AssertProp(
+            "itemQuantity",
+            t => t is TsType.Brand { Name: "Quantity" } or TsType.TypeRef { Name: "Quantity" },
+            "Quantity"
+        );
 
         // Enum ref
         AssertProp("currentPriority", t => t is TsType.TypeRef { Name: "Priority" }, "Priority");
 
         // Nested type refs
         AssertProp("homeAddress", t => t is TsType.TypeRef { Name: "AddressDto" }, "AddressDto");
-        AssertProp("workAddress", t => t is TsType.Nullable { Inner: TsType.TypeRef { Name: "AddressDto" } }, "AddressDto | null");
+        AssertProp(
+            "workAddress",
+            t => t is TsType.Nullable { Inner: TsType.TypeRef { Name: "AddressDto" } },
+            "AddressDto | null"
+        );
 
         // Collections
-        AssertProp("tags", t => t is TsType.Array { Element: TsType.Primitive { Name: "string" } }, "string[]");
-        AssertProp("idList", t => t is TsType.Array { Element: TsType.Primitive { Name: "string", Format: "uuid" } }, "string(uuid)[]");
+        AssertProp(
+            "tags",
+            t => t is TsType.Array { Element: TsType.Primitive { Name: "string" } },
+            "string[]"
+        );
+        AssertProp(
+            "idList",
+            t => t is TsType.Array { Element: TsType.Primitive { Name: "string", Format: "uuid" } },
+            "string(uuid)[]"
+        );
 
         // Dictionaries
-        AssertProp("metadata", t => t is TsType.Dictionary { Value: TsType.Primitive { Name: "string" } }, "Record<string, string>");
-        AssertProp("counts", t => t is TsType.Dictionary { Value: TsType.Primitive { Name: "number" } }, "Record<string, number>");
+        AssertProp(
+            "metadata",
+            t => t is TsType.Dictionary { Value: TsType.Primitive { Name: "string" } },
+            "Record<string, string>"
+        );
+        AssertProp(
+            "counts",
+            t => t is TsType.Dictionary { Value: TsType.Primitive { Name: "number" } },
+            "Record<string, number>"
+        );
 
         // Deprecated
         var legacyProp = taskDef.Properties.First(p => p.Name == "legacyField");
@@ -3585,13 +4198,18 @@ public sealed class OpenApiRoundTripTests
 
         var addrDef = walker.Definitions["AddressDto"];
         var line2Prop = addrDef.Properties.First(p => p.Name == "line2");
-        Assert.True(line2Prop.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "string" } },
-            $"AddressDto.line2 should be nullable string, got {line2Prop.Type}");
+        Assert.True(
+            line2Prop.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "string" } },
+            $"AddressDto.line2 should be nullable string, got {line2Prop.Type}"
+        );
 
         // ===== Generics survived =====
 
         // PagedResult<T> should exist as a generic template
-        Assert.True(walker.Definitions.ContainsKey("PagedResult"), "PagedResult generic should survive");
+        Assert.True(
+            walker.Definitions.ContainsKey("PagedResult"),
+            "PagedResult generic should survive"
+        );
         var pagedDef = walker.Definitions["PagedResult"];
         Assert.True(pagedDef.TypeParameters.Count > 0, "PagedResult should have type parameters");
 
@@ -3605,74 +4223,111 @@ public sealed class OpenApiRoundTripTests
 
         // ===== GET /api/tasks/{id} =====
 
-        var getTask = endpoints.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks/{id}");
-        Assert.True(getTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
-            $"getTask return type should be TaskDto, got {getTask.ReturnType}");
+        var getTask = endpoints.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks/{id}"
+        );
+        Assert.True(
+            getTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
+            $"getTask return type should be TaskDto, got {getTask.ReturnType}"
+        );
         Assert.Single(getTask.Params, p => p.Source == ParamSource.Route && p.Name == "id");
         Assert.Equal("Retrieve a single task", getTask.Description);
 
         // ===== GET /api/tasks (search with query params + generic return) =====
 
-        var searchTasks = endpoints.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks");
-        Assert.True(searchTasks.ReturnType is TsType.Generic { Name: "PagedResult" },
-            $"searchTasks return type should be PagedResult<TaskDto>, got {searchTasks.ReturnType}");
+        var searchTasks = endpoints.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks"
+        );
+        Assert.True(
+            searchTasks.ReturnType is TsType.Generic { Name: "PagedResult" },
+            $"searchTasks return type should be PagedResult<TaskDto>, got {searchTasks.ReturnType}"
+        );
         var queryParams = searchTasks.Params.Where(p => p.Source == ParamSource.Query).ToList();
-        Assert.True(queryParams.Count >= 2, $"searchTasks should have at least 2 query params, got {queryParams.Count}");
+        Assert.True(
+            queryParams.Count >= 2,
+            $"searchTasks should have at least 2 query params, got {queryParams.Count}"
+        );
         // query should be non-nullable string
         var queryParam = queryParams.FirstOrDefault(p => p.Name == "query");
         Assert.NotNull(queryParam);
-        Assert.True(queryParam.Type is TsType.Primitive { Name: "string" },
-            $"query param should be string, got {queryParam.Type}");
+        Assert.True(
+            queryParam.Type is TsType.Primitive { Name: "string" },
+            $"query param should be string, got {queryParam.Type}"
+        );
         // offset should be nullable (int? in source)
         var offsetParam = queryParams.FirstOrDefault(p => p.Name == "offset");
         Assert.NotNull(offsetParam);
-        Assert.True(offsetParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
-            $"offset param should be nullable number, got {offsetParam.Type}");
+        Assert.True(
+            offsetParam.Type is TsType.Nullable { Inner: TsType.Primitive { Name: "number" } },
+            $"offset param should be nullable number, got {offsetParam.Type}"
+        );
 
         // ===== POST /api/tasks (201 + multi-response) =====
 
-        var createTask = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks");
-        Assert.True(createTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
-            $"createTask return type should be TaskDto, got {createTask.ReturnType}");
+        var createTask = endpoints.First(e =>
+            e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks"
+        );
+        Assert.True(
+            createTask.ReturnType is TsType.TypeRef { Name: "TaskDto" },
+            $"createTask return type should be TaskDto, got {createTask.ReturnType}"
+        );
         Assert.Contains(createTask.Responses, r => r.StatusCode == 201);
         Assert.Contains(createTask.Responses, r => r.StatusCode == 422);
         var validationResp = createTask.Responses.First(r => r.StatusCode == 422);
-        Assert.True(validationResp.DataType is TsType.TypeRef { Name: "ValidationError" },
-            $"422 response should be ValidationError, got {validationResp.DataType}");
+        Assert.True(
+            validationResp.DataType is TsType.TypeRef { Name: "ValidationError" },
+            $"422 response should be ValidationError, got {validationResp.DataType}"
+        );
 
         // ===== DELETE /api/tasks/{id} (void + 204 + 404 error) =====
 
-        var deleteTask = endpoints.First(e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{id}");
+        var deleteTask = endpoints.First(e =>
+            e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{id}"
+        );
         Assert.Null(deleteTask.ReturnType);
         Assert.Contains(deleteTask.Responses, r => r.StatusCode == 204);
         Assert.Contains(deleteTask.Responses, r => r.StatusCode == 404);
         var notFoundResp = deleteTask.Responses.First(r => r.StatusCode == 404);
-        Assert.True(notFoundResp.DataType is TsType.TypeRef { Name: "NotFoundError" },
-            $"404 response should be NotFoundError, got {notFoundResp.DataType}");
+        Assert.True(
+            notFoundResp.DataType is TsType.TypeRef { Name: "NotFoundError" },
+            $"404 response should be NotFoundError, got {notFoundResp.DataType}"
+        );
 
         // ===== GET /api/users (second generic instantiation) =====
 
-        var listUsers = endpoints.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users");
-        Assert.True(listUsers.ReturnType is TsType.Generic { Name: "PagedResult" },
-            $"listUsers return type should be PagedResult<UserDto>, got {listUsers.ReturnType}");
+        var listUsers = endpoints.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/users"
+        );
+        Assert.True(
+            listUsers.ReturnType is TsType.Generic { Name: "PagedResult" },
+            $"listUsers return type should be PagedResult<UserDto>, got {listUsers.ReturnType}"
+        );
         if (listUsers.ReturnType is TsType.Generic g)
         {
             Assert.Single(g.TypeArguments);
-            Assert.True(g.TypeArguments[0] is TsType.TypeRef { Name: "UserDto" },
-                $"PagedResult type arg should be UserDto, got {g.TypeArguments[0]}");
+            Assert.True(
+                g.TypeArguments[0] is TsType.TypeRef { Name: "UserDto" },
+                $"PagedResult type arg should be UserDto, got {g.TypeArguments[0]}"
+            );
         }
 
         // ===== POST /api/files (file upload) =====
 
-        var upload = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/files");
-        Assert.True(upload.ReturnType is TsType.TypeRef { Name: "UploadResult" },
-            $"upload return type should be UploadResult, got {upload.ReturnType}");
+        var upload = endpoints.First(e =>
+            e.HttpMethod == "POST" && e.RouteTemplate == "/api/files"
+        );
+        Assert.True(
+            upload.ReturnType is TsType.TypeRef { Name: "UploadResult" },
+            $"upload return type should be UploadResult, got {upload.ReturnType}"
+        );
         Assert.Contains(upload.Params, p => p.Source == ParamSource.File);
         Assert.Contains(upload.Responses, r => r.StatusCode == 201);
 
         // ===== GET /api/health (anonymous void) =====
 
-        var health = endpoints.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/health");
+        var health = endpoints.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/health"
+        );
         Assert.Null(health.ReturnType);
         Assert.NotNull(health.Security);
         Assert.True(health.Security!.IsAnonymous, "Health endpoint should be anonymous");
@@ -3682,7 +4337,9 @@ public sealed class OpenApiRoundTripTests
         // body type visible — OpenAPI doesn't distinguish input-only from output-only.
         // The important thing is the route param and 204 status survive.
 
-        var patch = endpoints.First(e => e.HttpMethod == "PATCH" && e.RouteTemplate == "/api/tasks/{id}");
+        var patch = endpoints.First(e =>
+            e.HttpMethod == "PATCH" && e.RouteTemplate == "/api/tasks/{id}"
+        );
         Assert.Contains(patch.Responses, r => r.StatusCode == 204);
         Assert.Single(patch.Params, p => p.Source == ParamSource.Route);
     }
@@ -3694,51 +4351,64 @@ public sealed class OpenApiRoundTripTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ConfigDto": {
-                    "type": "object",
-                    "properties": {
-                        "locale": { "type": "string", "default": "en" },
-                        "pageSize": { "type": "integer", "format": "int32", "default": 25 },
-                        "greeting": { "type": "string", "example": "Hello world" }
-                    },
-                    "required": ["locale", "pageSize", "greeting"]
-                }
-                """,
+            "ConfigDto": {
+                "type": "object",
+                "properties": {
+                    "locale": { "type": "string", "default": "en" },
+                    "pageSize": { "type": "integer", "format": "int32", "default": 25 },
+                    "greeting": { "type": "string", "example": "Hello world" }
+                },
+                "required": ["locale", "pageSize", "greeting"]
+            }
+            """,
             paths: """
-                "/api/config": {
-                    "get": {
-                        "operationId": "GetConfig",
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ConfigDto" }
-                                    }
+            "/api/config": {
+                "get": {
+                    "operationId": "GetConfig",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ConfigDto" }
                                 }
                             }
                         }
                     }
                 }
-                """);
+            }
+            """
+        );
 
         // Import → compile → walk → emit OpenAPI
         var result = CompilationHelper.Import(spec);
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var emittedJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         var emitted = JsonSerializer.Deserialize<JsonElement>(emittedJson);
 
-        var props = emitted.GetProperty("components").GetProperty("schemas")
-            .GetProperty("ConfigDto").GetProperty("properties");
+        var props = emitted
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ConfigDto")
+            .GetProperty("properties");
 
         // default values survive
         Assert.Equal("en", props.GetProperty("locale").GetProperty("default").GetString());
         Assert.Equal(25, props.GetProperty("pageSize").GetProperty("default").GetInt32());
 
         // example survives (re-emitted as the 3.1 / 2020-12 `examples` array)
-        Assert.Equal("Hello world", props.GetProperty("greeting").GetProperty("examples")[0].GetString());
+        Assert.Equal(
+            "Hello world",
+            props.GetProperty("greeting").GetProperty("examples")[0].GetString()
+        );
     }
 
     // ========== GAP-2: readOnly/writeOnly round-trip through import ==========
@@ -3748,43 +4418,53 @@ public sealed class OpenApiRoundTripTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "UserDto": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string", "readOnly": true },
-                        "password": { "type": "string", "writeOnly": true },
-                        "name": { "type": "string" }
-                    },
-                    "required": ["id", "password", "name"]
-                }
-                """,
+            "UserDto": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "readOnly": true },
+                    "password": { "type": "string", "writeOnly": true },
+                    "name": { "type": "string" }
+                },
+                "required": ["id", "password", "name"]
+            }
+            """,
             paths: """
-                "/api/users": {
-                    "get": {
-                        "operationId": "GetUser",
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/UserDto" }
-                                    }
+            "/api/users": {
+                "get": {
+                    "operationId": "GetUser",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/UserDto" }
                                 }
                             }
                         }
                     }
                 }
-                """);
+            }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var emittedJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         var emitted = JsonSerializer.Deserialize<JsonElement>(emittedJson);
 
-        var props = emitted.GetProperty("components").GetProperty("schemas")
-            .GetProperty("UserDto").GetProperty("properties");
+        var props = emitted
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("UserDto")
+            .GetProperty("properties");
 
         Assert.True(props.GetProperty("id").GetProperty("readOnly").GetBoolean());
         Assert.True(props.GetProperty("password").GetProperty("writeOnly").GetBoolean());
@@ -3799,58 +4479,74 @@ public sealed class OpenApiRoundTripTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ItemDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "ItemDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "ListItems",
-                        "description": "Returns all items with filtering",
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
-                                    }
+            "/api/items": {
+                "get": {
+                    "operationId": "ListItems",
+                    "description": "Returns all items with filtering",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ItemDto" }
                                 }
                             }
                         }
                     }
                 }
-                """);
+            }
+            """
+        );
 
         // First round-trip: OpenAPI → import → compile → walk → emit
         var result1 = CompilationHelper.Import(spec);
         var comp1 = CompilationHelper.CompileImportResult(result1);
         var (disc1, walker1) = CompilationHelper.DiscoverAndWalk(comp1);
         var eps1 = CompilationHelper.WalkContracts(comp1, disc1, walker1);
-        var json1 = OpenApiEmitter.Emit(eps1, walker1.Definitions, walker1.Brands, walker1.Enums, null);
+        var json1 = OpenApiEmitter.Emit(
+            eps1,
+            walker1.Definitions,
+            walker1.Brands,
+            walker1.Enums,
+            null
+        );
 
         // Second round-trip: should be stable
         var result2 = CompilationHelper.Import(json1);
         var comp2 = CompilationHelper.CompileImportResult(result2);
         var (disc2, walker2) = CompilationHelper.DiscoverAndWalk(comp2);
         var eps2 = CompilationHelper.WalkContracts(comp2, disc2, walker2);
-        var json2 = OpenApiEmitter.Emit(eps2, walker2.Definitions, walker2.Brands, walker2.Enums, null);
+        var json2 = OpenApiEmitter.Emit(
+            eps2,
+            walker2.Definitions,
+            walker2.Brands,
+            walker2.Enums,
+            null
+        );
 
         // The description should not be duplicated as summary — only description should exist
         var doc1 = JsonSerializer.Deserialize<JsonElement>(json1);
         var op1 = doc1.GetProperty("paths").GetProperty("/api/items").GetProperty("get");
         Assert.True(op1.TryGetProperty("description", out _), "description should be present");
-        Assert.False(op1.TryGetProperty("summary", out _),
-            "summary should NOT be present when only description was in the original spec");
+        Assert.False(
+            op1.TryGetProperty("summary", out _),
+            "summary should NOT be present when only description was in the original spec"
+        );
 
         // Second pass should be identical to first
         var doc2 = JsonSerializer.Deserialize<JsonElement>(json2);
         var op2 = doc2.GetProperty("paths").GetProperty("/api/items").GetProperty("get");
         Assert.Equal(
             op1.GetProperty("description").GetString(),
-            op2.GetProperty("description").GetString());
+            op2.GetProperty("description").GetString()
+        );
     }
 
     // ========== WP-1.1: x-rivet-contract / x-rivet-endpoint name fidelity ==========
@@ -3889,7 +4585,9 @@ public sealed class OpenApiRoundTripTests
 
         // The emitted operation carries the explicit identity extensions
         var doc0 = JsonSerializer.Deserialize<JsonElement>(json0);
-        var op0 = doc0.GetProperty("paths").GetProperty("/api/legacy-items/{id}").GetProperty("get");
+        var op0 = doc0.GetProperty("paths")
+            .GetProperty("/api/legacy-items/{id}")
+            .GetProperty("get");
         Assert.Equal("legacy_Items", op0.GetProperty("x-rivet-contract").GetString());
         Assert.Equal("by_id", op0.GetProperty("x-rivet-endpoint").GetString());
 
@@ -3921,11 +4619,14 @@ public sealed class OpenApiRoundTripTests
 
         Assert.True(
             JsonNode.DeepEquals(JsonNode.Parse(json1), JsonNode.Parse(json2)),
-            $"emit∘import is not a fixed point.\n--- json1 ---\n{json1}\n--- json2 ---\n{json2}");
+            $"emit∘import is not a fixed point.\n--- json1 ---\n{json1}\n--- json2 ---\n{json2}"
+        );
 
         // And the identity survives both loops verbatim
         var doc2 = JsonSerializer.Deserialize<JsonElement>(json2);
-        var op2 = doc2.GetProperty("paths").GetProperty("/api/legacy-items/{id}").GetProperty("get");
+        var op2 = doc2.GetProperty("paths")
+            .GetProperty("/api/legacy-items/{id}")
+            .GetProperty("get");
         Assert.Equal("legacy_Items", op2.GetProperty("x-rivet-contract").GetString());
         Assert.Equal("by_id", op2.GetProperty("x-rivet-endpoint").GetString());
         Assert.Equal("legacy_Items_by_id", op2.GetProperty("operationId").GetString());
@@ -3970,9 +4671,13 @@ public sealed class OpenApiRoundTripTests
 
         // The anonymous multipart schema is stamped with the input-record name
         var doc0 = JsonSerializer.Deserialize<JsonElement>(json0);
-        var schema0 = doc0.GetProperty("paths").GetProperty("/api/files").GetProperty("post")
-            .GetProperty("requestBody").GetProperty("content")
-            .GetProperty("multipart/form-data").GetProperty("schema");
+        var schema0 = doc0.GetProperty("paths")
+            .GetProperty("/api/files")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("multipart/form-data")
+            .GetProperty("schema");
         Assert.Equal("AttachRequest", schema0.GetProperty("x-rivet-input-type").GetString());
 
         // Hand-edit the operationId — the convention-derived name would now change,
@@ -4050,7 +4755,12 @@ public sealed class OpenApiRoundTripTests
 
         // ── Stage 2: walk → OpenAPI ──
         var openApiJson = OpenApiEmitter.Emit(
-            endpoints.ToList(), walker.Definitions, walker.Brands, walker.Enums, security: null);
+            endpoints.ToList(),
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            security: null
+        );
         Assert.Contains("\"x-rivet-query-auth\"", openApiJson);
         Assert.Contains("\"parameterName\": \"secret\"", openApiJson);
         // Route param, query param, and auth param all present
@@ -4070,9 +4780,14 @@ public sealed class OpenApiRoundTripTests
 
         // ── Stage 4: imported C# → compile → walk again ──
         var importedCompilation = CompilationHelper.CompileImportResult(importResult);
-        var (importedDiscovered, importedWalker) = CompilationHelper.DiscoverAndWalk(importedCompilation);
+        var (importedDiscovered, importedWalker) = CompilationHelper.DiscoverAndWalk(
+            importedCompilation
+        );
         var importedEndpoints = CompilationHelper.WalkContracts(
-            importedCompilation, importedDiscovered, importedWalker);
+            importedCompilation,
+            importedDiscovered,
+            importedWalker
+        );
 
         var importedEp = Assert.Single(importedEndpoints);
         Assert.Equal("GET", importedEp.HttpMethod);

@@ -5,6 +5,4 @@ using Rivet;
 namespace ImportDemo;
 
 [RivetType]
-public sealed record ErrorDto(
-    string Code,
-    string Message);
+public sealed record ErrorDto(string Code, string Message);

@@ -10,9 +10,7 @@ namespace Rivet;
 [AttributeUsage(AttributeTargets.Property, Inherited = false)]
 public sealed class RivetHeaderAttribute : Attribute
 {
-    public RivetHeaderAttribute()
-    {
-    }
+    public RivetHeaderAttribute() { }
 
     public RivetHeaderAttribute(string name)
     {

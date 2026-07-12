@@ -12,7 +12,8 @@ public sealed class ContractEmitterTests
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            []);
+            []
+        );
 
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -30,10 +31,14 @@ public sealed class ContractEmitterTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["UserDto"] = new("UserDto", [], [
-                new("id", new TsType.Primitive("number"), false),
-                new("name", new TsType.Primitive("string"), false),
-            ]),
+            ["UserDto"] = new(
+                "UserDto",
+                [],
+                [
+                    new("id", new TsType.Primitive("number"), false),
+                    new("name", new TsType.Primitive("string"), false),
+                ]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -80,9 +85,14 @@ public sealed class ContractEmitterTests
             [new TsEndpointParam("id", new TsType.Primitive("number"), ParamSource.Route)],
             new TsType.TypeRef("UserDto"),
             "UsersController",
-            [new TsResponseType(200, new TsType.TypeRef("UserDto"))]);
+            [new TsResponseType(200, new TsType.TypeRef("UserDto"))]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -107,9 +117,14 @@ public sealed class ContractEmitterTests
             ],
             null,
             "UploadController",
-            [new TsResponseType(204, null)]);
+            [new TsResponseType(204, null)]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var pars = doc.RootElement.GetProperty("endpoints")[0].GetProperty("params");
 
@@ -128,9 +143,14 @@ public sealed class ContractEmitterTests
             [],
             null,
             "ItemsController",
-            [new TsResponseType(200, null)]);
+            [new TsResponseType(200, null)]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -159,9 +179,14 @@ public sealed class ContractEmitterTests
             [
                 new TsResponseType(200, new TsType.TypeRef("UserDto")),
                 new TsResponseType(404, null, "Not found"),
-            ]);
+            ]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var responses = doc.RootElement.GetProperty("endpoints")[0].GetProperty("responses");
 
@@ -183,7 +208,13 @@ public sealed class ContractEmitterTests
             "createOrder",
             "POST",
             "/api/orders",
-            [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            [
+                new TsEndpointParam(
+                    "body",
+                    new TsType.TypeRef("CreateOrderRequest"),
+                    ParamSource.Body
+                ),
+            ],
             new TsType.TypeRef("CreateOrderResponse"),
             "OrdersController",
             [
@@ -192,9 +223,18 @@ public sealed class ContractEmitterTests
                     new TsType.TypeRef("CreateOrderResponse"),
                     Examples:
                     [
-                        new TsEndpointExample("application/json", "created", """{"id":"ord_123","status":"created"}"""),
-                        new TsEndpointExample("application/json", "queued", """{"id":"ord_124","status":"queued"}"""),
-                    ]),
+                        new TsEndpointExample(
+                            "application/json",
+                            "created",
+                            """{"id":"ord_123","status":"created"}"""
+                        ),
+                        new TsEndpointExample(
+                            "application/json",
+                            "queued",
+                            """{"id":"ord_124","status":"queued"}"""
+                        ),
+                    ]
+                ),
                 new TsResponseType(
                     422,
                     new TsType.TypeRef("ValidationProblem"),
@@ -204,15 +244,22 @@ public sealed class ContractEmitterTests
                             "application/json",
                             "validationProblem",
                             ComponentExampleId: "validation-problem",
-                            ResolvedJson: """{"message":"Validation failed"}"""),
-                    ]),
+                            ResolvedJson: """{"message":"Validation failed"}"""
+                        ),
+                    ]
+                ),
             ],
             RequestExamples:
             [
                 new TsEndpointExample("application/json", Json: """{"customerId":"cus_123"}"""),
-            ]);
+            ]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -220,7 +267,10 @@ public sealed class ContractEmitterTests
         Assert.Single(requestExamples.EnumerateArray());
         var requestExample = requestExamples[0];
         Assert.Equal("application/json", requestExample.GetProperty("mediaType").GetString());
-        Assert.Equal("""{"customerId":"cus_123"}""", requestExample.GetProperty("json").GetString());
+        Assert.Equal(
+            """{"customerId":"cus_123"}""",
+            requestExample.GetProperty("json").GetString()
+        );
         Assert.False(requestExample.TryGetProperty("name", out _));
         Assert.False(requestExample.TryGetProperty("componentExampleId", out _));
         Assert.False(requestExample.TryGetProperty("resolvedJson", out _));
@@ -229,16 +279,28 @@ public sealed class ContractEmitterTests
         var createdExamples = responses[0].GetProperty("examples");
         Assert.Equal(2, createdExamples.GetArrayLength());
         Assert.Equal("created", createdExamples[0].GetProperty("name").GetString());
-        Assert.Equal("""{"id":"ord_123","status":"created"}""", createdExamples[0].GetProperty("json").GetString());
+        Assert.Equal(
+            """{"id":"ord_123","status":"created"}""",
+            createdExamples[0].GetProperty("json").GetString()
+        );
         Assert.Equal("queued", createdExamples[1].GetProperty("name").GetString());
-        Assert.Equal("""{"id":"ord_124","status":"queued"}""", createdExamples[1].GetProperty("json").GetString());
+        Assert.Equal(
+            """{"id":"ord_124","status":"queued"}""",
+            createdExamples[1].GetProperty("json").GetString()
+        );
 
         var validationExamples = responses[1].GetProperty("examples");
         Assert.Single(validationExamples.EnumerateArray());
         var refBackedExample = validationExamples[0];
         Assert.Equal("validationProblem", refBackedExample.GetProperty("name").GetString());
-        Assert.Equal("validation-problem", refBackedExample.GetProperty("componentExampleId").GetString());
-        Assert.Equal("""{"message":"Validation failed"}""", refBackedExample.GetProperty("resolvedJson").GetString());
+        Assert.Equal(
+            "validation-problem",
+            refBackedExample.GetProperty("componentExampleId").GetString()
+        );
+        Assert.Equal(
+            """{"message":"Validation failed"}""",
+            refBackedExample.GetProperty("resolvedJson").GetString()
+        );
         Assert.False(refBackedExample.TryGetProperty("json", out _));
     }
 
@@ -249,7 +311,13 @@ public sealed class ContractEmitterTests
             "createOrder",
             "POST",
             "/api/orders",
-            [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            [
+                new TsEndpointParam(
+                    "body",
+                    new TsType.TypeRef("CreateOrderRequest"),
+                    ParamSource.Body
+                ),
+            ],
             new TsType.TypeRef("CreateOrderResponse"),
             "OrdersController",
             [new TsResponseType(201, new TsType.TypeRef("CreateOrderResponse"))],
@@ -260,13 +328,19 @@ public sealed class ContractEmitterTests
                     "application/json",
                     "refBacked",
                     ComponentExampleId: "create-order-example",
-                    ResolvedJson: """{"customerId":"cus_456"}"""),
-            ]);
+                    ResolvedJson: """{"customerId":"cus_456"}"""
+                ),
+            ]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
-        var requestExamples = doc.RootElement
-            .GetProperty("endpoints")[0]
+        var requestExamples = doc
+            .RootElement.GetProperty("endpoints")[0]
             .GetProperty("requestExamples");
 
         Assert.Equal(2, requestExamples.GetArrayLength());
@@ -281,8 +355,14 @@ public sealed class ContractEmitterTests
         var refBackedExample = requestExamples[1];
         Assert.Equal("application/json", refBackedExample.GetProperty("mediaType").GetString());
         Assert.Equal("refBacked", refBackedExample.GetProperty("name").GetString());
-        Assert.Equal("create-order-example", refBackedExample.GetProperty("componentExampleId").GetString());
-        Assert.Equal("""{"customerId":"cus_456"}""", refBackedExample.GetProperty("resolvedJson").GetString());
+        Assert.Equal(
+            "create-order-example",
+            refBackedExample.GetProperty("componentExampleId").GetString()
+        );
+        Assert.Equal(
+            """{"customerId":"cus_456"}""",
+            refBackedExample.GetProperty("resolvedJson").GetString()
+        );
         Assert.False(refBackedExample.TryGetProperty("json", out _));
     }
 
@@ -305,14 +385,21 @@ public sealed class ContractEmitterTests
                         new TsEndpointExample(
                             "application/json",
                             "accepted",
-                            ComponentExampleId: "order-accepted"),
-                    ]),
-            ]);
+                            ComponentExampleId: "order-accepted"
+                        ),
+                    ]
+                ),
+            ]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
-        var example = doc.RootElement
-            .GetProperty("endpoints")[0]
+        var example = doc
+            .RootElement.GetProperty("endpoints")[0]
             .GetProperty("responses")[0]
             .GetProperty("examples")[0];
 
@@ -343,36 +430,65 @@ public sealed class ContractEmitterTests
                             "application/problem+json",
                             "problem",
                             ComponentExampleId: "problem-example",
-                            ResolvedJson: """{"title":"Bad request"}"""),
-                    ]),
+                            ResolvedJson: """{"title":"Bad request"}"""
+                        ),
+                    ]
+                ),
             ],
             RequestExamples:
             [
-                new TsEndpointExample("application/problem+json", Json: """{"title":"Bad request"}"""),
-            ]);
+                new TsEndpointExample(
+                    "application/problem+json",
+                    Json: """{"title":"Bad request"}"""
+                ),
+            ]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
         var requestExample = ep.GetProperty("requestExamples")[0];
-        Assert.Equal("application/problem+json", requestExample.GetProperty("mediaType").GetString());
+        Assert.Equal(
+            "application/problem+json",
+            requestExample.GetProperty("mediaType").GetString()
+        );
         Assert.Equal("""{"title":"Bad request"}""", requestExample.GetProperty("json").GetString());
 
         var responseExample = ep.GetProperty("responses")[0].GetProperty("examples")[0];
-        Assert.Equal("application/problem+json", responseExample.GetProperty("mediaType").GetString());
-        Assert.Equal("problem-example", responseExample.GetProperty("componentExampleId").GetString());
-        Assert.Equal("""{"title":"Bad request"}""", responseExample.GetProperty("resolvedJson").GetString());
+        Assert.Equal(
+            "application/problem+json",
+            responseExample.GetProperty("mediaType").GetString()
+        );
+        Assert.Equal(
+            "problem-example",
+            responseExample.GetProperty("componentExampleId").GetString()
+        );
+        Assert.Equal(
+            """{"title":"Bad request"}""",
+            responseExample.GetProperty("resolvedJson").GetString()
+        );
     }
 
     [Fact]
     public void Endpoint_Example_Requires_Exactly_One_Of_Json_Or_ComponentExampleId()
     {
-        var missingPayload = Assert.Throws<ArgumentException>(() => new TsEndpointExample("application/json"));
+        var missingPayload = Assert.Throws<ArgumentException>(() =>
+            new TsEndpointExample("application/json")
+        );
         Assert.Contains("Exactly one of json or componentExampleId", missingPayload.Message);
 
         var duplicatePayload = Assert.Throws<ArgumentException>(() =>
-            new TsEndpointExample("application/json", Json: """{"id":"ord_123"}""", ComponentExampleId: "order-created"));
+            new TsEndpointExample(
+                "application/json",
+                Json: """{"id":"ord_123"}""",
+                ComponentExampleId: "order-created"
+            )
+        );
         Assert.Contains("Exactly one of json or componentExampleId", duplicatePayload.Message);
     }
 
@@ -380,7 +496,12 @@ public sealed class ContractEmitterTests
     public void Endpoint_Example_ResolvedJson_Requires_ComponentExampleId()
     {
         var error = Assert.Throws<ArgumentException>(() =>
-            new TsEndpointExample("application/json", ResolvedJson: """{"id":"ord_123"}""", Json: """{"id":"ord_123"}"""));
+            new TsEndpointExample(
+                "application/json",
+                ResolvedJson: """{"id":"ord_123"}""",
+                Json: """{"id":"ord_123"}"""
+            )
+        );
 
         Assert.Contains("resolvedJson is only valid for ref-backed examples", error.Message);
     }
@@ -388,10 +509,20 @@ public sealed class ContractEmitterTests
     [Fact]
     public void Endpoint_Example_Properties_Are_Not_Publicly_Settable()
     {
-        Assert.Null(typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.MediaType))!.SetMethod);
-        Assert.Null(typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.Json))!.SetMethod);
-        Assert.Null(typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.ComponentExampleId))!.SetMethod);
-        Assert.Null(typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.ResolvedJson))!.SetMethod);
+        Assert.Null(
+            typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.MediaType))!.SetMethod
+        );
+        Assert.Null(
+            typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.Json))!.SetMethod
+        );
+        Assert.Null(
+            typeof(TsEndpointExample)
+                .GetProperty(nameof(TsEndpointExample.ComponentExampleId))!
+                .SetMethod
+        );
+        Assert.Null(
+            typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.ResolvedJson))!.SetMethod
+        );
     }
 
     [Fact]
@@ -405,9 +536,14 @@ public sealed class ContractEmitterTests
             null,
             "SecureController",
             [],
-            Security: new EndpointSecurity(false, "Bearer"));
+            Security: new EndpointSecurity(false, "Bearer")
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var sec = doc.RootElement.GetProperty("endpoints")[0].GetProperty("security");
 
@@ -420,10 +556,14 @@ public sealed class ContractEmitterTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["Dto"] = new("Dto", [], [
-                new("required", new TsType.Primitive("string"), false),
-                new("optional", new TsType.Primitive("string"), true),
-            ]),
+            ["Dto"] = new(
+                "Dto",
+                [],
+                [
+                    new("required", new TsType.Primitive("string"), false),
+                    new("optional", new TsType.Primitive("string"), true),
+                ]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -439,12 +579,16 @@ public sealed class ContractEmitterTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["CreateOrderRequest"] = new("CreateOrderRequest", [], [
-                new("customerId", new TsType.Primitive("string", Format: "uuid"), false),
-                new("items", new TsType.Array(new TsType.TypeRef("OrderItemDto")), false),
-                new("notes", new TsType.Nullable(new TsType.Primitive("string")), true),
-                new("priority", new TsType.StringUnion(["low", "normal", "urgent"]), false),
-            ]),
+            ["CreateOrderRequest"] = new(
+                "CreateOrderRequest",
+                [],
+                [
+                    new("customerId", new TsType.Primitive("string", Format: "uuid"), false),
+                    new("items", new TsType.Array(new TsType.TypeRef("OrderItemDto")), false),
+                    new("notes", new TsType.Nullable(new TsType.Primitive("string")), true),
+                    new("priority", new TsType.StringUnion(["low", "normal", "urgent"]), false),
+                ]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -461,7 +605,10 @@ public sealed class ContractEmitterTests
         var itemsType = props[1].GetProperty("type");
         Assert.Equal("array", itemsType.GetProperty("kind").GetString());
         Assert.Equal("ref", itemsType.GetProperty("element").GetProperty("kind").GetString());
-        Assert.Equal("OrderItemDto", itemsType.GetProperty("element").GetProperty("name").GetString());
+        Assert.Equal(
+            "OrderItemDto",
+            itemsType.GetProperty("element").GetProperty("name").GetString()
+        );
 
         // notes: nullable inner primitive
         var notesType = props[2].GetProperty("type");
@@ -484,22 +631,31 @@ public sealed class ContractEmitterTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["CreateOrderRequest"] = new("CreateOrderRequest", [], [
-                new("amount", new TsType.Primitive("number"), false),
-            ], Description: "Request to create an order"),
-            ["SimpleDto"] = new("SimpleDto", [], [
-                new("id", new TsType.Primitive("number"), false),
-            ]),
+            ["CreateOrderRequest"] = new(
+                "CreateOrderRequest",
+                [],
+                [new("amount", new TsType.Primitive("number"), false)],
+                Description: "Request to create an order"
+            ),
+            ["SimpleDto"] = new(
+                "SimpleDto",
+                [],
+                [new("id", new TsType.Primitive("number"), false)]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
         using var doc = JsonDocument.Parse(json);
         var types = doc.RootElement.GetProperty("types");
 
-        var withDesc = types.EnumerateArray().First(t => t.GetProperty("name").GetString() == "CreateOrderRequest");
+        var withDesc = types
+            .EnumerateArray()
+            .First(t => t.GetProperty("name").GetString() == "CreateOrderRequest");
         Assert.Equal("Request to create an order", withDesc.GetProperty("description").GetString());
 
-        var withoutDesc = types.EnumerateArray().First(t => t.GetProperty("name").GetString() == "SimpleDto");
+        var withoutDesc = types
+            .EnumerateArray()
+            .First(t => t.GetProperty("name").GetString() == "SimpleDto");
         Assert.False(withoutDesc.TryGetProperty("description", out _));
     }
 
@@ -508,16 +664,32 @@ public sealed class ContractEmitterTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["DisplayState"] = new("DisplayState", [], new TsType.TaggedUnion("kind", [
-                new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
-                    ("kind", new TsType.StringUnion(["hidden"])),
-                    ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
-                ])),
-                new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
-                    ("kind", new TsType.StringUnion(["shown"])),
-                    ("summary", new TsType.TypeRef("Summary")),
-                ])),
-            ])),
+            ["DisplayState"] = new(
+                "DisplayState",
+                [],
+                new TsType.TaggedUnion(
+                    "kind",
+                    [
+                        new TsType.TaggedUnionVariant(
+                            "hidden",
+                            new TsType.InlineObject([
+                                ("kind", new TsType.StringUnion(["hidden"])),
+                                (
+                                    "workspaceKey",
+                                    new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))
+                                ),
+                            ])
+                        ),
+                        new TsType.TaggedUnionVariant(
+                            "shown",
+                            new TsType.InlineObject([
+                                ("kind", new TsType.StringUnion(["shown"])),
+                                ("summary", new TsType.TypeRef("Summary")),
+                            ])
+                        ),
+                    ]
+                )
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -537,16 +709,27 @@ public sealed class ContractEmitterTests
             "createOrder",
             "POST",
             "/api/orders",
-            [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            [
+                new TsEndpointParam(
+                    "body",
+                    new TsType.TypeRef("CreateOrderRequest"),
+                    ParamSource.Body
+                ),
+            ],
             new TsType.TypeRef("CreateOrderResponse"),
             "OrdersController",
             [
                 new TsResponseType(201, new TsType.TypeRef("CreateOrderResponse")),
                 new TsResponseType(422, new TsType.TypeRef("ValidationProblem")),
             ],
-            Summary: "Create an order");
+            Summary: "Create an order"
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -554,7 +737,10 @@ public sealed class ContractEmitterTests
         var param = ep.GetProperty("params")[0];
         Assert.Equal("body", param.GetProperty("source").GetString());
         Assert.Equal("ref", param.GetProperty("type").GetProperty("kind").GetString());
-        Assert.Equal("CreateOrderRequest", param.GetProperty("type").GetProperty("name").GetString());
+        Assert.Equal(
+            "CreateOrderRequest",
+            param.GetProperty("type").GetProperty("name").GetString()
+        );
 
         // responses
         var responses = ep.GetProperty("responses");
@@ -575,12 +761,24 @@ public sealed class ContractEmitterTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["Dto"] = new("Dto", [], [
-                // List<int?> → Array(Nullable(Primitive))
-                new("scores", new TsType.Array(new TsType.Nullable(new TsType.TypeRef("Score"))), false),
-                // Dictionary<string, string[]> → Dictionary(Array(Primitive))
-                new("tags", new TsType.Dictionary(new TsType.Array(new TsType.Primitive("string"))), false),
-            ]),
+            ["Dto"] = new(
+                "Dto",
+                [],
+                [
+                    // List<int?> → Array(Nullable(Primitive))
+                    new(
+                        "scores",
+                        new TsType.Array(new TsType.Nullable(new TsType.TypeRef("Score"))),
+                        false
+                    ),
+                    // Dictionary<string, string[]> → Dictionary(Array(Primitive))
+                    new(
+                        "tags",
+                        new TsType.Dictionary(new TsType.Array(new TsType.Primitive("string"))),
+                        false
+                    ),
+                ]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -609,15 +807,44 @@ public sealed class ContractEmitterTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["Dto"] = new("Dto", [], [
-                new("name", new TsType.Primitive("string"), false,
-                    Constraints: new TsPropertyConstraints(MinLength: 1, MaxLength: 100, Pattern: "^[a-z]+$")),
-                new("score", new TsType.Primitive("number"), false,
-                    Constraints: new TsPropertyConstraints(Minimum: 0, Maximum: 999.5,
-                        ExclusiveMinimum: -1, ExclusiveMaximum: 1000, MultipleOf: 0.5)),
-                new("tags", new TsType.Array(new TsType.Primitive("string")), false,
-                    Constraints: new TsPropertyConstraints(MinItems: 1, MaxItems: 10, UniqueItems: true)),
-            ]),
+            ["Dto"] = new(
+                "Dto",
+                [],
+                [
+                    new(
+                        "name",
+                        new TsType.Primitive("string"),
+                        false,
+                        Constraints: new TsPropertyConstraints(
+                            MinLength: 1,
+                            MaxLength: 100,
+                            Pattern: "^[a-z]+$"
+                        )
+                    ),
+                    new(
+                        "score",
+                        new TsType.Primitive("number"),
+                        false,
+                        Constraints: new TsPropertyConstraints(
+                            Minimum: 0,
+                            Maximum: 999.5,
+                            ExclusiveMinimum: -1,
+                            ExclusiveMaximum: 1000,
+                            MultipleOf: 0.5
+                        )
+                    ),
+                    new(
+                        "tags",
+                        new TsType.Array(new TsType.Primitive("string")),
+                        false,
+                        Constraints: new TsPropertyConstraints(
+                            MinItems: 1,
+                            MaxItems: 10,
+                            UniqueItems: true
+                        )
+                    ),
+                ]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -657,14 +884,22 @@ public sealed class ContractEmitterTests
             "UsersController",
             [new TsResponseType(200, new TsType.TypeRef("UserDto"))],
             Summary: "Get a user by ID",
-            Description: "Returns the full user profile including nested address data.");
+            Description: "Returns the full user profile including nested address data."
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
         Assert.Equal("Get a user by ID", ep.GetProperty("summary").GetString());
-        Assert.Equal("Returns the full user profile including nested address data.", ep.GetProperty("description").GetString());
+        Assert.Equal(
+            "Returns the full user profile including nested address data.",
+            ep.GetProperty("description").GetString()
+        );
     }
 
     [Fact]
@@ -672,10 +907,14 @@ public sealed class ContractEmitterTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["PagedResult"] = new("PagedResult", ["T", "U"], [
-                new("items", new TsType.Array(new TsType.TypeParam("T")), false),
-                new("meta", new TsType.TypeParam("U"), false),
-            ]),
+            ["PagedResult"] = new(
+                "PagedResult",
+                ["T", "U"],
+                [
+                    new("items", new TsType.Array(new TsType.TypeParam("T")), false),
+                    new("meta", new TsType.TypeParam("U"), false),
+                ]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -692,17 +931,25 @@ public sealed class ContractEmitterTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["Dto"] = new("Dto", [], [
-                new("allMeta", new TsType.Primitive("string"), false,
-                    IsDeprecated: true,
-                    Format: "email",
-                    DefaultValue: "user@example.com",
-                    Description: "The user email",
-                    Example: "alice@example.com",
-                    IsReadOnly: true,
-                    IsWriteOnly: false),
-                new("bare", new TsType.Primitive("string"), false),
-            ]),
+            ["Dto"] = new(
+                "Dto",
+                [],
+                [
+                    new(
+                        "allMeta",
+                        new TsType.Primitive("string"),
+                        false,
+                        IsDeprecated: true,
+                        Format: "email",
+                        DefaultValue: "user@example.com",
+                        Description: "The user email",
+                        Example: "alice@example.com",
+                        IsReadOnly: true,
+                        IsWriteOnly: false
+                    ),
+                    new("bare", new TsType.Primitive("string"), false),
+                ]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -737,30 +984,50 @@ public sealed class ContractEmitterTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["CreateOrderRequest"] = new("CreateOrderRequest", [], [
-                new("customerId", new TsType.Primitive("string", Format: "uuid"), false),
-                new("items", new TsType.Array(new TsType.TypeRef("OrderItemDto")), false),
-                new("notes", new TsType.Nullable(new TsType.Primitive("string")), true),
-                new("priority", new TsType.StringUnion(["low", "normal", "urgent"]), false),
-            ], Description: "Request to create an order"),
+            ["CreateOrderRequest"] = new(
+                "CreateOrderRequest",
+                [],
+                [
+                    new("customerId", new TsType.Primitive("string", Format: "uuid"), false),
+                    new("items", new TsType.Array(new TsType.TypeRef("OrderItemDto")), false),
+                    new("notes", new TsType.Nullable(new TsType.Primitive("string")), true),
+                    new("priority", new TsType.StringUnion(["low", "normal", "urgent"]), false),
+                ],
+                Description: "Request to create an order"
+            ),
         };
 
         var enums = new Dictionary<string, TsType>
         {
-            ["OrderStatus"] = new TsType.StringUnion(["Pending", "Confirmed", "Shipped", "Cancelled"]),
+            ["OrderStatus"] = new TsType.StringUnion([
+                "Pending",
+                "Confirmed",
+                "Shipped",
+                "Cancelled",
+            ]),
         };
 
         var endpoints = new List<TsEndpointDefinition>
         {
-            new("createOrder", "POST", "/api/orders",
-                [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            new(
+                "createOrder",
+                "POST",
+                "/api/orders",
+                [
+                    new TsEndpointParam(
+                        "body",
+                        new TsType.TypeRef("CreateOrderRequest"),
+                        ParamSource.Body
+                    ),
+                ],
                 new TsType.TypeRef("CreateOrderResponse"),
                 "OrdersController",
                 [
                     new TsResponseType(201, new TsType.TypeRef("CreateOrderResponse")),
                     new TsResponseType(422, new TsType.TypeRef("ValidationProblem")),
                 ],
-                Summary: "Create an order"),
+                Summary: "Create an order"
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, enums, endpoints);
@@ -777,7 +1044,10 @@ public sealed class ContractEmitterTests
         Assert.Equal("CreateOrderRequest", type.GetProperty("name").GetString());
         Assert.Equal("Request to create an order", type.GetProperty("description").GetString());
         Assert.Equal(4, type.GetProperty("properties").GetArrayLength());
-        Assert.Equal("customerId", type.GetProperty("properties")[0].GetProperty("name").GetString());
+        Assert.Equal(
+            "customerId",
+            type.GetProperty("properties")[0].GetProperty("name").GetString()
+        );
         Assert.False(type.GetProperty("properties")[0].GetProperty("optional").GetBoolean());
         Assert.True(type.GetProperty("properties")[2].GetProperty("optional").GetBoolean());
 
@@ -803,19 +1073,31 @@ public sealed class ContractEmitterTests
         Assert.Equal("body", param.GetProperty("name").GetString());
         Assert.Equal("body", param.GetProperty("source").GetString());
         Assert.Equal("ref", param.GetProperty("type").GetProperty("kind").GetString());
-        Assert.Equal("CreateOrderRequest", param.GetProperty("type").GetProperty("name").GetString());
+        Assert.Equal(
+            "CreateOrderRequest",
+            param.GetProperty("type").GetProperty("name").GetString()
+        );
 
         // Return type
         Assert.Equal("ref", ep.GetProperty("returnType").GetProperty("kind").GetString());
-        Assert.Equal("CreateOrderResponse", ep.GetProperty("returnType").GetProperty("name").GetString());
+        Assert.Equal(
+            "CreateOrderResponse",
+            ep.GetProperty("returnType").GetProperty("name").GetString()
+        );
 
         // Responses
         var responses = ep.GetProperty("responses");
         Assert.Equal(2, responses.GetArrayLength());
         Assert.Equal(201, responses[0].GetProperty("statusCode").GetInt32());
-        Assert.Equal("CreateOrderResponse", responses[0].GetProperty("dataType").GetProperty("name").GetString());
+        Assert.Equal(
+            "CreateOrderResponse",
+            responses[0].GetProperty("dataType").GetProperty("name").GetString()
+        );
         Assert.Equal(422, responses[1].GetProperty("statusCode").GetInt32());
-        Assert.Equal("ValidationProblem", responses[1].GetProperty("dataType").GetProperty("name").GetString());
+        Assert.Equal(
+            "ValidationProblem",
+            responses[1].GetProperty("dataType").GetProperty("name").GetString()
+        );
     }
 
     [Fact]
@@ -823,10 +1105,14 @@ public sealed class ContractEmitterTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["UserDto"] = new("UserDto", [], [
-                new("id", new TsType.Primitive("number"), false),
-                new("status", new TsType.TypeRef("Status"), false),
-            ]),
+            ["UserDto"] = new(
+                "UserDto",
+                [],
+                [
+                    new("id", new TsType.Primitive("number"), false),
+                    new("status", new TsType.TypeRef("Status"), false),
+                ]
+            ),
         };
 
         var enums = new Dictionary<string, TsType>
@@ -836,11 +1122,15 @@ public sealed class ContractEmitterTests
 
         var endpoints = new List<TsEndpointDefinition>
         {
-            new("getUser", "GET", "/api/users/{id}",
+            new(
+                "getUser",
+                "GET",
+                "/api/users/{id}",
                 [new TsEndpointParam("id", new TsType.Primitive("number"), ParamSource.Route)],
                 new TsType.TypeRef("UserDto"),
                 "UsersController",
-                [new TsResponseType(200, new TsType.TypeRef("UserDto"))]),
+                [new TsResponseType(200, new TsType.TypeRef("UserDto"))]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, enums, endpoints);
@@ -866,9 +1156,14 @@ public sealed class ContractEmitterTests
             null,
             "MediaController",
             [new TsResponseType(200, null)],
-            QueryAuth: new QueryAuthMetadata("token"));
+            QueryAuth: new QueryAuthMetadata("token")
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -887,9 +1182,14 @@ public sealed class ContractEmitterTests
             null,
             "MediaController",
             [new TsResponseType(200, null)],
-            QueryAuth: new QueryAuthMetadata("key"));
+            QueryAuth: new QueryAuthMetadata("key")
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var qa = doc.RootElement.GetProperty("endpoints")[0].GetProperty("queryAuth");
 
@@ -906,9 +1206,14 @@ public sealed class ContractEmitterTests
             [],
             null,
             "UsersController",
-            [new TsResponseType(200, null)]);
+            [new TsResponseType(200, null)]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -926,9 +1231,14 @@ public sealed class ContractEmitterTests
             null,
             "FilesController",
             [new TsResponseType(200, null)],
-            IsFileEndpoint: true);
+            IsFileEndpoint: true
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -946,9 +1256,14 @@ public sealed class ContractEmitterTests
             null,
             "UsersController",
             [new TsResponseType(200, null)],
-            IsFileEndpoint: false);
+            IsFileEndpoint: false
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -967,9 +1282,14 @@ public sealed class ContractEmitterTests
             "MediaController",
             [new TsResponseType(200, null)],
             FileContentType: "video/mp4",
-            IsFileEndpoint: true);
+            IsFileEndpoint: true
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -986,9 +1306,14 @@ public sealed class ContractEmitterTests
             [],
             null,
             "UsersController",
-            [new TsResponseType(200, null)]);
+            [new TsResponseType(200, null)]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
@@ -998,7 +1323,10 @@ public sealed class ContractEmitterTests
     [Fact]
     public void Duplicate_Response_Status_Keeps_First_Metadata_And_Sorts()
     {
-        var firstExamples = new[] { new TsEndpointExample("application/json", "first", "{\"message\":\"first\"}") };
+        var firstExamples = new[]
+        {
+            new TsEndpointExample("application/json", "first", "{\"message\":\"first\"}"),
+        };
         var firstHeaders = new[] { new TsResponseHeader("X-First", "first header", true) };
         var endpoint = new TsEndpointDefinition(
             "getUser",
@@ -1009,24 +1337,41 @@ public sealed class ContractEmitterTests
             "UsersController",
             [
                 new TsResponseType(500, null, "server error"),
-                new TsResponseType(404, new TsType.Primitive("string"), "first", firstExamples, firstHeaders),
+                new TsResponseType(
+                    404,
+                    new TsType.Primitive("string"),
+                    "first",
+                    firstExamples,
+                    firstHeaders
+                ),
                 new TsResponseType(404, new TsType.Primitive("number"), "second"),
                 new TsResponseType(200, null, "success"),
-            ]);
+            ]
+        );
 
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            [endpoint]);
+            [endpoint]
+        );
 
         using var doc = JsonDocument.Parse(json);
         var responses = doc.RootElement.GetProperty("endpoints")[0].GetProperty("responses");
-        Assert.Equal([200, 404, 500], responses.EnumerateArray().Select(r => r.GetProperty("statusCode").GetInt32()));
+        Assert.Equal(
+            [200, 404, 500],
+            responses.EnumerateArray().Select(r => r.GetProperty("statusCode").GetInt32())
+        );
         var response404 = responses[1];
         Assert.Equal("first", response404.GetProperty("description").GetString());
         Assert.Equal("string", response404.GetProperty("dataType").GetProperty("type").GetString());
-        Assert.Equal("first", response404.GetProperty("examples")[0].GetProperty("name").GetString());
-        Assert.Equal("X-First", response404.GetProperty("headers")[0].GetProperty("name").GetString());
+        Assert.Equal(
+            "first",
+            response404.GetProperty("examples")[0].GetProperty("name").GetString()
+        );
+        Assert.Equal(
+            "X-First",
+            response404.GetProperty("headers")[0].GetProperty("name").GetString()
+        );
     }
 
     [Fact]
@@ -1042,9 +1387,14 @@ public sealed class ContractEmitterTests
             [new TsResponseType(200, null)],
             FileContentType: "video/mp4",
             IsFileEndpoint: true,
-            QueryAuth: new QueryAuthMetadata("token"));
+            QueryAuth: new QueryAuthMetadata("token")
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         using var doc = JsonDocument.Parse(json);
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 

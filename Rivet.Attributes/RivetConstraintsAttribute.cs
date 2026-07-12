@@ -56,22 +56,34 @@ public sealed class RivetConstraintsAttribute : ValidationAttribute
             if (!double.IsNaN(ExclusiveMinimum) && number <= ExclusiveMinimum)
             {
                 return new ValidationResult(
-                    string.Create(CultureInfo.InvariantCulture,
-                        $"The field {name} must be greater than {ExclusiveMinimum}."), members);
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"The field {name} must be greater than {ExclusiveMinimum}."
+                    ),
+                    members
+                );
             }
 
             if (!double.IsNaN(ExclusiveMaximum) && number >= ExclusiveMaximum)
             {
                 return new ValidationResult(
-                    string.Create(CultureInfo.InvariantCulture,
-                        $"The field {name} must be less than {ExclusiveMaximum}."), members);
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"The field {name} must be less than {ExclusiveMaximum}."
+                    ),
+                    members
+                );
             }
 
             if (!double.IsNaN(MultipleOf) && !IsMultipleOf(number, MultipleOf))
             {
                 return new ValidationResult(
-                    string.Create(CultureInfo.InvariantCulture,
-                        $"The field {name} must be a multiple of {MultipleOf}."), members);
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"The field {name} must be a multiple of {MultipleOf}."
+                    ),
+                    members
+                );
             }
 
             return ValidationResult.Success;
@@ -86,21 +98,31 @@ public sealed class RivetConstraintsAttribute : ValidationAttribute
             if (MinItems >= 0 && items.Count < MinItems)
             {
                 return new ValidationResult(
-                    string.Create(CultureInfo.InvariantCulture,
-                        $"The field {name} must contain at least {MinItems} item(s)."), members);
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"The field {name} must contain at least {MinItems} item(s)."
+                    ),
+                    members
+                );
             }
 
             if (MaxItems >= 0 && items.Count > MaxItems)
             {
                 return new ValidationResult(
-                    string.Create(CultureInfo.InvariantCulture,
-                        $"The field {name} must contain at most {MaxItems} item(s)."), members);
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"The field {name} must contain at most {MaxItems} item(s)."
+                    ),
+                    members
+                );
             }
 
             if (UniqueItems && items.Count != items.Distinct().Count())
             {
                 return new ValidationResult(
-                    $"The field {name} must not contain duplicate items.", members);
+                    $"The field {name} must not contain duplicate items.",
+                    members
+                );
             }
         }
 
@@ -111,8 +133,17 @@ public sealed class RivetConstraintsAttribute : ValidationAttribute
     {
         switch (value)
         {
-            case sbyte or byte or short or ushort or int or uint or long or ulong
-                or float or double or decimal:
+            case sbyte
+            or byte
+            or short
+            or ushort
+            or int
+            or uint
+            or long
+            or ulong
+            or float
+            or double
+            or decimal:
                 number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
                 return true;
             default:
@@ -129,6 +160,7 @@ public sealed class RivetConstraintsAttribute : ValidationAttribute
         }
 
         var ratio = value / multipleOf;
-        return Math.Abs(ratio - Math.Round(ratio)) <= MultipleOfTolerance * Math.Max(1, Math.Abs(ratio));
+        return Math.Abs(ratio - Math.Round(ratio))
+            <= MultipleOfTolerance * Math.Max(1, Math.Abs(ratio));
     }
 }

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Rivet;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -226,25 +225,32 @@ public sealed class HeaderSupportTests
     [Fact]
     public void Builder_Rejects_DuplicateHeaderPerStatus()
     {
-        var definition = Define.Get<string>("/api/things")
-            .WithResponseHeader("ETag");
+        var definition = Define.Get<string>("/api/things").WithResponseHeader("ETag");
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => definition.WithResponseHeader("etag"));
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            definition.WithResponseHeader("etag")
+        );
         Assert.Contains("already declared", ex.Message);
     }
 
     [Fact]
     public void Builder_Exposes_DeclaredResponseHeaders()
     {
-        var definition = Define.Get<string>("/api/things")
+        var definition = Define
+            .Get<string>("/api/things")
             .WithResponseHeader("ETag")
             .WithResponseHeader(304, "Cache-Control", "Caching policy", required: true);
 
         Assert.NotNull(definition.ResponseHeaders);
         Assert.Equal(2, definition.ResponseHeaders!.Count);
-        Assert.Equal(new RouteResponseHeader(null, "ETag", null, false), definition.ResponseHeaders[0]);
-        Assert.Equal(new RouteResponseHeader(304, "Cache-Control", "Caching policy", true), definition.ResponseHeaders[1]);
+        Assert.Equal(
+            new RouteResponseHeader(null, "ETag", null, false),
+            definition.ResponseHeaders[0]
+        );
+        Assert.Equal(
+            new RouteResponseHeader(304, "Cache-Control", "Caching policy", true),
+            definition.ResponseHeaders[1]
+        );
     }
 
     // ---------------------------------------------------------------
@@ -272,11 +278,14 @@ public sealed class HeaderSupportTests
             """;
 
         using var doc = CompilationHelper.EmitOpenApi(source);
-        var parameters = doc.RootElement
-            .GetProperty("paths").GetProperty("/api/pages").GetProperty("get")
+        var parameters = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/pages")
+            .GetProperty("get")
             .GetProperty("parameters");
 
-        var headerParam = parameters.EnumerateArray()
+        var headerParam = parameters
+            .EnumerateArray()
             .Single(p => p.GetProperty("in").GetString() == "header");
         Assert.Equal("Notion-Version", headerParam.GetProperty("name").GetString());
         Assert.True(headerParam.GetProperty("required").GetBoolean());
@@ -313,11 +322,14 @@ public sealed class HeaderSupportTests
 
         using (doc)
         {
-            var parameters = doc.RootElement
-                .GetProperty("paths").GetProperty("/api/items").GetProperty("get")
+            var parameters = doc
+                .RootElement.GetProperty("paths")
+                .GetProperty("/api/items")
+                .GetProperty("get")
                 .GetProperty("parameters");
 
-            var headerNames = parameters.EnumerateArray()
+            var headerNames = parameters
+                .EnumerateArray()
                 .Where(p => p.GetProperty("in").GetString() == "header")
                 .Select(p => p.GetProperty("name").GetString())
                 .ToList();
@@ -326,7 +338,10 @@ public sealed class HeaderSupportTests
             Assert.Equal(["X-Fine"], headerNames);
         }
 
-        Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(stderr, "warning RIV2009:").Count);
+        Assert.Equal(
+            3,
+            System.Text.RegularExpressions.Regex.Matches(stderr, "warning RIV2009:").Count
+        );
         Assert.Contains("'Authorization'", stderr);
         Assert.Contains("'Accept'", stderr);
         Assert.Contains("'Content-Type'", stderr);
@@ -358,9 +373,13 @@ public sealed class HeaderSupportTests
             """;
 
         using var doc = CompilationHelper.EmitOpenApi(source);
-        var headers = doc.RootElement
-            .GetProperty("paths").GetProperty("/api/tasks").GetProperty("post")
-            .GetProperty("responses").GetProperty("201").GetProperty("headers");
+        var headers = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/tasks")
+            .GetProperty("post")
+            .GetProperty("responses")
+            .GetProperty("201")
+            .GetProperty("headers");
 
         var location = headers.GetProperty("Location");
         Assert.Equal("URL of the created task", location.GetProperty("description").GetString());

@@ -17,8 +17,10 @@ namespace Rivet;
 public sealed class RivetUnionAttribute : JsonConverterAttribute
 {
     public override JsonConverter? CreateConverter(Type typeToConvert) =>
-        (JsonConverter?)Activator.CreateInstance(
-            typeof(RivetUnionJsonConverter<>).MakeGenericType(typeToConvert));
+        (JsonConverter?)
+            Activator.CreateInstance(
+                typeof(RivetUnionJsonConverter<>).MakeGenericType(typeToConvert)
+            );
 }
 
 /// <summary>
@@ -29,17 +31,21 @@ public sealed class RivetUnionAttribute : JsonConverterAttribute
 /// </summary>
 public sealed class RivetUnionJsonConverter<T> : JsonConverter<T>
 {
-    private static readonly PropertyInfo[] VariantProperties = typeof(T)
+    private static readonly PropertyInfo[] _variantProperties = typeof(T)
         .GetProperties(BindingFlags.Public | BindingFlags.Instance)
         .Where(property => property.CanRead)
         .ToArray();
 
-    public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    public override T? Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options
+    )
     {
         using var document = JsonDocument.ParseValue(ref reader);
         var element = document.RootElement;
 
-        foreach (var property in VariantProperties)
+        foreach (var property in _variantProperties)
         {
             if (!KindMatches(element, property.PropertyType))
             {
@@ -60,12 +66,13 @@ public sealed class RivetUnionJsonConverter<T> : JsonConverter<T>
         }
 
         throw new JsonException(
-            $"Value does not match any variant of union wrapper '{typeof(T).Name}'.");
+            $"Value does not match any variant of union wrapper '{typeof(T).Name}'."
+        );
     }
 
     public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
     {
-        foreach (var property in VariantProperties)
+        foreach (var property in _variantProperties)
         {
             var variant = property.GetValue(value);
             if (variant is not null)
@@ -116,7 +123,8 @@ public sealed class RivetUnionJsonConverter<T> : JsonConverter<T>
             .Select(parameter =>
                 string.Equals(parameter.Name, matched.Name, StringComparison.OrdinalIgnoreCase)
                     ? value
-                    : null)
+                    : null
+            )
             .ToArray();
 
         return (T)constructor.Invoke(arguments);

@@ -10,8 +10,8 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class GapAnalysisTests
 {
-    private static string LoadFixture(string name)
-        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
+    private static string LoadFixture(string name) =>
+        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
 
     [Fact]
     public void Endpoint_Example_Fidelity_Distinguishes_Request_And_Response_Loss()
@@ -46,7 +46,8 @@ public sealed class GapAnalysisTests
                 }
               }
             }
-            """);
+            """
+        );
         var emittedDoc = JsonSerializer.Deserialize<JsonElement>(
             """
             {
@@ -75,13 +76,17 @@ public sealed class GapAnalysisTests
                 }
               }
             }
-            """);
+            """
+        );
 
         var fidelity = AnalyzeEndpointExampleFidelity(originalDoc, emittedDoc);
 
         Assert.Equal(1, fidelity.RequestExampleLoss);
         Assert.Equal(1, fidelity.ResponseExampleLoss);
-        Assert.DoesNotContain(fidelity.Failures, failure => failure.StartsWith("EXAMPLES LOST:", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            fidelity.Failures,
+            failure => failure.StartsWith("EXAMPLES LOST:", StringComparison.Ordinal)
+        );
         Assert.Contains("REQUEST EXAMPLE LOSS: 1", fidelity.Failures);
         Assert.Contains("RESPONSE EXAMPLE LOSS: 1", fidelity.Failures);
     }
@@ -151,7 +156,8 @@ public sealed class GapAnalysisTests
                 }
               }
             }
-            """);
+            """
+        );
         var emittedDoc = JsonSerializer.Deserialize<JsonElement>(
             """
             {
@@ -204,14 +210,18 @@ public sealed class GapAnalysisTests
                 }
               }
             }
-            """);
+            """
+        );
 
         var fidelity = AnalyzeEndpointExampleFidelity(originalDoc, emittedDoc);
 
         Assert.Equal(0, CountPropertyExampleLoss(originalDoc, emittedDoc));
         Assert.Equal(1, fidelity.NamedExampleLoss);
         Assert.Equal(1, fidelity.RefBackedExampleLoss);
-        Assert.DoesNotContain(fidelity.Failures, failure => failure.StartsWith("EXAMPLES LOST:", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            fidelity.Failures,
+            failure => failure.StartsWith("EXAMPLES LOST:", StringComparison.Ordinal)
+        );
         Assert.Contains("NAMED EXAMPLE LOSS: 1", fidelity.Failures);
         Assert.Contains("REF-BACKED EXAMPLE LOSS: 1", fidelity.Failures);
     }
@@ -221,7 +231,8 @@ public sealed class GapAnalysisTests
     public void Full_Gap_Analysis_Report_Includes_Endpoint_Example_Fidelity_Block()
     {
         var output = CompilationHelper.CaptureStdOut(() =>
-            RunFullGapAnalysis("openapi-github.json", "GitHub"));
+            RunFullGapAnalysis("openapi-github.json", "GitHub")
+        );
         Assert.Contains("ENDPOINT EXAMPLE FIDELITY:", output);
         Assert.Contains("Request example loss:", output);
         Assert.Contains("Response example loss:", output);
@@ -236,8 +247,8 @@ public sealed class GapAnalysisTests
         var originalJson = LoadFixture("openapi-github.json");
         var originalDoc = JsonSerializer.Deserialize<JsonElement>(originalJson);
         var import = OpenApiImporter.Import(originalJson, new ImportOptions("GitHub", null));
-        var sources = import.Files
-            .GroupBy(file => file.FileName)
+        var sources = import
+            .Files.GroupBy(file => file.FileName)
             .Select(group => group.First().Content)
             .ToArray();
 
@@ -254,12 +265,18 @@ public sealed class GapAnalysisTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var emittedJson = Rivet.Tool.Emit.OpenApiEmitter.Emit(
-            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         var emittedDoc = JsonSerializer.Deserialize<JsonElement>(emittedJson);
         var fidelity = AnalyzeEndpointExampleFidelity(originalDoc, emittedDoc);
 
         var output = CompilationHelper.CaptureStdOut(() =>
-            RunFullGapAnalysis("openapi-github.json", "GitHub"));
+            RunFullGapAnalysis("openapi-github.json", "GitHub")
+        );
         Assert.Contains($"Request example loss:    {fidelity.RequestExampleLoss}", output);
         Assert.Contains($"Response example loss:   {fidelity.ResponseExampleLoss}", output);
         Assert.Contains($"Named example loss:      {fidelity.NamedExampleLoss}", output);
@@ -286,8 +303,10 @@ public sealed class GapAnalysisTests
         var originalAnyOfs = new List<string>();
         var originalAllOfs = new List<string>();
 
-        if (originalDoc.TryGetProperty("components", out var comps) &&
-            comps.TryGetProperty("schemas", out var schemas))
+        if (
+            originalDoc.TryGetProperty("components", out var comps)
+            && comps.TryGetProperty("schemas", out var schemas)
+        )
         {
             foreach (var schema in schemas.EnumerateObject())
             {
@@ -295,14 +314,24 @@ public sealed class GapAnalysisTests
                 CountInlineEnums(schema.Name, schema.Value, originalInlineEnums);
 
                 if (HasStringEnum(schema.Value))
+                {
                     originalTopLevelEnums++;
+                }
 
                 if (schema.Value.TryGetProperty("oneOf", out _))
+                {
                     originalOneOfs.Add(schema.Name);
+                }
+
                 if (schema.Value.TryGetProperty("anyOf", out _))
+                {
                     originalAnyOfs.Add(schema.Name);
+                }
+
                 if (schema.Value.TryGetProperty("allOf", out _))
+                {
                     originalAllOfs.Add(schema.Name);
+                }
             }
         }
 
@@ -314,7 +343,9 @@ public sealed class GapAnalysisTests
                 foreach (var op in path.Value.EnumerateObject())
                 {
                     if (IsHttpMethod(op.Name))
+                    {
                         originalOperationCount++;
+                    }
                 }
             }
         }
@@ -327,8 +358,8 @@ public sealed class GapAnalysisTests
         var enumFiles = result.Files.Count(f => f.Content.Contains("public enum "));
         var brandFiles = result.Files.Count(f => f.Content.Contains("[RivetType(Brand"));
         var contractFiles = result.Files.Count(f => f.Content.Contains("[RivetContract]"));
-        var endpointFields = result.Files
-            .Where(f => f.Content.Contains("[RivetContract]"))
+        var endpointFields = result
+            .Files.Where(f => f.Content.Contains("[RivetContract]"))
             .Sum(f => f.Content.Split('\n').Count(l => l.Contains("public static readonly")));
 
         // Check compilation
@@ -336,8 +367,8 @@ public sealed class GapAnalysisTests
         EndpointExampleFidelity? endpointExampleFidelity = null;
         try
         {
-            var sources = result.Files
-                .GroupBy(f => f.FileName)
+            var sources = result
+                .Files.GroupBy(f => f.FileName)
                 .Select(g => g.First().Content)
                 .ToArray();
 
@@ -352,9 +383,18 @@ public sealed class GapAnalysisTests
             }
 
             var (discovered, walker) = CompilationHelper.DiscoverAndWalk(roundTripCompilation);
-            var endpoints = CompilationHelper.WalkContracts(roundTripCompilation, discovered, walker);
+            var endpoints = CompilationHelper.WalkContracts(
+                roundTripCompilation,
+                discovered,
+                walker
+            );
             var emittedJson = Rivet.Tool.Emit.OpenApiEmitter.Emit(
-                endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+                endpoints,
+                walker.Definitions,
+                walker.Brands,
+                walker.Enums,
+                null
+            );
             var emittedDoc = JsonSerializer.Deserialize<JsonElement>(emittedJson);
             endpointExampleFidelity = AnalyzeEndpointExampleFidelity(originalDoc, emittedDoc);
         }
@@ -364,16 +404,16 @@ public sealed class GapAnalysisTests
         }
 
         // Count unsupported markers in contracts
-        var unsupportedLines = result.Files
-            .SelectMany(f => f.Content.Split('\n'))
+        var unsupportedLines = result
+            .Files.SelectMany(f => f.Content.Split('\n'))
             .Where(l => l.Contains("[rivet:unsupported"))
             .ToList();
         var unsupportedMarkers = unsupportedLines.Count;
 
         var output = new System.Text.StringBuilder();
-        output.AppendLine($"\n{'=',-60}");
+        output.AppendLine($"\n{'=', -60}");
         output.AppendLine($"  {ns} — Full Gap Analysis");
-        output.AppendLine($"{'=',-60}");
+        output.AppendLine($"{'=', -60}");
         output.AppendLine();
         output.AppendLine($"  ORIGINAL SPEC:");
         output.AppendLine($"    Schemas:          {originalSchemaCount}");
@@ -396,16 +436,28 @@ public sealed class GapAnalysisTests
         output.AppendLine($"    Unsupported:      {unsupportedMarkers}");
         output.AppendLine();
         output.AppendLine($"  COVERAGE:");
-        output.AppendLine($"    Endpoint coverage: {endpointFields}/{originalOperationCount} ({(originalOperationCount > 0 ? 100.0 * endpointFields / originalOperationCount : 0):F1}%)");
-        output.AppendLine($"    Schema coverage:   {recordFiles + enumFiles + brandFiles}/{originalSchemaCount} ({(originalSchemaCount > 0 ? 100.0 * (recordFiles + enumFiles + brandFiles) / originalSchemaCount : 0):F1}%)");
+        output.AppendLine(
+            $"    Endpoint coverage: {endpointFields}/{originalOperationCount} ({(originalOperationCount > 0 ? 100.0 * endpointFields / originalOperationCount : 0):F1}%)"
+        );
+        output.AppendLine(
+            $"    Schema coverage:   {recordFiles + enumFiles + brandFiles}/{originalSchemaCount} ({(originalSchemaCount > 0 ? 100.0 * (recordFiles + enumFiles + brandFiles) / originalSchemaCount : 0):F1}%)"
+        );
         if (endpointExampleFidelity is not null)
         {
             output.AppendLine();
             output.AppendLine($"  ENDPOINT EXAMPLE FIDELITY:");
-            output.AppendLine($"    Request example loss:    {endpointExampleFidelity.RequestExampleLoss}");
-            output.AppendLine($"    Response example loss:   {endpointExampleFidelity.ResponseExampleLoss}");
-            output.AppendLine($"    Named example loss:      {endpointExampleFidelity.NamedExampleLoss}");
-            output.AppendLine($"    Ref-backed example loss: {endpointExampleFidelity.RefBackedExampleLoss}");
+            output.AppendLine(
+                $"    Request example loss:    {endpointExampleFidelity.RequestExampleLoss}"
+            );
+            output.AppendLine(
+                $"    Response example loss:   {endpointExampleFidelity.ResponseExampleLoss}"
+            );
+            output.AppendLine(
+                $"    Named example loss:      {endpointExampleFidelity.NamedExampleLoss}"
+            );
+            output.AppendLine(
+                $"    Ref-backed example loss: {endpointExampleFidelity.RefBackedExampleLoss}"
+            );
         }
         output.AppendLine();
         if (unsupportedLines.Count > 0)
@@ -425,8 +477,8 @@ public sealed class GapAnalysisTests
         if (result.Warnings.Count > 0)
         {
             output.AppendLine($"\n  WARNINGS ({result.Warnings.Count}):");
-            var warningGroups = result.Warnings
-                .GroupBy(w => w.Length > 50 ? w[..50] : w)
+            var warningGroups = result
+                .Warnings.GroupBy(w => w.Length > 50 ? w[..50] : w)
                 .OrderByDescending(g => g.Count())
                 .Take(15);
             foreach (var g in warningGroups)
@@ -438,31 +490,34 @@ public sealed class GapAnalysisTests
         Console.WriteLine(output.ToString());
     }
 
-
-
-
     private static Dictionary<string, JsonElement> ExtractOperations(JsonElement doc)
     {
         var result = new Dictionary<string, JsonElement>();
-        if (!doc.TryGetProperty("paths", out var paths)) return result;
+        if (!doc.TryGetProperty("paths", out var paths))
+        {
+            return result;
+        }
 
         foreach (var path in paths.EnumerateObject())
         {
             foreach (var method in path.Value.EnumerateObject())
             {
                 if (IsHttpMethod(method.Name))
+                {
                     result[$"{method.Name.ToUpperInvariant()} {path.Name}"] = method.Value;
+                }
             }
         }
         return result;
     }
 
-    private static EndpointExampleFidelity AnalyzeEndpointExampleFidelity(JsonElement originalDoc, JsonElement emittedDoc)
+    private static EndpointExampleFidelity AnalyzeEndpointExampleFidelity(
+        JsonElement originalDoc,
+        JsonElement emittedDoc
+    )
     {
-        var emittedExamples = ExtractEndpointExamples(emittedDoc).ToDictionary(
-            example => example.Key,
-            example => example,
-            StringComparer.Ordinal);
+        var emittedExamples = ExtractEndpointExamples(emittedDoc)
+            .ToDictionary(example => example.Key, example => example, StringComparer.Ordinal);
 
         var requestExampleLoss = 0;
         var responseExampleLoss = 0;
@@ -527,7 +582,8 @@ public sealed class GapAnalysisTests
             responseExampleLoss,
             namedExampleLoss,
             refBackedExampleLoss,
-            failures);
+            failures
+        );
     }
 
     private static int CountPropertyExampleLoss(JsonElement originalDoc, JsonElement emittedDoc)
@@ -575,7 +631,10 @@ public sealed class GapAnalysisTests
                     }
                 }
 
-                if (HasField(originalProperty, "example") && !HasField(emittedProperties[emittedPropertyName], "example"))
+                if (
+                    HasField(originalProperty, "example")
+                    && !HasField(emittedProperties[emittedPropertyName], "example")
+                )
                 {
                     examplesLost++;
                 }
@@ -592,14 +651,26 @@ public sealed class GapAnalysisTests
         {
             if (operation.TryGetProperty("requestBody", out var requestBody))
             {
-                CollectEndpointExamples(examples, operationKey, EndpointExampleLocation.Request, statusCode: null, requestBody);
+                CollectEndpointExamples(
+                    examples,
+                    operationKey,
+                    EndpointExampleLocation.Request,
+                    statusCode: null,
+                    requestBody
+                );
             }
 
             if (operation.TryGetProperty("responses", out var responses))
             {
                 foreach (var response in responses.EnumerateObject())
                 {
-                    CollectEndpointExamples(examples, operationKey, EndpointExampleLocation.Response, response.Name, response.Value);
+                    CollectEndpointExamples(
+                        examples,
+                        operationKey,
+                        EndpointExampleLocation.Response,
+                        response.Name,
+                        response.Value
+                    );
                 }
             }
         }
@@ -612,7 +683,8 @@ public sealed class GapAnalysisTests
         string operationKey,
         EndpointExampleLocation location,
         string? statusCode,
-        JsonElement container)
+        JsonElement container
+    )
     {
         if (!container.TryGetProperty("content", out var content))
         {
@@ -623,13 +695,16 @@ public sealed class GapAnalysisTests
         {
             if (mediaType.Value.TryGetProperty("example", out _))
             {
-                examples.Add(new EndpointExampleOccurrence(
-                    $"{operationKey}|{location}|{statusCode}|{mediaType.Name}|__single__",
-                    location,
-                    statusCode,
-                    mediaType.Name,
-                    Name: null,
-                    IsRefBacked: false));
+                examples.Add(
+                    new EndpointExampleOccurrence(
+                        $"{operationKey}|{location}|{statusCode}|{mediaType.Name}|__single__",
+                        location,
+                        statusCode,
+                        mediaType.Name,
+                        Name: null,
+                        IsRefBacked: false
+                    )
+                );
             }
 
             if (!mediaType.Value.TryGetProperty("examples", out var namedExamples))
@@ -639,13 +714,16 @@ public sealed class GapAnalysisTests
 
             foreach (var example in namedExamples.EnumerateObject())
             {
-                examples.Add(new EndpointExampleOccurrence(
-                    $"{operationKey}|{location}|{statusCode}|{mediaType.Name}|{example.Name}",
-                    location,
-                    statusCode,
-                    mediaType.Name,
-                    example.Name,
-                    example.Value.TryGetProperty("$ref", out _)));
+                examples.Add(
+                    new EndpointExampleOccurrence(
+                        $"{operationKey}|{location}|{statusCode}|{mediaType.Name}|{example.Name}",
+                        location,
+                        statusCode,
+                        mediaType.Name,
+                        example.Name,
+                        example.Value.TryGetProperty("$ref", out _)
+                    )
+                );
             }
         }
     }
@@ -655,7 +733,8 @@ public sealed class GapAnalysisTests
         int ResponseExampleLoss,
         int NamedExampleLoss,
         int RefBackedExampleLoss,
-        IReadOnlyList<string> Failures);
+        IReadOnlyList<string> Failures
+    );
 
     private sealed record EndpointExampleOccurrence(
         string Key,
@@ -663,7 +742,8 @@ public sealed class GapAnalysisTests
         string? StatusCode,
         string MediaType,
         string? Name,
-        bool IsRefBacked);
+        bool IsRefBacked
+    );
 
     private enum EndpointExampleLocation
     {
@@ -679,14 +759,21 @@ public sealed class GapAnalysisTests
                 foreach (var prop in element.EnumerateObject())
                 {
                     if (prop.Name == "$ref" && prop.Value.ValueKind == JsonValueKind.String)
+                    {
                         refs.Add(prop.Value.GetString()!);
+                    }
                     else
+                    {
                         CollectAllRefs(prop.Value, refs);
+                    }
                 }
                 break;
             case JsonValueKind.Array:
                 foreach (var item in element.EnumerateArray())
+                {
                     CollectAllRefs(item, refs);
+                }
+
                 break;
         }
     }
@@ -694,11 +781,15 @@ public sealed class GapAnalysisTests
     private static Dictionary<string, JsonElement> ExtractSchemas(JsonElement doc)
     {
         var result = new Dictionary<string, JsonElement>();
-        if (doc.TryGetProperty("components", out var comps) &&
-            comps.TryGetProperty("schemas", out var schemas))
+        if (
+            doc.TryGetProperty("components", out var comps)
+            && comps.TryGetProperty("schemas", out var schemas)
+        )
         {
             foreach (var s in schemas.EnumerateObject())
+            {
                 result[s.Name] = s.Value;
+            }
         }
         return result;
     }
@@ -711,7 +802,9 @@ public sealed class GapAnalysisTests
         if (schema.TryGetProperty("properties", out var props))
         {
             foreach (var p in props.EnumerateObject())
+            {
                 result[p.Name] = p.Value;
+            }
         }
 
         // allOf: merge properties from all items
@@ -732,13 +825,8 @@ public sealed class GapAnalysisTests
         return result;
     }
 
-
-    private static bool HasField(JsonElement schema, string fieldName)
-        => schema.TryGetProperty(fieldName, out _);
-
-
-
-
+    private static bool HasField(JsonElement schema, string fieldName) =>
+        schema.TryGetProperty(fieldName, out _);
 
     private static Compilation CreateCompilationLenient(string[] sources)
     {
@@ -747,10 +835,16 @@ public sealed class GapAnalysisTests
             namespace System { public readonly struct DateOnly { public DateOnly(int year, int month, int day) { } } }
             """;
 
-        var trees = sources.Append(importStubs)
-            .Select(s => Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
-                s, new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
-                    Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest)))
+        var trees = sources
+            .Append(importStubs)
+            .Select(s =>
+                Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+                    s,
+                    new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
+                        Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest
+                    )
+                )
+            )
             .ToList();
 
         var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
@@ -768,7 +862,10 @@ public sealed class GapAnalysisTests
         foreach (var extra in new[] { "System.Linq.dll", "System.Console.dll" })
         {
             var path = Path.Combine(runtimeDir, extra);
-            if (File.Exists(path)) refFiles.Add(path);
+            if (File.Exists(path))
+            {
+                refFiles.Add(path);
+            }
         }
 
         return Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
@@ -777,34 +874,53 @@ public sealed class GapAnalysisTests
             refFiles.Select(f => (MetadataReference)MetadataReference.CreateFromFile(f)).ToArray(),
             new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable));
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
     }
 
     // --- Helpers ---
 
-
-    private static void CountInlineEnums(string schemaName, JsonElement schema, List<string> results)
+    private static void CountInlineEnums(
+        string schemaName,
+        JsonElement schema,
+        List<string> results
+    )
     {
         if (!schema.TryGetProperty("properties", out var props))
+        {
             return;
+        }
 
         foreach (var prop in props.EnumerateObject())
         {
-            if (prop.Value.TryGetProperty("enum", out var enumValues) && enumValues.GetArrayLength() > 0)
+            if (
+                prop.Value.TryGetProperty("enum", out var enumValues)
+                && enumValues.GetArrayLength() > 0
+            )
             {
                 // Check it's a string enum (most common), not integer enum
                 var isString = true;
                 if (prop.Value.TryGetProperty("type", out var type))
                 {
-                    isString = type.ValueKind == JsonValueKind.String && type.GetString() == "string";
+                    isString =
+                        type.ValueKind == JsonValueKind.String && type.GetString() == "string";
                 }
 
                 if (isString)
                 {
-                    var values = string.Join("|", enumValues.EnumerateArray()
-                        .Take(5).Select(v => v.ToString()));
-                    if (enumValues.GetArrayLength() > 5) values += "|...";
-                    results.Add($"{schemaName}.{prop.Name} [{enumValues.GetArrayLength()} values: {values}]");
+                    var values = string.Join(
+                        "|",
+                        enumValues.EnumerateArray().Take(5).Select(v => v.ToString())
+                    );
+                    if (enumValues.GetArrayLength() > 5)
+                    {
+                        values += "|...";
+                    }
+
+                    results.Add(
+                        $"{schemaName}.{prop.Name} [{enumValues.GetArrayLength()} values: {values}]"
+                    );
                 }
             }
 
@@ -813,7 +929,11 @@ public sealed class GapAnalysisTests
         }
     }
 
-    private static void CheckCompositionForInlineEnums(string path, JsonElement schema, List<string> results)
+    private static void CheckCompositionForInlineEnums(
+        string path,
+        JsonElement schema,
+        List<string> results
+    )
     {
         foreach (var keyword in new[] { "allOf", "oneOf", "anyOf" })
         {
@@ -834,11 +954,13 @@ public sealed class GapAnalysisTests
 
     private static bool HasStringEnum(JsonElement schema)
     {
-        if (schema.TryGetProperty("type", out var type) &&
-            type.ValueKind == JsonValueKind.String &&
-            type.GetString() == "string" &&
-            schema.TryGetProperty("enum", out var e) &&
-            e.GetArrayLength() > 0)
+        if (
+            schema.TryGetProperty("type", out var type)
+            && type.ValueKind == JsonValueKind.String
+            && type.GetString() == "string"
+            && schema.TryGetProperty("enum", out var e)
+            && e.GetArrayLength() > 0
+        )
         {
             return true;
         }
@@ -846,18 +968,20 @@ public sealed class GapAnalysisTests
         return false;
     }
 
-    private static bool IsHttpMethod(string name)
-        => name is "get" or "post" or "put" or "delete" or "patch" or "head" or "options";
+    private static bool IsHttpMethod(string name) =>
+        name is "get" or "post" or "put" or "delete" or "patch" or "head" or "options";
 
     private static int GetCompilationErrorCount(ImportResult result)
     {
-        var uniqueFiles = result.Files
-            .GroupBy(f => f.FileName)
+        var uniqueFiles = result
+            .Files.GroupBy(f => f.FileName)
             .Select(g => g.First().Content)
-            .Append("""
+            .Append(
+                """
                 namespace Microsoft.AspNetCore.Http { public interface IFormFile { } }
                 namespace System { public readonly struct DateOnly { public DateOnly(int year, int month, int day) { } } }
-                """)
+                """
+            )
             .ToArray();
 
         try
@@ -869,9 +993,14 @@ public sealed class GapAnalysisTests
         {
             // Re-compile without throwing to count errors
             var trees = uniqueFiles
-                .Select(s => Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
-                    s, new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
-                        Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest)))
+                .Select(s =>
+                    Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+                        s,
+                        new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
+                            Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest
+                        )
+                    )
+                )
                 .ToList();
 
             var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
@@ -885,16 +1014,21 @@ public sealed class GapAnalysisTests
                 Path.Combine(runtimeDir, "netstandard.dll"),
                 Path.Combine(runtimeDir, "System.Private.Uri.dll"),
                 typeof(RivetTypeAttribute).Assembly.Location,
-            }.Select(f => (MetadataReference)MetadataReference.CreateFromFile(f)).ToArray();
+            }
+                .Select(f => (MetadataReference)MetadataReference.CreateFromFile(f))
+                .ToArray();
 
             var compilation = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
-                "TestAssembly", trees, refs,
+                "TestAssembly",
+                trees,
+                refs,
                 new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(
                     OutputKind.DynamicallyLinkedLibrary,
-                    nullableContextOptions: NullableContextOptions.Enable));
+                    nullableContextOptions: NullableContextOptions.Enable
+                )
+            );
 
-            return compilation.GetDiagnostics()
-                .Count(d => d.Severity == DiagnosticSeverity.Error);
+            return compilation.GetDiagnostics().Count(d => d.Severity == DiagnosticSeverity.Error);
         }
     }
 }

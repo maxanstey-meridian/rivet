@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
-using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -11,7 +10,8 @@ public sealed class KitchenSinkImportTests
     private static string LoadFixture()
     {
         return File.ReadAllText(
-            Path.Combine(AppContext.BaseDirectory, "Fixtures", "openapi-kitchen-sink.json"));
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "openapi-kitchen-sink.json")
+        );
     }
 
     // ========== Compilation ==========
@@ -21,8 +21,11 @@ public sealed class KitchenSinkImportTests
     {
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
 
-        var errors = CompilationHelper.CompileImportResult(result).GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        var errors = CompilationHelper
+            .CompileImportResult(result)
+            .GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
         Assert.Empty(errors);
     }
 
@@ -41,26 +44,62 @@ public sealed class KitchenSinkImportTests
 
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/users");
-        Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{userId}");
-        Assert.Contains(endpoints, e => e.HttpMethod == "PUT" && e.RouteTemplate == "/api/users/{userId}");
-        Assert.Contains(endpoints, e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/users/{userId}");
-        Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/users/{userId}/avatar");
-        Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/orgs/{orgId}/projects/{projectId}/tasks/{taskId}");
-        Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/{tenantId}/users/{userId}");
-        Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/analytics");
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{userId}"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "PUT" && e.RouteTemplate == "/api/users/{userId}"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/users/{userId}"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/users/{userId}/avatar"
+        );
+        Assert.Contains(
+            endpoints,
+            e =>
+                e.HttpMethod == "GET"
+                && e.RouteTemplate == "/api/orgs/{orgId}/projects/{projectId}/tasks/{taskId}"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/{tenantId}/users/{userId}"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/analytics"
+        );
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/health");
-        Assert.Contains(endpoints, e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/admin/purge");
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/admin/purge"
+        );
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/status");
-        Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/webhooks");
-        Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/form-submit");
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/webhooks"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/form-submit"
+        );
 
         // Validate return types on key endpoints
-        var getUser = endpoints.Single(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{userId}");
+        var getUser = endpoints.Single(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/users/{userId}"
+        );
         Assert.NotNull(getUser.ReturnType);
         var getUserReturn = Assert.IsType<TsType.TypeRef>(getUser.ReturnType);
         Assert.Equal("UserDto", getUserReturn.Name);
 
-        var deleteUser = endpoints.Single(e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/users/{userId}");
+        var deleteUser = endpoints.Single(e =>
+            e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/users/{userId}"
+        );
         Assert.Null(deleteUser.ReturnType);
 
         // Validate route params exist and have correct source
@@ -178,10 +217,22 @@ public sealed class KitchenSinkImportTests
     {
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
 
-        Assert.Contains("public sealed record Email(string Value)", CompilationHelper.FindFile(result, "Email.cs"));
-        Assert.Contains("public sealed record WebsiteUri(string Value)", CompilationHelper.FindFile(result, "WebsiteUri.cs"));
-        Assert.Contains("public sealed record WebsiteUrl(string Value)", CompilationHelper.FindFile(result, "WebsiteUrl.cs"));
-        Assert.Contains("public sealed record ResourceRef(string Value)", CompilationHelper.FindFile(result, "ResourceRef.cs"));
+        Assert.Contains(
+            "public sealed record Email(string Value)",
+            CompilationHelper.FindFile(result, "Email.cs")
+        );
+        Assert.Contains(
+            "public sealed record WebsiteUri(string Value)",
+            CompilationHelper.FindFile(result, "WebsiteUri.cs")
+        );
+        Assert.Contains(
+            "public sealed record WebsiteUrl(string Value)",
+            CompilationHelper.FindFile(result, "WebsiteUrl.cs")
+        );
+        Assert.Contains(
+            "public sealed record ResourceRef(string Value)",
+            CompilationHelper.FindFile(result, "ResourceRef.cs")
+        );
 
         // All brands should be in Domain/ folder
         Assert.Contains(result.Files, f => f.FileName == "Domain/Email.cs");
@@ -223,8 +274,10 @@ public sealed class KitchenSinkImportTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
-        Assert.Contains(endpoints, e =>
-            e.RouteTemplate == "/api/orgs/{orgId}/projects/{projectId}/tasks/{taskId}");
+        Assert.Contains(
+            endpoints,
+            e => e.RouteTemplate == "/api/orgs/{orgId}/projects/{projectId}/tasks/{taskId}"
+        );
     }
 
     // ========== Endpoints ==========
@@ -263,10 +316,16 @@ public sealed class KitchenSinkImportTests
         Assert.Contains(".Anonymous()", CompilationHelper.FindFile(result, "HealthContract.cs"));
 
         // Admin purge has security: [{"admin": []}] → .Secure("admin")
-        Assert.Contains(".Secure(\"admin\")", CompilationHelper.FindFile(result, "AdminContract.cs"));
+        Assert.Contains(
+            ".Secure(\"admin\")",
+            CompilationHelper.FindFile(result, "AdminContract.cs")
+        );
 
         // Users endpoints inherit global → .Secure("bearer")
-        Assert.Contains(".Secure(\"bearer\")", CompilationHelper.FindFile(result, "UsersContract.cs"));
+        Assert.Contains(
+            ".Secure(\"bearer\")",
+            CompilationHelper.FindFile(result, "UsersContract.cs")
+        );
     }
 
     // ========== Tags / contracts ==========
@@ -277,12 +336,18 @@ public sealed class KitchenSinkImportTests
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         var contractFiles = result.Files.Where(f => f.FileName.StartsWith("Contracts/")).ToList();
 
-        Assert.Contains(contractFiles, f => f.FileName == "Contracts/UsersContract.cs");
-        Assert.Contains(contractFiles, f => f.FileName == "Contracts/OrganizationsContract.cs");
-        Assert.Contains(contractFiles, f => f.FileName == "Contracts/TenantsContract.cs");
-        Assert.Contains(contractFiles, f => f.FileName == "Contracts/AnalyticsContract.cs");
-        Assert.Contains(contractFiles, f => f.FileName == "Contracts/HealthContract.cs");
-        Assert.Contains(contractFiles, f => f.FileName == "Contracts/AdminContract.cs");
+        Assert.Contains(contractFiles, f => f.FileName == "Contracts/Users/UsersContract.cs");
+        Assert.Contains(
+            contractFiles,
+            f => f.FileName == "Contracts/Organizations/OrganizationsContract.cs"
+        );
+        Assert.Contains(contractFiles, f => f.FileName == "Contracts/Tenants/TenantsContract.cs");
+        Assert.Contains(
+            contractFiles,
+            f => f.FileName == "Contracts/Analytics/AnalyticsContract.cs"
+        );
+        Assert.Contains(contractFiles, f => f.FileName == "Contracts/Health/HealthContract.cs");
+        Assert.Contains(contractFiles, f => f.FileName == "Contracts/Admin/AdminContract.cs");
         Assert.True(contractFiles.Count >= 4);
     }
 
@@ -290,7 +355,7 @@ public sealed class KitchenSinkImportTests
     public void No_Tag_Produces_DefaultContract()
     {
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
-        Assert.Contains(result.Files, f => f.FileName == "Contracts/DefaultContract.cs");
+        Assert.Contains(result.Files, f => f.FileName == "Contracts/Default/DefaultContract.cs");
     }
 
     // ========== Form-encoded request body ==========
@@ -410,8 +475,12 @@ public sealed class KitchenSinkImportTests
 
         // The discriminator's polymorphic dispatch semantics are dropped — never silently
         // (I.A-17): the import surfaces a named warning.
-        Assert.Contains(result.Warnings, w =>
-            w.StartsWith("RIV3005: Discriminator dropped on 'DiscriminatedShape'") && w.Contains("'kind'"));
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.StartsWith("RIV3005: Discriminator dropped on 'DiscriminatedShape'")
+                && w.Contains("'kind'")
+        );
     }
 
     // ========== File upload ==========
@@ -734,8 +803,13 @@ public sealed class KitchenSinkImportTests
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         // Emit → OpenAPI JSON
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums,
-            SecurityParser.ParseMany(["bearer", "admin=bearer"]));
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            SecurityParser.ParseMany(["bearer", "admin=bearer"])
+        );
 
         // Verify emitted JSON is well-formed and all $refs resolve
         var doc = JsonSerializer.Deserialize<JsonElement>(json);
@@ -752,8 +826,7 @@ public sealed class KitchenSinkImportTests
             .Where(r => r.StartsWith("#/components/schemas/"))
             .Where(r => !schemaNames.Contains(r["#/components/schemas/".Length..]))
             .ToList();
-        Assert.True(brokenRefs.Count == 0,
-            $"Broken $refs: {string.Join(", ", brokenRefs)}");
+        Assert.True(brokenRefs.Count == 0, $"Broken $refs: {string.Join(", ", brokenRefs)}");
 
         // Pass 2: Re-import → compile → walk
         var result2 = CompilationHelper.Import(json, "KitchenSink");
@@ -762,12 +835,20 @@ public sealed class KitchenSinkImportTests
         var endpoints2 = CompilationHelper.WalkContracts(compilation2, discovered2, walker2);
 
         // Structural stability: endpoints preserved
-        Assert.True(endpoints2.Count >= endpoints.Count,
-            $"Lost endpoints: {endpoints.Count} → {endpoints2.Count}");
+        Assert.True(
+            endpoints2.Count >= endpoints.Count,
+            $"Lost endpoints: {endpoints.Count} → {endpoints2.Count}"
+        );
 
         // Route templates preserved
-        var routes1 = endpoints.Select(e => $"{e.HttpMethod} {e.RouteTemplate}").OrderBy(x => x).ToList();
-        var routes2 = endpoints2.Select(e => $"{e.HttpMethod} {e.RouteTemplate}").OrderBy(x => x).ToList();
+        var routes1 = endpoints
+            .Select(e => $"{e.HttpMethod} {e.RouteTemplate}")
+            .OrderBy(x => x)
+            .ToList();
+        var routes2 = endpoints2
+            .Select(e => $"{e.HttpMethod} {e.RouteTemplate}")
+            .OrderBy(x => x)
+            .ToList();
         foreach (var route in routes1)
         {
             Assert.Contains(route, routes2);
@@ -793,21 +874,23 @@ public sealed class KitchenSinkImportTests
         var lostReferenced = referencedNames
             .Where(n => walker.Definitions.ContainsKey(n) && !walker2.Definitions.ContainsKey(n))
             .ToList();
-        Assert.True(lostReferenced.Count == 0,
-            $"Lost endpoint-referenced types: {string.Join(", ", lostReferenced)}");
+        Assert.True(
+            lostReferenced.Count == 0,
+            $"Lost endpoint-referenced types: {string.Join(", ", lostReferenced)}"
+        );
 
         // Enums and brands that were used survive
-        var lostEnums = walker.Enums.Keys
-            .Where(k => referencedNames.Contains(k))
-            .Except(walker2.Enums.Keys).ToList();
-        Assert.True(lostEnums.Count == 0,
-            $"Lost enums: {string.Join(", ", lostEnums)}");
+        var lostEnums = walker
+            .Enums.Keys.Where(k => referencedNames.Contains(k))
+            .Except(walker2.Enums.Keys)
+            .ToList();
+        Assert.True(lostEnums.Count == 0, $"Lost enums: {string.Join(", ", lostEnums)}");
 
-        var lostBrands = walker.Brands.Keys
-            .Where(k => referencedNames.Contains(k))
-            .Except(walker2.Brands.Keys).ToList();
-        Assert.True(lostBrands.Count == 0,
-            $"Lost brands: {string.Join(", ", lostBrands)}");
+        var lostBrands = walker
+            .Brands.Keys.Where(k => referencedNames.Contains(k))
+            .Except(walker2.Brands.Keys)
+            .ToList();
+        Assert.True(lostBrands.Count == 0, $"Lost brands: {string.Join(", ", lostBrands)}");
     }
 
     // ========== Property-level fidelity: emitted OpenAPI matches input ==========
@@ -820,8 +903,13 @@ public sealed class KitchenSinkImportTests
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums,
-            SecurityParser.ParseMany(["bearer", "admin=bearer"]));
+        var emittedJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            SecurityParser.ParseMany(["bearer", "admin=bearer"])
+        );
         var emitted = JsonSerializer.Deserialize<JsonElement>(emittedJson);
 
         var emittedSchemas = emitted.GetProperty("components").GetProperty("schemas");
@@ -834,13 +922,49 @@ public sealed class KitchenSinkImportTests
         // bio is required AND nullable in the source spec (type ["string","null"]
         // + listed in required) — the importer now scaffolds `required string?`
         // so both axes survive instead of nullable eating required (#11b)
-        AssertSchemaProperty(emittedSchemas, "UserDto", "bio", "string", null, required: true, nullable: true);
+        AssertSchemaProperty(
+            emittedSchemas,
+            "UserDto",
+            "bio",
+            "string",
+            null,
+            required: true,
+            nullable: true
+        );
         AssertSchemaProperty(emittedSchemas, "UserDto", "age", "integer", null, required: true);
-        AssertSchemaProperty(emittedSchemas, "UserDto", "totalPoints", "integer", "int64", required: true);
+        AssertSchemaProperty(
+            emittedSchemas,
+            "UserDto",
+            "totalPoints",
+            "integer",
+            "int64",
+            required: true
+        );
         AssertSchemaProperty(emittedSchemas, "UserDto", "score", "number", null, required: true);
-        AssertSchemaProperty(emittedSchemas, "UserDto", "rating", "number", "float", required: true);
-        AssertSchemaProperty(emittedSchemas, "UserDto", "isActive", "boolean", null, required: true);
-        AssertSchemaProperty(emittedSchemas, "UserDto", "createdAt", "string", "date-time", required: true);
+        AssertSchemaProperty(
+            emittedSchemas,
+            "UserDto",
+            "rating",
+            "number",
+            "float",
+            required: true
+        );
+        AssertSchemaProperty(
+            emittedSchemas,
+            "UserDto",
+            "isActive",
+            "boolean",
+            null,
+            required: true
+        );
+        AssertSchemaProperty(
+            emittedSchemas,
+            "UserDto",
+            "createdAt",
+            "string",
+            "date-time",
+            required: true
+        );
         AssertSchemaRef(emittedSchemas, "UserDto", "email", "Email", required: true);
         // company is not in original required[] — [RivetOptional] preserves this through round-trip
         AssertSchemaRef(emittedSchemas, "UserDto", "company", "CompanyDto", required: false);
@@ -849,9 +973,23 @@ public sealed class KitchenSinkImportTests
         AssertSchemaProperty(emittedSchemas, "UserDto", "metadata", "object", null, required: true);
 
         // AddressDto: simple flat record
-        AssertSchemaProperty(emittedSchemas, "AddressDto", "street", "string", null, required: true);
+        AssertSchemaProperty(
+            emittedSchemas,
+            "AddressDto",
+            "street",
+            "string",
+            null,
+            required: true
+        );
         AssertSchemaProperty(emittedSchemas, "AddressDto", "city", "string", null, required: true);
-        AssertSchemaProperty(emittedSchemas, "AddressDto", "zipCode", "string", null, required: true);
+        AssertSchemaProperty(
+            emittedSchemas,
+            "AddressDto",
+            "zipCode",
+            "string",
+            null,
+            required: true
+        );
 
         // CompanyDto: nested $ref
         AssertSchemaProperty(emittedSchemas, "CompanyDto", "name", "string", null, required: true);
@@ -862,12 +1000,54 @@ public sealed class KitchenSinkImportTests
         // is tested via UserDto properties above (uuid, int64, float, date-time, etc.)
 
         // CollectionsDto: arrays and dicts (referenced by GET /api/analytics)
-        AssertSchemaProperty(emittedSchemas, "CollectionsDto", "stringList", "array", null, required: true);
-        AssertSchemaProperty(emittedSchemas, "CollectionsDto", "refList", "array", null, required: true);
-        AssertSchemaProperty(emittedSchemas, "CollectionsDto", "nestedList", "array", null, required: true);
-        AssertSchemaProperty(emittedSchemas, "CollectionsDto", "stringDict", "object", null, required: true);
-        AssertSchemaProperty(emittedSchemas, "CollectionsDto", "refDict", "object", null, required: true);
-        AssertSchemaProperty(emittedSchemas, "CollectionsDto", "arrayDict", "object", null, required: true);
+        AssertSchemaProperty(
+            emittedSchemas,
+            "CollectionsDto",
+            "stringList",
+            "array",
+            null,
+            required: true
+        );
+        AssertSchemaProperty(
+            emittedSchemas,
+            "CollectionsDto",
+            "refList",
+            "array",
+            null,
+            required: true
+        );
+        AssertSchemaProperty(
+            emittedSchemas,
+            "CollectionsDto",
+            "nestedList",
+            "array",
+            null,
+            required: true
+        );
+        AssertSchemaProperty(
+            emittedSchemas,
+            "CollectionsDto",
+            "stringDict",
+            "object",
+            null,
+            required: true
+        );
+        AssertSchemaProperty(
+            emittedSchemas,
+            "CollectionsDto",
+            "refDict",
+            "object",
+            null,
+            required: true
+        );
+        AssertSchemaProperty(
+            emittedSchemas,
+            "CollectionsDto",
+            "arrayDict",
+            "object",
+            null,
+            required: true
+        );
 
         // Enums (transitively referenced via UserDto → Priority, ProjectTaskDto → TaskStatus)
         // Original values preserved via [JsonStringEnumMemberName] round-trip
@@ -893,8 +1073,13 @@ public sealed class KitchenSinkImportTests
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums,
-            SecurityParser.ParseMany(["bearer", "admin=bearer"]));
+        var emittedJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            SecurityParser.ParseMany(["bearer", "admin=bearer"])
+        );
         var emitted = JsonSerializer.Deserialize<JsonElement>(emittedJson);
         var paths = emitted.GetProperty("paths");
 
@@ -915,12 +1100,37 @@ public sealed class KitchenSinkImportTests
         AssertEndpointExists(paths, "post", "/api/inline-test");
 
         // Response types correct
-        AssertEndpointResponse(paths, "get", "/api/users", 200, "#/components/schemas/UserDto", isArray: true);
+        AssertEndpointResponse(
+            paths,
+            "get",
+            "/api/users",
+            200,
+            "#/components/schemas/UserDto",
+            isArray: true
+        );
         AssertEndpointResponse(paths, "post", "/api/users", 201, "#/components/schemas/UserDto");
-        AssertEndpointResponse(paths, "get", "/api/users/{userId}", 200, "#/components/schemas/UserDto");
-        AssertEndpointResponse(paths, "put", "/api/users/{userId}", 200, "#/components/schemas/UserDto");
+        AssertEndpointResponse(
+            paths,
+            "get",
+            "/api/users/{userId}",
+            200,
+            "#/components/schemas/UserDto"
+        );
+        AssertEndpointResponse(
+            paths,
+            "put",
+            "/api/users/{userId}",
+            200,
+            "#/components/schemas/UserDto"
+        );
         AssertEndpointResponse(paths, "delete", "/api/users/{userId}", 204, null);
-        AssertEndpointResponse(paths, "get", "/api/health", 200, "#/components/schemas/HealthStatusDto");
+        AssertEndpointResponse(
+            paths,
+            "get",
+            "/api/health",
+            200,
+            "#/components/schemas/HealthStatusDto"
+        );
 
         // Error responses preserved
         var putUser = paths.GetProperty("/api/users/{userId}").GetProperty("put");
@@ -932,67 +1142,99 @@ public sealed class KitchenSinkImportTests
 
         // Security: health is anonymous, admin has explicit scheme
         var healthOp = paths.GetProperty("/api/health").GetProperty("get");
-        Assert.True(healthOp.TryGetProperty("security", out var healthSec), "Health endpoint missing security");
+        Assert.True(
+            healthOp.TryGetProperty("security", out var healthSec),
+            "Health endpoint missing security"
+        );
         Assert.Equal(0, healthSec.GetArrayLength()); // empty array = anonymous
 
         var adminOp = paths.GetProperty("/api/admin/purge").GetProperty("delete");
-        Assert.True(adminOp.TryGetProperty("security", out var adminSec), "Admin endpoint missing security");
+        Assert.True(
+            adminOp.TryGetProperty("security", out var adminSec),
+            "Admin endpoint missing security"
+        );
         Assert.True(adminSec.GetArrayLength() > 0, "Admin endpoint should have security scheme");
     }
 
     // --- Schema assertion helpers ---
 
     private static void AssertSchemaProperty(
-        JsonElement schemas, string schemaName, string propName,
-        string expectedType, string? expectedFormat,
-        bool required, bool nullable = false)
+        JsonElement schemas,
+        string schemaName,
+        string propName,
+        string expectedType,
+        string? expectedFormat,
+        bool required,
+        bool nullable = false
+    )
     {
-        Assert.True(schemas.TryGetProperty(schemaName, out var schema),
-            $"Schema '{schemaName}' not found in emitted OpenAPI");
+        Assert.True(
+            schemas.TryGetProperty(schemaName, out var schema),
+            $"Schema '{schemaName}' not found in emitted OpenAPI"
+        );
 
         var props = schema.GetProperty("properties");
-        Assert.True(props.TryGetProperty(propName, out var prop),
-            $"Property '{propName}' not found in schema '{schemaName}'");
+        Assert.True(
+            props.TryGetProperty(propName, out var prop),
+            $"Property '{propName}' not found in schema '{schemaName}'"
+        );
 
         // Check type (a 3.1 nullable emits a ["T", "null"] type array)
         var actualType = GetType(prop);
-        Assert.True(actualType == expectedType,
-            $"{schemaName}.{propName}: expected type '{expectedType}', got '{actualType}'");
+        Assert.True(
+            actualType == expectedType,
+            $"{schemaName}.{propName}: expected type '{expectedType}', got '{actualType}'"
+        );
 
         // Check format
         if (expectedFormat is not null)
         {
-            Assert.True(prop.TryGetProperty("format", out var fmt)
-                || (TryUnwrapNullableComposition(prop, out var inner) && inner.TryGetProperty("format", out fmt)),
-                $"{schemaName}.{propName}: expected format '{expectedFormat}', got none");
+            Assert.True(
+                prop.TryGetProperty("format", out var fmt)
+                    || (
+                        TryUnwrapNullableComposition(prop, out var inner)
+                        && inner.TryGetProperty("format", out fmt)
+                    ),
+                $"{schemaName}.{propName}: expected format '{expectedFormat}', got none"
+            );
             Assert.Equal(expectedFormat, fmt.GetString());
         }
 
         // Check required
         var isRequired = IsInRequired(schema, propName);
-        Assert.True(isRequired == required,
-            $"{schemaName}.{propName}: expected required={required}, got {isRequired}");
+        Assert.True(
+            isRequired == required,
+            $"{schemaName}.{propName}: expected required={required}, got {isRequired}"
+        );
 
         // Check nullable — 3.1: the type array carries a "null" member, or the schema
         // is a oneOf/anyOf with an explicit { "type": "null" } branch
         if (nullable)
         {
             var isNullable = HasNullType(prop) || TryUnwrapNullableComposition(prop, out _);
-            Assert.True(isNullable,
-                $"{schemaName}.{propName}: expected a 3.1 null type member");
+            Assert.True(isNullable, $"{schemaName}.{propName}: expected a 3.1 null type member");
         }
     }
 
     private static void AssertSchemaRef(
-        JsonElement schemas, string schemaName, string propName,
-        string expectedRefName, bool required, bool nullable = false)
+        JsonElement schemas,
+        string schemaName,
+        string propName,
+        string expectedRefName,
+        bool required,
+        bool nullable = false
+    )
     {
-        Assert.True(schemas.TryGetProperty(schemaName, out var schema),
-            $"Schema '{schemaName}' not found");
+        Assert.True(
+            schemas.TryGetProperty(schemaName, out var schema),
+            $"Schema '{schemaName}' not found"
+        );
 
         var props = schema.GetProperty("properties");
-        Assert.True(props.TryGetProperty(propName, out var prop),
-            $"Property '{propName}' not found in schema '{schemaName}'");
+        Assert.True(
+            props.TryGetProperty(propName, out var prop),
+            $"Property '{propName}' not found in schema '{schemaName}'"
+        );
 
         // $ref may be direct or a oneOf branch (for 3.1 nullable)
         string? actualRef = null;
@@ -1000,70 +1242,113 @@ public sealed class KitchenSinkImportTests
         {
             actualRef = refVal.GetString();
         }
-        else if (TryUnwrapNullableComposition(prop, out var inner) && inner.TryGetProperty("$ref", out refVal))
+        else if (
+            TryUnwrapNullableComposition(prop, out var inner)
+            && inner.TryGetProperty("$ref", out refVal)
+        )
         {
             actualRef = refVal.GetString();
         }
 
-        Assert.True(actualRef is not null,
-            $"{schemaName}.{propName}: expected $ref to '{expectedRefName}', got no $ref");
+        Assert.True(
+            actualRef is not null,
+            $"{schemaName}.{propName}: expected $ref to '{expectedRefName}', got no $ref"
+        );
         Assert.Equal($"#/components/schemas/{expectedRefName}", actualRef);
 
+        if (nullable)
+        {
+            Assert.True(
+                TryUnwrapNullableComposition(prop, out _),
+                $"{schemaName}.{propName}: expected a nullable $ref composition"
+            );
+        }
+
         var isRequired = IsInRequired(schema, propName);
-        Assert.True(isRequired == required,
-            $"{schemaName}.{propName}: expected required={required}, got {isRequired}");
+        Assert.True(
+            isRequired == required,
+            $"{schemaName}.{propName}: expected required={required}, got {isRequired}"
+        );
     }
 
     private static void AssertEnumSchema(JsonElement schemas, string name, string[] expectedMembers)
     {
-        Assert.True(schemas.TryGetProperty(name, out var schema),
-            $"Enum schema '{name}' not found");
+        Assert.True(
+            schemas.TryGetProperty(name, out var schema),
+            $"Enum schema '{name}' not found"
+        );
         Assert.Equal("string", schema.GetProperty("type").GetString());
-        var members = schema.GetProperty("enum").EnumerateArray()
-            .Select(v => v.GetString()!).OrderBy(s => s).ToList();
+        var members = schema
+            .GetProperty("enum")
+            .EnumerateArray()
+            .Select(v => v.GetString()!)
+            .OrderBy(s => s)
+            .ToList();
         var expected = expectedMembers.OrderBy(s => s).ToList();
         Assert.Equal(expected, members);
     }
 
     private static void AssertBrandSchema(JsonElement schemas, string name, string expectedType)
     {
-        Assert.True(schemas.TryGetProperty(name, out var schema),
-            $"Brand schema '{name}' not found");
-        Assert.True(schema.TryGetProperty("x-rivet-brand", out _),
-            $"Brand schema '{name}' missing x-rivet-brand extension");
+        Assert.True(
+            schemas.TryGetProperty(name, out var schema),
+            $"Brand schema '{name}' not found"
+        );
+        Assert.True(
+            schema.TryGetProperty("x-rivet-brand", out _),
+            $"Brand schema '{name}' missing x-rivet-brand extension"
+        );
         Assert.Equal(expectedType, schema.GetProperty("type").GetString());
     }
 
     private static void AssertEndpointExists(JsonElement paths, string method, string route)
     {
-        Assert.True(paths.TryGetProperty(route, out var pathItem),
-            $"Path '{route}' not found in emitted OpenAPI");
-        Assert.True(pathItem.TryGetProperty(method, out _),
-            $"Method '{method}' not found for path '{route}'");
+        Assert.True(
+            paths.TryGetProperty(route, out var pathItem),
+            $"Path '{route}' not found in emitted OpenAPI"
+        );
+        Assert.True(
+            pathItem.TryGetProperty(method, out _),
+            $"Method '{method}' not found for path '{route}'"
+        );
     }
 
     private static void AssertEndpointResponse(
-        JsonElement paths, string method, string route,
-        int statusCode, string? expectedSchemaRef, bool isArray = false)
+        JsonElement paths,
+        string method,
+        string route,
+        int statusCode,
+        string? expectedSchemaRef,
+        bool isArray = false
+    )
     {
         var op = paths.GetProperty(route).GetProperty(method);
         var responses = op.GetProperty("responses");
-        Assert.True(responses.TryGetProperty(statusCode.ToString(), out var resp),
-            $"{method.ToUpperInvariant()} {route}: missing {statusCode} response");
+        Assert.True(
+            responses.TryGetProperty(statusCode.ToString(), out var resp),
+            $"{method.ToUpperInvariant()} {route}: missing {statusCode} response"
+        );
 
         if (expectedSchemaRef is null)
         {
             // Void response — no content block
-            Assert.False(resp.TryGetProperty("content", out _),
-                $"{method.ToUpperInvariant()} {route}: expected no content for {statusCode}");
+            Assert.False(
+                resp.TryGetProperty("content", out _),
+                $"{method.ToUpperInvariant()} {route}: expected no content for {statusCode}"
+            );
             return;
         }
 
-        var content = resp.GetProperty("content").GetProperty("application/json").GetProperty("schema");
+        var content = resp.GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema");
         if (isArray)
         {
             Assert.Equal("array", content.GetProperty("type").GetString());
-            Assert.Equal(expectedSchemaRef, content.GetProperty("items").GetProperty("$ref").GetString());
+            Assert.Equal(
+                expectedSchemaRef,
+                content.GetProperty("items").GetProperty("$ref").GetString()
+            );
         }
         else
         {
@@ -1077,11 +1362,21 @@ public sealed class KitchenSinkImportTests
         {
             // 3.1 nullable → ["T", "null"]; report the non-null member
             if (t.ValueKind == JsonValueKind.Array)
-                return t.EnumerateArray().Select(v => v.GetString()).FirstOrDefault(v => v != "null");
+            {
+                return t.EnumerateArray()
+                    .Select(v => v.GetString())
+                    .FirstOrDefault(v => v != "null");
+            }
+
             return t.GetString();
         }
-        if (TryUnwrapNullableComposition(prop, out var inner) && inner.TryGetProperty("type", out t))
+        if (
+            TryUnwrapNullableComposition(prop, out var inner) && inner.TryGetProperty("type", out t)
+        )
+        {
             return t.GetString();
+        }
+
         return null;
     }
 
@@ -1097,14 +1392,17 @@ public sealed class KitchenSinkImportTests
     {
         foreach (var keyword in new[] { "oneOf", "anyOf" })
         {
-            if (prop.TryGetProperty(keyword, out var branches)
-                && branches.GetArrayLength() == 2)
+            if (prop.TryGetProperty(keyword, out var branches) && branches.GetArrayLength() == 2)
             {
                 foreach (var branch in branches.EnumerateArray())
                 {
-                    if (!(branch.TryGetProperty("type", out var t)
-                          && t.ValueKind == JsonValueKind.String
-                          && t.GetString() == "null"))
+                    if (
+                        !(
+                            branch.TryGetProperty("type", out var t)
+                            && t.ValueKind == JsonValueKind.String
+                            && t.GetString() == "null"
+                        )
+                    )
                     {
                         inner = branch;
                         return true;
@@ -1119,7 +1417,10 @@ public sealed class KitchenSinkImportTests
     private static bool IsInRequired(JsonElement schema, string propName)
     {
         if (!schema.TryGetProperty("required", out var req))
+        {
             return false;
+        }
+
         return req.EnumerateArray().Any(v => v.GetString() == propName);
     }
 

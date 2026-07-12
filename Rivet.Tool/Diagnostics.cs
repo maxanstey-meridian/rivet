@@ -26,6 +26,7 @@ public static class Diagnostics
     public const string ContractExampleUndeclaredStatus = "RIV1002";
     public const string RouteBoundJsonPropertyNameIgnored = "RIV1003";
     public const string ControllerExampleUndeclaredStatus = "RIV1004";
+
     // RIV1005 (FromHeaderParameterExcluded) retired in P2 wave 5: [FromHeader] params now
     // map to ParamSource.Header instead of being excluded. The number is never reused.
     public const string UnmappedTypedResult = "RIV1006";
@@ -33,6 +34,7 @@ public static class Diagnostics
     public const string UnparseableRangeBound = "RIV1008";
     public const string UnsupportedTimeSpan = "RIV1009";
     public const string UnsupportedBigInteger = "RIV1010";
+
     // RIV1011 (UnsupportedChar) retired in P2 wave 6: char now maps to a length-1 string
     // schema (the System.Text.Json wire shape) with x-rivet-csharp-type. The number is
     // never reused.
@@ -89,52 +91,97 @@ public static class Diagnostics
     /// DiagnosticsTests cross-checks this against docs/reference/diagnostics.md
     /// so neither the registry nor the doc page can rot.
     /// </summary>
-    public static readonly IReadOnlyDictionary<string, string> Registry = new Dictionary<string, string>(StringComparer.Ordinal)
+    public static readonly IReadOnlyDictionary<string, string> Registry = new Dictionary<
+        string,
+        string
+    >(StringComparer.Ordinal)
     {
-        [EndpointFieldNotStaticReadonly] = "Contract endpoint field is not 'static readonly' — it may not be read correctly at generation time.",
-        [ContractExampleUndeclaredStatus] = "Response example targets a status code the contract endpoint does not declare — the example is ignored.",
-        [RouteBoundJsonPropertyNameIgnored] = "[JsonPropertyName] on a route-bound property is ignored for route interpolation — the contract param keeps the route name.",
-        [ControllerExampleUndeclaredStatus] = "Response example targets a status code the controller endpoint does not declare — the example is ignored.",
-        [UnmappedTypedResult] = "Unmapped typed result branch in Results<...> — the response branch is omitted from the contract.",
-        [TypeNameCollision] = "Two walked types share a simple name — the later type is emitted under a disambiguated name.",
-        [UnparseableRangeBound] = "[Range] bound could not be parsed — the range constraint is skipped.",
-        [UnsupportedTimeSpan] = "TimeSpan has no schema mapping — emitted as an untyped (empty) schema.",
-        [UnsupportedBigInteger] = "BigInteger has no schema mapping — emitted as an untyped (empty) schema.",
-        [DictionaryKeyTypeDropped] = "Dictionary key type has no contract representation (supported: string, enums, string-backed brands, string-serializable primitives) — keys are emitted as unconstrained strings.",
-        [PolymorphicNonStringTag] = "[JsonDerivedType] registration with a non-string (int or absent) discriminator tag — a string-discriminated oneOf cannot represent it; the base type falls back to plain property flattening.",
-        [PolymorphicNoDerivedTypes] = "[JsonPolymorphic] base type has no [JsonDerivedType] registrations — there is no variant set to emit; the type falls back to plain property flattening.",
-        [PolymorphicUnknownHandlingDropped] = "[JsonPolymorphic] UnknownDerivedTypeHandling has no spec representation — the emitted oneOf admits only the registered derived types.",
-        [ResponseHeaderUndeclaredStatus] = ".WithResponseHeader() targets a status code the contract endpoint does not declare — the header is ignored.",
-        [RivetUnionNoVariants] = "[RivetUnion] wrapper has no variant properties — there is no union to emit; the type falls back to plain property flattening.",
-        [RouteTokenWithoutInputProperty] = "Route token has no matching property on the endpoint's input type (after normalized matching: case-insensitive, '_'/'-' stripped) — emitted as an untyped string path param.",
-        [InputTypeNotParamLowerable] = "The input type on a bodyless method (GET/DELETE/.AcceptsBinary) is a dictionary, collection or scalar — it has no property surface to lower to query params, so the input is dropped (route tokens still emit as untyped path params).",
-        [DuplicateResponseStatus] = "An authored contract declares the same response status more than once; generation fails because the contract cannot execute as declared.",
-        [InvalidRequestBodyProvenance] = "A [RivetRequestBody] type is not represented independently by the endpoint input type.",
-        [TaggedUnionComponentCollision] = "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
-        [UndefinedSecurityScheme] = "Endpoint references a security scheme with no definition — generation fails rather than inventing security semantics.",
-        [DuplicateEndpoint] = "Two endpoints share an HTTP method + path — the later definition wins.",
-        [MultipartInputTypeMissing] = "Multipart input type is absent from the contract's type definitions — the request schema is built inline from the endpoint's params.",
-        [UnknownTypeUntypedSchema] = "'unknown' type (JsonElement/JsonNode or an unmapped C# type) in the OpenAPI schema — emitted as untyped.",
-        [UnresolvedTypeParameter] = "Unresolved generic type parameter in the OpenAPI schema — emitted as object.",
-        [GenericTemplateMissing] = "Generic template is absent from the contract's type definitions — a free-form object schema is emitted for the instantiation.",
-        [BrandConflictingUnderlyingTypes] = "Brand declared with conflicting underlying types — the first declaration wins.",
-        [ReservedHeaderParameterSkipped] = "Header parameter named Accept, Content-Type or Authorization — OpenAPI forbids these as header parameters; the parameter is omitted from the spec.",
-        [DuplicateResponseStatusInIr] = "External contract IR declares the same response status more than once; the duplicate is dropped and the first declaration is kept.",
-        [DuplicateSecuritySchemeDefinition] = "A security scheme name is configured as both the primary and an additional definition.",
-        [ImportAliasCycleBroken] = "Alias schema is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object.",
-        [ImportSecuritySchemesDropped] = "Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented.",
-        [ImportOperationMethodDropped] = "HEAD/OPTIONS/TRACE operation dropped — the HTTP method has no contract representation.",
-        [ImportAdditionalPropertiesDropped] = "Named schema declares both 'properties' and 'additionalProperties' — imported as a record; extra members are not represented.",
-        [ImportDiscriminatorDropped] = "Discriminator with no reversible polymorphic shape (plain object without oneOf, or oneOf whose mapping is absent/unusable) — imported without dispatch semantics.",
-        [ImportAliasTargetMissing] = "Alias schema references a missing schema — consumers fall back to JsonElement.",
-        [ImportAliasRefCycle] = "Alias schema is part of a $ref cycle — consumers fall back to JsonElement.",
-        [ImportUnresolvableAliasReference] = "Reference to an unresolvable alias schema (cycle or missing target) — using JsonElement.",
-        [ImportUnresolvedSchema] = "Schema could not be resolved to a C# type — mapped to JsonElement.",
+        [EndpointFieldNotStaticReadonly] =
+            "Contract endpoint field is not 'static readonly' — it may not be read correctly at generation time.",
+        [ContractExampleUndeclaredStatus] =
+            "Response example targets a status code the contract endpoint does not declare — the example is ignored.",
+        [RouteBoundJsonPropertyNameIgnored] =
+            "[JsonPropertyName] on a route-bound property is ignored for route interpolation — the contract param keeps the route name.",
+        [ControllerExampleUndeclaredStatus] =
+            "Response example targets a status code the controller endpoint does not declare — the example is ignored.",
+        [UnmappedTypedResult] =
+            "Unmapped typed result branch in Results<...> — the response branch is omitted from the contract.",
+        [TypeNameCollision] =
+            "Two walked types share a simple name — the later type is emitted under a disambiguated name.",
+        [UnparseableRangeBound] =
+            "[Range] bound could not be parsed — the range constraint is skipped.",
+        [UnsupportedTimeSpan] =
+            "TimeSpan has no schema mapping — emitted as an untyped (empty) schema.",
+        [UnsupportedBigInteger] =
+            "BigInteger has no schema mapping — emitted as an untyped (empty) schema.",
+        [DictionaryKeyTypeDropped] =
+            "Dictionary key type has no contract representation (supported: string, enums, string-backed brands, string-serializable primitives) — keys are emitted as unconstrained strings.",
+        [PolymorphicNonStringTag] =
+            "[JsonDerivedType] registration with a non-string (int or absent) discriminator tag — a string-discriminated oneOf cannot represent it; the base type falls back to plain property flattening.",
+        [PolymorphicNoDerivedTypes] =
+            "[JsonPolymorphic] base type has no [JsonDerivedType] registrations — there is no variant set to emit; the type falls back to plain property flattening.",
+        [PolymorphicUnknownHandlingDropped] =
+            "[JsonPolymorphic] UnknownDerivedTypeHandling has no spec representation — the emitted oneOf admits only the registered derived types.",
+        [ResponseHeaderUndeclaredStatus] =
+            ".WithResponseHeader() targets a status code the contract endpoint does not declare — the header is ignored.",
+        [RivetUnionNoVariants] =
+            "[RivetUnion] wrapper has no variant properties — there is no union to emit; the type falls back to plain property flattening.",
+        [RouteTokenWithoutInputProperty] =
+            "Route token has no matching property on the endpoint's input type (after normalized matching: case-insensitive, '_'/'-' stripped) — emitted as an untyped string path param.",
+        [InputTypeNotParamLowerable] =
+            "The input type on a bodyless method (GET/DELETE/.AcceptsBinary) is a dictionary, collection or scalar — it has no property surface to lower to query params, so the input is dropped (route tokens still emit as untyped path params).",
+        [DuplicateResponseStatus] =
+            "An authored contract declares the same response status more than once; generation fails because the contract cannot execute as declared.",
+        [InvalidRequestBodyProvenance] =
+            "A [RivetRequestBody] type is not represented independently by the endpoint input type.",
+        [TaggedUnionComponentCollision] =
+            "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
+        [UndefinedSecurityScheme] =
+            "Endpoint references a security scheme with no definition — generation fails rather than inventing security semantics.",
+        [DuplicateEndpoint] =
+            "Two endpoints share an HTTP method + path — the later definition wins.",
+        [MultipartInputTypeMissing] =
+            "Multipart input type is absent from the contract's type definitions — the request schema is built inline from the endpoint's params.",
+        [UnknownTypeUntypedSchema] =
+            "'unknown' type (JsonElement/JsonNode or an unmapped C# type) in the OpenAPI schema — emitted as untyped.",
+        [UnresolvedTypeParameter] =
+            "Unresolved generic type parameter in the OpenAPI schema — emitted as object.",
+        [GenericTemplateMissing] =
+            "Generic template is absent from the contract's type definitions — a free-form object schema is emitted for the instantiation.",
+        [BrandConflictingUnderlyingTypes] =
+            "Brand declared with conflicting underlying types — the first declaration wins.",
+        [ReservedHeaderParameterSkipped] =
+            "Header parameter named Accept, Content-Type or Authorization — OpenAPI forbids these as header parameters; the parameter is omitted from the spec.",
+        [DuplicateResponseStatusInIr] =
+            "External contract IR declares the same response status more than once; the duplicate is dropped and the first declaration is kept.",
+        [DuplicateSecuritySchemeDefinition] =
+            "A security scheme name is configured as both the primary and an additional definition.",
+        [ImportAliasCycleBroken] =
+            "Alias schema is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object.",
+        [ImportSecuritySchemesDropped] =
+            "Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented.",
+        [ImportOperationMethodDropped] =
+            "HEAD/OPTIONS/TRACE operation dropped — the HTTP method has no contract representation.",
+        [ImportAdditionalPropertiesDropped] =
+            "Named schema declares both 'properties' and 'additionalProperties' — imported as a record; extra members are not represented.",
+        [ImportDiscriminatorDropped] =
+            "Discriminator with no reversible polymorphic shape (plain object without oneOf, or oneOf whose mapping is absent/unusable) — imported without dispatch semantics.",
+        [ImportAliasTargetMissing] =
+            "Alias schema references a missing schema — consumers fall back to JsonElement.",
+        [ImportAliasRefCycle] =
+            "Alias schema is part of a $ref cycle — consumers fall back to JsonElement.",
+        [ImportUnresolvableAliasReference] =
+            "Reference to an unresolvable alias schema (cycle or missing target) — using JsonElement.",
+        [ImportUnresolvedSchema] =
+            "Schema could not be resolved to a C# type — mapped to JsonElement.",
         [ImportUnsupportedSchemaType] = "Unhandled JSON Schema 'type' — mapped to JsonElement.",
         [ImportArrayMissingItems] = "Array schema without 'items' — mapped to List<JsonElement>.",
-        [ImportEnumConstraintDropped] = "Enum constraint that cannot become a C# enum (single-value, mixed/float, out-of-int32-range) — degraded to a primitive.",
-        [ImportDeclaredPropertiesDropped] = "Inline schema declares both 'properties' and 'additionalProperties' — imported as a dictionary; the declared properties are not represented.",
-        [ImportDictionaryKeyDropped] = "Dictionary 'propertyNames' schema has no C# dictionary-key representation — imported with string keys.",
+        [ImportEnumConstraintDropped] =
+            "Enum constraint that cannot become a C# enum (single-value, mixed/float, out-of-int32-range) — degraded to a primitive.",
+        [ImportDeclaredPropertiesDropped] =
+            "Inline schema declares both 'properties' and 'additionalProperties' — imported as a dictionary; the declared properties are not represented.",
+        [ImportDictionaryKeyDropped] =
+            "Dictionary 'propertyNames' schema has no C# dictionary-key representation — imported with string keys.",
         [CoverageMissingImplementation] = "Contract endpoint has no matching implementation.",
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",
@@ -144,14 +191,13 @@ public static class Diagnostics
     /// Writes the canonical machine-parseable warning line to stderr:
     /// <c>warning RIV1001: message</c>.
     /// </summary>
-    public static void Warn(string id, string message)
-        => Console.Error.WriteLine($"warning {id}: {message}");
+    public static void Warn(string id, string message) =>
+        Console.Error.WriteLine($"warning {id}: {message}");
 
     /// <summary>
     /// Prefixes a collected warning string (e.g. ImportResult.Warnings) with its ID:
     /// <c>RIV3001: message</c>. Program.cs prepends "warning " when printing,
     /// producing the same canonical stderr line as <see cref="Warn"/>.
     /// </summary>
-    public static string Prefix(string id, string message)
-        => $"{id}: {message}";
+    public static string Prefix(string id, string message) => $"{id}: {message}";
 }

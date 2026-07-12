@@ -1,5 +1,4 @@
 using Microsoft.OpenApi;
-using Microsoft.OpenApi.Reader;
 
 namespace Rivet.Tool.Import;
 
@@ -18,7 +17,9 @@ public static class OpenApiImporter
         json = BreakAliasCycles(json, warnings);
 
         var readResult = OpenApiDocument.Parse(json, "json");
-        var doc = readResult.Document ?? throw new InvalidOperationException("Failed to parse OpenAPI document.");
+        var doc =
+            readResult.Document
+            ?? throw new InvalidOperationException("Failed to parse OpenAPI document.");
         var files = new List<GeneratedFile>();
         var mapper = new SchemaMapper(warnings);
 
@@ -35,7 +36,12 @@ public static class OpenApiImporter
         // Parse paths → contracts
         var contracts = doc.Paths is { Count: > 0 }
             ? ContractBuilder.BuildContracts(
-                doc.Paths, mapper, globalSecurityScheme, warnings, doc.Components?.Examples)
+                doc.Paths,
+                mapper,
+                globalSecurityScheme,
+                warnings,
+                doc.Components?.Examples
+            )
             : [];
 
         // Emit type files (records → Types/, enums → Types/, brands → Domain/)
@@ -80,7 +86,12 @@ public static class OpenApiImporter
         foreach (var contract in contracts)
         {
             var content = CSharpWriter.WriteContract(contract, ns);
-            files.Add(new GeneratedFile($"Contracts/{contract.ClassName}.cs", content));
+            files.Add(
+                new GeneratedFile(
+                    $"Contracts/{contract.ModuleName}/{contract.ClassName}.cs",
+                    content
+                )
+            );
         }
 
         return new ImportResult(files, warnings);
@@ -112,11 +123,13 @@ public static class OpenApiImporter
         var aliasTargets = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (key, node) in schemas)
         {
-            if (node is System.Text.Json.Nodes.JsonObject obj
+            if (
+                node is System.Text.Json.Nodes.JsonObject obj
                 && obj.TryGetPropertyValue("$ref", out var refNode)
                 && refNode is System.Text.Json.Nodes.JsonValue value
                 && value.TryGetValue<string>(out var refString)
-                && refString.StartsWith(prefix, StringComparison.Ordinal))
+                && refString.StartsWith(prefix, StringComparison.Ordinal)
+            )
             {
                 aliasTargets[key] = refString[prefix.Length..];
             }
@@ -152,9 +165,12 @@ public static class OpenApiImporter
 
         foreach (var key in cyclic.OrderBy(k => k, StringComparer.Ordinal))
         {
-            warnings.Add(Diagnostics.Prefix(
-                Diagnostics.ImportAliasCycleBroken,
-                $"Alias schema '{key}' is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object."));
+            warnings.Add(
+                Diagnostics.Prefix(
+                    Diagnostics.ImportAliasCycleBroken,
+                    $"Alias schema '{key}' is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object."
+                )
+            );
             schemas[key] = new System.Text.Json.Nodes.JsonObject
             {
                 ["description"] = "[rivet:unsupported] cyclic $ref alias",
@@ -173,8 +189,8 @@ public static class OpenApiImporter
 
         // I12: the contract model carries a single global scheme — OR alternatives, AND
         // combinations and scopes collapse to the first resolvable scheme, loudly.
-        var schemeIds = doc.Security
-            .SelectMany(req => req.Keys)
+        var schemeIds = doc
+            .Security.SelectMany(req => req.Keys)
             .Select(scheme => scheme.Reference?.Id)
             .Where(id => id is not null)
             .Select(id => id!)
@@ -182,23 +198,23 @@ public static class OpenApiImporter
 
         if (schemeIds.Count > 1)
         {
-            warnings.Add(Diagnostics.Prefix(
-                Diagnostics.ImportSecuritySchemesDropped,
-                $"Security schemes dropped: document declares [{string.Join(", ", schemeIds)}] — only the first scheme '{schemeIds[0]}' is imported; alternatives and scopes are not represented."));
+            warnings.Add(
+                Diagnostics.Prefix(
+                    Diagnostics.ImportSecuritySchemesDropped,
+                    $"Security schemes dropped: document declares [{string.Join(", ", schemeIds)}] — only the first scheme '{schemeIds[0]}' is imported; alternatives and scopes are not represented."
+                )
+            );
         }
 
         return schemeIds.FirstOrDefault();
     }
 }
 
-public sealed record ImportOptions(
-    string Namespace,
-    string? SecurityScheme = null);
+public sealed record ImportOptions(string Namespace, string? SecurityScheme = null);
 
 public sealed record ImportResult(
     IReadOnlyList<GeneratedFile> Files,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings
+);
 
-public sealed record GeneratedFile(
-    string FileName,
-    string Content);
+public sealed record GeneratedFile(string FileName, string Content);

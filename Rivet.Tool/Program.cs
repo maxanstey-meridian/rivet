@@ -60,7 +60,12 @@ static async Task<int> Run(string[] args)
     }
 
     var wkt = new WellKnownTypes(compilation);
-    var endpoints = EndpointWalker.Walk(wkt, walker, discovered.EndpointMethods, discovered.ClientTypes);
+    var endpoints = EndpointWalker.Walk(
+        wkt,
+        walker,
+        discovered.EndpointMethods,
+        discovered.ClientTypes
+    );
     IReadOnlyList<TsEndpointDefinition> contractEndpoints;
     try
     {
@@ -79,26 +84,38 @@ static async Task<int> Run(string[] args)
         {
             var id = w.Kind switch
             {
-                CoverageWarningKind.MissingImplementation => Diagnostics.CoverageMissingImplementation,
+                CoverageWarningKind.MissingImplementation =>
+                    Diagnostics.CoverageMissingImplementation,
                 CoverageWarningKind.HttpMethodMismatch => Diagnostics.CoverageHttpMethodMismatch,
                 CoverageWarningKind.RouteMismatch => Diagnostics.CoverageRouteMismatch,
-                _ => throw new InvalidOperationException($"Unmapped coverage warning kind: {w.Kind}"),
+                _ => throw new InvalidOperationException(
+                    $"Unmapped coverage warning kind: {w.Kind}"
+                ),
             };
-            Diagnostics.Warn(id, $"[{w.Kind}] {w.ContractName}.{w.FieldName}: expected {w.Expected}, got {w.Actual}");
+            Diagnostics.Warn(
+                id,
+                $"[{w.Kind}] {w.ContractName}.{w.FieldName}: expected {w.Expected}, got {w.Actual}"
+            );
         }
 
         var totalFields = contractEndpoints.Count;
-        var missingCount = coverageWarnings.Count(w => w.Kind == CoverageWarningKind.MissingImplementation);
+        var missingCount = coverageWarnings.Count(w =>
+            w.Kind == CoverageWarningKind.MissingImplementation
+        );
         var coveredCount = totalFields - missingCount;
         var mismatchCount = coverageWarnings.Count - missingCount;
 
         if (coverageWarnings.Count == 0)
         {
-            Console.Error.WriteLine($"Coverage: {coveredCount}/{totalFields} endpoints covered. All OK.");
+            Console.Error.WriteLine(
+                $"Coverage: {coveredCount}/{totalFields} endpoints covered. All OK."
+            );
         }
         else
         {
-            Console.Error.WriteLine($"Coverage: {coveredCount}/{totalFields} endpoints covered, {mismatchCount} mismatch(es), {missingCount} missing.");
+            Console.Error.WriteLine(
+                $"Coverage: {coveredCount}/{totalFields} endpoints covered, {mismatchCount} mismatch(es), {missingCount} missing."
+            );
         }
 
         if (coverageWarnings.Count > 0 && outputDir is null)
@@ -121,8 +138,14 @@ static async Task<int> Run(string[] args)
     var brands = walker.Brands.Values.ToList();
 
     var emitInput = new EmitPipeline.EmitInput(
-        definitions, brands, walker.Enums, endpoints, walker.TypeNamespaces,
-        walker.Definitions, walker.Brands);
+        definitions,
+        brands,
+        walker.Enums,
+        endpoints,
+        walker.TypeNamespaces,
+        walker.Definitions,
+        walker.Brands
+    );
 
     return await EmitPipeline.RunAsync(emitInput, options);
 }
@@ -146,7 +169,8 @@ static async Task<int> RunFromContract(RivetOptions options)
         endpoints,
         new Dictionary<string, string?>(),
         types.ToDictionary(t => t.Name),
-        brands);
+        brands
+    );
 
     return await EmitPipeline.RunAsync(emitInput, options);
 }
@@ -162,7 +186,8 @@ static int RunImport(RivetOptions options)
     var json = File.ReadAllText(options.FromOpenApiPath!);
     var importOptions = new ImportOptions(
         options.ImportNamespace ?? "Generated",
-        options.DefaultSecurity);
+        options.DefaultSecurity
+    );
     var result = OpenApiImporter.Import(json, importOptions);
 
     // Import warnings carry their RIV3xxx ID as a "RIV3001: " prefix (Diagnostics.Prefix),

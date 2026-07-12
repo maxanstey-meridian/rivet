@@ -1,4 +1,3 @@
-using System.Net.Http;
 using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 using Rivet.Tool.Model;
@@ -10,8 +9,14 @@ namespace Rivet.Tool.Import;
 /// </summary>
 internal static class ContractBuilder
 {
-    private static readonly HashSet<HttpMethod> SupportedMethods =
-        [HttpMethod.Get, HttpMethod.Post, HttpMethod.Put, HttpMethod.Patch, HttpMethod.Delete];
+    private static readonly HashSet<HttpMethod> _supportedMethods =
+    [
+        HttpMethod.Get,
+        HttpMethod.Post,
+        HttpMethod.Put,
+        HttpMethod.Patch,
+        HttpMethod.Delete,
+    ];
 
     /// <summary>
     /// Group operations by tag, return one contract per tag.
@@ -21,7 +26,8 @@ internal static class ContractBuilder
         SchemaMapper mapper,
         string? globalSecurityScheme,
         List<string> warnings,
-        IDictionary<string, IOpenApiExample>? componentExamples = null)
+        IDictionary<string, IOpenApiExample>? componentExamples = null
+    )
     {
         var groups = new Dictionary<string, List<GeneratedEndpointField>>();
 
@@ -29,13 +35,16 @@ internal static class ContractBuilder
         {
             foreach (var (method, operation) in pathItem.Operations ?? [])
             {
-                if (!SupportedMethods.Contains(method))
+                if (!_supportedMethods.Contains(method))
                 {
                     // I15: HEAD/OPTIONS/TRACE used to be skipped with zero diagnostics —
                     // "nothing is dropped silently" demands a named warning per dropped op.
-                    warnings.Add(Diagnostics.Prefix(
-                        Diagnostics.ImportOperationMethodDropped,
-                        $"Operation dropped: {method.Method.ToUpperInvariant()} {route} — HTTP method has no contract representation."));
+                    warnings.Add(
+                        Diagnostics.Prefix(
+                            Diagnostics.ImportOperationMethodDropped,
+                            $"Operation dropped: {method.Method.ToUpperInvariant()} {route} — HTTP method has no contract representation."
+                        )
+                    );
                     continue;
                 }
 
@@ -45,12 +54,20 @@ internal static class ContractBuilder
                 // WP-1.1: prefer the explicit x-rivet-contract extension — the tag
                 // convention is lossy for unusual casing (underscores, acronyms) and
                 // breaks under hand-edits. Convention stays as the fallback.
-                var contractKey = GetOperationExtensionString(operation, "x-rivet-contract") is { } contractExt
+                var contractKey = GetOperationExtensionString(operation, "x-rivet-contract")
+                    is { } contractExt
                     ? Naming.StripInvalidIdentifierChars(contractExt)
                     : tag;
 
-                var field = BuildEndpointField(componentExamples, 
-                    httpMethod, route, operation, tag, globalSecurityScheme, mapper);
+                var field = BuildEndpointField(
+                    componentExamples,
+                    httpMethod,
+                    route,
+                    operation,
+                    tag,
+                    globalSecurityScheme,
+                    mapper
+                );
 
                 if (!groups.TryGetValue(contractKey, out var list))
                 {
@@ -64,7 +81,11 @@ internal static class ContractBuilder
 
         return groups
             .OrderBy(g => g.Key)
-            .Select(g => new GeneratedContract($"{g.Key}Contract", DeduplicateFields(g.Value)))
+            .Select(g => new GeneratedContract(
+                g.Key,
+                $"{g.Key}Contract",
+                DeduplicateFields(g.Value)
+            ))
             .ToList();
     }
 
@@ -75,18 +96,22 @@ internal static class ContractBuilder
         OpenApiOperation operation,
         string tag,
         string? globalSecurityScheme,
-        SchemaMapper mapper)
+        SchemaMapper mapper
+    )
     {
         var operationId = operation.OperationId;
 
         // WP-1.1: prefer the explicit x-rivet-endpoint extension over the
         // operationId/tag-prefix convention (lossy for unusual casing).
-        var fieldName = GetOperationExtensionString(operation, "x-rivet-endpoint") is { } endpointExt
+        var fieldName = GetOperationExtensionString(operation, "x-rivet-endpoint")
+            is { } endpointExt
             ? Naming.StripInvalidIdentifierChars(endpointExt)
             : DeriveFieldName(operationId, httpMethod, route, tag);
         var method = Naming.ToPascalCaseFromSegments(httpMethod);
         var summary = string.IsNullOrEmpty(operation.Summary) ? null : operation.Summary;
-        var description = string.IsNullOrEmpty(operation.Description) ? null : operation.Description;
+        var description = string.IsNullOrEmpty(operation.Description)
+            ? null
+            : operation.Description;
         var unsupported = new List<string>();
 
         // QueryAuth: read x-rivet-query-auth extension
@@ -103,7 +128,12 @@ internal static class ContractBuilder
         // input record; when a true merge is structurally impossible (opaque body type)
         // the loser is dropped LOUDLY via a named marker — never silently.
         var paramProperties = CollectParamProperties(
-            operation, mapper, fieldName, unsupported, queryAuthParameterName);
+            operation,
+            mapper,
+            fieldName,
+            unsupported,
+            queryAuthParameterName
+        );
 
         var bodyDropped = false;
         if (inputType is null)
@@ -116,38 +146,64 @@ internal static class ContractBuilder
             var originalBodyType = inputType.EndsWith('?') ? inputType[..^1] : inputType;
             inputType = originalBodyType;
             var bodyRecord = mapper.FindRecordByName(originalBodyType);
-            var hasPropertyCollision = bodyRecord is not null
+            var hasPropertyCollision =
+                bodyRecord is not null
                 && bodyRecord.Properties.Any(bodyProperty =>
-                    paramProperties.Any(parameter => parameter.Property.Name == bodyProperty.Name));
-            var hasJsonBody = operation.RequestBody?.Content?.Keys.Any(contentType =>
-                contentType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
-                || contentType.StartsWith("application/json;", StringComparison.OrdinalIgnoreCase)) is true;
-            if ((hasJsonBody || isFormEncoded)
+                    paramProperties.Any(parameter => parameter.Property.Name == bodyProperty.Name)
+                );
+            var hasJsonBody =
+                operation.RequestBody?.Content?.Keys.Any(contentType =>
+                    contentType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
+                    || contentType.StartsWith(
+                        "application/json;",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                is true;
+            if (
+                (hasJsonBody || isFormEncoded)
                 && hasPropertyCollision
                 && paramProperties.Any(parameter => parameter.Location == "path")
                 && paramProperties.All(parameter => parameter.Location is "path" or "header")
-                && bodyRecord is not null)
+                && bodyRecord is not null
+            )
             {
                 var bodyPropertyName = UniqueBodyPropertyName(paramProperties);
                 var compositeBodyType = operation.RequestBody is { Required: false }
                     ? originalBodyType + "?"
                     : originalBodyType;
-                var compositeProperties = paramProperties.Select(parameter => parameter.Property).ToList();
-                compositeProperties.Add(new RecordProperty(
-                    bodyPropertyName,
-                    compositeBodyType,
-                    IsRequired: !compositeBodyType.EndsWith('?')));
-                inputType = SynthesizeInputRecord(compositeProperties, mapper, fieldName) ?? originalBodyType;
+                var compositeProperties = paramProperties
+                    .Select(parameter => parameter.Property)
+                    .ToList();
+                compositeProperties.Add(
+                    new RecordProperty(
+                        bodyPropertyName,
+                        compositeBodyType,
+                        IsRequired: !compositeBodyType.EndsWith('?')
+                    )
+                );
+                inputType =
+                    SynthesizeInputRecord(compositeProperties, mapper, fieldName)
+                    ?? originalBodyType;
                 requestBodyType = originalBodyType;
             }
             else
             {
                 inputType = MergeParamsIntoInputType(
-                    httpMethod, inputType, paramProperties, mapper, fieldName, unsupported, out bodyDropped);
-                if (!bodyDropped
+                    httpMethod,
+                    inputType,
+                    paramProperties,
+                    mapper,
+                    fieldName,
+                    unsupported,
+                    out bodyDropped
+                );
+                if (
+                    !bodyDropped
                     && inputType != originalBodyType
                     && !hasPropertyCollision
-                    && paramProperties.All(parameter => parameter.Location is "path" or "header"))
+                    && paramProperties.All(parameter => parameter.Location is "path" or "header")
+                )
                 {
                     requestBodyType = originalBodyType;
                 }
@@ -160,7 +216,11 @@ internal static class ContractBuilder
         // model has no DELETE-body axis; the relocation must at least be loud.
         // (Skipped when the merge already dropped an opaque body — nothing
         // relocates in that case, and that drop carries its own marker.)
-        if (inputTypeFromBody && !bodyDropped && httpMethod.Equals("delete", StringComparison.OrdinalIgnoreCase))
+        if (
+            inputTypeFromBody
+            && !bodyDropped
+            && httpMethod.Equals("delete", StringComparison.OrdinalIgnoreCase)
+        )
         {
             unsupported.Add("body-location method=DELETE reason=body-lowered-to-query-params");
         }
@@ -179,7 +239,8 @@ internal static class ContractBuilder
         // rule re-emits it as required:false. Only for pure-body inputs on
         // body-carrying methods: a record that merged required path/query
         // params cannot be nullable as a whole, so that case stays loud.
-        var bodyIsOptional = inputTypeFromBody
+        var bodyIsOptional =
+            inputTypeFromBody
             && httpMethod is "post" or "put" or "patch"
             && operation.RequestBody is { Required: false };
         if (bodyIsOptional && inputType is not null && !inputType.EndsWith('?'))
@@ -190,49 +251,92 @@ internal static class ContractBuilder
             }
             else if (requestBodyType is null)
             {
-                unsupported.Add("body-optionality required=false reason=optional-body-merged-with-required-params");
+                unsupported.Add(
+                    "body-optionality required=false reason=optional-body-merged-with-required-params"
+                );
             }
         }
 
         // Resolve output type (lowest 2xx response with JSON content)
-        var (outputType, successStatus, fileContentType, responseContentType) =
-            ResolveOutputType(operation, mapper, fieldName, unsupported);
+        var (outputType, successStatus, fileContentType, responseContentType) = ResolveOutputType(
+            operation,
+            mapper,
+            fieldName,
+            unsupported
+        );
 
         // File endpoint: binary content type on a GET endpoint → Define.File()
         // Non-GET binary endpoints (e.g. POST → PDF) keep Define.{Method}().ProducesFile()
-        var isFileEndpoint = fileContentType is not null
+        var isFileEndpoint =
+            fileContentType is not null
             && httpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase);
 
         // Error responses
-        var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, unsupported, successStatus);
+        var errorResponses = ResolveErrorResponses(
+            operation,
+            mapper,
+            fieldName,
+            unsupported,
+            successStatus
+        );
         var requestExamples = ResolveRequestExamples(operation, unsupported, componentExamples);
         var responseExamples = ResolveResponseExamples(operation, unsupported, componentExamples);
         errorResponses = EnsureExampleStatusesAreDeclared(
             operation,
             successStatus,
             errorResponses,
-            responseExamples);
+            responseExamples
+        );
 
         // P2 wave 5: response headers re-emit as .WithResponseHeader(...) chain calls —
         // resolved AFTER the declared-status set is final (success + error responses).
-        var responseHeaders = ResolveResponseHeaders(operation, successStatus, errorResponses, unsupported);
+        var responseHeaders = ResolveResponseHeaders(
+            operation,
+            successStatus,
+            errorResponses,
+            unsupported
+        );
 
         // Security
-        var (isAnonymous, securityScheme) = ResolveSecurity(operation, globalSecurityScheme, unsupported);
+        var (isAnonymous, securityScheme) = ResolveSecurity(
+            operation,
+            globalSecurityScheme,
+            unsupported
+        );
 
         return new GeneratedEndpointField(
-            fieldName, method, route, inputType, outputType,
-            summary, description, successStatus, errorResponses,
-            isAnonymous, securityScheme, unsupported, fileContentType, isFormEncoded,
-            requestExamples, responseExamples, isFileEndpoint, queryAuthParameterName,
-            responseHeaders, binaryRequestContentType, requestContentType, responseContentType,
+            fieldName,
+            method,
+            route,
+            inputType,
+            outputType,
+            summary,
+            description,
+            successStatus,
+            errorResponses,
+            isAnonymous,
+            securityScheme,
+            unsupported,
+            fileContentType,
+            isFormEncoded,
+            requestExamples,
+            responseExamples,
+            isFileEndpoint,
+            queryAuthParameterName,
+            responseHeaders,
+            binaryRequestContentType,
+            requestContentType,
+            responseContentType,
             requestBodyType,
-            requestBodyType is null ? null : operation.RequestBody?.Required is true);
+            requestBodyType is null ? null : operation.RequestBody?.Required is true
+        );
     }
 
     private static string UniqueBodyPropertyName(IReadOnlyList<ParamProperty> parameters)
     {
-        var names = parameters.Select(parameter => parameter.Property.Name).ToHashSet(StringComparer.Ordinal);
+        var names = parameters
+            .Select(parameter => parameter.Property.Name)
+            .ToHashSet(StringComparer.Ordinal);
         var name = "Body";
         while (names.Contains(name))
         {
@@ -252,7 +356,8 @@ internal static class ContractBuilder
         OpenApiOperation operation,
         int? successStatus,
         IReadOnlyList<GeneratedErrorResponse> errorResponses,
-        List<string> unsupported)
+        List<string> unsupported
+    )
     {
         if (operation.Responses is null)
         {
@@ -269,7 +374,10 @@ internal static class ContractBuilder
 
         foreach (var (statusStr, response) in operation.Responses)
         {
-            if (response.Headers is not { Count: > 0 } || NormalizeStatusCode(statusStr) is not { } statusCode)
+            if (
+                response.Headers is not { Count: > 0 }
+                || NormalizeStatusCode(statusStr) is not { } statusCode
+            )
             {
                 continue;
             }
@@ -283,36 +391,58 @@ internal static class ContractBuilder
 
                 if (!declaredStatuses.Contains(statusCode))
                 {
-                    unsupported.Add($"header name={name} status={statusCode} reason=undeclared-status");
+                    unsupported.Add(
+                        $"header name={name} status={statusCode} reason=undeclared-status"
+                    );
                     continue;
                 }
 
-                if (header.Schema is { } schema
+                if (
+                    header.Schema is { } schema
                     && schema.Type.HasValue
-                    && !schema.Type.Value.HasFlag(JsonSchemaType.String))
+                    && !schema.Type.Value.HasFlag(JsonSchemaType.String)
+                )
                 {
-                    unsupported.Add($"header name={name} status={statusCode} reason=schema-degraded-to-string");
+                    unsupported.Add(
+                        $"header name={name} status={statusCode} reason=schema-degraded-to-string"
+                    );
                 }
 
-                if (headers.Any(existing => existing.StatusCode == statusCode
-                    && string.Equals(existing.Name, name, StringComparison.OrdinalIgnoreCase)))
+                if (
+                    headers.Any(existing =>
+                        existing.StatusCode == statusCode
+                        && string.Equals(existing.Name, name, StringComparison.OrdinalIgnoreCase)
+                    )
+                )
                 {
                     continue;
                 }
 
-                headers.Add(new GeneratedResponseHeader(
-                    statusCode,
-                    name,
-                    string.IsNullOrEmpty(header.Description) ? null : header.Description,
-                    header.Required));
+                headers.Add(
+                    new GeneratedResponseHeader(
+                        statusCode,
+                        name,
+                        string.IsNullOrEmpty(header.Description) ? null : header.Description,
+                        header.Required
+                    )
+                );
             }
         }
 
         return headers;
     }
 
-    private static (string? InputType, bool IsFormEncoded, string? BinaryRequestContentType, string? RequestContentType) ResolveInputType(
-        OpenApiOperation operation, SchemaMapper mapper, string fieldName, List<string> unsupported)
+    private static (
+        string? InputType,
+        bool IsFormEncoded,
+        string? BinaryRequestContentType,
+        string? RequestContentType
+    ) ResolveInputType(
+        OpenApiOperation operation,
+        SchemaMapper mapper,
+        string fieldName,
+        List<string> unsupported
+    )
     {
         var requestBody = operation.RequestBody;
         if (requestBody is null)
@@ -343,12 +473,16 @@ internal static class ContractBuilder
         {
             // JSON — default
         }
-        else if (TryGetSchemaForContentType(content, "application/x-www-form-urlencoded", out schema))
+        else if (
+            TryGetSchemaForContentType(content, "application/x-www-form-urlencoded", out schema)
+        )
         {
             isFormEncoded = true;
         }
-        else if (TryGetSchemaForContentType(content, "multipart/form-data", out schema)
-            || TryGetSchemaForContentType(content, "*/*", out schema))
+        else if (
+            TryGetSchemaForContentType(content, "multipart/form-data", out schema)
+            || TryGetSchemaForContentType(content, "*/*", out schema)
+        )
         {
             // multipart or wildcard — not form-encoded
         }
@@ -359,7 +493,8 @@ internal static class ContractBuilder
             // The convention fallback is segment-pascalized: underscores in a component
             // name are treated as delimiters on the next import, so a synthesized name
             // containing them would mutate every loop.
-            var context = GetExtensionString(schema, "x-rivet-input-type")
+            var context =
+                GetExtensionString(schema, "x-rivet-input-type")
                 ?? $"{Naming.ToPascalCaseFromSegments(fieldName)}Request";
             return (mapper.ResolveCSharpType(schema, context), isFormEncoded, null, null);
         }
@@ -369,7 +504,8 @@ internal static class ContractBuilder
         // body never becomes a TInput; path/query params import as normal.
         var binaryEntry = content.FirstOrDefault(entry =>
             !entry.Key.Equals("multipart/form-data", StringComparison.OrdinalIgnoreCase)
-            && IsRawBinarySchema(entry.Value.Schema));
+            && IsRawBinarySchema(entry.Value.Schema)
+        );
         if (binaryEntry.Key is not null)
         {
             return (null, false, binaryEntry.Key, null);
@@ -379,16 +515,28 @@ internal static class ContractBuilder
         var fallbackType = content.Keys.FirstOrDefault(k =>
             IsBinaryContentType(k)
             || k.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
-            || k.StartsWith("application/x-", StringComparison.OrdinalIgnoreCase));
-        if (fallbackType is not null && TryGetSchemaForContentType(content, fallbackType, out schema))
+            || k.StartsWith("application/x-", StringComparison.OrdinalIgnoreCase)
+        );
+        if (
+            fallbackType is not null
+            && TryGetSchemaForContentType(content, fallbackType, out schema)
+        )
         {
             // FABLE_ROUNDTRIP #10: a text/* body keeps its media type via
             // .AcceptsContentType(...) — re-emitting it as application/json
             // was a silent wire change (the octet-stream bug's sibling).
-            var requestContentType = fallbackType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
+            var requestContentType = fallbackType.StartsWith(
+                "text/",
+                StringComparison.OrdinalIgnoreCase
+            )
                 ? fallbackType
                 : null;
-            return (mapper.ResolveCSharpType(schema!, $"{fieldName}Request"), false, null, requestContentType);
+            return (
+                mapper.ResolveCSharpType(schema!, $"{fieldName}Request"),
+                false,
+                null,
+                requestContentType
+            );
         }
 
         // Request body exists but uses unsupported content type(s)
@@ -410,10 +558,19 @@ internal static class ContractBuilder
     /// A path/query/header/cookie parameter resolved to a record property, keeping the
     /// original spec name and location for diagnostics.
     /// </summary>
-    private sealed record ParamProperty(RecordProperty Property, string OriginalName, string Location);
+    private sealed record ParamProperty(
+        RecordProperty Property,
+        string OriginalName,
+        string Location
+    );
 
     private static List<ParamProperty> CollectParamProperties(
-        OpenApiOperation operation, SchemaMapper mapper, string fieldName, List<string> unsupported, string? queryAuthParameterName = null)
+        OpenApiOperation operation,
+        SchemaMapper mapper,
+        string fieldName,
+        List<string> unsupported,
+        string? queryAuthParameterName = null
+    )
     {
         if (operation.Parameters is null or { Count: 0 })
         {
@@ -425,8 +582,15 @@ internal static class ContractBuilder
 
         foreach (var param in operation.Parameters)
         {
-            if (param.In is not (ParameterLocation.Path or ParameterLocation.Query
-                or ParameterLocation.Header or ParameterLocation.Cookie))
+            if (
+                param.In
+                is not (
+                    ParameterLocation.Path
+                    or ParameterLocation.Query
+                    or ParameterLocation.Header
+                    or ParameterLocation.Cookie
+                )
+            )
             {
                 continue;
             }
@@ -439,9 +603,15 @@ internal static class ContractBuilder
             }
 
             // Skip QueryAuth token parameter — it's not an input field
-            if (queryAuthParameterName is not null
+            if (
+                queryAuthParameterName is not null
                 && param.In is ParameterLocation.Query
-                && string.Equals(param.Name, queryAuthParameterName, StringComparison.OrdinalIgnoreCase))
+                && string.Equals(
+                    param.Name,
+                    queryAuthParameterName,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
             {
                 continue;
             }
@@ -459,7 +629,9 @@ internal static class ContractBuilder
             // carries [RivetHeader("original-name")] and re-emits as in: header.
             if (param.In is ParameterLocation.Cookie)
             {
-                unsupported.Add($"param name={param.Name} in={location} reason=location-erased-to-query");
+                unsupported.Add(
+                    $"param name={param.Name} in={location} reason=location-erased-to-query"
+                );
             }
 
             // Accept/Content-Type/Authorization are not legal OpenAPI header params —
@@ -468,20 +640,27 @@ internal static class ContractBuilder
             // OpenApiEmitter.IsReservedHeaderName).
             if (param.In is ParameterLocation.Header && IsReservedHeaderName(param.Name))
             {
-                unsupported.Add($"param name={param.Name} in=header reason=reserved-header-dropped");
+                unsupported.Add(
+                    $"param name={param.Name} in=header reason=reserved-header-dropped"
+                );
                 continue;
             }
 
             // I13: description/deprecated/constraints don't survive into the synthesized
             // input record — aggregated marker below names the affected params.
-            if (!string.IsNullOrEmpty(param.Description)
+            if (
+                !string.IsNullOrEmpty(param.Description)
                 || param.Deprecated
-                || HasParamConstraints(param.Schema))
+                || HasParamConstraints(param.Schema)
+            )
             {
                 metadataDropped.Add(param.Name);
             }
 
-            var csharpType = mapper.ResolveCSharpType(param.Schema, $"{fieldName}{Naming.ToPascalCaseFromSegments(param.Name)}");
+            var csharpType = mapper.ResolveCSharpType(
+                param.Schema,
+                $"{fieldName}{Naming.ToPascalCaseFromSegments(param.Name)}"
+            );
             if (!param.Required && !csharpType.EndsWith("?"))
             {
                 csharpType += "?";
@@ -493,7 +672,9 @@ internal static class ContractBuilder
                 // Params bind by member name (not the serializer), so the rename
                 // shifts the spec-visible name — loud marker, not a silent fix.
                 paramPropertyName += "Value";
-                unsupported.Add($"param name={param.Name} in={location} reason=reserved-member-renamed");
+                unsupported.Add(
+                    $"param name={param.Name} in={location} reason=reserved-member-renamed"
+                );
             }
 
             // FABLE_ROUNDTRIP #1, the query half: pin the wire name whenever the
@@ -502,42 +683,61 @@ internal static class ContractBuilder
             // params). Headers carry their original name via [RivetHeader]
             // instead; path params match route tokens by NAME (normalized), and
             // a pin equal to the token is inert by the A14 rule.
-            var wireName = param.In is ParameterLocation.Header
-                || string.Equals(Naming.ToCamelCase(paramPropertyName), param.Name, StringComparison.Ordinal)
+            var wireName =
+                param.In is ParameterLocation.Header
+                || string.Equals(
+                    Naming.ToCamelCase(paramPropertyName),
+                    param.Name,
+                    StringComparison.Ordinal
+                )
                     ? null
                     : param.Name;
 
-            properties.Add(new ParamProperty(
-                new RecordProperty(
-                    paramPropertyName,
-                    csharpType,
-                    param.Required,
-                    HeaderName: param.In is ParameterLocation.Header ? param.Name : null,
-                    WireName: wireName),
-                param.Name,
-                location));
+            properties.Add(
+                new ParamProperty(
+                    new RecordProperty(
+                        paramPropertyName,
+                        csharpType,
+                        param.Required,
+                        HeaderName: param.In is ParameterLocation.Header ? param.Name : null,
+                        WireName: wireName
+                    ),
+                    param.Name,
+                    location
+                )
+            );
         }
 
         if (metadataDropped.Count > 0)
         {
-            unsupported.Add($"param-metadata params={string.Join(", ", metadataDropped)} reason=metadata-dropped");
+            unsupported.Add(
+                $"param-metadata params={string.Join(", ", metadataDropped)} reason=metadata-dropped"
+            );
         }
 
         return properties;
     }
 
     private static string? SynthesizeParamInputType(
-        List<ParamProperty> paramProperties, SchemaMapper mapper, string fieldName)
+        List<ParamProperty> paramProperties,
+        SchemaMapper mapper,
+        string fieldName
+    )
     {
         return paramProperties.Count == 0
             ? null
-            : SynthesizeInputRecord(paramProperties.Select(p => p.Property).ToList(), mapper, fieldName);
+            : SynthesizeInputRecord(
+                paramProperties.Select(p => p.Property).ToList(),
+                mapper,
+                fieldName
+            );
     }
 
     private static string? SynthesizeInputRecord(
         List<RecordProperty> properties,
         SchemaMapper mapper,
-        string fieldName)
+        string fieldName
+    )
     {
         if (properties.Count == 0)
         {
@@ -602,7 +802,8 @@ internal static class ContractBuilder
         SchemaMapper mapper,
         string fieldName,
         List<string> unsupported,
-        out bool bodyDropped)
+        out bool bodyDropped
+    )
     {
         bodyDropped = false;
         var bodyRecord = mapper.FindRecordByName(bodyInputType);
@@ -616,7 +817,8 @@ internal static class ContractBuilder
                 {
                     bodyDropped = true;
                     unsupported.Add(
-                        $"body method={httpMethod.ToUpperInvariant()} reason=opaque-body-dropped-params-kept body-type={bodyInputType}");
+                        $"body method={httpMethod.ToUpperInvariant()} reason=opaque-body-dropped-params-kept body-type={bodyInputType}"
+                    );
                     return paramInput;
                 }
             }
@@ -624,7 +826,8 @@ internal static class ContractBuilder
             foreach (var p in paramProperties)
             {
                 unsupported.Add(
-                    $"param name={p.OriginalName} in={p.Location} reason=dropped-unmergeable-body body-type={bodyInputType}");
+                    $"param name={p.OriginalName} in={p.Location} reason=dropped-unmergeable-body body-type={bodyInputType}"
+                );
             }
 
             return bodyInputType;
@@ -645,7 +848,8 @@ internal static class ContractBuilder
                 if (shadowing.Property.CSharpType != bodyProp.CSharpType)
                 {
                     unsupported.Add(
-                        $"param name={shadowing.OriginalName} in={shadowing.Location} reason=body-property-shadowed-by-param body-type={bodyProp.CSharpType}");
+                        $"param name={shadowing.OriginalName} in={shadowing.Location} reason=body-property-shadowed-by-param body-type={bodyProp.CSharpType}"
+                    );
                 }
 
                 continue;
@@ -658,8 +862,10 @@ internal static class ContractBuilder
         // untouched — re-attach the [RivetHeader] properties to the body record itself
         // (headers never re-enter its JSON schema on emit) so the original record name
         // survives the round-trip instead of being replaced by a synthesized {Field}Input.
-        if (paramProperties.All(p => p.Property.HeaderName is not null)
-            && mapper.TryAugmentComponentRecord(bodyInputType, merged))
+        if (
+            paramProperties.All(p => p.Property.HeaderName is not null)
+            && mapper.TryAugmentComponentRecord(bodyInputType, merged)
+        )
         {
             return bodyInputType;
         }
@@ -673,7 +879,9 @@ internal static class ContractBuilder
             {
                 if (p.Location is "query")
                 {
-                    unsupported.Add($"param name={p.OriginalName} in=query reason=location-erased-to-body");
+                    unsupported.Add(
+                        $"param name={p.OriginalName} in=query reason=location-erased-to-body"
+                    );
                 }
             }
         }
@@ -695,13 +903,21 @@ internal static class ContractBuilder
     /// input record drops?
     /// </summary>
     private static bool HasParamConstraints(IOpenApiSchema schema) =>
-        schema.MinLength.HasValue || schema.MaxLength.HasValue || schema.Pattern is not null
-        || schema.Minimum is not null || schema.Maximum is not null
-        || schema.ExclusiveMinimum is not null || schema.ExclusiveMaximum is not null
-        || schema.MultipleOf is not null || schema.MinItems.HasValue || schema.MaxItems.HasValue
+        schema.MinLength.HasValue
+        || schema.MaxLength.HasValue
+        || schema.Pattern is not null
+        || schema.Minimum is not null
+        || schema.Maximum is not null
+        || schema.ExclusiveMinimum is not null
+        || schema.ExclusiveMaximum is not null
+        || schema.MultipleOf is not null
+        || schema.MinItems.HasValue
+        || schema.MaxItems.HasValue
         || schema.UniqueItems == true;
 
-    private static readonly HashSet<string> BinaryContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _binaryContentTypes = new(
+        StringComparer.OrdinalIgnoreCase
+    )
     {
         "application/octet-stream",
         "application/pdf",
@@ -714,16 +930,22 @@ internal static class ContractBuilder
     };
 
     private static bool IsBinaryContentType(string contentType) =>
-        BinaryContentTypes.Contains(contentType)
+        _binaryContentTypes.Contains(contentType)
         || contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
         || contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)
         || contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
 
-    private static (string? OutputType, int? SuccessStatus, string? FileContentType, string? ResponseContentType) ResolveOutputType(
+    private static (
+        string? OutputType,
+        int? SuccessStatus,
+        string? FileContentType,
+        string? ResponseContentType
+    ) ResolveOutputType(
         OpenApiOperation operation,
         SchemaMapper mapper,
         string fieldName,
-        List<string> unsupported)
+        List<string> unsupported
+    )
     {
         if (operation.Responses is null)
         {
@@ -764,7 +986,6 @@ internal static class ContractBuilder
 
         foreach (var (code, response) in successResponses)
         {
-
             if (successCode.HasValue && code >= successCode.Value)
             {
                 continue;
@@ -781,8 +1002,10 @@ internal static class ContractBuilder
 
             if (response.Content is { Count: > 0 })
             {
-                if (TryGetSchemaForContentType(response.Content, "application/json", out var schema)
-                    || TryGetSchemaForContentType(response.Content, "*/*", out schema))
+                if (
+                    TryGetSchemaForContentType(response.Content, "application/json", out var schema)
+                    || TryGetSchemaForContentType(response.Content, "*/*", out schema)
+                )
                 {
                     outputType = mapper.ResolveCSharpType(schema!, $"{fieldName}Response");
                 }
@@ -799,9 +1022,12 @@ internal static class ContractBuilder
                     {
                         // Try any text/* content type with a schema
                         var textType = response.Content.Keys.FirstOrDefault(k =>
-                            k.StartsWith("text/", StringComparison.OrdinalIgnoreCase));
-                        if (textType is not null
-                            && TryGetSchemaForContentType(response.Content, textType, out schema))
+                            k.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
+                        );
+                        if (
+                            textType is not null
+                            && TryGetSchemaForContentType(response.Content, textType, out schema)
+                        )
                         {
                             // FABLE_ROUNDTRIP #10: keep the text/* media type via
                             // .ProducesContentType(...) — re-emitting it as
@@ -811,7 +1037,9 @@ internal static class ContractBuilder
                         }
                         else
                         {
-                            unsupported.Add($"response status={code} {DescribeUnsupportedContent(response.Content)}");
+                            unsupported.Add(
+                                $"response status={code} {DescribeUnsupportedContent(response.Content)}"
+                            );
                             outputType = null;
                         }
                     }
@@ -830,8 +1058,8 @@ internal static class ContractBuilder
         // never returns.
         if (successCode is null && operation.Responses is not null)
         {
-            successCode = operation.Responses.Keys
-                .Select(status => int.TryParse(status, out var parsed) ? parsed : -1)
+            successCode = operation
+                .Responses.Keys.Select(status => int.TryParse(status, out var parsed) ? parsed : -1)
                 .Where(parsed => parsed is (>= 100 and < 200) or (>= 300 and < 400))
                 .OrderBy(parsed => parsed)
                 .Cast<int?>()
@@ -846,7 +1074,8 @@ internal static class ContractBuilder
         SchemaMapper mapper,
         string fieldName,
         List<string> unsupported,
-        int? successStatus = null)
+        int? successStatus = null
+    )
     {
         if (operation.Responses is null)
         {
@@ -897,11 +1126,15 @@ internal static class ContractBuilder
 
             if (response.Content is { Count: > 0 })
             {
-                if (TryGetSchemaForContentType(response.Content, "application/json", out var schema)
-                    || TryGetSchemaForContentType(response.Content, "*/*", out schema))
+                if (
+                    TryGetSchemaForContentType(response.Content, "application/json", out var schema)
+                    || TryGetSchemaForContentType(response.Content, "*/*", out schema)
+                )
                 {
                     var typeName = mapper.ResolveCSharpType(schema!, $"{fieldName}Error{code}");
-                    var description = string.IsNullOrEmpty(response.Description) ? null : response.Description;
+                    var description = string.IsNullOrEmpty(response.Description)
+                        ? null
+                        : response.Description;
 
                     if (!errors.Any(e => e.StatusCode == code))
                     {
@@ -911,13 +1144,17 @@ internal static class ContractBuilder
                 else
                 {
                     // Error response has content but no supported schema
-                    unsupported.Add($"error status={code} {DescribeUnsupportedContent(response.Content)}");
+                    unsupported.Add(
+                        $"error status={code} {DescribeUnsupportedContent(response.Content)}"
+                    );
                 }
             }
             else if (!errors.Any(e => e.StatusCode == code))
             {
                 // Void error response (no content) — preserve the status code and description
-                var description = string.IsNullOrEmpty(response.Description) ? null : response.Description;
+                var description = string.IsNullOrEmpty(response.Description)
+                    ? null
+                    : response.Description;
                 errors.Add(new GeneratedErrorResponse(code, null, description));
             }
         }
@@ -928,7 +1165,8 @@ internal static class ContractBuilder
     private static IReadOnlyList<TsEndpointExample> ResolveRequestExamples(
         OpenApiOperation operation,
         List<string> unsupported,
-        IDictionary<string, IOpenApiExample>? componentExamples)
+        IDictionary<string, IOpenApiExample>? componentExamples
+    )
     {
         if (operation.RequestBody?.Content is not { Count: > 0 } content)
         {
@@ -941,7 +1179,8 @@ internal static class ContractBuilder
     private static IReadOnlyList<GeneratedEndpointResponseExample> ResolveResponseExamples(
         OpenApiOperation operation,
         List<string> unsupported,
-        IDictionary<string, IOpenApiExample>? componentExamples)
+        IDictionary<string, IOpenApiExample>? componentExamples
+    )
     {
         if (operation.Responses is null)
         {
@@ -958,13 +1197,18 @@ internal static class ContractBuilder
                 continue;
             }
 
-            foreach (var example in ResolveMediaExamples(
-                content,
-                unsupported,
-                $"response-example status={statusCode.Value}",
-                componentExamples))
+            foreach (
+                var example in ResolveMediaExamples(
+                    content,
+                    unsupported,
+                    $"response-example status={statusCode.Value}",
+                    componentExamples
+                )
+            )
             {
-                responseExamples.Add(new GeneratedEndpointResponseExample(statusCode.Value, example));
+                responseExamples.Add(
+                    new GeneratedEndpointResponseExample(statusCode.Value, example)
+                );
             }
         }
 
@@ -975,21 +1219,22 @@ internal static class ContractBuilder
         OpenApiOperation operation,
         int? successStatus,
         IReadOnlyList<GeneratedErrorResponse> errorResponses,
-        IReadOnlyList<GeneratedEndpointResponseExample> responseExamples)
+        IReadOnlyList<GeneratedEndpointResponseExample> responseExamples
+    )
     {
         if (responseExamples.Count == 0)
         {
             return errorResponses;
         }
 
-        var declaredStatuses = errorResponses
-            .Select(response => response.StatusCode)
-            .ToHashSet();
+        var declaredStatuses = errorResponses.Select(response => response.StatusCode).ToHashSet();
         var descriptionsByStatus = (operation.Responses ?? [])
             .Select(entry => new
             {
                 StatusCode = NormalizeStatusCode(entry.Key),
-                Description = string.IsNullOrEmpty(entry.Value.Description) ? null : entry.Value.Description,
+                Description = string.IsNullOrEmpty(entry.Value.Description)
+                    ? null
+                    : entry.Value.Description,
             })
             .Where(entry => entry.StatusCode is not null)
             .GroupBy(entry => entry.StatusCode!.Value)
@@ -997,10 +1242,12 @@ internal static class ContractBuilder
 
         var augmentedResponses = errorResponses.ToList();
 
-        foreach (var statusCode in responseExamples
-                     .Select(example => example.StatusCode)
-                     .Distinct()
-                     .OrderBy(code => code))
+        foreach (
+            var statusCode in responseExamples
+                .Select(example => example.StatusCode)
+                .Distinct()
+                .OrderBy(code => code)
+        )
         {
             if (statusCode == successStatus || declaredStatuses.Contains(statusCode))
             {
@@ -1019,7 +1266,8 @@ internal static class ContractBuilder
         IDictionary<string, OpenApiMediaType> content,
         List<string> unsupported,
         string markerPrefix,
-        IDictionary<string, IOpenApiExample>? componentExamples = null)
+        IDictionary<string, IOpenApiExample>? componentExamples = null
+    )
     {
         var examples = new List<TsEndpointExample>();
 
@@ -1027,10 +1275,19 @@ internal static class ContractBuilder
         {
             if (media.Example is not null)
             {
-                examples.Add(new TsEndpointExample(
-                    mediaType,
-                    Json: InlineEmbeddedExampleRefs(
-                        media.Example.ToJsonString(), componentExamples, unsupported, markerPrefix, mediaType, null)));
+                examples.Add(
+                    new TsEndpointExample(
+                        mediaType,
+                        Json: InlineEmbeddedExampleRefs(
+                            media.Example.ToJsonString(),
+                            componentExamples,
+                            unsupported,
+                            markerPrefix,
+                            mediaType,
+                            null
+                        )
+                    )
+                );
             }
 
             if (media.Examples is null)
@@ -1040,7 +1297,15 @@ internal static class ContractBuilder
 
             foreach (var (name, example) in media.Examples)
             {
-                var endpointExample = ResolveExample(mediaType, name, example, componentExamples, unsupported, markerPrefix, out var reason);
+                var endpointExample = ResolveExample(
+                    mediaType,
+                    name,
+                    example,
+                    componentExamples,
+                    unsupported,
+                    markerPrefix,
+                    out var reason
+                );
                 if (endpointExample is not null)
                 {
                     examples.Add(endpointExample);
@@ -1049,12 +1314,15 @@ internal static class ContractBuilder
 
                 if (reason is not null)
                 {
-                    unsupported.Add(BuildExampleUnsupportedMarker(
-                        markerPrefix,
-                        mediaType,
-                        name,
-                        TryGetComponentExampleId(example),
-                        reason));
+                    unsupported.Add(
+                        BuildExampleUnsupportedMarker(
+                            markerPrefix,
+                            mediaType,
+                            name,
+                            TryGetComponentExampleId(example),
+                            reason
+                        )
+                    );
                 }
             }
         }
@@ -1069,14 +1337,21 @@ internal static class ContractBuilder
         IDictionary<string, IOpenApiExample>? componentExamples,
         List<string> unsupported,
         string markerPrefix,
-        out string? reason)
+        out string? reason
+    )
     {
         var componentExampleId = TryGetComponentExampleId(example);
         var resolvedJson = TryGetExampleJson(example);
         if (resolvedJson is not null)
         {
             resolvedJson = InlineEmbeddedExampleRefs(
-                resolvedJson, componentExamples, unsupported, markerPrefix, mediaType, name);
+                resolvedJson,
+                componentExamples,
+                unsupported,
+                markerPrefix,
+                mediaType,
+                name
+            );
         }
 
         if (componentExampleId is not null)
@@ -1087,7 +1362,8 @@ internal static class ContractBuilder
                     mediaType,
                     name,
                     ComponentExampleId: componentExampleId,
-                    ResolvedJson: resolvedJson)
+                    ResolvedJson: resolvedJson
+                )
                 : null;
         }
 
@@ -1121,7 +1397,8 @@ internal static class ContractBuilder
         List<string> unsupported,
         string markerPrefix,
         string mediaType,
-        string? name)
+        string? name
+    )
     {
         json = json.Replace(OpenApiNullSentinel, "null", StringComparison.Ordinal);
 
@@ -1146,8 +1423,17 @@ internal static class ContractBuilder
             componentExamples,
             new HashSet<string>(StringComparer.Ordinal),
             () => changed = true,
-            unresolved => unsupported.Add(BuildExampleUnsupportedMarker(
-                markerPrefix, mediaType, name, unresolved, "unresolvable-embedded-example-ref")));
+            unresolved =>
+                unsupported.Add(
+                    BuildExampleUnsupportedMarker(
+                        markerPrefix,
+                        mediaType,
+                        name,
+                        unresolved,
+                        "unresolvable-embedded-example-ref"
+                    )
+                )
+        );
 
         return changed ? inlined?.ToJsonString() ?? "null" : json;
     }
@@ -1157,29 +1443,39 @@ internal static class ContractBuilder
         IDictionary<string, IOpenApiExample>? componentExamples,
         HashSet<string> resolving,
         Action markChanged,
-        Action<string> markUnresolved)
+        Action<string> markUnresolved
+    )
     {
         const string examplesPrefix = "#/components/examples/";
 
         switch (node)
         {
             case JsonObject obj:
-                if (obj.TryGetPropertyValue("$ref", out var refNode)
+                if (
+                    obj.TryGetPropertyValue("$ref", out var refNode)
                     && refNode is JsonValue refValue
                     && refValue.TryGetValue<string>(out var reference)
-                    && reference.StartsWith(examplesPrefix, StringComparison.Ordinal))
+                    && reference.StartsWith(examplesPrefix, StringComparison.Ordinal)
+                )
                 {
                     markChanged();
                     var componentName = reference[examplesPrefix.Length..];
 
-                    if (componentExamples is not null
+                    if (
+                        componentExamples is not null
                         && componentExamples.TryGetValue(componentName, out var component)
                         && resolving.Add(componentName)
-                        && TryGetExampleJson(component) is { } componentJson)
+                        && TryGetExampleJson(component) is { } componentJson
+                    )
                     {
                         var componentNode = JsonNode.Parse(componentJson);
                         var resolved = InlineExampleRefNode(
-                            componentNode, componentExamples, resolving, markChanged, markUnresolved);
+                            componentNode,
+                            componentExamples,
+                            resolving,
+                            markChanged,
+                            markUnresolved
+                        );
                         resolving.Remove(componentName);
                         return resolved;
                     }
@@ -1193,7 +1489,12 @@ internal static class ContractBuilder
                 {
                     var child = obj[key];
                     var replaced = InlineExampleRefNode(
-                        child, componentExamples, resolving, markChanged, markUnresolved);
+                        child,
+                        componentExamples,
+                        resolving,
+                        markChanged,
+                        markUnresolved
+                    );
                     if (!ReferenceEquals(child, replaced))
                     {
                         obj[key] = replaced;
@@ -1207,7 +1508,12 @@ internal static class ContractBuilder
                 {
                     var child = array[index];
                     var replaced = InlineExampleRefNode(
-                        child, componentExamples, resolving, markChanged, markUnresolved);
+                        child,
+                        componentExamples,
+                        resolving,
+                        markChanged,
+                        markUnresolved
+                    );
                     if (!ReferenceEquals(child, replaced))
                     {
                         array[index] = replaced;
@@ -1226,13 +1532,10 @@ internal static class ContractBuilder
         string mediaType,
         string? name,
         string? componentExampleId,
-        string reason)
+        string reason
+    )
     {
-        var parts = new List<string>
-        {
-            markerPrefix,
-            $"media-type={mediaType}",
-        };
+        var parts = new List<string> { markerPrefix, $"media-type={mediaType}" };
 
         if (name is not null)
         {
@@ -1266,10 +1569,10 @@ internal static class ContractBuilder
 
         return example switch
         {
-            OpenApiExampleReference { RecursiveTarget.Value: not null } exampleReference
-                => exampleReference.RecursiveTarget.Value.ToJsonString(),
-            OpenApiExampleReference { Target.Value: not null } exampleReference
-                => exampleReference.Target.Value.ToJsonString(),
+            OpenApiExampleReference { RecursiveTarget.Value: not null } exampleReference =>
+                exampleReference.RecursiveTarget.Value.ToJsonString(),
+            OpenApiExampleReference { Target.Value: not null } exampleReference =>
+                exampleReference.Target.Value.ToJsonString(),
             _ => null,
         };
     }
@@ -1315,7 +1618,8 @@ internal static class ContractBuilder
     private static bool TryGetSchemaForContentType(
         IDictionary<string, OpenApiMediaType> content,
         string contentType,
-        out IOpenApiSchema? schema)
+        out IOpenApiSchema? schema
+    )
     {
         if (content.TryGetValue(contentType, out var mediaType) && mediaType.Schema is not null)
         {
@@ -1330,14 +1634,13 @@ internal static class ContractBuilder
     private static (bool IsAnonymous, string? Scheme) ResolveSecurity(
         OpenApiOperation operation,
         string? globalSecurityScheme,
-        List<string> unsupported)
+        List<string> unsupported
+    )
     {
         if (operation.Security is null)
         {
             // No operation-level security — use global default
-            return globalSecurityScheme is not null
-                ? (false, globalSecurityScheme)
-                : (false, null);
+            return globalSecurityScheme is not null ? (false, globalSecurityScheme) : (false, null);
         }
 
         // Empty list → anonymous
@@ -1349,8 +1652,8 @@ internal static class ContractBuilder
         // I12: the contract model carries a single scheme, so OR alternatives, AND
         // combinations and scopes collapse to the first resolvable scheme — with a loud
         // marker instead of a silent drop.
-        var schemeIds = operation.Security
-            .SelectMany(req => req.Keys)
+        var schemeIds = operation
+            .Security.SelectMany(req => req.Keys)
             .Select(scheme => scheme.Reference?.Id)
             .Where(id => id is not null)
             .Select(id => id!)
@@ -1358,14 +1661,17 @@ internal static class ContractBuilder
 
         if (schemeIds.Count > 1)
         {
-            unsupported.Add($"security schemes={string.Join(", ", schemeIds)} reason=multi-scheme-first-only");
+            unsupported.Add(
+                $"security schemes={string.Join(", ", schemeIds)} reason=multi-scheme-first-only"
+            );
         }
 
         return (false, schemeIds.FirstOrDefault());
     }
 
     private static IReadOnlyList<GeneratedEndpointField> DeduplicateFields(
-        List<GeneratedEndpointField> fields)
+        List<GeneratedEndpointField> fields
+    )
     {
         var seen = new Dictionary<string, int>();
         var result = new List<GeneratedEndpointField>(fields.Count);
@@ -1394,17 +1700,21 @@ internal static class ContractBuilder
         string? operationId,
         string httpMethod,
         string route,
-        string tag)
+        string tag
+    )
     {
         if (operationId is not null)
         {
             return StripTagPrefix(operationId, tag);
         }
 
-        var segments = route.Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Select(s => s.StartsWith('{') && s.EndsWith('}')
-                ? "By" + Naming.ToPascalCaseFromSegments(s[1..^1])
-                : Naming.ToPascalCaseFromSegments(s));
+        var segments = route
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s =>
+                s.StartsWith('{') && s.EndsWith('}')
+                    ? "By" + Naming.ToPascalCaseFromSegments(s[1..^1])
+                    : Naming.ToPascalCaseFromSegments(s)
+            );
 
         return Naming.ToPascalCaseFromSegments(httpMethod) + string.Concat(segments);
     }
@@ -1433,14 +1743,18 @@ internal static class ContractBuilder
 
     private static string? ResolveQueryAuth(OpenApiOperation operation)
     {
-        if (operation.Extensions is null
-            || !operation.Extensions.TryGetValue("x-rivet-query-auth", out var ext))
+        if (
+            operation.Extensions is null
+            || !operation.Extensions.TryGetValue("x-rivet-query-auth", out var ext)
+        )
         {
             return null;
         }
 
-        if (ext is JsonNodeExtension { Node: JsonObject obj }
-            && obj.TryGetPropertyValue("parameterName", out var nameNode))
+        if (
+            ext is JsonNodeExtension { Node: JsonObject obj }
+            && obj.TryGetPropertyValue("parameterName", out var nameNode)
+        )
         {
             return nameNode?.GetValue<string>();
         }
@@ -1486,8 +1800,6 @@ internal static class ContractBuilder
         }
 
         var firstTag = operation.Tags.FirstOrDefault();
-        return firstTag?.Name is not null
-            ? Naming.ToPascalCaseFromSegments(firstTag.Name)
-            : null;
+        return firstTag?.Name is not null ? Naming.ToPascalCaseFromSegments(firstTag.Name) : null;
     }
 }

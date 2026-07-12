@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
 using Rivet.Tool.Model;
@@ -77,12 +76,16 @@ public sealed class AnnotationRoundTripTests
     public void Required_Attribute_Overrides_Nullability()
     {
         using var doc = CompilationHelper.EmitOpenApi(NullabilityFixture);
-        var schema = doc.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("NullabilityRecord");
+        var schema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("NullabilityRecord");
 
         var requiredNames = new List<string>();
         foreach (var item in schema.GetProperty("required").EnumerateArray())
+        {
             requiredNames.Add(item.GetString()!);
+        }
 
         // string? with [Required] → required
         Assert.Contains("nullableRequired", requiredNames);
@@ -148,7 +151,13 @@ public sealed class AnnotationRoundTripTests
         var compilation = CompilationHelper.CreateCompilation(FixtureSource);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var openApiJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var openApiJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         var doc = JsonSerializer.Deserialize<JsonElement>(openApiJson);
 
         var props = doc.GetProperty("components")
@@ -180,8 +189,10 @@ public sealed class AnnotationRoundTripTests
         var exclusiveMin = score.GetProperty("exclusiveMinimum");
         Assert.Equal(JsonValueKind.Number, exclusiveMin.ValueKind);
         Assert.Equal(0.0, exclusiveMin.GetDouble());
-        Assert.False(score.TryGetProperty("minimum", out _),
-            "numeric exclusiveMinimum must not synthesize a minimum");
+        Assert.False(
+            score.TryGetProperty("minimum", out _),
+            "numeric exclusiveMinimum must not synthesize a minimum"
+        );
         Assert.Equal(0.5, score.GetProperty("multipleOf").GetDouble());
 
         // Email: format = "email"
@@ -200,7 +211,13 @@ public sealed class AnnotationRoundTripTests
         var compilation = CompilationHelper.CreateCompilation(FixtureSource);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var openApiJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var openApiJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         // Reverse: OpenAPI → import → compile → walk
         var importResult = OpenApiImporter.Import(openApiJson, new ImportOptions("RoundTrip"));
@@ -285,8 +302,16 @@ public sealed class AnnotationRoundTripTests
 
         // OpenAPI should have "minimum": 0 but no "maximum"
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var openApiJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
-        var doc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(openApiJson);
+        var openApiJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
+        var doc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            openApiJson
+        );
 
         var prop = doc.GetProperty("components")
             .GetProperty("schemas")
@@ -295,8 +320,10 @@ public sealed class AnnotationRoundTripTests
             .GetProperty("score");
 
         Assert.Equal(0.0, prop.GetProperty("minimum").GetDouble());
-        Assert.False(prop.TryGetProperty("maximum", out _),
-            "Single-sided minimum must not leak a sentinel maximum into OpenAPI");
+        Assert.False(
+            prop.TryGetProperty("maximum", out _),
+            "Single-sided minimum must not leak a sentinel maximum into OpenAPI"
+        );
     }
 
     [Fact]
@@ -333,8 +360,16 @@ public sealed class AnnotationRoundTripTests
 
         // OpenAPI should have "maximum": 100 but no "minimum"
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var openApiJson = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
-        var doc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(openApiJson);
+        var openApiJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
+        var doc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            openApiJson
+        );
 
         var prop = doc.GetProperty("components")
             .GetProperty("schemas")
@@ -343,7 +378,9 @@ public sealed class AnnotationRoundTripTests
             .GetProperty("score");
 
         Assert.Equal(100.0, prop.GetProperty("maximum").GetDouble());
-        Assert.False(prop.TryGetProperty("minimum", out _),
-            "Single-sided maximum must not leak a sentinel minimum into OpenAPI");
+        Assert.False(
+            prop.TryGetProperty("minimum", out _),
+            "Single-sided maximum must not leak a sentinel minimum into OpenAPI"
+        );
     }
 }

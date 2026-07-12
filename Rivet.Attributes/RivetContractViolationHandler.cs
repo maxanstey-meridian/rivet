@@ -23,7 +23,10 @@ public sealed record RivetErrorEnvelope(string Code, string Message);
 public sealed class RivetContractViolationHandler : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(
-        HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
+        HttpContext httpContext,
+        Exception exception,
+        CancellationToken cancellationToken
+    )
     {
         if (exception is not RivetContractViolationException violation)
         {
@@ -32,7 +35,9 @@ public sealed class RivetContractViolationHandler : IExceptionHandler
 
         httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
         await httpContext.Response.WriteAsJsonAsync(
-            new RivetErrorEnvelope("contract_violation", violation.Message), cancellationToken);
+            new RivetErrorEnvelope("contract_violation", violation.Message),
+            cancellationToken
+        );
         return true;
     }
 }

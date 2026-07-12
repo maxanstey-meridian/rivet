@@ -39,13 +39,17 @@ public sealed class DictionaryKeyTests
 
         var usage = Assert.Single(walker.Definitions["PaletteDto"].Properties);
         var dict = Assert.IsType<TsType.Dictionary>(usage.Type);
-        Assert.True(dict.Key is TsType.TypeRef { Name: "Color" },
-            $"Expected TypeRef(Color) key but got {dict.Key}");
+        Assert.True(
+            dict.Key is TsType.TypeRef { Name: "Color" },
+            $"Expected TypeRef(Color) key but got {dict.Key}"
+        );
         Assert.True(dict.Value is TsType.Primitive { Name: "number", Format: "int32" });
 
         // Headline fix: the key enum's schema is registered, not vanished
-        Assert.True(walker.Enums.ContainsKey("Color"),
-            $"Color enum vanished. Enums: [{string.Join(", ", walker.Enums.Keys)}]");
+        Assert.True(
+            walker.Enums.ContainsKey("Color"),
+            $"Color enum vanished. Enums: [{string.Join(", ", walker.Enums.Keys)}]"
+        );
         var color = Assert.IsType<TsType.StringUnion>(walker.Enums["Color"]);
         Assert.Equal(["red", "green", "blue"], color.Members);
 
@@ -103,11 +107,15 @@ public sealed class DictionaryKeyTests
         });
 
         var byYear = walker.Definitions["CountsDto"].Properties.First(p => p.Name == "byYear");
-        var intKey = Assert.IsType<TsType.Primitive>(Assert.IsType<TsType.Dictionary>(byYear.Type).Key);
+        var intKey = Assert.IsType<TsType.Primitive>(
+            Assert.IsType<TsType.Dictionary>(byYear.Type).Key
+        );
         Assert.Equal(new TsType.Primitive("string", "int32", "int"), intKey);
 
         var byId = walker.Definitions["CountsDto"].Properties.First(p => p.Name == "byId");
-        var longKey = Assert.IsType<TsType.Primitive>(Assert.IsType<TsType.Dictionary>(byId.Type).Key);
+        var longKey = Assert.IsType<TsType.Primitive>(
+            Assert.IsType<TsType.Dictionary>(byId.Type).Key
+        );
         Assert.Equal(new TsType.Primitive("string", "int64", "long"), longKey);
 
         Assert.DoesNotContain("RIV1013", stderr);
@@ -137,12 +145,18 @@ public sealed class DictionaryKeyTests
         });
 
         TsType? KeyOf(string name) =>
-            Assert.IsType<TsType.Dictionary>(
-                walker.Definitions["LookupDto"].Properties.First(p => p.Name == name).Type).Key;
+            Assert
+                .IsType<TsType.Dictionary>(
+                    walker.Definitions["LookupDto"].Properties.First(p => p.Name == name).Type
+                )
+                .Key;
 
         Assert.Equal(new TsType.Primitive("string", "uuid"), KeyOf("byGuid"));
         Assert.Equal(new TsType.Primitive("string", "date"), KeyOf("byDate"));
-        Assert.Equal(new TsType.Primitive("string", "date-time", "DateTimeOffset"), KeyOf("byStamp"));
+        Assert.Equal(
+            new TsType.Primitive("string", "date-time", "DateTimeOffset"),
+            KeyOf("byStamp")
+        );
         Assert.DoesNotContain("RIV1013", stderr);
     }
 
@@ -210,8 +224,10 @@ public sealed class DictionaryKeyTests
         Assert.Contains("'Test.Quantity'", stderr);
 
         // The unsupported-key probe must not register the brand as a side effect
-        Assert.False(walker.Brands.ContainsKey("Quantity"),
-            "non-string-backed brand key probe must not register the brand");
+        Assert.False(
+            walker.Brands.ContainsKey("Quantity"),
+            "non-string-backed brand key probe must not register the brand"
+        );
     }
 
     // ---------------------------------------------------------------
@@ -254,18 +270,27 @@ public sealed class DictionaryKeyTests
         // Enum key → $ref, and the enum component schema exists
         var byColor = props.GetProperty("byColor");
         Assert.Equal("object", byColor.GetProperty("type").GetString());
-        Assert.Equal("integer", byColor.GetProperty("additionalProperties").GetProperty("type").GetString());
+        Assert.Equal(
+            "integer",
+            byColor.GetProperty("additionalProperties").GetProperty("type").GetString()
+        );
         Assert.Equal(
             "#/components/schemas/Color",
-            byColor.GetProperty("propertyNames").GetProperty("$ref").GetString());
-        var colorValues = schemas.GetProperty("Color").GetProperty("enum")
-            .EnumerateArray().Select(e => e.GetString()).ToList();
+            byColor.GetProperty("propertyNames").GetProperty("$ref").GetString()
+        );
+        var colorValues = schemas
+            .GetProperty("Color")
+            .GetProperty("enum")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Equal(["red", "green", "blue"], colorValues);
 
         // Brand key → $ref to the brand schema
         Assert.Equal(
             "#/components/schemas/Sku",
-            props.GetProperty("bySku").GetProperty("propertyNames").GetProperty("$ref").GetString());
+            props.GetProperty("bySku").GetProperty("propertyNames").GetProperty("$ref").GetString()
+        );
 
         // Numeric key → string-typed with format + x-rivet-csharp-type
         var byYearKeys = props.GetProperty("byYear").GetProperty("propertyNames");
@@ -292,7 +317,8 @@ public sealed class DictionaryKeyTests
     [Fact]
     public void Importer_ReadsPropertyNames_EnumRef_AsEnumKey()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Color": { "type": "string", "enum": ["red", "green"] },
             "PaletteDto": {
                 "type": "object",
@@ -305,7 +331,8 @@ public sealed class DictionaryKeyTests
                 },
                 "required": ["usage"]
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -318,7 +345,8 @@ public sealed class DictionaryKeyTests
     [Fact]
     public void Importer_ReadsPropertyNames_FormatAndCSharpType_AsKeyTypes()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "LookupDto": {
                 "type": "object",
                 "properties": {
@@ -340,7 +368,8 @@ public sealed class DictionaryKeyTests
                 },
                 "required": ["byGuid", "byYear", "byInitial"]
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -354,7 +383,8 @@ public sealed class DictionaryKeyTests
     [Fact]
     public void Importer_UnsupportedPropertyNames_DegradesToStringKeys_WithRIV3014()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "RecordDto": {
                 "type": "object",
                 "properties": { "value": { "type": "string" } }
@@ -374,7 +404,8 @@ public sealed class DictionaryKeyTests
                     }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -396,7 +427,8 @@ public sealed class DictionaryKeyTests
     {
         var withKey = new TsType.Dictionary(
             new TsType.Primitive("number", "int32"),
-            new TsType.TypeRef("Color"));
+            new TsType.TypeRef("Color")
+        );
 
         var json = JsonSerializer.Serialize<TsType>(withKey);
         Assert.Contains("\"key\"", json);

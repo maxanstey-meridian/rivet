@@ -1,4 +1,3 @@
-using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -66,7 +65,6 @@ public sealed class GenericTypeTests
         var secondProp = Assert.Single(pair.Properties, p => p.Name == "second");
         var secondType = Assert.IsType<TsType.TypeParam>(secondProp.Type);
         Assert.Equal("TSecond", secondType.Name);
-
     }
 
     [Fact]
@@ -106,7 +104,6 @@ public sealed class GenericTypeTests
         var pagedResult = walker.Definitions["PagedResult"];
         Assert.Single(pagedResult.TypeParameters);
         Assert.Equal("T", pagedResult.TypeParameters[0]);
-
     }
 
     [Fact]
@@ -135,7 +132,6 @@ public sealed class GenericTypeTests
         Assert.Single(genericType.TypeArguments);
         var typeArg = Assert.IsType<TsType.Primitive>(genericType.TypeArguments[0]);
         Assert.Equal("string", typeArg.Name);
-
     }
 
     [Fact]

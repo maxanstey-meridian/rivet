@@ -6,7 +6,8 @@ namespace Rivet.Tool.Emit;
 public sealed record SecurityConfig(
     string SchemeName,
     Dictionary<string, object> SchemeDefinition,
-    IReadOnlyDictionary<string, Dictionary<string, object>>? AdditionalSchemeDefinitions = null);
+    IReadOnlyDictionary<string, Dictionary<string, object>>? AdditionalSchemeDefinitions = null
+);
 
 public static class SecurityParser
 {
@@ -15,8 +16,11 @@ public static class SecurityParser
         var parsed = new List<SecurityConfig>();
         foreach (var spec in specs)
         {
-            var config = Parse(spec) ?? throw new SecurityConfigurationException(
-                $"error: invalid --security value '{spec}'; expected bearer[:format], cookie:name, apikey:location:name, or name=<value>");
+            var config =
+                Parse(spec)
+                ?? throw new SecurityConfigurationException(
+                    $"error: invalid --security value '{spec}'; expected bearer[:format], cookie:name, apikey:location:name, or name=<value>"
+                );
             parsed.Add(config);
         }
 
@@ -25,13 +29,16 @@ public static class SecurityParser
             return null;
         }
 
-        var definitions = new Dictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
+        var definitions = new Dictionary<string, Dictionary<string, object>>(
+            StringComparer.Ordinal
+        );
         foreach (var config in parsed)
         {
             if (!definitions.TryAdd(config.SchemeName, config.SchemeDefinition))
             {
                 throw new SecurityConfigurationException(
-                    $"error: duplicate --security scheme name '{config.SchemeName}'");
+                    $"error: duplicate --security scheme name '{config.SchemeName}'"
+                );
             }
         }
 
@@ -61,7 +68,10 @@ public static class SecurityParser
             var definition = Parse(definitionSpec);
             return !IsValidSchemeName(schemeName) || definition is null
                 ? null
-                : definition with { SchemeName = schemeName };
+                : definition with
+                {
+                    SchemeName = schemeName,
+                };
         }
 
         var parts = spec.Split(':');
@@ -69,51 +79,67 @@ public static class SecurityParser
 
         return kind switch
         {
-            "bearer" when parts.Length == 1 =>
-                new SecurityConfig("bearer", new Dictionary<string, object>
-                {
-                    ["type"] = "http",
-                    ["scheme"] = "bearer",
-                }),
+            "bearer" when parts.Length == 1 => new SecurityConfig(
+                "bearer",
+                new Dictionary<string, object> { ["type"] = "http", ["scheme"] = "bearer" }
+            ),
 
-            "bearer" when parts.Length == 2 && parts[1].Length > 0 =>
-                new SecurityConfig("bearer", new Dictionary<string, object>
+            "bearer" when parts.Length == 2 && parts[1].Length > 0 => new SecurityConfig(
+                "bearer",
+                new Dictionary<string, object>
                 {
                     ["type"] = "http",
                     ["scheme"] = "bearer",
                     ["bearerFormat"] = parts[1].ToUpperInvariant(),
-                }),
+                }
+            ),
 
-            "cookie" when parts.Length == 2 && parts[1].Length > 0 =>
-                new SecurityConfig("cookieAuth", new Dictionary<string, object>
+            "cookie" when parts.Length == 2 && parts[1].Length > 0 => new SecurityConfig(
+                "cookieAuth",
+                new Dictionary<string, object>
                 {
                     ["type"] = "apiKey",
                     ["in"] = "cookie",
                     ["name"] = parts[1],
-                }),
+                }
+            ),
 
-            "apikey" when parts.Length == 3
-                && parts[2].Length > 0
-                && (parts[1].Equals("query", StringComparison.OrdinalIgnoreCase)
-                    || parts[1].Equals("header", StringComparison.OrdinalIgnoreCase)
-                    || parts[1].Equals("cookie", StringComparison.OrdinalIgnoreCase)) =>
-                new SecurityConfig("apiKeyAuth", new Dictionary<string, object>
+            "apikey"
+                when parts.Length == 3
+                    && parts[2].Length > 0
+                    && (
+                        parts[1].Equals("query", StringComparison.OrdinalIgnoreCase)
+                        || parts[1].Equals("header", StringComparison.OrdinalIgnoreCase)
+                        || parts[1].Equals("cookie", StringComparison.OrdinalIgnoreCase)
+                    ) => new SecurityConfig(
+                "apiKeyAuth",
+                new Dictionary<string, object>
                 {
                     ["type"] = "apiKey",
                     ["in"] = parts[1].ToLowerInvariant(),
                     ["name"] = parts[2],
-                }),
+                }
+            ),
 
             _ => null,
         };
     }
 
     internal static bool IsValidSchemeName(string name) =>
-        name.Length > 0 && name.All(character =>
-            character is >= 'a' and <= 'z'
-                or >= 'A' and <= 'Z'
-                or >= '0' and <= '9'
-                or '.' or '_' or '-');
+        name.Length > 0
+        && name.All(character =>
+            character
+                is >= 'a'
+                    and <= 'z'
+                    or >= 'A'
+                    and <= 'Z'
+                    or >= '0'
+                    and <= '9'
+                    or '.'
+                    or '_'
+                    or '-'
+        );
 }
 
-internal sealed class SecurityConfigurationException(string message) : InvalidOperationException(message);
+internal sealed class SecurityConfigurationException(string message)
+    : InvalidOperationException(message);

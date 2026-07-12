@@ -16,12 +16,28 @@ public sealed class TsTypeNameSuffixTests
         Assert.Equal("Foo", TsType.GetNameSuffix(new TsType.TypeRef("Foo")));
         Assert.Equal("T", TsType.GetNameSuffix(new TsType.TypeParam("T")));
         Assert.Equal("String", TsType.GetNameSuffix(new TsType.Primitive("string")));
-        Assert.Equal("Email", TsType.GetNameSuffix(new TsType.Brand("Email", new TsType.Primitive("string"))));
-        Assert.Equal("RecordString", TsType.GetNameSuffix(new TsType.Dictionary(new TsType.Primitive("string"))));
+        Assert.Equal(
+            "Email",
+            TsType.GetNameSuffix(new TsType.Brand("Email", new TsType.Primitive("string")))
+        );
+        Assert.Equal(
+            "RecordString",
+            TsType.GetNameSuffix(new TsType.Dictionary(new TsType.Primitive("string")))
+        );
         Assert.Equal("FooArray", TsType.GetNameSuffix(new TsType.Array(new TsType.TypeRef("Foo"))));
-        Assert.Equal("FooNullable", TsType.GetNameSuffix(new TsType.Nullable(new TsType.TypeRef("Foo"))));
-        Assert.Equal("KindUnion", TsType.GetNameSuffix(new TsType.TaggedUnion("kind",
-            [new TsType.TaggedUnionVariant("a", new TsType.TypeRef("A"))])));
+        Assert.Equal(
+            "FooNullable",
+            TsType.GetNameSuffix(new TsType.Nullable(new TsType.TypeRef("Foo")))
+        );
+        Assert.Equal(
+            "KindUnion",
+            TsType.GetNameSuffix(
+                new TsType.TaggedUnion(
+                    "kind",
+                    [new TsType.TaggedUnionVariant("a", new TsType.TypeRef("A"))]
+                )
+            )
+        );
     }
 
     [Fact]
@@ -48,25 +64,39 @@ public sealed class TsTypeNameSuffixTests
         Assert.NotEqual(TsType.GetNameSuffix(ofString), TsType.GetNameSuffix(ofNumber));
 
         // Multiple fields join name/type pairs
-        Assert.Equal("Key_String_Value_Number", TsType.GetNameSuffix(new TsType.InlineObject([
-            ("key", new TsType.Primitive("string")),
-            ("value", new TsType.Primitive("number")),
-        ])));
+        Assert.Equal(
+            "Key_String_Value_Number",
+            TsType.GetNameSuffix(
+                new TsType.InlineObject([
+                    ("key", new TsType.Primitive("string")),
+                    ("value", new TsType.Primitive("number")),
+                ])
+            )
+        );
 
         // > 3 fields collapse to "Object" (registry-disambiguated downstream)
-        Assert.Equal("Object", TsType.GetNameSuffix(new TsType.InlineObject([
-            ("a", new TsType.Primitive("string")),
-            ("b", new TsType.Primitive("string")),
-            ("c", new TsType.Primitive("string")),
-            ("d", new TsType.Primitive("string")),
-        ])));
+        Assert.Equal(
+            "Object",
+            TsType.GetNameSuffix(
+                new TsType.InlineObject([
+                    ("a", new TsType.Primitive("string")),
+                    ("b", new TsType.Primitive("string")),
+                    ("c", new TsType.Primitive("string")),
+                    ("d", new TsType.Primitive("string")),
+                ])
+            )
+        );
     }
 
     [Fact]
     public void GetNameSuffix_Is_Deterministic()
     {
-        var make = () => (TsType)new TsType.Generic("Wrapper",
-            [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]);
+        var make = () =>
+            (TsType)
+                new TsType.Generic(
+                    "Wrapper",
+                    [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]
+                );
 
         Assert.Equal(TsType.GetNameSuffix(make()), TsType.GetNameSuffix(make()));
     }
@@ -74,17 +104,28 @@ public sealed class TsTypeNameSuffixTests
     [Fact]
     public void MonomorphisedName_Distinct_Instantiations_Differ()
     {
-        var ofString = new TsType.Generic("Wrapper",
-            [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]);
-        var ofNumber = new TsType.Generic("Wrapper",
-            [new TsType.InlineObject([("value", new TsType.Primitive("number"))])]);
+        var ofString = new TsType.Generic(
+            "Wrapper",
+            [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]
+        );
+        var ofNumber = new TsType.Generic(
+            "Wrapper",
+            [new TsType.InlineObject([("value", new TsType.Primitive("number"))])]
+        );
 
         Assert.Equal("Wrapper_Value_String", TsType.MonomorphisedName(ofString));
         Assert.Equal("Wrapper_Value_Number", TsType.MonomorphisedName(ofNumber));
 
         // Multiple type arguments are underscore-joined
-        Assert.Equal("Pair_String_Number", TsType.MonomorphisedName(new TsType.Generic("Pair",
-            [new TsType.Primitive("string"), new TsType.Primitive("number")])));
+        Assert.Equal(
+            "Pair_String_Number",
+            TsType.MonomorphisedName(
+                new TsType.Generic(
+                    "Pair",
+                    [new TsType.Primitive("string"), new TsType.Primitive("number")]
+                )
+            )
+        );
     }
 
     // ── CollectTypeRefs (rescued from the deleted TypeEmitter test file: the helper

@@ -26,7 +26,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Primitive_Types_String_Int_Long_Double_Float_Bool()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "TestDto": {
                 "type": "object",
                 "properties": {
@@ -39,7 +40,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["name", "count", "bigCount", "score", "rating", "active"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "TestDto.cs");
@@ -55,7 +58,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void DateTime_Format_Maps_To_DateTime()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "EventDto": {
                 "type": "object",
                 "properties": {
@@ -63,7 +67,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["createdAt"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         Assert.Contains("DateTime CreatedAt", CompilationHelper.FindFile(result, "EventDto.cs"));
@@ -72,7 +78,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Guid_Format_Maps_To_Guid()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "ItemDto": {
                 "type": "object",
                 "properties": {
@@ -80,7 +87,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["id"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         Assert.Contains("Guid Id", CompilationHelper.FindFile(result, "ItemDto.cs"));
@@ -89,12 +98,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void String_Enum_Maps_To_CSharp_Enum()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "string",
                 "enum": ["low", "medium", "high", "critical"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Priority.cs");
@@ -109,25 +121,32 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Branded_Format_Maps_To_Value_Object()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Email": {
                 "type": "string",
                 "format": "email"
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Email.cs");
 
         Assert.Contains("public sealed record Email(string Value)", content);
         Assert.Contains("public override string ToString() => Value;", content);
-        Assert.Contains("Domain/Email.cs", result.Files.First(f => f.FileName.Contains("Email")).FileName);
+        Assert.Contains(
+            "Domain/Email.cs",
+            result.Files.First(f => f.FileName.Contains("Email")).FileName
+        );
     }
 
     [Fact]
     public void Array_Maps_To_List()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "TagList": {
                 "type": "object",
                 "properties": {
@@ -135,15 +154,21 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["tags"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
-        Assert.Contains("List<string> Tags", CompilationHelper.FindFile(CompilationHelper.Import(spec), "TagList.cs"));
+        Assert.Contains(
+            "List<string> Tags",
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TagList.cs")
+        );
     }
 
     [Fact]
     public void Dictionary_Maps_To_Dictionary()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "MetadataDto": {
                 "type": "object",
                 "properties": {
@@ -151,15 +176,21 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["values"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
-        Assert.Contains("Dictionary<string, string> Values", CompilationHelper.FindFile(CompilationHelper.Import(spec), "MetadataDto.cs"));
+        Assert.Contains(
+            "Dictionary<string, string> Values",
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "MetadataDto.cs")
+        );
     }
 
     [Fact]
     public void Nullable_Type_Array_Maps_To_Nullable()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "TaskDto": {
                 "type": "object",
                 "properties": {
@@ -167,15 +198,21 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["description"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
-        Assert.Contains("string? Description", CompilationHelper.FindFile(CompilationHelper.Import(spec), "TaskDto.cs"));
+        Assert.Contains(
+            "string? Description",
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TaskDto.cs")
+        );
     }
 
     [Fact]
     public void Object_With_Properties_Maps_To_Sealed_Record()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "TaskDto": {
                 "type": "object",
                 "properties": {
@@ -184,7 +221,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["id", "title"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TaskDto.cs");
         Assert.Contains("[RivetType]", content);
@@ -194,7 +233,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Ref_Resolution_Uses_Named_Type()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "LabelDto": {
                 "type": "object",
                 "properties": { "name": { "type": "string" } },
@@ -205,15 +245,21 @@ public sealed class OpenApiImporterTests
                 "properties": { "label": { "$ref": "#/components/schemas/LabelDto" } },
                 "required": ["label"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
-        Assert.Contains("LabelDto Label", CompilationHelper.FindFile(CompilationHelper.Import(spec), "TaskDto.cs"));
+        Assert.Contains(
+            "LabelDto Label",
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TaskDto.cs")
+        );
     }
 
     [Fact]
     public void Required_Vs_Optional_Properties()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "TaskDto": {
                 "type": "object",
                 "properties": {
@@ -222,7 +268,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["id"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TaskDto.cs");
         Assert.Contains("string Id", content);
@@ -233,7 +281,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void OneOf_Schema_Produces_Union_Wrapper()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Shape": {
                 "oneOf": [
                     { "$ref": "#/components/schemas/Circle" },
@@ -250,7 +299,9 @@ public sealed class OpenApiImporterTests
                 "properties": { "side": { "type": "number" } },
                 "required": ["side"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         Assert.Contains(result.Files, f => f.FileName.Contains("Shape"));
@@ -269,31 +320,33 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "TaskDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/tasks": {
-                    "get": {
-                        "operationId": "tasks_list",
-                        "tags": ["Tasks"],
-                        "summary": "List all tasks",
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
+            "/api/tasks": {
+                "get": {
+                    "operationId": "tasks_list",
+                    "tags": ["Tasks"],
+                    "summary": "List all tasks",
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "TasksContract.cs");
@@ -310,45 +363,50 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "CreateTaskRequest": {
-                    "type": "object",
-                    "properties": { "title": { "type": "string" } },
-                    "required": ["title"]
-                },
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "CreateTaskRequest": {
+                "type": "object",
+                "properties": { "title": { "type": "string" } },
+                "required": ["title"]
+            },
+            "TaskDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/tasks": {
-                    "post": {
-                        "operationId": "tasks_createTask",
-                        "tags": ["Tasks"],
-                        "requestBody": {
-                            "required": true,
+            "/api/tasks": {
+                "post": {
+                    "operationId": "tasks_createTask",
+                    "tags": ["Tasks"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "schema": { "$ref": "#/components/schemas/CreateTaskRequest" }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "201": {
+                            "description": "Created",
                             "content": {
                                 "application/json": {
-                                    "schema": { "$ref": "#/components/schemas/CreateTaskRequest" }
-                                }
-                            }
-                        },
-                        "responses": {
-                            "201": {
-                                "description": "Created",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
+                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "TasksContract.cs"
+        );
 
         Assert.Contains("RouteDefinition<CreateTaskRequest, TaskDto> CreateTask", content);
         Assert.Contains("Define.Post<CreateTaskRequest, TaskDto>(\"/api/tasks\")", content);
@@ -361,46 +419,50 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                },
-                "NotFoundDto": {
-                    "type": "object",
-                    "properties": { "message": { "type": "string" } },
-                    "required": ["message"]
-                }
-                """,
+            "TaskDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "NotFoundDto": {
+                "type": "object",
+                "properties": { "message": { "type": "string" } },
+                "required": ["message"]
+            }
+            """,
             paths: """
-                "/api/tasks/{id}": {
-                    "get": {
-                        "operationId": "tasks_getTask",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
+            "/api/tasks/{id}": {
+                "get": {
+                    "operationId": "tasks_getTask",
+                    "tags": ["Tasks"],
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
                                 }
-                            },
-                            "404": {
-                                "description": "Task not found",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/NotFoundDto" }
-                                    }
+                            }
+                        },
+                        "404": {
+                            "description": "Task not found",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/NotFoundDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        Assert.Contains(".Returns<NotFoundDto>(404, \"Task not found\")",
-            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs"));
+        Assert.Contains(
+            ".Returns<NotFoundDto>(404, \"Task not found\")",
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs")
+        );
     }
 
     [Fact]
@@ -408,18 +470,23 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/tasks/{id}": {
-                    "delete": {
-                        "operationId": "tasks_deleteTask",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "204": { "description": "No Content" }
-                        }
+            "/api/tasks/{id}": {
+                "delete": {
+                    "operationId": "tasks_deleteTask",
+                    "tags": ["Tasks"],
+                    "responses": {
+                        "204": { "description": "No Content" }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "TasksContract.cs"
+        );
         Assert.Contains("public static readonly RouteDefinition DeleteTask", content);
         Assert.Contains("Define.Delete(\"/api/tasks/{id}\")", content);
         // 204 is the default for DELETE — no .Status() emitted
@@ -431,17 +498,22 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/health": {
-                    "get": {
-                        "operationId": "health_check",
-                        "tags": ["Health"],
-                        "security": [],
-                        "responses": { "200": { "description": "OK" } }
-                    }
+            "/api/health": {
+                "get": {
+                    "operationId": "health_check",
+                    "tags": ["Health"],
+                    "security": [],
+                    "responses": { "200": { "description": "OK" } }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        Assert.Contains(".Anonymous()", CompilationHelper.FindFile(CompilationHelper.Import(spec), "HealthContract.cs"));
+        Assert.Contains(
+            ".Anonymous()",
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "HealthContract.cs")
+        );
     }
 
     [Fact]
@@ -449,17 +521,22 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/admin": {
-                    "delete": {
-                        "operationId": "admin_deleteAll",
-                        "tags": ["Admin"],
-                        "security": [{ "admin": [] }],
-                        "responses": { "204": { "description": "No Content" } }
-                    }
+            "/api/admin": {
+                "delete": {
+                    "operationId": "admin_deleteAll",
+                    "tags": ["Admin"],
+                    "security": [{ "admin": [] }],
+                    "responses": { "204": { "description": "No Content" } }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        Assert.Contains(".Secure(\"admin\")", CompilationHelper.FindFile(CompilationHelper.Import(spec), "AdminContract.cs"));
+        Assert.Contains(
+            ".Secure(\"admin\")",
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "AdminContract.cs")
+        );
     }
 
     [Fact]
@@ -467,37 +544,51 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "TaskDto": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] },
-                "MemberDto": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] }
-                """,
+            "TaskDto": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] },
+            "MemberDto": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] }
+            """,
             paths: """
-                "/api/tasks": { "get": { "operationId": "tasks_list", "tags": ["Tasks"], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TaskDto" } } } } } } },
-                "/api/members": { "get": { "operationId": "members_list", "tags": ["Members"], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MemberDto" } } } } } } }
-                """, title: "API");
+            "/api/tasks": { "get": { "operationId": "tasks_list", "tags": ["Tasks"], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TaskDto" } } } } } } },
+            "/api/members": { "get": { "operationId": "members_list", "tags": ["Members"], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MemberDto" } } } } } } }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
-        Assert.Contains(result.Files, f => f.FileName == "Contracts/TasksContract.cs");
-        Assert.Contains(result.Files, f => f.FileName == "Contracts/MembersContract.cs");
+        Assert.Contains(result.Files, f => f.FileName == "Contracts/Tasks/TasksContract.cs");
+        Assert.Contains(result.Files, f => f.FileName == "Contracts/Members/MembersContract.cs");
     }
 
     [Fact]
     public void No_Tag_Uses_DefaultContract()
     {
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/api/health": { "get": { "operationId": "healthCheck", "responses": { "200": { "description": "OK" } } } }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
-        Assert.Contains(CompilationHelper.Import(spec).Files, f => f.FileName == "Contracts/DefaultContract.cs");
+        Assert.Contains(
+            CompilationHelper.Import(spec).Files,
+            f => f.FileName == "Contracts/Default/DefaultContract.cs"
+        );
     }
 
     [Fact]
     public void OperationId_Stripped_Of_Tag_Prefix()
     {
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/api/tasks": { "get": { "operationId": "tasks_listAllTasks", "tags": ["Tasks"], "responses": { "200": { "description": "OK" } } } }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
-        Assert.Contains("ListAllTasks", CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs"));
+        Assert.Contains(
+            "ListAllTasks",
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs")
+        );
     }
 
     // ========== Fixture-based round-trip tests ==========
@@ -529,7 +620,8 @@ public sealed class OpenApiImporterTests
         JsonObject sourceDocument,
         JsonObject targetDocument,
         string sectionName,
-        params string[] keys)
+        params string[] keys
+    )
     {
         var sourceSection = sourceDocument["components"]?[sectionName] as JsonObject;
         Assert.NotNull(sourceSection);
@@ -565,15 +657,14 @@ public sealed class OpenApiImporterTests
         var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
         var document = CreateFixtureSliceDocument("openapi-github.json");
         var paths = (JsonObject)document["paths"]!;
-        var sourcePath = source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"] as JsonObject;
+        var sourcePath =
+            source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"]
+            as JsonObject;
 
         Assert.NotNull(sourcePath);
 
         var patch = sourcePath["patch"]!.DeepClone()!.AsObject();
-        patch["responses"] = new JsonObject
-        {
-            ["404"] = patch["responses"]!["404"]!.DeepClone(),
-        };
+        patch["responses"] = new JsonObject { ["404"] = patch["responses"]!["404"]!.DeepClone() };
 
         paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
         {
@@ -591,15 +682,14 @@ public sealed class OpenApiImporterTests
         var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
         var document = CreateFixtureSliceDocument("openapi-github.json");
         var paths = (JsonObject)document["paths"]!;
-        var sourcePath = source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"] as JsonObject;
+        var sourcePath =
+            source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"]
+            as JsonObject;
 
         Assert.NotNull(sourcePath);
 
         var delete = sourcePath["delete"]!.DeepClone()!.AsObject();
-        delete["responses"] = new JsonObject
-        {
-            ["200"] = delete["responses"]!["200"]!.DeepClone(),
-        };
+        delete["responses"] = new JsonObject { ["200"] = delete["responses"]!["200"]!.DeepClone() };
 
         paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
         {
@@ -619,15 +709,14 @@ public sealed class OpenApiImporterTests
         var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
         var document = CreateFixtureSliceDocument("openapi-github.json");
         var paths = (JsonObject)document["paths"]!;
-        var sourcePath = source["paths"]?["/enterprises/{enterprise}/actions/cache/retention-limit"] as JsonObject;
+        var sourcePath =
+            source["paths"]?["/enterprises/{enterprise}/actions/cache/retention-limit"]
+            as JsonObject;
 
         Assert.NotNull(sourcePath);
 
         var put = sourcePath["put"]!.DeepClone()!.AsObject();
-        put["responses"] = new JsonObject
-        {
-            ["204"] = put["responses"]!["204"]!.DeepClone(),
-        };
+        put["responses"] = new JsonObject { ["204"] = put["responses"]!["204"]!.DeepClone() };
 
         paths["/enterprises/{enterprise}/actions/cache/retention-limit"] = new JsonObject
         {
@@ -635,7 +724,12 @@ public sealed class OpenApiImporterTests
         };
 
         CopyComponentEntries(source, document, "parameters", "enterprise");
-        CopyComponentEntries(source, document, "schemas", "actions-cache-retention-limit-for-enterprise");
+        CopyComponentEntries(
+            source,
+            document,
+            "schemas",
+            "actions-cache-retention-limit-for-enterprise"
+        );
         CopyComponentEntries(source, document, "examples", "actions-cache-retention-limit");
 
         return document.ToJsonString();
@@ -653,25 +747,20 @@ public sealed class OpenApiImporterTests
         var patch = sourcePath["patch"]!.DeepClone()!.AsObject();
         patch["responses"] = new JsonObject
         {
-            ["204"] = new JsonObject
-            {
-                ["description"] = "No Content",
-            },
+            ["204"] = new JsonObject { ["description"] = "No Content" },
         };
 
-        paths["/repos/{owner}/{repo}/import"] = new JsonObject
-        {
-            ["patch"] = patch,
-        };
+        paths["/repos/{owner}/{repo}/import"] = new JsonObject { ["patch"] = patch };
 
         CopyComponentEntries(source, document, "parameters", "owner", "repo");
 
         return document.ToJsonString();
     }
 
-    private static (ImportResult Result, IReadOnlyList<TsEndpointDefinition> Endpoints) ImportSpecAndWalkContracts(
-        string spec,
-        string ns = "Test")
+    private static (
+        ImportResult Result,
+        IReadOnlyList<TsEndpointDefinition> Endpoints
+    ) ImportSpecAndWalkContracts(string spec, string ns = "Test")
     {
         var result = CompilationHelper.Import(spec, ns);
         var compilation = CompilationHelper.CompileImportResult(result);
@@ -680,15 +769,17 @@ public sealed class OpenApiImporterTests
         return (result, endpoints);
     }
 
-
     [Fact]
     public void Fixture_Generated_CSharp_Compiles()
     {
         var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
         Assert.Empty(result.Warnings);
 
-        var errors = CompilationHelper.CompileImportResult(result).GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        var errors = CompilationHelper
+            .CompileImportResult(result)
+            .GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
         Assert.Empty(errors);
     }
 
@@ -703,13 +794,31 @@ public sealed class OpenApiImporterTests
         Assert.Equal(10, endpoints.Count);
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks");
         Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks");
-        Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks/{taskId}");
-        Assert.Contains(endpoints, e => e.HttpMethod == "PUT" && e.RouteTemplate == "/api/tasks/{taskId}");
-        Assert.Contains(endpoints, e => e.HttpMethod == "PATCH" && e.RouteTemplate == "/api/tasks/{taskId}");
-        Assert.Contains(endpoints, e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{taskId}");
-        Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks/{taskId}/attachments");
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks/{taskId}"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "PUT" && e.RouteTemplate == "/api/tasks/{taskId}"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "PATCH" && e.RouteTemplate == "/api/tasks/{taskId}"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{taskId}"
+        );
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks/{taskId}/attachments"
+        );
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/members");
-        Assert.Contains(endpoints, e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/members");
+        Assert.Contains(
+            endpoints,
+            e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/members"
+        );
         Assert.Contains(endpoints, e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/health");
     }
 
@@ -743,7 +852,9 @@ public sealed class OpenApiImporterTests
     public void Fixture_TaskDto_Properties_Match_OpenAPI_Schema()
     {
         var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
-        var (_, walker) = CompilationHelper.DiscoverAndWalk(CompilationHelper.CompileImportResult(result));
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(
+            CompilationHelper.CompileImportResult(result)
+        );
         var taskDto = walker.Definitions["TaskDto"];
 
         AssertProperty(taskDto, "id", "string");
@@ -769,26 +880,35 @@ public sealed class OpenApiImporterTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
-        var createTask = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks");
+        var createTask = endpoints.First(e =>
+            e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks"
+        );
         Assert.Contains(createTask.Responses, r => r.StatusCode == 201);
         Assert.Contains(createTask.Responses, r => r.StatusCode == 422);
 
-        var getTask = endpoints.First(e => e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks/{taskId}");
+        var getTask = endpoints.First(e =>
+            e.HttpMethod == "GET" && e.RouteTemplate == "/api/tasks/{taskId}"
+        );
         Assert.Contains(getTask.Responses, r => r.StatusCode == 200);
         Assert.Contains(getTask.Responses, r => r.StatusCode == 404);
 
-        var deleteTask = endpoints.First(e => e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{taskId}");
+        var deleteTask = endpoints.First(e =>
+            e.HttpMethod == "DELETE" && e.RouteTemplate == "/api/tasks/{taskId}"
+        );
         Assert.Contains(deleteTask.Responses, r => r.StatusCode == 204);
     }
 
     [Fact]
     public void Twilio_CreateAccount_FormUrlEncoded_RequestExample_Survives_Import_RoundTrip()
     {
-        var (_, endpoints) = ImportSpecAndWalkContracts(BuildTwilioCreateAccountFixtureSpec(), "Twilio.Contracts");
+        var (_, endpoints) = ImportSpecAndWalkContracts(
+            BuildTwilioCreateAccountFixtureSpec(),
+            "Twilio.Contracts"
+        );
 
         var endpoint = endpoints.Single(e =>
-            e.HttpMethod == "POST" &&
-            e.RouteTemplate == "/2010-04-01/Accounts.json");
+            e.HttpMethod == "POST" && e.RouteTemplate == "/2010-04-01/Accounts.json"
+        );
 
         Assert.True(endpoint.IsFormEncoded);
 
@@ -803,11 +923,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void GitHub_UpdateBudgetOrg_404_Named_ResponseExamples_Survive_Import_RoundTrip()
     {
-        var (_, endpoints) = ImportSpecAndWalkContracts(BuildGitHubUpdateBudgetFixtureSpec(), "GitHub.Contracts");
+        var (_, endpoints) = ImportSpecAndWalkContracts(
+            BuildGitHubUpdateBudgetFixtureSpec(),
+            "GitHub.Contracts"
+        );
 
         var endpoint = endpoints.Single(e =>
-            e.HttpMethod == "PATCH" &&
-            e.RouteTemplate == "/organizations/{org}/settings/billing/budgets/{budget_id}");
+            e.HttpMethod == "PATCH"
+            && e.RouteTemplate == "/organizations/{org}/settings/billing/budgets/{budget_id}"
+        );
 
         var response = endpoint.Responses.Single(r => r.StatusCode == 404);
         Assert.NotNull(response.Examples);
@@ -817,7 +941,10 @@ public sealed class OpenApiImporterTests
             {
                 Assert.Equal("budget-not-found", first.Name);
                 Assert.Equal("application/json", first.MediaType);
-                Assert.Equal("""{"message":"Budget with ID 550e8400-e29b-41d4-a716-446655440000 not found.","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""", first.Json);
+                Assert.Equal(
+                    """{"message":"Budget with ID 550e8400-e29b-41d4-a716-446655440000 not found.","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""",
+                    first.Json
+                );
                 Assert.Null(first.ComponentExampleId);
                 Assert.Null(first.ResolvedJson);
             },
@@ -825,20 +952,28 @@ public sealed class OpenApiImporterTests
             {
                 Assert.Equal("feature-not-enabled", second.Name);
                 Assert.Equal("application/json", second.MediaType);
-                Assert.Equal("""{"message":"Not Found","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""", second.Json);
+                Assert.Equal(
+                    """{"message":"Not Found","documentation_url":"https://docs.github.com/rest/billing/budgets#update-a-budget"}""",
+                    second.Json
+                );
                 Assert.Null(second.ComponentExampleId);
                 Assert.Null(second.ResolvedJson);
-            });
+            }
+        );
     }
 
     [Fact]
     public void GitHub_DeleteBudgetOrg_RefBacked_ResponseExample_Preserves_Ref_And_ResolvedJson()
     {
-        var (_, endpoints) = ImportSpecAndWalkContracts(BuildGitHubDeleteBudgetFixtureSpec(), "GitHub.Contracts");
+        var (_, endpoints) = ImportSpecAndWalkContracts(
+            BuildGitHubDeleteBudgetFixtureSpec(),
+            "GitHub.Contracts"
+        );
 
         var endpoint = endpoints.Single(e =>
-            e.HttpMethod == "DELETE" &&
-            e.RouteTemplate == "/organizations/{org}/settings/billing/budgets/{budget_id}");
+            e.HttpMethod == "DELETE"
+            && e.RouteTemplate == "/organizations/{org}/settings/billing/budgets/{budget_id}"
+        );
 
         var response = endpoint.Responses.Single(r => r.StatusCode == 200);
         var example = Assert.Single(response.Examples!);
@@ -847,7 +982,10 @@ public sealed class OpenApiImporterTests
         Assert.Equal("application/json", example.MediaType);
         Assert.Null(example.Json);
         Assert.Equal("delete-budget", example.ComponentExampleId);
-        Assert.Equal("""{"message":"Budget successfully deleted.","budget_id":"2c1feb79-3947-4dc8-a16e-80cbd732cc0b"}""", example.ResolvedJson);
+        Assert.Equal(
+            """{"message":"Budget successfully deleted.","budget_id":"2c1feb79-3947-4dc8-a16e-80cbd732cc0b"}""",
+            example.ResolvedJson
+        );
     }
 
     [Fact]
@@ -855,11 +993,13 @@ public sealed class OpenApiImporterTests
     {
         var (_, endpoints) = ImportSpecAndWalkContracts(
             BuildGitHubSetActionsCacheRetentionLimitFixtureSpec(),
-            "GitHub.Contracts");
+            "GitHub.Contracts"
+        );
 
         var endpoint = endpoints.Single(e =>
-            e.HttpMethod == "PUT" &&
-            e.RouteTemplate == "/enterprises/{enterprise}/actions/cache/retention-limit");
+            e.HttpMethod == "PUT"
+            && e.RouteTemplate == "/enterprises/{enterprise}/actions/cache/retention-limit"
+        );
 
         var requestExample = Assert.Single(endpoint.RequestExamples!);
         Assert.Equal("selected_actions", requestExample.Name);
@@ -880,18 +1020,20 @@ public sealed class OpenApiImporterTests
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         var endpoint = endpoints.Single(e =>
-            e.HttpMethod == "PATCH" &&
-            e.RouteTemplate == "/repos/{owner}/{repo}/import");
+            e.HttpMethod == "PATCH" && e.RouteTemplate == "/repos/{owner}/{repo}/import"
+        );
 
         Assert.NotNull(endpoint.RequestExamples);
         Assert.Collection(
             endpoint.RequestExamples!,
             first => Assert.Equal("example-1", first.Name),
-            second => Assert.Equal("example-2", second.Name));
+            second => Assert.Equal("example-2", second.Name)
+        );
 
         Assert.Contains(
             "[rivet:unsupported request-example media-type=application/json name=example-3 reason=missing-value]",
-            content);
+            content
+        );
     }
 
     [Fact]
@@ -899,27 +1041,28 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/messages": {
-                    "post": {
-                        "operationId": "messages_create",
-                        "tags": ["Messages"],
-                        "requestBody": {
-                            "required": false,
-                            "content": {
-                                "text/plain": {
-                                    "example": "hello world"
-                                }
+            "/api/messages": {
+                "post": {
+                    "operationId": "messages_create",
+                    "tags": ["Messages"],
+                    "requestBody": {
+                        "required": false,
+                        "content": {
+                            "text/plain": {
+                                "example": "hello world"
                             }
-                        },
-                        "responses": {
-                            "204": {
-                                "description": "Created"
-                            }
+                        }
+                    },
+                    "responses": {
+                        "204": {
+                            "description": "Created"
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var (result, endpoints) = ImportSpecAndWalkContracts(spec);
         var contract = CompilationHelper.FindFile(result, "MessagesContract.cs");
@@ -935,7 +1078,8 @@ public sealed class OpenApiImporterTests
         Assert.Contains("[rivet:unsupported body content-type=text/plain]", contract);
         Assert.Contains(
             ".RequestExampleJson(\"\\\"hello world\\\"\", mediaType: \"text/plain\")",
-            contract);
+            contract
+        );
     }
 
     [Fact]
@@ -1001,10 +1145,12 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains(
             ".RequestExampleJson(\"{\\\"mode\\\":\\\"fast\\\"}\", mediaType: \"application/json\", name: \"validRequest\")",
-            contract);
+            contract
+        );
         Assert.Contains(
             "[rivet:unsupported request-example media-type=application/json name=missingRef component-example-id=missing-request reason=unresolved-ref]",
-            contract);
+            contract
+        );
     }
 
     [Fact]
@@ -1071,15 +1217,18 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains(
             ".ResponseExampleJson(422, \"{\\\"message\\\":\\\"Validation failed\\\"}\", mediaType: \"application/json\"",
-            contract);
+            contract
+        );
         Assert.Contains("name: \"validProblem\"", contract);
 
         Assert.Contains(
             "[rivet:unsupported response-example status=422 media-type=application/json name=missingValue reason=missing-value]",
-            contract);
+            contract
+        );
         Assert.Contains(
             "[rivet:unsupported response-example status=422 media-type=application/json name=missingRef component-example-id=missing-problem reason=unresolved-ref]",
-            contract);
+            contract
+        );
     }
 
     [Fact]
@@ -1087,51 +1236,52 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "CreateWidgetRequest": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string" }
-                    },
-                    "required": ["name"]
+            "CreateWidgetRequest": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" }
                 },
-                "WidgetResponse": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" },
-                        "name": { "type": "string" }
-                    },
-                    "required": ["id", "name"]
-                }
-                """,
+                "required": ["name"]
+            },
+            "WidgetResponse": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" }
+                },
+                "required": ["id", "name"]
+            }
+            """,
             paths: """
-                "/api/widgets": {
-                    "post": {
-                        "operationId": "widgets_create",
-                        "tags": ["Widgets"],
-                        "requestBody": {
-                            "required": true,
+            "/api/widgets": {
+                "post": {
+                    "operationId": "widgets_create",
+                    "tags": ["Widgets"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "schema": { "$ref": "#/components/schemas/CreateWidgetRequest" },
+                                "example": { "name": "starter-widget" }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "201": {
+                            "description": "Created",
                             "content": {
                                 "application/json": {
-                                    "schema": { "$ref": "#/components/schemas/CreateWidgetRequest" },
-                                    "example": { "name": "starter-widget" }
-                                }
-                            }
-                        },
-                        "responses": {
-                            "201": {
-                                "description": "Created",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/WidgetResponse" },
-                                        "example": { "id": "wid_123", "name": "starter-widget" }
-                                    }
+                                    "schema": { "$ref": "#/components/schemas/WidgetResponse" },
+                                    "example": { "id": "wid_123", "name": "starter-widget" }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var (result, endpoints) = ImportSpecAndWalkContracts(spec);
         var contract = CompilationHelper.FindFile(result, "WidgetsContract.cs");
@@ -1154,10 +1304,12 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains(
             ".RequestExampleJson(\"{\\\"name\\\":\\\"starter-widget\\\"}\", mediaType: \"application/json\")",
-            contract);
+            contract
+        );
         Assert.Contains(
             ".ResponseExampleJson(201, \"{\\\"id\\\":\\\"wid_123\\\",\\\"name\\\":\\\"starter-widget\\\"}\", mediaType: \"application/json\")",
-            contract);
+            contract
+        );
     }
 
     [Fact]
@@ -1165,32 +1317,33 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/previews": {
-                    "post": {
-                        "operationId": "previews_queue",
-                        "tags": ["Previews"],
-                        "requestBody": {
-                            "required": true,
-                            "content": {
-                                "application/json": {
-                                    "example": { "mode": "fast" }
-                                }
+            "/api/previews": {
+                "post": {
+                    "operationId": "previews_queue",
+                    "tags": ["Previews"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "example": { "mode": "fast" }
                             }
-                        },
-                        "responses": {
-                            "202": {
-                                "description": "Queued",
-                                "content": {
-                                    "text/plain": {
-                                        "example": "queued"
-                                    }
+                        }
+                    },
+                    "responses": {
+                        "202": {
+                            "description": "Queued",
+                            "content": {
+                                "text/plain": {
+                                    "example": "queued"
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var (result, endpoints) = ImportSpecAndWalkContracts(spec);
         var contract = CompilationHelper.FindFile(result, "PreviewsContract.cs");
@@ -1206,13 +1359,18 @@ public sealed class OpenApiImporterTests
         Assert.Equal("\"queued\"", responseExample.Json);
 
         Assert.Contains("[rivet:unsupported body content-type=application/json]", contract);
-        Assert.Contains("[rivet:unsupported response status=202 content-type=text/plain]", contract);
+        Assert.Contains(
+            "[rivet:unsupported response status=202 content-type=text/plain]",
+            contract
+        );
         Assert.Contains(
             ".RequestExampleJson(\"{\\\"mode\\\":\\\"fast\\\"}\", mediaType: \"application/json\")",
-            contract);
+            contract
+        );
         Assert.Contains(
             ".ResponseExampleJson(202, \"\\\"queued\\\"\", mediaType: \"text/plain\")",
-            contract);
+            contract
+        );
     }
 
     [Fact]
@@ -1220,41 +1378,42 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" }
-                    },
-                    "required": ["id"]
-                }
-                """,
+            "TaskDto": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" }
+                },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/tasks/{id}": {
-                    "get": {
-                        "operationId": "tasks_get",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
+            "/api/tasks/{id}": {
+                "get": {
+                    "operationId": "tasks_get",
+                    "tags": ["Tasks"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
                                 }
-                            },
-                            "404": {
-                                "description": "Not found",
-                                "content": {
-                                    "text/plain": {
-                                        "example": "missing"
-                                    }
+                            }
+                        },
+                        "404": {
+                            "description": "Not found",
+                            "content": {
+                                "text/plain": {
+                                    "example": "missing"
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var (result, endpoints) = ImportSpecAndWalkContracts(spec);
         var contract = CompilationHelper.FindFile(result, "TasksContract.cs");
@@ -1271,7 +1430,8 @@ public sealed class OpenApiImporterTests
         Assert.Contains(".Returns(404, \"Not found\")", contract);
         Assert.Contains(
             ".ResponseExampleJson(404, \"\\\"missing\\\"\", mediaType: \"text/plain\")",
-            contract);
+            contract
+        );
     }
 
     [Fact]
@@ -1279,24 +1439,25 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/previews/{id}": {
-                    "get": {
-                        "operationId": "previews_get",
-                        "tags": ["Previews"],
-                        "responses": {
-                            "200": {
-                                "description": "Preview text",
-                                "content": {
-                                    "text/plain": {
-                                        "example": "preview"
-                                    }
+            "/api/previews/{id}": {
+                "get": {
+                    "operationId": "previews_get",
+                    "tags": ["Previews"],
+                    "responses": {
+                        "200": {
+                            "description": "Preview text",
+                            "content": {
+                                "text/plain": {
+                                    "example": "preview"
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var (result, endpoints) = ImportSpecAndWalkContracts(spec);
         var contract = CompilationHelper.FindFile(result, "PreviewsContract.cs");
@@ -1313,13 +1474,17 @@ public sealed class OpenApiImporterTests
         Assert.Contains(".Status(200)", contract);
         Assert.Contains(
             ".ResponseExampleJson(200, \"\\\"preview\\\"\", mediaType: \"text/plain\")",
-            contract);
+            contract
+        );
     }
 
     [Fact]
     public void Fixture_Covers_All_Supported_Type_Mappings()
     {
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(LoadFixture(), "Test"), "TaskDto.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(LoadFixture(), "Test"),
+            "TaskDto.cs"
+        );
 
         Assert.Contains("Guid Id", content);
         Assert.Contains("string Title", content);
@@ -1335,13 +1500,22 @@ public sealed class OpenApiImporterTests
         Assert.Contains("List<LabelDto> Labels", content);
         Assert.Contains("Dictionary<string, string> Metadata", content);
 
-        Assert.Contains("Priority?", CompilationHelper.FindFile(CompilationHelper.Import(LoadFixture(), "Test"), "PatchTaskRequest.cs"));
+        Assert.Contains(
+            "Priority?",
+            CompilationHelper.FindFile(
+                CompilationHelper.Import(LoadFixture(), "Test"),
+                "PatchTaskRequest.cs"
+            )
+        );
     }
 
     [Fact]
     public void Fixture_Covers_All_HTTP_Methods()
     {
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(LoadFixture(), "Test"), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(LoadFixture(), "Test"),
+            "TasksContract.cs"
+        );
         Assert.Contains("Define.Get<", content);
         Assert.Contains("Define.Post<", content);
         Assert.Contains("Define.Put<", content);
@@ -1365,10 +1539,16 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Multipart_Endpoint_Uses_Request_As_InputType()
     {
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(LoadFixture(), "Test"), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(LoadFixture(), "Test"),
+            "TasksContract.cs"
+        );
 
         Assert.Contains("RouteDefinition<AttachFileRequest, AttachmentDto> Attach", content);
-        Assert.Contains("Define.Post<AttachFileRequest, AttachmentDto>(\"/api/tasks/{taskId}/attachments\")", content);
+        Assert.Contains(
+            "Define.Post<AttachFileRequest, AttachmentDto>(\"/api/tasks/{taskId}/attachments\")",
+            content
+        );
     }
 
     [Fact]
@@ -1379,7 +1559,9 @@ public sealed class OpenApiImporterTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
-        var attach = endpoints.First(e => e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks/{taskId}/attachments");
+        var attach = endpoints.First(e =>
+            e.HttpMethod == "POST" && e.RouteTemplate == "/api/tasks/{taskId}/attachments"
+        );
         Assert.Contains(attach.Params, p => p.Source == ParamSource.File && p.Name == "file");
     }
 
@@ -1388,45 +1570,47 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "UploadRequest": {
-                    "type": "object",
-                    "properties": {
-                        "document": { "type": "string", "format": "binary" }
-                    },
-                    "required": ["document"]
+            "UploadRequest": {
+                "type": "object",
+                "properties": {
+                    "document": { "type": "string", "format": "binary" }
                 },
-                "UploadResult": {
-                    "type": "object",
-                    "properties": { "url": { "type": "string" } },
-                    "required": ["url"]
-                }
-                """,
+                "required": ["document"]
+            },
+            "UploadResult": {
+                "type": "object",
+                "properties": { "url": { "type": "string" } },
+                "required": ["url"]
+            }
+            """,
             paths: """
-                "/api/uploads": {
-                    "post": {
-                        "operationId": "uploads_create",
-                        "tags": ["Uploads"],
-                        "requestBody": {
-                            "required": true,
-                            "content": {
-                                "multipart/form-data": {
-                                    "schema": { "$ref": "#/components/schemas/UploadRequest" }
-                                }
+            "/api/uploads": {
+                "post": {
+                    "operationId": "uploads_create",
+                    "tags": ["Uploads"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": { "$ref": "#/components/schemas/UploadRequest" }
                             }
-                        },
-                        "responses": {
-                            "201": {
-                                "description": "Created",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/UploadResult" }
-                                    }
+                        }
+                    },
+                    "responses": {
+                        "201": {
+                            "description": "Created",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/UploadResult" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var record = CompilationHelper.FindFile(result, "UploadRequest.cs");
@@ -1477,13 +1661,22 @@ public sealed class OpenApiImporterTests
         Assert.Contains(".Anonymous()", CompilationHelper.FindFile(result, "HealthContract.cs"));
 
         // Members invite has security: [{"admin": []}] → .Secure("admin")
-        Assert.Contains(".Secure(\"admin\")", CompilationHelper.FindFile(result, "MembersContract.cs"));
+        Assert.Contains(
+            ".Secure(\"admin\")",
+            CompilationHelper.FindFile(result, "MembersContract.cs")
+        );
 
         // Tasks list has global security → .Secure("bearer")
-        Assert.Contains(".Secure(\"bearer\")", CompilationHelper.FindFile(result, "TasksContract.cs"));
+        Assert.Contains(
+            ".Secure(\"bearer\")",
+            CompilationHelper.FindFile(result, "TasksContract.cs")
+        );
 
         // Summary present
-        Assert.Contains(".Summary(\"List all tasks\")", CompilationHelper.FindFile(result, "TasksContract.cs"));
+        Assert.Contains(
+            ".Summary(\"List all tasks\")",
+            CompilationHelper.FindFile(result, "TasksContract.cs")
+        );
     }
 
     // ========== Union ref name sanitization ==========
@@ -1491,7 +1684,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void OneOf_With_Hyphenated_Ref_Names_Sanitized()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "my-shape": {
                 "oneOf": [
                     { "$ref": "#/components/schemas/my-circle" },
@@ -1508,7 +1702,9 @@ public sealed class OpenApiImporterTests
                 "properties": { "side": { "type": "number" } },
                 "required": ["side"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "MyShape.cs");
@@ -1523,7 +1719,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void AnyOf_With_Dotted_Ref_Names_Sanitized()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "shape.union": {
                 "anyOf": [
                     { "$ref": "#/components/schemas/geo.circle" },
@@ -1540,7 +1737,9 @@ public sealed class OpenApiImporterTests
                 "properties": { "side": { "type": "number" } },
                 "required": ["side"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "ShapeUnion.cs");
@@ -1552,7 +1751,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Sanitized_Union_Refs_Compile()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "result-union": {
                 "oneOf": [
                     { "$ref": "#/components/schemas/success-response" },
@@ -1569,11 +1769,16 @@ public sealed class OpenApiImporterTests
                 "properties": { "message": { "type": "string" } },
                 "required": ["message"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
-        var errors = CompilationHelper.CompileImportResult(result).GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        var errors = CompilationHelper
+            .CompileImportResult(result)
+            .GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
         Assert.Empty(errors);
     }
 
@@ -1582,7 +1787,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void AllOf_With_Hyphenated_Ref_Names_Sanitized()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "base-address": {
                 "type": "object",
                 "properties": { "street": { "type": "string" } },
@@ -1594,7 +1800,9 @@ public sealed class OpenApiImporterTests
                     { "type": "object", "properties": { "zip": { "type": "string" } }, "required": ["zip"] }
                 ]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "ExtendedAddress.cs");
@@ -1609,7 +1817,8 @@ public sealed class OpenApiImporterTests
     public void AllOf_Nested_Hyphenated_Refs_Compile()
     {
         // allOf referencing another allOf with hyphenated names — 3 levels deep
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "api-base": {
                 "type": "object",
                 "properties": { "id": { "type": "string" } },
@@ -1627,12 +1836,17 @@ public sealed class OpenApiImporterTests
                     { "type": "object", "properties": { "device": { "type": "string" } }, "required": ["device"] }
                 ]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
-        var errors = CompilationHelper.CompileImportResult(result).GetDiagnostics()
-            .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error).ToList();
+        var errors = CompilationHelper
+            .CompileImportResult(result)
+            .GetDiagnostics()
+            .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+            .ToList();
         Assert.Empty(errors);
 
         var content = CompilationHelper.FindFile(result, "DeviceApiResponse.cs");
@@ -1785,7 +1999,10 @@ public sealed class OpenApiImporterTests
         Assert.Contains("public static readonly RouteDefinition Create", content);
 
         // ...but NEVER silently (I11 class): the dropped body leaves a named marker
-        Assert.Contains("// [rivet:unsupported body $ref=DoesNotExist reason=unresolved-ref]", content);
+        Assert.Contains(
+            "// [rivet:unsupported body $ref=DoesNotExist reason=unresolved-ref]",
+            content
+        );
     }
 
     // ========== Empty allOf record skipping ==========
@@ -1796,7 +2013,8 @@ public sealed class OpenApiImporterTests
         // allOf referencing a primitive-like schema (no properties) should not emit an empty
         // record — and consumers of the skipped schema must resolve to the underlying primitive
         // instead of a dangling type name (I2: CS0246 in generated code).
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "StringAlias": {
                 "type": "string"
             },
@@ -1812,7 +2030,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["thing"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -1834,7 +2054,8 @@ public sealed class OpenApiImporterTests
         // The OpenAPI 3.0 allOf-wrapped-enum idiom emitted by NSwag/openapi-generator:
         // "status": { "allOf": [ { "$ref": "#/components/schemas/SomeEnum" } ] }.
         // The wrapper record is skipped; consumers must resolve to the enum type (I2).
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "SomeEnum": {
                 "type": "string",
                 "enum": ["active", "paused", "canceled"]
@@ -1851,7 +2072,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["status"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -1871,7 +2094,8 @@ public sealed class OpenApiImporterTests
     public void AllOf_With_Object_Ref_Still_Emits_Record()
     {
         // allOf referencing an object schema should still produce a record with flattened properties
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Base": {
                 "type": "object",
                 "properties": { "name": { "type": "string" } },
@@ -1883,7 +2107,9 @@ public sealed class OpenApiImporterTests
                     { "type": "object", "properties": { "extra": { "type": "string" } }, "required": ["extra"] }
                 ]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Extended.cs");
@@ -1899,43 +2125,45 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "PodSpec": {
-                    "type": "object",
-                    "properties": { "name": { "type": "string" } },
-                    "required": ["name"]
-                },
-                "PodResult": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "PodSpec": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"]
+            },
+            "PodResult": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/pods": {
-                    "post": {
-                        "operationId": "pods_create",
-                        "tags": ["Pods"],
-                        "requestBody": {
-                            "required": true,
-                            "content": {
-                                "*/*": {
-                                    "schema": { "$ref": "#/components/schemas/PodSpec" }
-                                }
+            "/api/pods": {
+                "post": {
+                    "operationId": "pods_create",
+                    "tags": ["Pods"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "*/*": {
+                                "schema": { "$ref": "#/components/schemas/PodSpec" }
                             }
-                        },
-                        "responses": {
-                            "201": {
-                                "description": "Created",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/PodResult" }
-                                    }
+                        }
+                    },
+                    "responses": {
+                        "201": {
+                            "description": "Created",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/PodResult" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "PodsContract.cs");
 
@@ -1948,32 +2176,37 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "StatusDto": {
-                    "type": "object",
-                    "properties": { "ok": { "type": "boolean" } },
-                    "required": ["ok"]
-                }
-                """,
+            "StatusDto": {
+                "type": "object",
+                "properties": { "ok": { "type": "boolean" } },
+                "required": ["ok"]
+            }
+            """,
             paths: """
-                "/api/status": {
-                    "get": {
-                        "operationId": "status_check",
-                        "tags": ["Status"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "*/*": {
-                                        "schema": { "$ref": "#/components/schemas/StatusDto" }
-                                    }
+            "/api/status": {
+                "get": {
+                    "operationId": "status_check",
+                    "tags": ["Status"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "*/*": {
+                                    "schema": { "$ref": "#/components/schemas/StatusDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "StatusContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "StatusContract.cs"
+        );
 
         Assert.Contains("RouteDefinition<StatusDto>", content);
         Assert.Contains("Define.Get<StatusDto>", content);
@@ -1984,45 +2217,50 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ItemDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                },
-                "ErrorDto": {
-                    "type": "object",
-                    "properties": { "message": { "type": "string" } },
-                    "required": ["message"]
-                }
-                """,
+            "ItemDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "ErrorDto": {
+                "type": "object",
+                "properties": { "message": { "type": "string" } },
+                "required": ["message"]
+            }
+            """,
             paths: """
-                "/api/items/{id}": {
-                    "get": {
-                        "operationId": "items_get",
-                        "tags": ["Items"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
-                                    }
+            "/api/items/{id}": {
+                "get": {
+                    "operationId": "items_get",
+                    "tags": ["Items"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ItemDto" }
                                 }
-                            },
-                            "404": {
-                                "description": "Not found",
-                                "content": {
-                                    "*/*": {
-                                        "schema": { "$ref": "#/components/schemas/ErrorDto" }
-                                    }
+                            }
+                        },
+                        "404": {
+                            "description": "Not found",
+                            "content": {
+                                "*/*": {
+                                    "schema": { "$ref": "#/components/schemas/ErrorDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "ItemsContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "ItemsContract.cs"
+        );
 
         Assert.Contains(".Returns<ErrorDto>(404, \"Not found\")", content);
     }
@@ -2032,40 +2270,45 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                },
-                "GenericDto": {
-                    "type": "object",
-                    "properties": { "data": { "type": "string" } },
-                    "required": ["data"]
-                }
-                """,
+            "TaskDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "GenericDto": {
+                "type": "object",
+                "properties": { "data": { "type": "string" } },
+                "required": ["data"]
+            }
+            """,
             paths: """
-                "/api/tasks": {
-                    "get": {
-                        "operationId": "tasks_list",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    },
-                                    "*/*": {
-                                        "schema": { "$ref": "#/components/schemas/GenericDto" }
-                                    }
+            "/api/tasks": {
+                "get": {
+                    "operationId": "tasks_list",
+                    "tags": ["Tasks"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
+                                },
+                                "*/*": {
+                                    "schema": { "$ref": "#/components/schemas/GenericDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "TasksContract.cs"
+        );
 
         // application/json should win
         Assert.Contains("RouteDefinition<TaskDto>", content);
@@ -2079,46 +2322,50 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                },
-                "ClientErrorDto": {
-                    "type": "object",
-                    "properties": { "error": { "type": "string" } },
-                    "required": ["error"]
-                }
-                """,
+            "TaskDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "ClientErrorDto": {
+                "type": "object",
+                "properties": { "error": { "type": "string" } },
+                "required": ["error"]
+            }
+            """,
             paths: """
-                "/api/tasks": {
-                    "get": {
-                        "operationId": "tasks_list",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
+            "/api/tasks": {
+                "get": {
+                    "operationId": "tasks_list",
+                    "tags": ["Tasks"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
                                 }
-                            },
-                            "4XX": {
-                                "description": "Client error",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ClientErrorDto" }
-                                    }
+                            }
+                        },
+                        "4XX": {
+                            "description": "Client error",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ClientErrorDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        Assert.Contains(".Returns<ClientErrorDto>(400, \"Client error\")",
-            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs"));
+        Assert.Contains(
+            ".Returns<ClientErrorDto>(400, \"Client error\")",
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs")
+        );
     }
 
     [Fact]
@@ -2126,46 +2373,50 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                },
-                "ServerErrorDto": {
-                    "type": "object",
-                    "properties": { "error": { "type": "string" } },
-                    "required": ["error"]
-                }
-                """,
+            "TaskDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "ServerErrorDto": {
+                "type": "object",
+                "properties": { "error": { "type": "string" } },
+                "required": ["error"]
+            }
+            """,
             paths: """
-                "/api/tasks": {
-                    "get": {
-                        "operationId": "tasks_list",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
+            "/api/tasks": {
+                "get": {
+                    "operationId": "tasks_list",
+                    "tags": ["Tasks"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
                                 }
-                            },
-                            "5XX": {
-                                "description": "Server error",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ServerErrorDto" }
-                                    }
+                            }
+                        },
+                        "5XX": {
+                            "description": "Server error",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ServerErrorDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        Assert.Contains(".Returns<ServerErrorDto>(500, \"Server error\")",
-            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs"));
+        Assert.Contains(
+            ".Returns<ServerErrorDto>(500, \"Server error\")",
+            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs")
+        );
     }
 
     [Fact]
@@ -2175,32 +2426,37 @@ public sealed class OpenApiImporterTests
         // a void endpoint — the range maps to the success status 200 with its typed output.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "TaskDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/tasks": {
-                    "get": {
-                        "operationId": "tasks_list",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "2XX": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
+            "/api/tasks": {
+                "get": {
+                    "operationId": "tasks_list",
+                    "tags": ["Tasks"],
+                    "responses": {
+                        "2XX": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "TasksContract.cs"
+        );
 
         Assert.Contains("RouteDefinition<TaskDto>", content);
         // Cross-corpus #2: the projection to a literal 200 the spec never promised
@@ -2213,45 +2469,50 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                },
-                "GenericDto": {
-                    "type": "object",
-                    "properties": { "data": { "type": "string" } },
-                    "required": ["data"]
-                }
-                """,
+            "TaskDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "GenericDto": {
+                "type": "object",
+                "properties": { "data": { "type": "string" } },
+                "required": ["data"]
+            }
+            """,
             paths: """
-                "/api/tasks": {
-                    "post": {
-                        "operationId": "tasks_create",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "2XX": {
-                                "description": "Some success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/GenericDto" }
-                                    }
+            "/api/tasks": {
+                "post": {
+                    "operationId": "tasks_create",
+                    "tags": ["Tasks"],
+                    "responses": {
+                        "2XX": {
+                            "description": "Some success",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/GenericDto" }
                                 }
-                            },
-                            "201": {
-                                "description": "Created",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
+                            }
+                        },
+                        "201": {
+                            "description": "Created",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "TasksContract.cs"
+        );
 
         // The concrete 201 wins; the range wildcard never overrides a declared status.
         // (201 is the POST method default, so no explicit .Status() call is emitted —
@@ -2266,58 +2527,57 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                },
-                "ClientErrorDto": {
-                    "type": "object",
-                    "properties": { "error": { "type": "string" } },
-                    "required": ["error"]
-                },
-                "ServerErrorDto": {
-                    "type": "object",
-                    "properties": { "error": { "type": "string" } },
-                    "required": ["error"]
-                }
-                """,
+            "TaskDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "ClientErrorDto": {
+                "type": "object",
+                "properties": { "error": { "type": "string" } },
+                "required": ["error"]
+            },
+            "ServerErrorDto": {
+                "type": "object",
+                "properties": { "error": { "type": "string" } },
+                "required": ["error"]
+            }
+            """,
             paths: """
-                "/api/tasks": {
-                    "get": {
-                        "operationId": "tasks_list",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
+            "/api/tasks": {
+                "get": {
+                    "operationId": "tasks_list",
+                    "tags": ["Tasks"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
                                 }
-                            },
-                            "4XX": {
-                                "description": "Client error",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ClientErrorDto" },
-                                        "examples": {
-                                            "clientProblem": {
-                                                "value": { "error": "Bad request" }
-                                            }
+                            }
+                        },
+                        "4XX": {
+                            "description": "Client error",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ClientErrorDto" },
+                                    "examples": {
+                                        "clientProblem": {
+                                            "value": { "error": "Bad request" }
                                         }
                                     }
                                 }
-                            },
-                            "default": {
-                                "description": "Server error",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ServerErrorDto" },
-                                        "examples": {
-                                            "serverProblem": {
-                                                "value": { "error": "Unexpected failure" }
-                                            }
+                            }
+                        },
+                        "default": {
+                            "description": "Server error",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ServerErrorDto" },
+                                    "examples": {
+                                        "serverProblem": {
+                                            "value": { "error": "Unexpected failure" }
                                         }
                                     }
                                 }
@@ -2325,8 +2585,10 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var compilation = CompilationHelper.CompileImportResult(result);
@@ -2353,33 +2615,38 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "UpdateSettingsRequest": {
-                    "type": "object",
-                    "properties": { "theme": { "type": "string" } },
-                    "required": ["theme"]
-                }
-                """,
+            "UpdateSettingsRequest": {
+                "type": "object",
+                "properties": { "theme": { "type": "string" } },
+                "required": ["theme"]
+            }
+            """,
             paths: """
-                "/api/settings": {
-                    "put": {
-                        "operationId": "settings_update",
-                        "tags": ["Settings"],
-                        "requestBody": {
-                            "required": true,
-                            "content": {
-                                "application/json": {
-                                    "schema": { "$ref": "#/components/schemas/UpdateSettingsRequest" }
-                                }
+            "/api/settings": {
+                "put": {
+                    "operationId": "settings_update",
+                    "tags": ["Settings"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "schema": { "$ref": "#/components/schemas/UpdateSettingsRequest" }
                             }
-                        },
-                        "responses": {
-                            "204": { "description": "No Content" }
                         }
+                    },
+                    "responses": {
+                        "204": { "description": "No Content" }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "SettingsContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "SettingsContract.cs"
+        );
 
         Assert.Contains("InputRouteDefinition<UpdateSettingsRequest> Update", content);
         Assert.Contains("Define.Put(\"/api/settings\")", content);
@@ -2394,31 +2661,33 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "PodSpec": {
-                    "type": "object",
-                    "properties": { "name": { "type": "string" } },
-                    "required": ["name"]
-                }
-                """,
+            "PodSpec": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"]
+            }
+            """,
             paths: """
-                "/api/pods": {
-                    "post": {
-                        "operationId": "pods_create",
-                        "tags": ["Pods"],
-                        "requestBody": {
-                            "required": true,
-                            "content": {
-                                "*/*": {
-                                    "schema": { "$ref": "#/components/schemas/PodSpec" }
-                                }
+            "/api/pods": {
+                "post": {
+                    "operationId": "pods_create",
+                    "tags": ["Pods"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "*/*": {
+                                "schema": { "$ref": "#/components/schemas/PodSpec" }
                             }
-                        },
-                        "responses": {
-                            "201": { "description": "Created" }
                         }
+                    },
+                    "responses": {
+                        "201": { "description": "Created" }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "PodsContract.cs");
 
@@ -2431,38 +2700,42 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "UpdateRequest": {
-                    "type": "object",
-                    "properties": { "value": { "type": "string" } },
-                    "required": ["value"]
-                }
-                """,
+            "UpdateRequest": {
+                "type": "object",
+                "properties": { "value": { "type": "string" } },
+                "required": ["value"]
+            }
+            """,
             paths: """
-                "/api/config": {
-                    "put": {
-                        "operationId": "config_update",
-                        "tags": ["Config"],
-                        "requestBody": {
-                            "required": true,
-                            "content": {
-                                "application/json": {
-                                    "schema": { "$ref": "#/components/schemas/UpdateRequest" }
-                                }
+            "/api/config": {
+                "put": {
+                    "operationId": "config_update",
+                    "tags": ["Config"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "schema": { "$ref": "#/components/schemas/UpdateRequest" }
                             }
-                        },
-                        "responses": {
-                            "204": { "description": "No Content" }
                         }
+                    },
+                    "responses": {
+                        "204": { "description": "No Content" }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
         // Compiles
         var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation.GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        var errors = compilation
+            .GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
         Assert.Empty(errors);
 
         // Survives Roslyn walk
@@ -2488,25 +2761,30 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/upload": {
-                    "post": {
-                        "operationId": "upload_create",
-                        "tags": ["Upload"],
-                        "requestBody": {
-                            "content": {
-                                "application/octet-stream": {
-                                    "schema": { "type": "string", "format": "binary" }
-                                }
+            "/api/upload": {
+                "post": {
+                    "operationId": "upload_create",
+                    "tags": ["Upload"],
+                    "requestBody": {
+                        "content": {
+                            "application/octet-stream": {
+                                "schema": { "type": "string", "format": "binary" }
                             }
-                        },
-                        "responses": {
-                            "201": { "description": "Created" }
                         }
+                    },
+                    "responses": {
+                        "201": { "description": "Created" }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "UploadContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "UploadContract.cs"
+        );
 
         // application/octet-stream with format: binary → raw binary request body
         Assert.Contains(".AcceptsBinary()", content);
@@ -2521,25 +2799,30 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/avatar": {
-                    "get": {
-                        "operationId": "avatar_get",
-                        "tags": ["Avatar"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "image/png": {
-                                        "schema": { "type": "string", "format": "binary" }
-                                    }
+            "/api/avatar": {
+                "get": {
+                    "operationId": "avatar_get",
+                    "tags": ["Avatar"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "image/png": {
+                                    "schema": { "type": "string", "format": "binary" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "AvatarContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "AvatarContract.cs"
+        );
 
         Assert.Contains("Define.File", content);
         Assert.Contains(".ContentType(\"image/png\")", content);
@@ -2551,40 +2834,45 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ItemDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "ItemDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/items/{id}": {
-                    "get": {
-                        "operationId": "items_get",
-                        "tags": ["Items"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
-                                    }
+            "/api/items/{id}": {
+                "get": {
+                    "operationId": "items_get",
+                    "tags": ["Items"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ItemDto" }
                                 }
-                            },
-                            "404": {
-                                "description": "Not found",
-                                "content": {
-                                    "text/plain": {
-                                        "schema": { "type": "string" }
-                                    }
+                            }
+                        },
+                        "404": {
+                            "description": "Not found",
+                            "content": {
+                                "text/plain": {
+                                    "schema": { "type": "string" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "ItemsContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "ItemsContract.cs"
+        );
 
         Assert.Contains("[rivet:unsupported error status=404 content-type=text/plain]", content);
         // The typed 200 response should still work
@@ -2596,32 +2884,37 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "TaskDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "TaskDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/tasks": {
-                    "get": {
-                        "operationId": "tasks_list",
-                        "tags": ["Tasks"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                    }
+            "/api/tasks": {
+                "get": {
+                    "operationId": "tasks_list",
+                    "tags": ["Tasks"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "TasksContract.cs"
+        );
 
         Assert.DoesNotContain("[rivet:unsupported", content);
     }
@@ -2636,7 +2929,8 @@ public sealed class OpenApiImporterTests
             var innerType = prop.Type is TsType.Nullable n ? n.Inner : prop.Type;
             Assert.True(
                 innerType is TsType.Primitive p && p.Name == expectedPrimitive,
-                $"Property '{name}' expected primitive '{expectedPrimitive}' but got {innerType}");
+                $"Property '{name}' expected primitive '{expectedPrimitive}' but got {innerType}"
+            );
         }
     }
 
@@ -2649,39 +2943,41 @@ public sealed class OpenApiImporterTests
         // A $ref to foo_bar must resolve to FooBar_2 (the deduped name), not FooBar.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "FooBar": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
+            "FooBar": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "foo_bar": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"]
+            },
+            "Consumer": {
+                "type": "object",
+                "properties": {
+                    "original": { "$ref": "#/components/schemas/FooBar" },
+                    "snake": { "$ref": "#/components/schemas/foo_bar" }
                 },
-                "foo_bar": {
-                    "type": "object",
-                    "properties": { "name": { "type": "string" } },
-                    "required": ["name"]
-                },
-                "Consumer": {
-                    "type": "object",
-                    "properties": {
-                        "original": { "$ref": "#/components/schemas/FooBar" },
-                        "snake": { "$ref": "#/components/schemas/foo_bar" }
-                    },
-                    "required": ["original", "snake"]
-                }
-                """,
+                "required": ["original", "snake"]
+            }
+            """,
             paths: """
-                "/api/test": {
-                    "get": {
-                        "operationId": "test_get",
-                        "tags": ["Test"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Consumer" } } }
-                            }
+            "/api/test": {
+                "get": {
+                    "operationId": "test_get",
+                    "tags": ["Test"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Consumer" } } }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var consumer = CompilationHelper.FindFile(result, "Consumer.cs");
@@ -2699,9 +2995,12 @@ public sealed class OpenApiImporterTests
 
         // Must compile
         var compilation = CompilationHelper.CreateCompilationFromMultiple(
-            result.Files.Select(f => f.Content).ToArray());
-        var errors = compilation.GetDiagnostics()
-            .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error).ToList();
+            result.Files.Select(f => f.Content).ToArray()
+        );
+        var errors = compilation
+            .GetDiagnostics()
+            .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+            .ToList();
         Assert.Empty(errors);
     }
 
@@ -2714,20 +3013,22 @@ public sealed class OpenApiImporterTests
         // so it survives round-trip, even though the params become body params.
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/search": {
-                    "post": {
-                        "operationId": "items_search",
-                        "tags": ["Items"],
-                        "parameters": [
-                            { "name": "query", "in": "query", "required": true, "schema": { "type": "string" } },
-                            { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "format": "int32" } }
-                        ],
-                        "responses": {
-                            "200": { "description": "OK" }
-                        }
+            "/api/search": {
+                "post": {
+                    "operationId": "items_search",
+                    "tags": ["Items"],
+                    "parameters": [
+                        { "name": "query", "in": "query", "required": true, "schema": { "type": "string" } },
+                        { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "format": "int32" } }
+                    ],
+                    "responses": {
+                        "200": { "description": "OK" }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
@@ -2750,38 +3051,40 @@ public sealed class OpenApiImporterTests
         // Ensures the isParamOnlyInput fix doesn't break normal POST endpoints.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "CreateRequest": {
-                    "type": "object",
-                    "properties": { "name": { "type": "string" } },
-                    "required": ["name"]
-                },
-                "ItemDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "CreateRequest": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"]
+            },
+            "ItemDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "post": {
-                        "operationId": "items_create",
-                        "tags": ["Items"],
-                        "requestBody": {
-                            "content": {
-                                "application/json": {
-                                    "schema": { "$ref": "#/components/schemas/CreateRequest" }
-                                }
+            "/api/items": {
+                "post": {
+                    "operationId": "items_create",
+                    "tags": ["Items"],
+                    "requestBody": {
+                        "content": {
+                            "application/json": {
+                                "schema": { "$ref": "#/components/schemas/CreateRequest" }
                             }
-                        },
-                        "responses": {
-                            "201": {
-                                "description": "Created",
-                                "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ItemDto" } } }
-                            }
+                        }
+                    },
+                    "responses": {
+                        "201": {
+                            "description": "Created",
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ItemDto" } } }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
@@ -2799,49 +3102,50 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ItemDto": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" }
-                    },
-                    "required": ["id"]
-                }
-                """,
+            "ItemDto": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" }
+                },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "ListItems",
-                        "parameters": [
-                            {
-                                "name": "X-Tenant-Id",
-                                "in": "header",
-                                "required": true,
-                                "schema": { "type": "string" }
-                            },
-                            {
-                                "name": "X-Trace-Id",
-                                "in": "header",
-                                "required": false,
-                                "schema": { "type": "string" }
-                            }
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": {
-                                            "type": "array",
-                                            "items": { "$ref": "#/components/schemas/ItemDto" }
-                                        }
+            "/api/items": {
+                "get": {
+                    "operationId": "ListItems",
+                    "parameters": [
+                        {
+                            "name": "X-Tenant-Id",
+                            "in": "header",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        },
+                        {
+                            "name": "X-Trace-Id",
+                            "in": "header",
+                            "required": false,
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": { "$ref": "#/components/schemas/ItemDto" }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var inputContent = CompilationHelper.FindFile(result, "ListItemsInput.cs");
@@ -2855,40 +3159,41 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ProfileDto": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string" }
-                    },
-                    "required": ["name"]
-                }
-                """,
+            "ProfileDto": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" }
+                },
+                "required": ["name"]
+            }
+            """,
             paths: """
-                "/api/profile": {
-                    "get": {
-                        "operationId": "GetProfile",
-                        "parameters": [
-                            {
-                                "name": "session_id",
-                                "in": "cookie",
-                                "required": true,
-                                "schema": { "type": "string" }
-                            }
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ProfileDto" }
-                                    }
+            "/api/profile": {
+                "get": {
+                    "operationId": "GetProfile",
+                    "parameters": [
+                        {
+                            "name": "session_id",
+                            "in": "cookie",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ProfileDto" }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var inputContent = CompilationHelper.FindFile(result, "GetProfileInput.cs");
@@ -2903,50 +3208,51 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ListItemsInput": {
-                    "type": "object",
-                    "properties": {
-                        "page": { "type": "integer" }
-                    },
-                    "required": ["page"]
+            "ListItemsInput": {
+                "type": "object",
+                "properties": {
+                    "page": { "type": "integer" }
                 },
-                "ItemDto": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" }
-                    },
-                    "required": ["id"]
-                }
-                """,
+                "required": ["page"]
+            },
+            "ItemDto": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" }
+                },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "ListItems",
-                        "parameters": [
-                            {
-                                "name": "page",
-                                "in": "query",
-                                "required": true,
-                                "schema": { "type": "integer" }
-                            }
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": {
-                                            "type": "array",
-                                            "items": { "$ref": "#/components/schemas/ItemDto" }
-                                        }
+            "/api/items": {
+                "get": {
+                    "operationId": "ListItems",
+                    "parameters": [
+                        {
+                            "name": "page",
+                            "in": "query",
+                            "required": true,
+                            "schema": { "type": "integer" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": { "$ref": "#/components/schemas/ItemDto" }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -2965,51 +3271,52 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ListItemsInput": {
-                    "type": "object",
-                    "properties": {
-                        "page": { "type": "integer" },
-                        "limit": { "type": "integer" }
-                    },
-                    "required": ["page", "limit"]
+            "ListItemsInput": {
+                "type": "object",
+                "properties": {
+                    "page": { "type": "integer" },
+                    "limit": { "type": "integer" }
                 },
-                "ItemDto": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" }
-                    },
-                    "required": ["id"]
-                }
-                """,
+                "required": ["page", "limit"]
+            },
+            "ItemDto": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" }
+                },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "ListItems",
-                        "parameters": [
-                            {
-                                "name": "page",
-                                "in": "query",
-                                "required": true,
-                                "schema": { "type": "integer" }
-                            }
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": {
-                                            "type": "array",
-                                            "items": { "$ref": "#/components/schemas/ItemDto" }
-                                        }
+            "/api/items": {
+                "get": {
+                    "operationId": "ListItems",
+                    "parameters": [
+                        {
+                            "name": "page",
+                            "in": "query",
+                            "required": true,
+                            "schema": { "type": "integer" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": { "$ref": "#/components/schemas/ItemDto" }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -3041,58 +3348,59 @@ public sealed class OpenApiImporterTests
         // grow a fresh numbered record unboundedly.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ListItemsInput": {
-                    "type": "object",
-                    "properties": {
-                        "page": { "type": "integer" },
-                        "limit": { "type": "integer" }
-                    },
-                    "required": ["page", "limit"]
+            "ListItemsInput": {
+                "type": "object",
+                "properties": {
+                    "page": { "type": "integer" },
+                    "limit": { "type": "integer" }
                 },
-                "ListItemsInput2": {
-                    "type": "object",
-                    "properties": {
-                        "page": { "type": "integer" }
-                    },
-                    "required": ["page"]
+                "required": ["page", "limit"]
+            },
+            "ListItemsInput2": {
+                "type": "object",
+                "properties": {
+                    "page": { "type": "integer" }
                 },
-                "ItemDto": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" }
-                    },
-                    "required": ["id"]
-                }
-                """,
+                "required": ["page"]
+            },
+            "ItemDto": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" }
+                },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "ListItems",
-                        "parameters": [
-                            {
-                                "name": "page",
-                                "in": "query",
-                                "required": true,
-                                "schema": { "type": "integer" }
-                            }
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": {
-                                            "type": "array",
-                                            "items": { "$ref": "#/components/schemas/ItemDto" }
-                                        }
+            "/api/items": {
+                "get": {
+                    "operationId": "ListItems",
+                    "parameters": [
+                        {
+                            "name": "page",
+                            "in": "query",
+                            "required": true,
+                            "schema": { "type": "integer" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": { "$ref": "#/components/schemas/ItemDto" }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -3113,68 +3421,69 @@ public sealed class OpenApiImporterTests
         // share one type — each contract gets its own, distinctly named, compiled input record.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "MemberDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                },
-                "OrderDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "MemberDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/members/{memberId}": {
-                    "get": {
-                        "operationId": "members_getById",
-                        "tags": ["Members"],
-                        "parameters": [
-                            {
-                                "name": "memberId",
-                                "in": "path",
-                                "required": true,
-                                "schema": { "type": "string" }
-                            }
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/MemberDto" }
-                                    }
-                                }
-                            }
+            "/api/members/{memberId}": {
+                "get": {
+                    "operationId": "members_getById",
+                    "tags": ["Members"],
+                    "parameters": [
+                        {
+                            "name": "memberId",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "string" }
                         }
-                    }
-                },
-                "/api/orders/{orderNumber}": {
-                    "get": {
-                        "operationId": "orders_getById",
-                        "tags": ["Orders"],
-                        "parameters": [
-                            {
-                                "name": "orderNumber",
-                                "in": "path",
-                                "required": true,
-                                "schema": { "type": "integer", "format": "int64" }
-                            }
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/OrderDto" }
-                                    }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/MemberDto" }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            },
+            "/api/orders/{orderNumber}": {
+                "get": {
+                    "operationId": "orders_getById",
+                    "tags": ["Orders"],
+                    "parameters": [
+                        {
+                            "name": "orderNumber",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "integer", "format": "int64" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/OrderDto" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -3188,7 +3497,10 @@ public sealed class OpenApiImporterTests
         // Each contract references its own input type
         Assert.Contains("GetByIdInput", CompilationHelper.FindFile(result, "MembersContract.cs"));
         Assert.Contains("GetByIdInput2", CompilationHelper.FindFile(result, "OrdersContract.cs"));
-        Assert.DoesNotContain("GetByIdInput2", CompilationHelper.FindFile(result, "MembersContract.cs"));
+        Assert.DoesNotContain(
+            "GetByIdInput2",
+            CompilationHelper.FindFile(result, "MembersContract.cs")
+        );
 
         // No duplicate filenames with different content; everything compiles
         Assert.Equal(result.Files.Count, result.Files.Select(f => f.FileName).Distinct().Count());
@@ -3202,38 +3514,39 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "StatusDto": {
-                    "enum": ["active", "inactive", "pending"]
+            "StatusDto": {
+                "enum": ["active", "inactive", "pending"]
+            },
+            "ItemDto": {
+                "type": "object",
+                "properties": {
+                    "status": { "$ref": "#/components/schemas/StatusDto" }
                 },
-                "ItemDto": {
-                    "type": "object",
-                    "properties": {
-                        "status": { "$ref": "#/components/schemas/StatusDto" }
-                    },
-                    "required": ["status"]
-                }
-                """,
+                "required": ["status"]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "ListItems",
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": {
-                                            "type": "array",
-                                            "items": { "$ref": "#/components/schemas/ItemDto" }
-                                        }
+            "/api/items": {
+                "get": {
+                    "operationId": "ListItems",
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": { "$ref": "#/components/schemas/ItemDto" }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var enumContent = CompilationHelper.FindFile(result, "StatusDto.cs");
@@ -3251,8 +3564,10 @@ public sealed class OpenApiImporterTests
 
         // Should compile
         var compilation = CompilationHelper.CompileImportResult(result);
-        var diags = compilation.GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        var diags = compilation
+            .GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
         Assert.Empty(diags);
     }
 
@@ -3263,45 +3578,46 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "BaseDto": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" }
-                    },
-                    "required": ["id"]
+            "BaseDto": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" }
                 },
-                "ExtendedDto": {
-                    "description": "An extended data transfer object",
-                    "allOf": [
-                        { "$ref": "#/components/schemas/BaseDto" },
-                        {
-                            "type": "object",
-                            "properties": {
-                                "name": { "type": "string" }
-                            },
-                            "required": ["name"]
-                        }
-                    ]
-                }
-                """,
+                "required": ["id"]
+            },
+            "ExtendedDto": {
+                "description": "An extended data transfer object",
+                "allOf": [
+                    { "$ref": "#/components/schemas/BaseDto" },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" }
+                        },
+                        "required": ["name"]
+                    }
+                ]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "GetItem",
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ExtendedDto" }
-                                    }
+            "/api/items": {
+                "get": {
+                    "operationId": "GetItem",
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ExtendedDto" }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "ExtendedDto.cs");
@@ -3314,32 +3630,33 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "FlexibleValueDto": {
-                    "description": "A value that can be a string or number",
-                    "anyOf": [
-                        { "type": "string" },
-                        { "type": "number" }
-                    ]
-                }
-                """,
+            "FlexibleValueDto": {
+                "description": "A value that can be a string or number",
+                "anyOf": [
+                    { "type": "string" },
+                    { "type": "number" }
+                ]
+            }
+            """,
             paths: """
-                "/api/values": {
-                    "get": {
-                        "operationId": "GetValue",
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/FlexibleValueDto" }
-                                    }
+            "/api/values": {
+                "get": {
+                    "operationId": "GetValue",
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/FlexibleValueDto" }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "FlexibleValueDto.cs");
@@ -3354,48 +3671,49 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "UploadPayload": {
-                    "type": "object",
-                    "properties": {
-                        "file": { "type": "string", "format": "binary" },
-                        "title": { "type": "string" }
-                    },
-                    "required": ["file", "title"]
+            "UploadPayload": {
+                "type": "object",
+                "properties": {
+                    "file": { "type": "string", "format": "binary" },
+                    "title": { "type": "string" }
                 },
-                "UploadResult": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" }
-                    },
-                    "required": ["id"]
-                }
-                """,
+                "required": ["file", "title"]
+            },
+            "UploadResult": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" }
+                },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/uploads": {
-                    "post": {
-                        "operationId": "Upload",
-                        "requestBody": {
-                            "required": true,
-                            "content": {
-                                "multipart/form-data": {
-                                    "schema": { "$ref": "#/components/schemas/UploadPayload" }
-                                }
+            "/api/uploads": {
+                "post": {
+                    "operationId": "Upload",
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": { "$ref": "#/components/schemas/UploadPayload" }
                             }
-                        },
-                        "responses": {
-                            "201": {
-                                "description": "Created",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/UploadResult" }
-                                    }
+                        }
+                    },
+                    "responses": {
+                        "201": {
+                            "description": "Created",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/UploadResult" }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "Contract.cs");
@@ -3412,36 +3730,37 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ItemDto": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "minLength": 0,
-                            "maxLength": 255
-                        }
-                    },
-                    "required": ["name"]
-                }
-                """,
+            "ItemDto": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 255
+                    }
+                },
+                "required": ["name"]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "GetItem",
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
-                                    }
+            "/api/items": {
+                "get": {
+                    "operationId": "GetItem",
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ItemDto" }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "ItemDto.cs");
@@ -3457,24 +3776,25 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Shape": {
-                    "description": "A geometric shape",
-                    "oneOf": [
-                        { "$ref": "#/components/schemas/Circle" },
-                        { "$ref": "#/components/schemas/Square" }
-                    ]
-                },
-                "Circle": {
-                    "type": "object",
-                    "properties": { "radius": { "type": "number" } },
-                    "required": ["radius"]
-                },
-                "Square": {
-                    "type": "object",
-                    "properties": { "side": { "type": "number" } },
-                    "required": ["side"]
-                }
-                """);
+            "Shape": {
+                "description": "A geometric shape",
+                "oneOf": [
+                    { "$ref": "#/components/schemas/Circle" },
+                    { "$ref": "#/components/schemas/Square" }
+                ]
+            },
+            "Circle": {
+                "type": "object",
+                "properties": { "radius": { "type": "number" } },
+                "required": ["radius"]
+            },
+            "Square": {
+                "type": "object",
+                "properties": { "side": { "type": "number" } },
+                "required": ["side"]
+            }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Shape.cs");
@@ -3489,32 +3809,33 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ItemDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "ItemDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "items_list",
-                        "tags": ["Items"],
-                        "summary": "List items",
-                        "description": "Returns all items with pagination support",
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
-                                    }
+            "/api/items": {
+                "get": {
+                    "operationId": "items_list",
+                    "tags": ["Items"],
+                    "summary": "List items",
+                    "description": "Returns all items with pagination support",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ItemDto" }
                                 }
                             }
                         }
                     }
                 }
-                """);
+            }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "ItemsContract.cs");
@@ -3528,31 +3849,32 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ItemDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "ItemDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "items_list",
-                        "tags": ["Items"],
-                        "summary": "List items",
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
-                                    }
+            "/api/items": {
+                "get": {
+                    "operationId": "items_list",
+                    "tags": ["Items"],
+                    "summary": "List items",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ItemDto" }
                                 }
                             }
                         }
                     }
                 }
-                """);
+            }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "ItemsContract.cs");
@@ -3566,31 +3888,32 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ItemDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "ItemDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "items_list",
-                        "tags": ["Items"],
-                        "description": "Returns all items with pagination support",
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
-                                    }
+            "/api/items": {
+                "get": {
+                    "operationId": "items_list",
+                    "tags": ["Items"],
+                    "description": "Returns all items with pagination support",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ItemDto" }
                                 }
                             }
                         }
                     }
                 }
-                """);
+            }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "ItemsContract.cs");
@@ -3604,12 +3927,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IsIntEnum_Recognises_Integer_Type_With_Enum_Values()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "UserRole": {
                 "type": "integer",
                 "enum": [1, 2, 3]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "UserRole.cs");
@@ -3620,11 +3946,14 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IsIntEnum_Recognises_Untyped_Numeric_Enum()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Severity": {
                 "enum": [10, 20, 30]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Severity.cs");
@@ -3638,7 +3967,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_WouldGenerateType_Enables_Ref_Resolution()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "StatusCode": {
                 "type": "integer",
                 "enum": [1, 2, 3]
@@ -3650,7 +3980,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["status"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -3665,12 +3997,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Members_Have_Explicit_Values()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "integer",
                 "enum": [0, 1, 2]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Priority.cs");
@@ -3684,7 +4019,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Output_Compiles()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "StatusCode": {
                 "type": "integer",
                 "enum": [1, 2, 3]
@@ -3696,11 +4032,14 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["status"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
 
@@ -3710,12 +4049,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Negative_Values_Produce_Valid_Identifiers()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Offset": {
                 "type": "integer",
                 "enum": [-1, 0, 1]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Offset.cs");
@@ -3726,7 +4068,8 @@ public sealed class OpenApiImporterTests
 
         // Must compile — invalid identifiers would cause CS errors
         var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
         Assert.Empty(errors);
@@ -3735,12 +4078,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Duplicate_Values_Are_Deduplicated()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Status": {
                 "type": "integer",
                 "enum": [1, 1, 2]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Status.cs");
@@ -3751,7 +4097,8 @@ public sealed class OpenApiImporterTests
 
         // Must compile — duplicate member names would cause CS errors
         var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
         Assert.Empty(errors);
@@ -3760,7 +4107,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Inline_Integer_Enum_On_Property_Synthesizes_Enum()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "TaskDto": {
                 "type": "object",
                 "properties": {
@@ -3768,7 +4116,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["status"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var dtoContent = CompilationHelper.FindFile(result, "TaskDto.cs");
@@ -3778,7 +4128,8 @@ public sealed class OpenApiImporterTests
 
         // The synthesized enum file should exist with explicit values
         var enumFile = result.Files.FirstOrDefault(f =>
-            f.Content.Contains("public enum") && f.Content.Contains("= 0,"));
+            f.Content.Contains("public enum") && f.Content.Contains("= 0,")
+        );
         Assert.NotNull(enumFile);
         Assert.Contains("Value0 = 0,", enumFile.Content);
         Assert.Contains("Value1 = 1,", enumFile.Content);
@@ -3788,7 +4139,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Single_Value_IntEnum_Falls_Through_To_Long()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Constant": {
                 "type": "integer",
                 "enum": [42]
@@ -3800,7 +4152,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["code"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -3812,14 +4166,20 @@ public sealed class OpenApiImporterTests
         Assert.Contains("long Code", dtoContent);
 
         // Never silently: the dropped enum constraint emits a named warning (I.A-15)
-        Assert.Contains(result.Warnings, w =>
-            w.StartsWith("RIV3012: Enum constraint dropped") && w.Contains("[42]") && w.Contains("'long'"));
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.StartsWith("RIV3012: Enum constraint dropped")
+                && w.Contains("[42]")
+                && w.Contains("'long'")
+        );
     }
 
     [Fact]
     public void Single_Value_Untyped_IntEnum_Falls_Through()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "SingleVal": {
                 "enum": [42]
             },
@@ -3830,7 +4190,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["val"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -3842,14 +4204,20 @@ public sealed class OpenApiImporterTests
         Assert.Contains("string Val", dtoContent);
 
         // Never silently: the dropped enum constraint emits a named warning (I.A-15)
-        Assert.Contains(result.Warnings, w =>
-            w.StartsWith("RIV3012: Enum constraint dropped") && w.Contains("[42]") && w.Contains("'string'"));
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.StartsWith("RIV3012: Enum constraint dropped")
+                && w.Contains("[42]")
+                && w.Contains("'string'")
+        );
     }
 
     [Fact]
     public void Float_Enum_Values_Not_Classified_As_IntEnum()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "MixedVals": {
                 "type": "integer",
                 "enum": [1, 2, 3.5]
@@ -3861,7 +4229,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["code"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -3873,14 +4243,20 @@ public sealed class OpenApiImporterTests
         Assert.Contains("long Code", dtoContent);
 
         // Never silently: the dropped enum constraint emits a named warning (I.A-15)
-        Assert.Contains(result.Warnings, w =>
-            w.StartsWith("RIV3012: Enum constraint dropped") && w.Contains("3.5") && w.Contains("'long'"));
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.StartsWith("RIV3012: Enum constraint dropped")
+                && w.Contains("3.5")
+                && w.Contains("'long'")
+        );
     }
 
     [Fact]
     public void Untyped_Float_Enum_Values_Not_Classified_As_IntEnum()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "FloatVals": {
                 "enum": [1.5, 2.5]
             },
@@ -3891,7 +4267,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["val"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -3907,7 +4285,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Value_Exceeding_Int32_Range_Falls_Through_To_Long()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "BigVals": {
                 "type": "integer",
                 "enum": [1, 2147483648]
@@ -3919,7 +4298,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["code"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -3930,14 +4311,20 @@ public sealed class OpenApiImporterTests
         Assert.Contains("long Code", dtoContent);
 
         // Never silently: the dropped enum constraint emits a named warning (I.A-15)
-        Assert.Contains(result.Warnings, w =>
-            w.StartsWith("RIV3012: Enum constraint dropped") && w.Contains("2147483648") && w.Contains("'long'"));
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.StartsWith("RIV3012: Enum constraint dropped")
+                && w.Contains("2147483648")
+                && w.Contains("'long'")
+        );
     }
 
     [Fact]
     public void Two_Value_IntEnum_Is_Classified_As_Enum()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Toggle": {
                 "type": "integer",
                 "enum": [0, 1]
@@ -3949,7 +4336,9 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["enabled"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -3968,13 +4357,16 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_With_XEnumVarnames_Uses_Custom_Names()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "integer",
                 "enum": [0, 1, 2],
                 "x-enum-varnames": ["Low", "Medium", "High"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Priority.cs");
@@ -3990,17 +4382,21 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_With_XEnumVarnames_Compiles()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "integer",
                 "enum": [0, 1, 2],
                 "x-enum-varnames": ["Low", "Medium", "High"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
 
@@ -4010,13 +4406,16 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_XEnumVarnames_Are_Sanitised()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "integer",
                 "enum": [0, 1],
                 "x-enum-varnames": ["low_priority", "high-priority"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Priority.cs");
@@ -4028,13 +4427,16 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_XEnumVarnames_Count_Mismatch_Falls_Back()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "integer",
                 "enum": [0, 1, 2],
                 "x-enum-varnames": ["Low", "High"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Priority.cs");
@@ -4049,12 +4451,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Without_XEnumVarnames_Uses_ValueN_Fallback()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "integer",
                 "enum": [0, 1, 2]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Priority.cs");
@@ -4067,12 +4472,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void StringEnum_Does_Not_Have_JsonNumberEnumConverter()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Color": {
                 "type": "string",
                 "enum": ["red", "green", "blue"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Color.cs");
@@ -4083,7 +4491,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_With_JsonConverter_Compiles()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "StatusCode": {
                 "type": "integer",
                 "enum": [1, 2, 3]
@@ -4095,14 +4504,20 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["status"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var enumContent = CompilationHelper.FindFile(result, "StatusCode.cs");
-        Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<StatusCode>))]", enumContent);
+        Assert.Contains(
+            "[JsonConverter(typeof(JsonNumberEnumConverter<StatusCode>))]",
+            enumContent
+        );
 
         var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
 
@@ -4112,12 +4527,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Serialises_As_Number()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "integer",
                 "enum": [0, 1, 2]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Priority.cs");
@@ -4129,12 +4547,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Has_JsonNumberEnumConverter_Attribute()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "StatusCode": {
                 "type": "integer",
                 "enum": [1, 2, 3]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "StatusCode.cs");
@@ -4148,12 +4569,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Deserialises_From_Number()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "integer",
                 "enum": [0, 1, 2]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Priority.cs");
@@ -4165,12 +4589,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Untyped_With_XEnumVarnames_Uses_Custom_Names()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Severity": {
                 "enum": [10, 20, 30],
                 "x-enum-varnames": ["Info", "Warning", "Error"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Severity.cs");
@@ -4186,13 +4613,16 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_XEnumVarnames_Duplicate_After_Sanitisation_Are_Deduplicated()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "integer",
                 "enum": [0, 1],
                 "x-enum-varnames": ["low_val", "lowVal"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Priority.cs");
@@ -4201,7 +4631,8 @@ public sealed class OpenApiImporterTests
         Assert.Contains("LowVal_2 = 1", content);
 
         var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
         Assert.Empty(errors);
@@ -4210,12 +4641,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Serialisation_RoundTrip_Produces_Number()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "integer",
                 "enum": [0, 1, 2]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var compilation = CompilationHelper.CompileImportResult(result);
@@ -4249,11 +4683,14 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void WriteEnum_StringBacked_Preserves_JsonStringEnumMemberName()
     {
-        var enumDef = new GeneratedEnum("Status", [
-            new GeneratedEnumMember("Active", "active"),
-            new GeneratedEnumMember("Inactive", "inactive"),
-            new GeneratedEnumMember("Archived", null),
-        ]);
+        var enumDef = new GeneratedEnum(
+            "Status",
+            [
+                new GeneratedEnumMember("Active", "active"),
+                new GeneratedEnumMember("Inactive", "inactive"),
+                new GeneratedEnumMember("Archived", null),
+            ]
+        );
 
         var output = CSharpWriter.WriteEnum(enumDef, "Test");
 
@@ -4269,13 +4706,16 @@ public sealed class OpenApiImporterTests
         // varnames: Foo, Foo, Foo_2
         // Old logic: Foo (ok), Foo_2 (deduped from Foo), Foo_2 (natural) → collision!
         // New logic: Foo, Foo_2, Foo_2_2 — all unique
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Priority": {
                 "type": "integer",
                 "enum": [0, 1, 2],
                 "x-enum-varnames": ["Foo", "Foo", "Foo_2"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Priority.cs");
@@ -4287,7 +4727,8 @@ public sealed class OpenApiImporterTests
 
         // Must compile — CS0102 would indicate collision
         var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
         Assert.Empty(errors);
@@ -4300,13 +4741,16 @@ public sealed class OpenApiImporterTests
         // so when the third "A" dedupes, suffix _2 is already taken → must skip to _3
         // Old dict logic: A, A_2, A_2 — collision (dict doesn't know A_2 was emitted naturally)
         // New HashSet logic: A, A_2, A_3 — correct (while loop skips taken _2)
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Level": {
                 "type": "integer",
                 "enum": [0, 1, 2],
                 "x-enum-varnames": ["A", "A_2", "A"]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Level.cs");
@@ -4316,7 +4760,8 @@ public sealed class OpenApiImporterTests
         Assert.Contains("A_3 = 2", content);
 
         var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
         Assert.Empty(errors);
@@ -4325,12 +4770,15 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void IntEnum_Triple_Duplicate_Values_Produce_Unique_Names()
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Status": {
                 "type": "integer",
                 "enum": [1, 1, 1]
             }
-            """, title: "API");
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Status.cs");
@@ -4341,7 +4789,8 @@ public sealed class OpenApiImporterTests
 
         // Must compile — duplicate member names would cause CS0102
         var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation.GetDiagnostics()
+        var errors = compilation
+            .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
         Assert.Empty(errors);
@@ -4354,40 +4803,45 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/media/{id}/stream": {
-                    "get": {
-                        "operationId": "media_streamVideo",
-                        "tags": ["Media"],
-                        "parameters": [
-                            {
-                                "name": "id",
-                                "in": "path",
-                                "required": true,
-                                "schema": { "type": "string" }
-                            },
-                            {
-                                "name": "token",
-                                "in": "query",
-                                "required": true,
-                                "schema": { "type": "string" }
-                            }
-                        ],
-                        "x-rivet-query-auth": { "parameterName": "token" },
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "video/mp4": {
-                                        "schema": { "type": "string", "format": "binary" }
-                                    }
+            "/api/media/{id}/stream": {
+                "get": {
+                    "operationId": "media_streamVideo",
+                    "tags": ["Media"],
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        },
+                        {
+                            "name": "token",
+                            "in": "query",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "x-rivet-query-auth": { "parameterName": "token" },
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "video/mp4": {
+                                    "schema": { "type": "string", "format": "binary" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "MediaContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "MediaContract.cs"
+        );
 
         Assert.Contains("Define.File", content);
         Assert.Contains(".QueryAuth()", content);
@@ -4402,40 +4856,45 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/audio/{id}": {
-                    "get": {
-                        "operationId": "audio_stream",
-                        "tags": ["Audio"],
-                        "parameters": [
-                            {
-                                "name": "id",
-                                "in": "path",
-                                "required": true,
-                                "schema": { "type": "string" }
-                            },
-                            {
-                                "name": "key",
-                                "in": "query",
-                                "required": true,
-                                "schema": { "type": "string" }
-                            }
-                        ],
-                        "x-rivet-query-auth": { "parameterName": "key" },
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "audio/mpeg": {
-                                        "schema": { "type": "string", "format": "binary" }
-                                    }
+            "/api/audio/{id}": {
+                "get": {
+                    "operationId": "audio_stream",
+                    "tags": ["Audio"],
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        },
+                        {
+                            "name": "key",
+                            "in": "query",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "x-rivet-query-auth": { "parameterName": "key" },
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "audio/mpeg": {
+                                    "schema": { "type": "string", "format": "binary" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "AudioContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "AudioContract.cs"
+        );
 
         Assert.Contains(".QueryAuth(\"key\")", content);
         // Key param should not appear as an input field
@@ -4447,40 +4906,45 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "UserDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "UserDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/users/{id}": {
-                    "get": {
-                        "operationId": "users_get",
-                        "tags": ["Users"],
-                        "parameters": [
-                            {
-                                "name": "id",
-                                "in": "path",
-                                "required": true,
-                                "schema": { "type": "string" }
-                            }
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/UserDto" }
-                                    }
+            "/api/users/{id}": {
+                "get": {
+                    "operationId": "users_get",
+                    "tags": ["Users"],
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/UserDto" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "UsersContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "UsersContract.cs"
+        );
 
         Assert.DoesNotContain("QueryAuth", content);
         Assert.DoesNotContain("Define.File", content);
@@ -4492,25 +4956,30 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/avatar": {
-                    "get": {
-                        "operationId": "avatar_get",
-                        "tags": ["Avatar"],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "image/png": {
-                                        "schema": { "type": "string", "format": "binary" }
-                                    }
+            "/api/avatar": {
+                "get": {
+                    "operationId": "avatar_get",
+                    "tags": ["Avatar"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "image/png": {
+                                    "schema": { "type": "string", "format": "binary" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "AvatarContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "AvatarContract.cs"
+        );
 
         Assert.Contains("Define.File", content);
         Assert.Contains("FileRouteDefinition", content);
@@ -4524,42 +4993,47 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/reports/generate": {
-                    "post": {
-                        "operationId": "reports_generate",
-                        "tags": ["Reports"],
-                        "requestBody": {
-                            "required": true,
-                            "content": {
-                                "application/json": {
-                                    "schema": {
-                                        "type": "object",
-                                        "properties": {
-                                            "format": { "type": "string" }
-                                        },
-                                        "required": ["format"]
-                                    }
+            "/api/reports/generate": {
+                "post": {
+                    "operationId": "reports_generate",
+                    "tags": ["Reports"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "format": { "type": "string" }
+                                    },
+                                    "required": ["format"]
                                 }
                             }
-                        },
-                        "responses": {
-                            "200": {
-                                "description": "PDF report",
-                                "content": {
-                                    "application/pdf": {
-                                        "schema": {
-                                            "type": "string",
-                                            "format": "binary"
-                                        }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "PDF report",
+                            "content": {
+                                "application/pdf": {
+                                    "schema": {
+                                        "type": "string",
+                                        "format": "binary"
                                     }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
-        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "ReportsContract.cs");
+        var content = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "ReportsContract.cs"
+        );
 
         // Non-GET binary endpoint must use Define.Post().ProducesFile(), NOT Define.File()
         Assert.Contains("Define.Post", content);
@@ -4573,38 +5047,40 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
-                "/api/media/{id}/stream": {
-                    "get": {
-                        "operationId": "media_streamVideo",
-                        "tags": ["Media"],
-                        "parameters": [
-                            {
-                                "name": "id",
-                                "in": "path",
-                                "required": true,
-                                "schema": { "type": "string" }
-                            },
-                            {
-                                "name": "token",
-                                "in": "query",
-                                "required": true,
-                                "schema": { "type": "string" }
-                            }
-                        ],
-                        "x-rivet-query-auth": { "parameterName": "token" },
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "video/mp4": {
-                                        "schema": { "type": "string", "format": "binary" }
-                                    }
+            "/api/media/{id}/stream": {
+                "get": {
+                    "operationId": "media_streamVideo",
+                    "tags": ["Media"],
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        },
+                        {
+                            "name": "token",
+                            "in": "query",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "x-rivet-query-auth": { "parameterName": "token" },
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "video/mp4": {
+                                    "schema": { "type": "string", "format": "binary" }
                                 }
                             }
                         }
                     }
                 }
-                """, title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         // Import → compile → walk → assert QueryAuth survives
         var result = CompilationHelper.Import(spec);
@@ -4626,17 +5102,18 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string", "minLength": 3, "maxLength": 50 }
-                    },
-                    "required": ["name"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "minLength": 3, "maxLength": 50 }
+                },
+                "required": ["name"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("[StringLength(50, MinimumLength = 3)]", content);
@@ -4649,17 +5126,18 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string", "minLength": 1 }
-                    },
-                    "required": ["name"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "minLength": 1 }
+                },
+                "required": ["name"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("[MinLength(1)]", content);
@@ -4671,17 +5149,18 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string", "maxLength": 100 }
-                    },
-                    "required": ["name"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "maxLength": 100 }
+                },
+                "required": ["name"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("[MaxLength(100)]", content);
@@ -4693,17 +5172,18 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "score": { "type": "number", "minimum": 0, "maximum": 100 }
-                    },
-                    "required": ["score"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "score": { "type": "number", "minimum": 0, "maximum": 100 }
+                },
+                "required": ["score"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("[RangeAttribute(0, 100)]", content);
@@ -4715,17 +5195,18 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "code": { "type": "string", "pattern": "^[A-Z]{3}$" }
-                    },
-                    "required": ["code"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "code": { "type": "string", "pattern": "^[A-Z]{3}$" }
+                },
+                "required": ["code"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("[RegularExpression(\"^[A-Z]{3}$\")]", content);
@@ -4737,22 +5218,26 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "value": { "type": "number", "multipleOf": 0.5 },
-                        "tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 10, "uniqueItems": true }
-                    },
-                    "required": ["value", "tags"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "value": { "type": "number", "multipleOf": 0.5 },
+                    "tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 10, "uniqueItems": true }
+                },
+                "required": ["value", "tags"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("RivetConstraints(MultipleOf = 0.5)", content);
-        Assert.Contains("RivetConstraints(MinItems = 1, MaxItems = 10, UniqueItems = true)", content);
+        Assert.Contains(
+            "RivetConstraints(MinItems = 1, MaxItems = 10, UniqueItems = true)",
+            content
+        );
         Assert.DoesNotContain("StringLength", content);
         Assert.DoesNotContain("RegularExpression", content);
     }
@@ -4762,17 +5247,18 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string", "minLength": 1 }
-                    },
-                    "required": ["name"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "minLength": 1 }
+                },
+                "required": ["name"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("using System.ComponentModel.DataAnnotations;", content);
@@ -4783,17 +5269,18 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "value": { "type": "number", "multipleOf": 0.5 }
-                    },
-                    "required": ["value"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "value": { "type": "number", "multipleOf": 0.5 }
+                },
+                "required": ["value"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.DoesNotContain("System.ComponentModel.DataAnnotations", content);
@@ -4805,17 +5292,18 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "score": { "type": "number", "minimum": 0 }
-                    },
-                    "required": ["score"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "score": { "type": "number", "minimum": 0 }
+                },
+                "required": ["score"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("[RangeAttribute(0, double.MaxValue)]", content);
@@ -4827,17 +5315,18 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "score": { "type": "number", "maximum": 100 }
-                    },
-                    "required": ["score"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "score": { "type": "number", "maximum": 100 }
+                },
+                "required": ["score"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("[RangeAttribute(double.MinValue, 100)]", content);
@@ -4853,18 +5342,19 @@ public sealed class OpenApiImporterTests
         // property form instead (docs/guides/runtime-validation.md).
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string", "minLength": 3, "maxLength": 50 },
-                        "nickname": { "type": "string" }
-                    },
-                    "required": ["name"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "minLength": 3, "maxLength": 50 },
+                    "nickname": { "type": "string" }
+                },
+                "required": ["name"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.DoesNotContain("[property:", content);
@@ -4882,17 +5372,18 @@ public sealed class OpenApiImporterTests
         // so neither the serializer nor the round-tripped spec drift.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "equals": { "type": "string" },
-                        "toString": { "type": "string" }
-                    }
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "equals": { "type": "string" },
+                    "toString": { "type": "string" }
                 }
-                """,
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("[property: JsonPropertyName(\"equals\")]", content);
@@ -4911,19 +5402,20 @@ public sealed class OpenApiImporterTests
         // the wire field. camelCase keys need no pin.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "user_id": { "type": "string" },
-                        "Status": { "type": "string" },
-                        "displayName": { "type": "string" }
-                    },
-                    "required": ["user_id", "Status", "displayName"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "user_id": { "type": "string" },
+                    "Status": { "type": "string" },
+                    "displayName": { "type": "string" }
+                },
+                "required": ["user_id", "Status", "displayName"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("[property: JsonPropertyName(\"user_id\")]", content);
@@ -4940,28 +5432,36 @@ public sealed class OpenApiImporterTests
         // must reproduce the original property keys, not camelCase(member).
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "user_id": { "type": "string" },
-                        "equals": { "type": "string" }
-                    },
-                    "required": ["user_id"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "user_id": { "type": "string" },
+                    "equals": { "type": "string" }
+                },
+                "required": ["user_id"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var compilation = CompilationHelper.CompileImportResult(CompilationHelper.Import(spec));
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var emitted = Rivet.Tool.Emit.OpenApiEmitter.Emit(
-            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         using var document = System.Text.Json.JsonDocument.Parse(emitted);
-        var properties = document.RootElement
-            .GetProperty("components").GetProperty("schemas")
-            .GetProperty("Dto").GetProperty("properties");
+        var properties = document
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Dto")
+            .GetProperty("properties");
         Assert.True(properties.TryGetProperty("user_id", out _));
         Assert.True(properties.TryGetProperty("equals", out _));
         Assert.False(properties.TryGetProperty("userId", out _));
@@ -4976,16 +5476,17 @@ public sealed class OpenApiImporterTests
         // re-emits oneOf and the attribute's converter serializes the bare variant.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "title": { "oneOf": [ { "type": "string" }, { "type": "integer" } ] }
-                    }
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "title": { "oneOf": [ { "type": "string" }, { "type": "integer" } ] }
                 }
-                """,
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var wrapper = CompilationHelper.FindFile(result, "DtoTitle.cs");
@@ -4999,29 +5500,38 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "required": ["title"],
-                    "properties": {
-                        "title": { "oneOf": [ { "type": "string" }, { "type": "integer" } ] }
-                    }
+            "Dto": {
+                "type": "object",
+                "required": ["title"],
+                "properties": {
+                    "title": { "oneOf": [ { "type": "string" }, { "type": "integer" } ] }
                 }
-                """,
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var compilation = CompilationHelper.CompileImportResult(CompilationHelper.Import(spec));
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var emitted = Rivet.Tool.Emit.OpenApiEmitter.Emit(
-            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         using var document = System.Text.Json.JsonDocument.Parse(emitted);
 
-        var wrapperSchema = document.RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("DtoTitle");
+        var wrapperSchema = document
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("DtoTitle");
         Assert.True(wrapperSchema.TryGetProperty("oneOf", out var oneOf));
-        var variantTypes = oneOf.EnumerateArray()
+        var variantTypes = oneOf
+            .EnumerateArray()
             .Select(variant => variant.GetProperty("type").GetString())
             .ToList();
         Assert.Contains("string", variantTypes);
@@ -5093,12 +5603,13 @@ public sealed class OpenApiImporterTests
         // ...CustomHostname vs ...Customhostname left a dangling type ref).
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "custom-hostname": { "type": "object", "properties": { "id": { "type": "string" } } },
-                "custom_hostname": { "type": "object", "properties": { "name": { "type": "string" } } }
-                """,
+            "custom-hostname": { "type": "object", "properties": { "id": { "type": "string" } } },
+            "custom_hostname": { "type": "object", "properties": { "name": { "type": "string" } } }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/custom-hostname" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/custom-hostname" } } } } } } }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var fileNames = result.Files.Select(f => f.FileName).ToList();
@@ -5109,7 +5620,8 @@ public sealed class OpenApiImporterTests
         Assert.Empty(caseCollisions);
 
         // Both shapes must survive as distinct compilable types.
-        var compileErrors = CompilationHelper.CompileImportResult(result)
+        var compileErrors = CompilationHelper
+            .CompileImportResult(result)
             .GetDiagnostics()
             .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
             .ToList();
@@ -5121,17 +5633,18 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "Dto": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string" }
-                    },
-                    "required": ["name"]
-                }
-                """,
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" }
+                },
+                "required": ["name"]
+            }
+            """,
             paths: """
-                "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
-                """);
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("public sealed record Dto(", content);
@@ -5144,7 +5657,8 @@ public sealed class OpenApiImporterTests
     {
         // Base ← Mid (allOf[Base] + own sibling props) ← Leaf (allOf[Mid] + own sibling props).
         // The middle layer's OWN properties must reach the descendant.
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Base": {
                 "type": "object",
                 "properties": { "id": { "type": "string" } },
@@ -5160,7 +5674,8 @@ public sealed class OpenApiImporterTests
                 "properties": { "leafProp": { "type": "string" } },
                 "required": ["leafProp"]
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var leaf = CompilationHelper.FindFile(result, "Leaf.cs");
@@ -5169,8 +5684,11 @@ public sealed class OpenApiImporterTests
         Assert.Contains("string MidProp", leaf); // was silently dropped (I4)
         Assert.Contains("string LeafProp", leaf);
 
-        var errors = CompilationHelper.CompileImportResult(result).GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        var errors = CompilationHelper
+            .CompileImportResult(result)
+            .GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
         Assert.Empty(errors);
     }
 
@@ -5179,7 +5697,8 @@ public sealed class OpenApiImporterTests
     {
         // The standard "inherit and tighten" pattern: required declared on the composing
         // schema, the property declared on the referenced base.
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Base": {
                 "type": "object",
                 "properties": {
@@ -5191,20 +5710,22 @@ public sealed class OpenApiImporterTests
                 "allOf": [ { "$ref": "#/components/schemas/Base" } ],
                 "required": ["id"]
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var derived = CompilationHelper.FindFile(result, "Derived.cs");
 
         Assert.Contains("string Id", derived);
         Assert.DoesNotContain("string? Id", derived); // was wrongly optional (I8)
-        Assert.Contains("string? Name", derived);     // untouched props stay optional
+        Assert.Contains("string? Name", derived); // untouched props stay optional
     }
 
     [Fact]
     public void AllOf_TopLevel_Required_Reaches_Nested_Layers() // I8 × I4 interaction
     {
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Base": {
                 "type": "object",
                 "properties": { "id": { "type": "string" } }
@@ -5217,7 +5738,8 @@ public sealed class OpenApiImporterTests
                 "allOf": [ { "$ref": "#/components/schemas/Mid" } ],
                 "required": ["id", "midProp"]
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var leaf = CompilationHelper.FindFile(result, "Leaf.cs");
@@ -5233,7 +5755,8 @@ public sealed class OpenApiImporterTests
     {
         // Inline object declaring BOTH properties and additionalProperties: the dictionary
         // side wins, the declared properties are dropped — must not be silent.
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/api/things": {
                 "post": {
                     "operationId": "things_create",
@@ -5253,13 +5776,17 @@ public sealed class OpenApiImporterTests
                     "responses": { "204": { "description": "No Content" } }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ThingsContract.cs");
 
         Assert.Contains("Dictionary<string, string>", contract);
-        Assert.Contains(result.Warnings, w => w.StartsWith("RIV3013: Declared properties dropped", StringComparison.Ordinal));
+        Assert.Contains(
+            result.Warnings,
+            w => w.StartsWith("RIV3013: Declared properties dropped", StringComparison.Ordinal)
+        );
     }
 
     [Fact]
@@ -5267,20 +5794,25 @@ public sealed class OpenApiImporterTests
     {
         // Named schemas take the opposite branch: the record wins, additionalProperties
         // is dropped — equally loud.
-        var spec = CompilationHelper.BuildSpec(schemas: """
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
             "Mixed": {
                 "type": "object",
                 "properties": { "alpha": { "type": "string" } },
                 "additionalProperties": { "type": "string" },
                 "required": ["alpha"]
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var mixed = CompilationHelper.FindFile(result, "Mixed.cs");
 
         Assert.Contains("string Alpha", mixed);
-        Assert.Contains(result.Warnings, w => w.StartsWith("RIV3004: additionalProperties dropped", StringComparison.Ordinal));
+        Assert.Contains(
+            result.Warnings,
+            w => w.StartsWith("RIV3004: additionalProperties dropped", StringComparison.Ordinal)
+        );
     }
 
     [Fact]
@@ -5290,30 +5822,31 @@ public sealed class OpenApiImporterTests
         // 200 wins, and the binary branch's fileContentType must be cleared with it.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ReportDto": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-                """,
+            "ReportDto": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
             paths: """
-                "/api/reports": {
-                    "post": {
-                        "operationId": "reports_create",
-                        "tags": ["Reports"],
-                        "responses": {
-                            "202": {
-                                "description": "Accepted",
-                                "content": { "application/pdf": { "schema": { "type": "string", "format": "binary" } } }
-                            },
-                            "200": {
-                                "description": "OK",
-                                "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReportDto" } } }
-                            }
+            "/api/reports": {
+                "post": {
+                    "operationId": "reports_create",
+                    "tags": ["Reports"],
+                    "responses": {
+                        "202": {
+                            "description": "Accepted",
+                            "content": { "application/pdf": { "schema": { "type": "string", "format": "binary" } } }
+                        },
+                        "200": {
+                            "description": "OK",
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReportDto" } } }
                         }
                     }
                 }
-                """);
+            }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ReportsContract.cs");
@@ -5327,7 +5860,8 @@ public sealed class OpenApiImporterTests
     {
         // `application/json; charset=utf-8` defeats the exact content-type match; the
         // existing unsupported marker gains an explicit reason naming the cause.
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/api/items": {
                 "post": {
                     "operationId": "items_create",
@@ -5343,12 +5877,16 @@ public sealed class OpenApiImporterTests
                     "responses": { "204": { "description": "No Content" } }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
-        Assert.Contains("[rivet:unsupported body content-type=application/json; charset=utf-8 reason=media-type-parameters", contract);
+        Assert.Contains(
+            "[rivet:unsupported body content-type=application/json; charset=utf-8 reason=media-type-parameters",
+            contract
+        );
     }
 
     [Fact]
@@ -5381,7 +5919,10 @@ public sealed class OpenApiImporterTests
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
         Assert.Contains(".Secure(\"alpha\")", contract);
-        Assert.Contains(result.Warnings, w => w.StartsWith("RIV3002: Security schemes dropped", StringComparison.Ordinal));
+        Assert.Contains(
+            result.Warnings,
+            w => w.StartsWith("RIV3002: Security schemes dropped", StringComparison.Ordinal)
+        );
     }
 
     [Fact]
@@ -5414,7 +5955,10 @@ public sealed class OpenApiImporterTests
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
         Assert.Contains(".Secure(\"alpha\")", contract);
-        Assert.Contains("[rivet:unsupported security schemes=alpha, beta reason=multi-scheme-first-only]", contract);
+        Assert.Contains(
+            "[rivet:unsupported security schemes=alpha, beta reason=multi-scheme-first-only]",
+            contract
+        );
     }
 
     [Fact]
@@ -5423,7 +5967,8 @@ public sealed class OpenApiImporterTests
         // P2 wave 5 inverts the old header pin: header params keep their location — the
         // synthesized input property carries [RivetHeader("original-name")] and re-emits
         // as in: header. COOKIE params still erase to query, loudly.
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/api/items/{id}": {
                 "get": {
                     "operationId": "items_get",
@@ -5436,7 +5981,8 @@ public sealed class OpenApiImporterTests
                     "responses": { "204": { "description": "No Content" } }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
@@ -5446,7 +5992,10 @@ public sealed class OpenApiImporterTests
         var inputRecord = CompilationHelper.FindFile(result, "GetInput.cs");
         Assert.Contains("[property: RivetHeader(\"x-trace\")]", inputRecord);
 
-        Assert.Contains("[rivet:unsupported param name=session in=cookie reason=location-erased-to-query]", contract);
+        Assert.Contains(
+            "[rivet:unsupported param name=session in=cookie reason=location-erased-to-query]",
+            contract
+        );
         // path params keep their semantics — no marker
         Assert.DoesNotContain("param name=id", contract);
     }
@@ -5457,7 +6006,8 @@ public sealed class OpenApiImporterTests
         // Accept/Content-Type/Authorization are not legal OpenAPI header parameters —
         // the emitter could never re-emit them (RIV2009), so the importer drops them
         // with a marker instead of writing an unkeepable [RivetHeader] promise.
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/api/items": {
                 "get": {
                     "operationId": "items_list",
@@ -5469,12 +6019,16 @@ public sealed class OpenApiImporterTests
                     "responses": { "204": { "description": "No Content" } }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
-        Assert.Contains("[rivet:unsupported param name=Authorization in=header reason=reserved-header-dropped]", contract);
+        Assert.Contains(
+            "[rivet:unsupported param name=Authorization in=header reason=reserved-header-dropped]",
+            contract
+        );
         var inputRecord = CompilationHelper.FindFile(result, "ListInput.cs");
         Assert.Contains("[property: RivetHeader(\"X-Fine\")]", inputRecord);
         Assert.DoesNotContain("Authorization", inputRecord);
@@ -5485,7 +6039,8 @@ public sealed class OpenApiImporterTests
     {
         // description/deprecated/constraints on parameters don't survive into the
         // synthesized input record — one aggregated marker per endpoint names the params.
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/api/search": {
                 "get": {
                     "operationId": "search_run",
@@ -5497,12 +6052,16 @@ public sealed class OpenApiImporterTests
                     "responses": { "204": { "description": "No Content" } }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "SearchContract.cs");
 
-        Assert.Contains("[rivet:unsupported param-metadata params=q reason=metadata-dropped]", contract);
+        Assert.Contains(
+            "[rivet:unsupported param-metadata params=q reason=metadata-dropped]",
+            contract
+        );
         Assert.DoesNotContain("params=page", contract); // bare params don't trigger it
     }
 
@@ -5511,7 +6070,8 @@ public sealed class OpenApiImporterTests
     {
         // List<IFormFile> previously missed the Microsoft.AspNetCore.Http using
         // (exact-match check) — CS0246 in the scaffold.
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/api/uploads": {
                 "post": {
                     "operationId": "uploads_create",
@@ -5536,16 +6096,20 @@ public sealed class OpenApiImporterTests
                     "responses": { "204": { "description": "No Content" } }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var filesRecord = result.Files.First(f =>
-            f.Content.Contains("List<IFormFile>", StringComparison.Ordinal));
+            f.Content.Contains("List<IFormFile>", StringComparison.Ordinal)
+        );
         Assert.Contains("using Microsoft.AspNetCore.Http;", filesRecord.Content);
 
         var errors = RealWorldImportTests.GetCompilationErrors(result);
-        Assert.True(errors.Count == 0,
-            $"List<IFormFile> scaffold has compile errors:\n{string.Join("\n", errors.Take(5).Select(e => e.ToString()))}");
+        Assert.True(
+            errors.Count == 0,
+            $"List<IFormFile> scaffold has compile errors:\n{string.Join("\n", errors.Take(5).Select(e => e.ToString()))}"
+        );
     }
 
     // ========== I14/I15: params on body-carrying ops + unsupported methods ==========
@@ -5558,33 +6122,34 @@ public sealed class OpenApiImporterTests
         // GETs). Path/query params must merge with the body-derived input record.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "PdfOptions": {
-                    "type": "object",
-                    "properties": {
-                        "expand": { "type": "string" }
-                    }
+            "PdfOptions": {
+                "type": "object",
+                "properties": {
+                    "expand": { "type": "string" }
                 }
-                """,
+            }
+            """,
             paths: """
-                "/v1/quotes/{quote}/pdf": {
-                    "get": {
-                        "operationId": "getQuotePdf",
-                        "tags": ["Quotes"],
-                        "parameters": [
-                            { "name": "quote", "in": "path", "required": true, "schema": { "type": "string" } },
-                            { "name": "version", "in": "query", "required": false, "schema": { "type": "integer" } }
-                        ],
-                        "requestBody": {
-                            "content": {
-                                "application/x-www-form-urlencoded": {
-                                    "schema": { "$ref": "#/components/schemas/PdfOptions" }
-                                }
+            "/v1/quotes/{quote}/pdf": {
+                "get": {
+                    "operationId": "getQuotePdf",
+                    "tags": ["Quotes"],
+                    "parameters": [
+                        { "name": "quote", "in": "path", "required": true, "schema": { "type": "string" } },
+                        { "name": "version", "in": "query", "required": false, "schema": { "type": "integer" } }
+                    ],
+                    "requestBody": {
+                        "content": {
+                            "application/x-www-form-urlencoded": {
+                                "schema": { "$ref": "#/components/schemas/PdfOptions" }
                             }
-                        },
-                        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "string" } } } } } } }
-                    }
+                        }
+                    },
+                    "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "string" } } } } } } }
                 }
-                """);
+            }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
 
@@ -5609,32 +6174,33 @@ public sealed class OpenApiImporterTests
         // merged query param's location is erased — diagnosed per param, never silent.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "UpdatePet": {
-                    "type": "object",
-                    "properties": { "name": { "type": "string" } },
-                    "required": ["name"]
-                }
-                """,
+            "UpdatePet": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"]
+            }
+            """,
             paths: """
-                "/pets/{petId}": {
-                    "post": {
-                        "operationId": "updatePet",
-                        "tags": ["Pets"],
-                        "parameters": [
-                            { "name": "petId", "in": "path", "required": true, "schema": { "type": "string" } },
-                            { "name": "notify", "in": "query", "required": false, "schema": { "type": "boolean" } }
-                        ],
-                        "requestBody": {
-                            "content": {
-                                "application/json": {
-                                    "schema": { "$ref": "#/components/schemas/UpdatePet" }
-                                }
+            "/pets/{petId}": {
+                "post": {
+                    "operationId": "updatePet",
+                    "tags": ["Pets"],
+                    "parameters": [
+                        { "name": "petId", "in": "path", "required": true, "schema": { "type": "string" } },
+                        { "name": "notify", "in": "query", "required": false, "schema": { "type": "boolean" } }
+                    ],
+                    "requestBody": {
+                        "content": {
+                            "application/json": {
+                                "schema": { "$ref": "#/components/schemas/UpdatePet" }
                             }
-                        },
-                        "responses": { "204": { "description": "No Content" } }
-                    }
+                        }
+                    },
+                    "responses": { "204": { "description": "No Content" } }
                 }
-                """);
+            }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "PetsContract.cs");
@@ -5647,7 +6213,10 @@ public sealed class OpenApiImporterTests
         Assert.Contains("string Name", input);
 
         // ...and the query param's location erasure is marked loudly.
-        Assert.Contains("// [rivet:unsupported param name=notify in=query reason=location-erased-to-body]", contract);
+        Assert.Contains(
+            "// [rivet:unsupported param name=notify in=query reason=location-erased-to-body]",
+            contract
+        );
     }
 
     [Fact]
@@ -5655,47 +6224,48 @@ public sealed class OpenApiImporterTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "AlphaBody": {
-                    "type": "object",
-                    "properties": { "name": { "type": "string" } },
-                    "required": ["name"]
-                },
-                "BetaBody": {
-                    "type": "object",
-                    "properties": { "name": { "type": "string" } },
-                    "required": ["name"]
-                }
-                """,
+            "AlphaBody": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"]
+            },
+            "BetaBody": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"]
+            }
+            """,
             paths: """
-                "/alpha/{id}": {
-                    "post": {
-                        "operationId": "update",
-                        "tags": ["Alpha"],
-                        "parameters": [
-                            { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
-                        ],
-                        "requestBody": {
-                            "required": false,
-                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AlphaBody" } } }
-                        },
-                        "responses": { "204": { "description": "No Content" } }
-                    }
-                },
-                "/beta/{id}": {
-                    "post": {
-                        "operationId": "update",
-                        "tags": ["Beta"],
-                        "parameters": [
-                            { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
-                        ],
-                        "requestBody": {
-                            "required": true,
-                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BetaBody" } } }
-                        },
-                        "responses": { "204": { "description": "No Content" } }
-                    }
+            "/alpha/{id}": {
+                "post": {
+                    "operationId": "update",
+                    "tags": ["Alpha"],
+                    "parameters": [
+                        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                    ],
+                    "requestBody": {
+                        "required": false,
+                        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AlphaBody" } } }
+                    },
+                    "responses": { "204": { "description": "No Content" } }
                 }
-                """);
+            },
+            "/beta/{id}": {
+                "post": {
+                    "operationId": "update",
+                    "tags": ["Beta"],
+                    "parameters": [
+                        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                    ],
+                    "requestBody": {
+                        "required": true,
+                        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BetaBody" } } }
+                    },
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var alphaContract = CompilationHelper.FindFile(result, "AlphaContract.cs");
@@ -5705,24 +6275,48 @@ public sealed class OpenApiImporterTests
         Assert.Contains("[RivetRequestBody(typeof(BetaBody))]", betaContract);
         Assert.DoesNotContain(
             result.Files.Where(file => file.FileName.Contains("Types/", StringComparison.Ordinal)),
-            file => file.Content.Contains("RivetRequestBody", StringComparison.Ordinal));
+            file => file.Content.Contains("RivetRequestBody", StringComparison.Ordinal)
+        );
 
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emitted = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var emitted = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         var document = JsonSerializer.Deserialize<JsonElement>(emitted);
 
-        var alphaBody = document.GetProperty("paths").GetProperty("/alpha/{id}").GetProperty("post")
+        var alphaBody = document
+            .GetProperty("paths")
+            .GetProperty("/alpha/{id}")
+            .GetProperty("post")
             .GetProperty("requestBody");
         Assert.False(alphaBody.GetProperty("required").GetBoolean());
-        Assert.Contains("AlphaBody", alphaBody.GetProperty("content").GetProperty("application/json")
-            .GetProperty("schema").GetRawText());
+        Assert.Contains(
+            "AlphaBody",
+            alphaBody
+                .GetProperty("content")
+                .GetProperty("application/json")
+                .GetProperty("schema")
+                .GetRawText()
+        );
         Assert.EndsWith(
             "/BetaBody",
-            document.GetProperty("paths").GetProperty("/beta/{id}").GetProperty("post")
-                .GetProperty("requestBody").GetProperty("content").GetProperty("application/json")
-                .GetProperty("schema").GetProperty("$ref").GetString());
+            document
+                .GetProperty("paths")
+                .GetProperty("/beta/{id}")
+                .GetProperty("post")
+                .GetProperty("requestBody")
+                .GetProperty("content")
+                .GetProperty("application/json")
+                .GetProperty("schema")
+                .GetProperty("$ref")
+                .GetString()
+        );
     }
 
     [Fact]
@@ -5730,7 +6324,8 @@ public sealed class OpenApiImporterTests
     {
         // A body that is not a plain record (here: an array) cannot merge with params —
         // each param is dropped LOUDLY via a named marker instead of silently.
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/batch/{groupId}": {
                 "post": {
                     "operationId": "batchUpdate",
@@ -5748,7 +6343,8 @@ public sealed class OpenApiImporterTests
                     "responses": { "204": { "description": "No Content" } }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "BatchContract.cs");
@@ -5758,7 +6354,10 @@ public sealed class OpenApiImporterTests
         Assert.DoesNotContain("BatchUpdateInput", contract);
 
         // ...and the absence of the param is paired with a named diagnostic.
-        Assert.Contains("// [rivet:unsupported param name=groupId in=path reason=dropped-unmergeable-body body-type=List<string>]", contract);
+        Assert.Contains(
+            "// [rivet:unsupported param name=groupId in=path reason=dropped-unmergeable-body body-type=List<string>]",
+            contract
+        );
     }
 
     [Fact]
@@ -5766,7 +6365,8 @@ public sealed class OpenApiImporterTests
     {
         // I15: HEAD/OPTIONS/TRACE have no contract representation; the ops used to be
         // skipped with zero diagnostics. Their absence must pair with a named warning.
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/health": {
                 "get": {
                     "operationId": "getHealth",
@@ -5784,7 +6384,8 @@ public sealed class OpenApiImporterTests
                     "responses": { "204": { "description": "No Content" } }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "HealthContract.cs");
@@ -5795,9 +6396,17 @@ public sealed class OpenApiImporterTests
         Assert.DoesNotContain("OptionsHealth", contract);
 
         // ...and each absence is a named warning (ratcheted category: operation-method-dropped).
-        Assert.Contains(result.Warnings, w =>
-            w.StartsWith("RIV3003: Operation dropped: HEAD /health", StringComparison.Ordinal));
-        Assert.Contains(result.Warnings, w =>
-            w.StartsWith("RIV3003: Operation dropped: OPTIONS /health", StringComparison.Ordinal));
+        Assert.Contains(
+            result.Warnings,
+            w => w.StartsWith("RIV3003: Operation dropped: HEAD /health", StringComparison.Ordinal)
+        );
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.StartsWith(
+                    "RIV3003: Operation dropped: OPTIONS /health",
+                    StringComparison.Ordinal
+                )
+        );
     }
 }

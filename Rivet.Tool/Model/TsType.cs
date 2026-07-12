@@ -1,5 +1,5 @@
-using System.Text.Json.Serialization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Rivet.Tool.Model;
 
@@ -14,7 +14,8 @@ public abstract record TsType
 
     /// <summary>Leaf type: "string", "number", "boolean", "unknown". Optional Format for OpenAPI/JSON Schema.
     /// CSharpType is set when the C# type can't be recovered from Name+Format alone (e.g. DateTimeOffset, uint).</summary>
-    public sealed record Primitive(string Name, string? Format = null, string? CSharpType = null) : TsType;
+    public sealed record Primitive(string Name, string? Format = null, string? CSharpType = null)
+        : TsType;
 
     /// <summary>T | null.</summary>
     public sealed record Nullable(TsType Inner) : TsType;
@@ -59,7 +60,10 @@ public abstract record TsType
     }
 
     /// <summary>Discriminated union of object-like variants keyed by a shared string-literal field.</summary>
-    public sealed record TaggedUnion(string Discriminator, IReadOnlyList<TaggedUnionVariant> Variants) : TsType;
+    public sealed record TaggedUnion(
+        string Discriminator,
+        IReadOnlyList<TaggedUnionVariant> Variants
+    ) : TsType;
 
     /// <summary>An undiscriminated union (oneOf without discriminator) — [RivetUnion] wrappers.</summary>
     public sealed record Union(IReadOnlyList<TsType> Variants) : TsType;
@@ -91,10 +95,16 @@ public abstract record TsType
             // Wrapper<{value:string}> and Wrapper<{value:number}> collide on "Wrapper_Value"
             // and silently overwrite each other's component schema (E2).
             InlineObject obj => obj.Fields.Count <= 3
-                ? string.Join("_", obj.Fields.Select(f =>
-                    char.ToUpperInvariant(f.Name[0]) + f.Name[1..] + "_" + GetNameSuffix(f.Type)))
+                ? string.Join(
+                    "_",
+                    obj.Fields.Select(f =>
+                        char.ToUpperInvariant(f.Name[0]) + f.Name[1..] + "_" + GetNameSuffix(f.Type)
+                    )
+                )
                 : "Object",
-            TaggedUnion tu => char.ToUpperInvariant(tu.Discriminator[0]) + tu.Discriminator[1..] + "Union",
+            TaggedUnion tu => char.ToUpperInvariant(tu.Discriminator[0])
+                + tu.Discriminator[1..]
+                + "Union",
             Union u => string.Concat(u.Variants.Select(GetNameSuffix)) + "Union",
             _ => "Unknown",
         };
@@ -120,13 +130,28 @@ public abstract record TsType
             Nullable n => new Nullable(ResolveTypeParams(n.Inner, map)),
             Dictionary d => new Dictionary(
                 ResolveTypeParams(d.Value, map),
-                d.Key is null ? null : ResolveTypeParams(d.Key, map)),
-            Generic g => new Generic(g.Name, g.TypeArguments.Select(a => ResolveTypeParams(a, map)).ToList()),
-            InlineObject obj => new InlineObject(obj.Fields.Select(f =>
-                new InlineObjectField(f.Name, ResolveTypeParams(f.Type, map), f.Optional)).ToList()),
+                d.Key is null ? null : ResolveTypeParams(d.Key, map)
+            ),
+            Generic g => new Generic(
+                g.Name,
+                g.TypeArguments.Select(a => ResolveTypeParams(a, map)).ToList()
+            ),
+            InlineObject obj => new InlineObject(
+                obj.Fields.Select(f => new InlineObjectField(
+                        f.Name,
+                        ResolveTypeParams(f.Type, map),
+                        f.Optional
+                    ))
+                    .ToList()
+            ),
             TaggedUnion tu => new TaggedUnion(
                 tu.Discriminator,
-                tu.Variants.Select(v => new TaggedUnionVariant(v.Tag, ResolveTypeParams(v.Type, map))).ToList()),
+                tu.Variants.Select(v => new TaggedUnionVariant(
+                        v.Tag,
+                        ResolveTypeParams(v.Type, map)
+                    ))
+                    .ToList()
+            ),
             Union u => new Union(u.Variants.Select(v => ResolveTypeParams(v, map)).ToList()),
             _ => type,
         };
@@ -194,12 +219,14 @@ public abstract record TsType
         }
     }
 
-    private static string LiteralNameSuffix(JsonElement value) => value.ValueKind switch
-    {
-        JsonValueKind.String => "Literal" + value.GetString(),
-        JsonValueKind.Number => "Literal" + value.GetRawText().Replace("-", "Negative", StringComparison.Ordinal),
-        JsonValueKind.True => "LiteralTrue",
-        JsonValueKind.False => "LiteralFalse",
-        _ => "Literal",
-    };
+    private static string LiteralNameSuffix(JsonElement value) =>
+        value.ValueKind switch
+        {
+            JsonValueKind.String => "Literal" + value.GetString(),
+            JsonValueKind.Number => "Literal"
+                + value.GetRawText().Replace("-", "Negative", StringComparison.Ordinal),
+            JsonValueKind.True => "LiteralTrue",
+            JsonValueKind.False => "LiteralFalse",
+            _ => "Literal",
+        };
 }

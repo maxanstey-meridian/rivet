@@ -3,10 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "analyze": "gitnexus analyze --skip-agents-md"
+    "analyze": "gitnexus analyze --skip-agents-md",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "fmt": "oxfmt --write docs/.vitepress/config.ts Rivet.Tests/js/test-schemas.mjs",
+    "fmt:check": "oxfmt --check docs/.vitepress/config.ts Rivet.Tests/js/test-schemas.mjs"
   },
   "devDependencies": {
-    "gitnexus": "1.6.5"
+    "gitnexus": "1.6.5",
+    "oxfmt": "0.43.0",
+    "oxlint": "1.58.0"
   },
-"packageManager": "pnpm@10.24.0"
+  "packageManager": "pnpm@10.24.0"
 }

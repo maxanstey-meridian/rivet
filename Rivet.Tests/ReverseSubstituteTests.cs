@@ -51,11 +51,7 @@ public sealed class ReverseSubstituteTests
     {
         // First replacement produces text that contains a later key as substring
         // ListItem → TItem, then naive Item → T would corrupt TItem → TT
-        var map = new Dictionary<string, string>
-        {
-            ["ListItem"] = "TItem",
-            ["Item"] = "T"
-        };
+        var map = new Dictionary<string, string> { ["ListItem"] = "TItem", ["Item"] = "T" };
         var result = SchemaClassifier.ReverseSubstituteTypes("Pair<ListItem, Item>", map);
         Assert.Equal("Pair<TItem, T>", result);
     }
@@ -63,11 +59,7 @@ public sealed class ReverseSubstituteTests
     [Fact]
     public void MultipleTypeParams_IndependentReplacement()
     {
-        var map = new Dictionary<string, string>
-        {
-            ["UserDto"] = "TData",
-            ["ErrorDto"] = "TError"
-        };
+        var map = new Dictionary<string, string> { ["UserDto"] = "TData", ["ErrorDto"] = "TError" };
         var result = SchemaClassifier.ReverseSubstituteTypes("Result<UserDto, ErrorDto>", map);
         Assert.Equal("Result<TData, TError>", result);
     }

@@ -13,7 +13,8 @@ public sealed record TsTypeDefinition
         IReadOnlyList<string> TypeParameters,
         TsType? Type = null,
         IReadOnlyList<TsPropertyDefinition>? Properties = null,
-        string? Description = null)
+        string? Description = null
+    )
     {
         this.Name = Name;
         this.TypeParameters = TypeParameters;
@@ -26,19 +27,18 @@ public sealed record TsTypeDefinition
         string name,
         IReadOnlyList<string> typeParameters,
         IReadOnlyList<TsPropertyDefinition> properties,
-        string? Description = null)
+        string? Description = null
+    )
         : this(name, typeParameters, Type: null, Properties: properties, Description: Description)
-    {
-    }
+    { }
 
     public TsTypeDefinition(
         string name,
         IReadOnlyList<string> typeParameters,
         TsType type,
-        string? Description = null)
-        : this(name, typeParameters, Type: type, Properties: null, Description: Description)
-    {
-    }
+        string? Description = null
+    )
+        : this(name, typeParameters, Type: type, Properties: null, Description: Description) { }
 
     public string Name { get; }
 
@@ -59,14 +59,27 @@ public sealed record TsPropertyDefinition(
     string Name,
     TsType Type,
     [property: JsonPropertyName("optional")] bool IsOptional,
-    [property: JsonPropertyName("deprecated"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsDeprecated = false,
+    [property:
+        JsonPropertyName("deprecated"),
+        JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)
+    ]
+        bool IsDeprecated = false,
     string? Format = null,
     string? DefaultValue = null,
     TsPropertyConstraints? Constraints = null,
     string? Description = null,
     string? Example = null,
-    [property: JsonPropertyName("readOnly"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsReadOnly = false,
-    [property: JsonPropertyName("writeOnly"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsWriteOnly = false);
+    [property:
+        JsonPropertyName("readOnly"),
+        JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)
+    ]
+        bool IsReadOnly = false,
+    [property:
+        JsonPropertyName("writeOnly"),
+        JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)
+    ]
+        bool IsWriteOnly = false
+);
 
 public sealed record TsPropertyConstraints(
     int? MinLength = null,
@@ -79,10 +92,20 @@ public sealed record TsPropertyConstraints(
     double? MultipleOf = null,
     int? MinItems = null,
     int? MaxItems = null,
-    bool? UniqueItems = null)
+    bool? UniqueItems = null
+)
 {
     [JsonIgnore]
-    public bool HasAny => MinLength.HasValue || MaxLength.HasValue || Pattern is not null
-        || Minimum.HasValue || Maximum.HasValue || ExclusiveMinimum.HasValue || ExclusiveMaximum.HasValue
-        || MultipleOf.HasValue || MinItems.HasValue || MaxItems.HasValue || UniqueItems == true;
+    public bool HasAny =>
+        MinLength.HasValue
+        || MaxLength.HasValue
+        || Pattern is not null
+        || Minimum.HasValue
+        || Maximum.HasValue
+        || ExclusiveMinimum.HasValue
+        || ExclusiveMaximum.HasValue
+        || MultipleOf.HasValue
+        || MinItems.HasValue
+        || MaxItems.HasValue
+        || UniqueItems == true;
 }

@@ -21,8 +21,13 @@ internal static class Naming
     /// Deconstruct/EqualityContract collide with record-synthesized members.
     /// </summary>
     public static bool IsReservedRecordMemberName(string name) =>
-        name is "Equals" or "GetHashCode" or "GetType" or "ToString"
-            or "Deconstruct" or "EqualityContract";
+        name
+            is "Equals"
+                or "GetHashCode"
+                or "GetType"
+                or "ToString"
+                or "Deconstruct"
+                or "EqualityContract";
 
     public static string ToPascalCase(string name)
     {
@@ -48,14 +53,24 @@ internal static class Naming
 
         // Already PascalCase — only if no delimiters present (or only trailing _N suffix)
         // Still strip invalid chars in case input contains <, >, etc.
-        if (char.IsUpper(input[0])
-            && !input.Contains('-') && !input.Contains('/')
-            && !input.Contains('.') && !input.Contains(' '))
+        if (
+            char.IsUpper(input[0])
+            && !input.Contains('-')
+            && !input.Contains('/')
+            && !input.Contains('.')
+            && !input.Contains(' ')
+        )
         {
             // Allow underscore only as a trailing dedup suffix (_2, _3, etc.)
             var underscoreIdx = input.IndexOf('_');
-            if (underscoreIdx < 0
-                || (underscoreIdx > 0 && underscoreIdx + 1 < input.Length && input[(underscoreIdx + 1)..].All(char.IsDigit)))
+            if (
+                underscoreIdx < 0
+                || (
+                    underscoreIdx > 0
+                    && underscoreIdx + 1 < input.Length
+                    && input[(underscoreIdx + 1)..].All(char.IsDigit)
+                )
+            )
             {
                 return StripInvalidIdentifierChars(input);
             }
@@ -67,8 +82,7 @@ internal static class Naming
             return "_";
         }
 
-        var result = string.Concat(parts.Select(p =>
-            char.ToUpperInvariant(p[0]) + p[1..]));
+        var result = string.Concat(parts.Select(p => char.ToUpperInvariant(p[0]) + p[1..]));
 
         // Strip any remaining characters invalid in C# identifiers
         var stripped = StripInvalidIdentifierChars(result);
@@ -107,5 +121,4 @@ internal static class Naming
 
         return result;
     }
-
 }

@@ -14,8 +14,8 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class ParamWireNamePinningTests
 {
-    private static IReadOnlyList<TsEndpointDefinition> Generate(string source)
-        => CompilationHelper.WalkContract(source).Endpoints;
+    private static IReadOnlyList<TsEndpointDefinition> Generate(string source) =>
+        CompilationHelper.WalkContract(source).Endpoints;
 
     [Fact]
     public void SnakeCase_RouteToken_Matches_PascalCase_Property_Without_QueryTwin()
@@ -194,26 +194,27 @@ public sealed class ParamWireNamePinningTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "ItemDto": { "type": "object", "properties": { "id": { "type": "string" } } }
-                """,
+            "ItemDto": { "type": "object", "properties": { "id": { "type": "string" } } }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "listItems",
-                        "parameters": [
-                            {"name": "per_page", "in": "query", "required": false, "schema": {"type": "integer"}},
-                            {"name": "page", "in": "query", "required": false, "schema": {"type": "integer"}}
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "ok",
-                                "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemDto"}}}
-                            }
+            "/api/items": {
+                "get": {
+                    "operationId": "listItems",
+                    "parameters": [
+                        {"name": "per_page", "in": "query", "required": false, "schema": {"type": "integer"}},
+                        {"name": "page", "in": "query", "required": false, "schema": {"type": "integer"}}
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "ok",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemDto"}}}
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var input = CompilationHelper.FindFile(result, "ListItemsInput.cs");
@@ -243,7 +244,9 @@ public sealed class ParamWireNamePinningTests
     [Fact]
     public void ParseRouteParamNames_Keeps_Hyphenated_Names_Whole()
     {
-        var names = RouteParser.ParseRouteParamNames("/enterprises/{enterprise}/teams/{enterprise-team}");
+        var names = RouteParser.ParseRouteParamNames(
+            "/enterprises/{enterprise}/teams/{enterprise-team}"
+        );
 
         Assert.Equal(2, names.Count);
         Assert.Contains("enterprise", names);
@@ -253,7 +256,9 @@ public sealed class ParamWireNamePinningTests
     [Fact]
     public void ParseRouteParamNames_Still_Strips_Constraints_Defaults_And_Optional_Markers()
     {
-        var names = RouteParser.ParseRouteParamNames("/a/{id:int}/b/{code:regex(^\\d{4}$)}/c/{slug?}/d/{rest=*}/e/{**path}");
+        var names = RouteParser.ParseRouteParamNames(
+            "/a/{id:int}/b/{code:regex(^\\d{4}$)}/c/{slug?}/d/{rest=*}/e/{**path}"
+        );
 
         Assert.Contains("id", names);
         Assert.Contains("code", names);

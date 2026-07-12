@@ -7,11 +7,14 @@ namespace Rivet.Tests;
 
 public sealed class ContractSchemaTests
 {
-    private static readonly JsonSchema Schema = LoadSchema();
+    private static readonly JsonSchema _schema = LoadSchema();
 
     private static JsonSchema LoadSchema()
     {
-        var schemaPath = Path.Combine(AppContext.BaseDirectory, "../../../../rivet-contract-schema.json");
+        var schemaPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../rivet-contract-schema.json"
+        );
         var schemaJson = File.ReadAllText(schemaPath);
         return JsonSchema.FromText(schemaJson);
     }
@@ -19,7 +22,7 @@ public sealed class ContractSchemaTests
     private static EvaluationResults Validate(string json)
     {
         var node = JsonDocument.Parse(json).RootElement;
-        return Schema.Evaluate(node, new EvaluationOptions { OutputFormat = OutputFormat.List });
+        return _schema.Evaluate(node, new EvaluationOptions { OutputFormat = OutputFormat.List });
     }
 
     [Fact]
@@ -28,7 +31,8 @@ public sealed class ContractSchemaTests
         var json = ContractEmitter.Emit(
             new Dictionary<string, TsTypeDefinition>(),
             new Dictionary<string, TsType>(),
-            []);
+            []
+        );
 
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
@@ -52,31 +56,68 @@ public sealed class ContractSchemaTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["AllKinds"] = new("AllKinds", ["T"], [
-                new("prim", new TsType.Primitive("string"), false),
-                new("primFmt", new TsType.Primitive("string", Format: "uuid", CSharpType: "Guid"), false),
-                new("nullable", new TsType.Nullable(new TsType.Primitive("number")), true),
-                new("arr", new TsType.Array(new TsType.TypeRef("ItemDto")), false),
-                new("dict", new TsType.Dictionary(
-                    new TsType.Primitive("string"),
-                    new TsType.Primitive("number")), false),
-                new("strUnion", new TsType.StringUnion(["a", "b"]), false),
-                new("typeRef", new TsType.TypeRef("Other"), false),
-                new("generic", new TsType.Generic("Page", [new TsType.TypeRef("ItemDto")]), false),
-                new("typeParam", new TsType.TypeParam("T"), false),
-                new("brand", new TsType.Brand("Email", new TsType.Primitive("string")), false),
-                new("inline", new TsType.InlineObject([("key", new TsType.Primitive("string")), ("val", new TsType.Primitive("number"))]), false),
-                new("tagged", new TsType.TaggedUnion("kind", [
-                    new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
-                        ("kind", new TsType.StringUnion(["hidden"])),
-                        ("message", new TsType.Primitive("string")),
-                    ])),
-                    new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
-                        ("kind", new TsType.StringUnion(["shown"])),
-                        ("summary", new TsType.TypeRef("Summary")),
-                    ])),
-                ]), false),
-            ]),
+            ["AllKinds"] = new(
+                "AllKinds",
+                ["T"],
+                [
+                    new("prim", new TsType.Primitive("string"), false),
+                    new(
+                        "primFmt",
+                        new TsType.Primitive("string", Format: "uuid", CSharpType: "Guid"),
+                        false
+                    ),
+                    new("nullable", new TsType.Nullable(new TsType.Primitive("number")), true),
+                    new("arr", new TsType.Array(new TsType.TypeRef("ItemDto")), false),
+                    new(
+                        "dict",
+                        new TsType.Dictionary(
+                            new TsType.Primitive("string"),
+                            new TsType.Primitive("number")
+                        ),
+                        false
+                    ),
+                    new("strUnion", new TsType.StringUnion(["a", "b"]), false),
+                    new("typeRef", new TsType.TypeRef("Other"), false),
+                    new(
+                        "generic",
+                        new TsType.Generic("Page", [new TsType.TypeRef("ItemDto")]),
+                        false
+                    ),
+                    new("typeParam", new TsType.TypeParam("T"), false),
+                    new("brand", new TsType.Brand("Email", new TsType.Primitive("string")), false),
+                    new(
+                        "inline",
+                        new TsType.InlineObject([
+                            ("key", new TsType.Primitive("string")),
+                            ("val", new TsType.Primitive("number")),
+                        ]),
+                        false
+                    ),
+                    new(
+                        "tagged",
+                        new TsType.TaggedUnion(
+                            "kind",
+                            [
+                                new TsType.TaggedUnionVariant(
+                                    "hidden",
+                                    new TsType.InlineObject([
+                                        ("kind", new TsType.StringUnion(["hidden"])),
+                                        ("message", new TsType.Primitive("string")),
+                                    ])
+                                ),
+                                new TsType.TaggedUnionVariant(
+                                    "shown",
+                                    new TsType.InlineObject([
+                                        ("kind", new TsType.StringUnion(["shown"])),
+                                        ("summary", new TsType.TypeRef("Summary")),
+                                    ])
+                                ),
+                            ]
+                        ),
+                        false
+                    ),
+                ]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -93,17 +134,30 @@ public sealed class ContractSchemaTests
             "/api/orders",
             [
                 new TsEndpointParam("id", new TsType.Primitive("number"), ParamSource.Route),
-                new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body),
+                new TsEndpointParam(
+                    "body",
+                    new TsType.TypeRef("CreateOrderRequest"),
+                    ParamSource.Body
+                ),
             ],
             new TsType.TypeRef("CreateOrderResponse"),
             "OrdersController",
             [
                 new TsResponseType(201, new TsType.TypeRef("CreateOrderResponse")),
-                new TsResponseType(422, new TsType.TypeRef("ValidationProblem"), "Validation failed"),
+                new TsResponseType(
+                    422,
+                    new TsType.TypeRef("ValidationProblem"),
+                    "Validation failed"
+                ),
             ],
-            Summary: "Create an order");
+            Summary: "Create an order"
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
     }
@@ -115,7 +169,13 @@ public sealed class ContractSchemaTests
             "createOrder",
             "POST",
             "/api/orders",
-            [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            [
+                new TsEndpointParam(
+                    "body",
+                    new TsType.TypeRef("CreateOrderRequest"),
+                    ParamSource.Body
+                ),
+            ],
             new TsType.TypeRef("CreateOrderResponse"),
             "OrdersController",
             [
@@ -124,8 +184,13 @@ public sealed class ContractSchemaTests
                     new TsType.TypeRef("CreateOrderResponse"),
                     Examples:
                     [
-                        new TsEndpointExample("application/json", "created", """{"id":"ord_123"}"""),
-                    ]),
+                        new TsEndpointExample(
+                            "application/json",
+                            "created",
+                            """{"id":"ord_123"}"""
+                        ),
+                    ]
+                ),
                 new TsResponseType(
                     422,
                     new TsType.TypeRef("ValidationProblem"),
@@ -135,15 +200,22 @@ public sealed class ContractSchemaTests
                             "application/json",
                             "validationProblem",
                             ComponentExampleId: "validation-problem",
-                            ResolvedJson: """{"message":"Validation failed"}"""),
-                    ]),
+                            ResolvedJson: """{"message":"Validation failed"}"""
+                        ),
+                    ]
+                ),
             ],
             RequestExamples:
             [
                 new TsEndpointExample("application/json", Json: """{"customerId":"cus_123"}"""),
-            ]);
+            ]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
     }
@@ -167,11 +239,18 @@ public sealed class ContractSchemaTests
                         new TsEndpointExample(
                             "application/json",
                             "accepted",
-                            ComponentExampleId: "order-accepted"),
-                    ]),
-            ]);
+                            ComponentExampleId: "order-accepted"
+                        ),
+                    ]
+                ),
+            ]
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
     }
@@ -187,9 +266,14 @@ public sealed class ContractSchemaTests
             null,
             "BuyersController",
             [new TsResponseType(202, null)],
-            RequestType: new TsType.TypeRef("CreateBuyerRequest"));
+            RequestType: new TsType.TypeRef("CreateBuyerRequest")
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
     }
@@ -207,9 +291,14 @@ public sealed class ContractSchemaTests
             [new TsResponseType(200, new TsType.Primitive("string"))],
             BinaryRequestContentType: "application/pdf",
             RequestContentTypeOverride: "text/plain",
-            ResponseContentTypeOverride: "text/html");
+            ResponseContentTypeOverride: "text/html"
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
     }
@@ -219,30 +308,50 @@ public sealed class ContractSchemaTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["CreateOrderRequest"] = new("CreateOrderRequest", [], [
-                new("customerId", new TsType.Primitive("string", Format: "uuid"), false),
-                new("items", new TsType.Array(new TsType.TypeRef("OrderItemDto")), false),
-                new("notes", new TsType.Nullable(new TsType.Primitive("string")), true),
-                new("priority", new TsType.StringUnion(["low", "normal", "urgent"]), false),
-            ], Description: "Request to create an order"),
+            ["CreateOrderRequest"] = new(
+                "CreateOrderRequest",
+                [],
+                [
+                    new("customerId", new TsType.Primitive("string", Format: "uuid"), false),
+                    new("items", new TsType.Array(new TsType.TypeRef("OrderItemDto")), false),
+                    new("notes", new TsType.Nullable(new TsType.Primitive("string")), true),
+                    new("priority", new TsType.StringUnion(["low", "normal", "urgent"]), false),
+                ],
+                Description: "Request to create an order"
+            ),
         };
 
         var enums = new Dictionary<string, TsType>
         {
-            ["OrderStatus"] = new TsType.StringUnion(["Pending", "Confirmed", "Shipped", "Cancelled"]),
+            ["OrderStatus"] = new TsType.StringUnion([
+                "Pending",
+                "Confirmed",
+                "Shipped",
+                "Cancelled",
+            ]),
         };
 
         var endpoints = new List<TsEndpointDefinition>
         {
-            new("createOrder", "POST", "/api/orders",
-                [new TsEndpointParam("body", new TsType.TypeRef("CreateOrderRequest"), ParamSource.Body)],
+            new(
+                "createOrder",
+                "POST",
+                "/api/orders",
+                [
+                    new TsEndpointParam(
+                        "body",
+                        new TsType.TypeRef("CreateOrderRequest"),
+                        ParamSource.Body
+                    ),
+                ],
                 new TsType.TypeRef("CreateOrderResponse"),
                 "OrdersController",
                 [
                     new TsResponseType(201, new TsType.TypeRef("CreateOrderResponse")),
                     new TsResponseType(422, new TsType.TypeRef("ValidationProblem")),
                 ],
-                Summary: "Create an order"),
+                Summary: "Create an order"
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, enums, endpoints);
@@ -255,14 +364,34 @@ public sealed class ContractSchemaTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["Constrained"] = new("Constrained", [], [
-                new("name", new TsType.Primitive("string"), false,
-                    Constraints: new TsPropertyConstraints(MinLength: 1, MaxLength: 100)),
-                new("age", new TsType.Primitive("number"), false,
-                    Constraints: new TsPropertyConstraints(Minimum: 0, Maximum: 150)),
-                new("tags", new TsType.Array(new TsType.Primitive("string")), false,
-                    Constraints: new TsPropertyConstraints(MinItems: 1, MaxItems: 10, UniqueItems: true)),
-            ]),
+            ["Constrained"] = new(
+                "Constrained",
+                [],
+                [
+                    new(
+                        "name",
+                        new TsType.Primitive("string"),
+                        false,
+                        Constraints: new TsPropertyConstraints(MinLength: 1, MaxLength: 100)
+                    ),
+                    new(
+                        "age",
+                        new TsType.Primitive("number"),
+                        false,
+                        Constraints: new TsPropertyConstraints(Minimum: 0, Maximum: 150)
+                    ),
+                    new(
+                        "tags",
+                        new TsType.Array(new TsType.Primitive("string")),
+                        false,
+                        Constraints: new TsPropertyConstraints(
+                            MinItems: 1,
+                            MaxItems: 10,
+                            UniqueItems: true
+                        )
+                    ),
+                ]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -281,7 +410,8 @@ public sealed class ContractSchemaTests
     [Fact]
     public void Unknown_TsType_Kind_Rejected()
     {
-        var json = """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"invalid"},"optional":false}]}],"enums":[],"endpoints":[]}""";
+        var json =
+            """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"invalid"},"optional":false}]}],"enums":[],"endpoints":[]}""";
         var result = Validate(json);
         Assert.False(result.IsValid);
     }
@@ -297,7 +427,8 @@ public sealed class ContractSchemaTests
     [Fact]
     public void Missing_Required_Endpoint_Field_Rejected()
     {
-        var json = """{"types":[],"enums":[],"endpoints":[{"name":"foo","routeTemplate":"/","params":[],"controllerName":"C","responses":[]}]}""";
+        var json =
+            """{"types":[],"enums":[],"endpoints":[{"name":"foo","routeTemplate":"/","params":[],"controllerName":"C","responses":[]}]}""";
         var result = Validate(json);
         Assert.False(result.IsValid);
     }
@@ -307,10 +438,22 @@ public sealed class ContractSchemaTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["Dto"] = new("Dto", [], [
-                new("scores", new TsType.Array(new TsType.Nullable(new TsType.TypeRef("Score"))), false),
-                new("tags", new TsType.Dictionary(new TsType.Array(new TsType.Primitive("string"))), false),
-            ]),
+            ["Dto"] = new(
+                "Dto",
+                [],
+                [
+                    new(
+                        "scores",
+                        new TsType.Array(new TsType.Nullable(new TsType.TypeRef("Score"))),
+                        false
+                    ),
+                    new(
+                        "tags",
+                        new TsType.Dictionary(new TsType.Array(new TsType.Primitive("string"))),
+                        false
+                    ),
+                ]
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -323,16 +466,32 @@ public sealed class ContractSchemaTests
     {
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
-            ["DisplayState"] = new("DisplayState", [], new TsType.TaggedUnion("kind", [
-                new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
-                    ("kind", new TsType.StringUnion(["hidden"])),
-                    ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
-                ])),
-                new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
-                    ("kind", new TsType.StringUnion(["shown"])),
-                    ("summary", new TsType.TypeRef("Summary")),
-                ])),
-            ])),
+            ["DisplayState"] = new(
+                "DisplayState",
+                [],
+                new TsType.TaggedUnion(
+                    "kind",
+                    [
+                        new TsType.TaggedUnionVariant(
+                            "hidden",
+                            new TsType.InlineObject([
+                                ("kind", new TsType.StringUnion(["hidden"])),
+                                (
+                                    "workspaceKey",
+                                    new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))
+                                ),
+                            ])
+                        ),
+                        new TsType.TaggedUnionVariant(
+                            "shown",
+                            new TsType.InlineObject([
+                                ("kind", new TsType.StringUnion(["shown"])),
+                                ("summary", new TsType.TypeRef("Summary")),
+                            ])
+                        ),
+                    ]
+                )
+            ),
         };
 
         var json = ContractEmitter.Emit(definitions, new Dictionary<string, TsType>(), []);
@@ -344,7 +503,8 @@ public sealed class ContractSchemaTests
     public void Property_Missing_Required_Fields_Rejected()
     {
         // Missing "optional" field
-        var json = """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"primitive","type":"string"}}]}],"enums":[],"endpoints":[]}""";
+        var json =
+            """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"primitive","type":"string"}}]}],"enums":[],"endpoints":[]}""";
         var result = Validate(json);
         Assert.False(result.IsValid);
     }
@@ -353,7 +513,8 @@ public sealed class ContractSchemaTests
     public void Property_Missing_Type_Rejected()
     {
         // Missing "type" field
-        var json = """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","optional":false}]}],"enums":[],"endpoints":[]}""";
+        var json =
+            """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","optional":false}]}],"enums":[],"endpoints":[]}""";
         var result = Validate(json);
         Assert.False(result.IsValid);
     }
@@ -361,7 +522,8 @@ public sealed class ContractSchemaTests
     [Fact]
     public void Empty_StringUnion_Values_Rejected()
     {
-        var json = """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"stringUnion","values":[]},"optional":false}]}],"enums":[],"endpoints":[]}""";
+        var json =
+            """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"stringUnion","values":[]},"optional":false}]}],"enums":[],"endpoints":[]}""";
         var result = Validate(json);
         Assert.False(result.IsValid);
     }
@@ -369,14 +531,16 @@ public sealed class ContractSchemaTests
     [Fact]
     public void Heterogeneous_Scalar_Union_Is_Accepted()
     {
-        var json = """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"union","variants":[{"kind":"primitive","type":"number"},{"kind":"literal","value":false}]},"optional":false}]}],"enums":[],"endpoints":[]}""";
+        var json =
+            """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"union","variants":[{"kind":"primitive","type":"number"},{"kind":"literal","value":false}]},"optional":false}]}],"enums":[],"endpoints":[]}""";
         Assert.True(Validate(json).IsValid);
     }
 
     [Fact]
     public void Empty_Generic_Union_Is_Rejected()
     {
-        var json = """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"union","variants":[]},"optional":false}]}],"enums":[],"endpoints":[]}""";
+        var json =
+            """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"union","variants":[]},"optional":false}]}],"enums":[],"endpoints":[]}""";
         Assert.False(Validate(json).IsValid);
     }
 
@@ -384,7 +548,8 @@ public sealed class ContractSchemaTests
     public void Invalid_ParamSource_Rejected()
     {
         // "header" became a valid source in P2 wave 5 — "cookie" remains unrepresentable.
-        var json = """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"x","type":{"kind":"primitive","type":"string"},"source":"cookie"}],"controllerName":"C","responses":[]}]}""";
+        var json =
+            """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"x","type":{"kind":"primitive","type":"string"},"source":"cookie"}],"controllerName":"C","responses":[]}]}""";
         var result = Validate(json);
         Assert.False(result.IsValid);
     }
@@ -392,7 +557,8 @@ public sealed class ContractSchemaTests
     [Fact]
     public void Header_ParamSource_And_Response_Headers_Accepted() // P2 wave 5
     {
-        var json = """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"Notion-Version","type":{"kind":"primitive","type":"string"},"source":"header"}],"controllerName":"C","responses":[{"statusCode":200,"headers":[{"name":"ETag","description":"Entity tag","required":true}]}]}]}""";
+        var json =
+            """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"Notion-Version","type":{"kind":"primitive","type":"string"},"source":"header"}],"controllerName":"C","responses":[{"statusCode":200,"headers":[{"name":"ETag","description":"Entity tag","required":true}]}]}]}""";
         var result = Validate(json);
         Assert.True(result.IsValid);
     }
@@ -667,9 +833,14 @@ public sealed class ContractSchemaTests
             [new TsResponseType(200, null)],
             FileContentType: "video/mp4",
             IsFileEndpoint: true,
-            QueryAuth: new QueryAuthMetadata("token"));
+            QueryAuth: new QueryAuthMetadata("token")
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
     }
@@ -685,9 +856,14 @@ public sealed class ContractSchemaTests
             null,
             "FilesController",
             [new TsResponseType(200, null)],
-            IsFileEndpoint: true);
+            IsFileEndpoint: true
+        );
 
-        var json = ContractEmitter.Emit(new Dictionary<string, TsTypeDefinition>(), new Dictionary<string, TsType>(), [endpoint]);
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
         var result = Validate(json);
         Assert.True(result.IsValid, FormatErrors(result));
     }
@@ -743,7 +919,10 @@ public sealed class ContractSchemaTests
     }
 
     private static string FormatErrors(EvaluationResults results) =>
-        string.Join("\n", results.Details
-            .Where(d => !d.IsValid && d.Errors is not null)
-            .SelectMany(d => d.Errors!.Select(e => $"{d.InstanceLocation}: {e.Value}")));
+        string.Join(
+            "\n",
+            results
+                .Details.Where(d => !d.IsValid && d.Errors is not null)
+                .SelectMany(d => d.Errors!.Select(e => $"{d.InstanceLocation}: {e.Value}"))
+        );
 }

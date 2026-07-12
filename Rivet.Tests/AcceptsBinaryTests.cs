@@ -18,8 +18,7 @@ public sealed class AcceptsBinaryTests
     [Fact]
     public void AcceptsBinary_Defaults_To_OctetStream()
     {
-        var route = Define.Put("/api/things/{id}/chunks/{n}")
-            .AcceptsBinary();
+        var route = Define.Put("/api/things/{id}/chunks/{n}").AcceptsBinary();
 
         Assert.Equal("application/octet-stream", route.BinaryRequestContentType);
     }
@@ -27,8 +26,7 @@ public sealed class AcceptsBinaryTests
     [Fact]
     public void AcceptsBinary_Sets_Custom_ContentType()
     {
-        var route = Define.Put("/api/recordings/{id}/audio")
-            .AcceptsBinary("audio/mpeg");
+        var route = Define.Put("/api/recordings/{id}/audio").AcceptsBinary("audio/mpeg");
 
         Assert.Equal("audio/mpeg", route.BinaryRequestContentType);
     }
@@ -45,7 +43,8 @@ public sealed class AcceptsBinaryTests
     [Fact]
     public void AcceptsBinary_Survives_Accepts_Conversion()
     {
-        var route = Define.Put("/api/things/{id}/chunks/{chunkIndex}")
+        var route = Define
+            .Put("/api/things/{id}/chunks/{chunkIndex}")
             .AcceptsBinary("video/mp4")
             .Accepts<ChunkInput>();
 
@@ -209,8 +208,9 @@ public sealed class AcceptsBinaryTests
             }
             """;
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => CompilationHelper.WalkContract(source));
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
         Assert.Contains(".AcceptsBinary()", ex.Message);
         Assert.Contains(".AcceptsFile()", ex.Message);
     }
@@ -233,24 +233,24 @@ public sealed class AcceptsBinaryTests
             }
             """;
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => CompilationHelper.WalkContract(source));
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
         Assert.Contains(".AcceptsBinary()", ex.Message);
         Assert.Contains(".FormEncoded()", ex.Message);
     }
 
     // ----- OpenApiEmitter -----
 
-    private static JsonDocument EmitOpenApi(string source)
-        => CompilationHelper.EmitOpenApi(source);
+    private static JsonDocument EmitOpenApi(string source) => CompilationHelper.EmitOpenApi(source);
 
     [Fact]
     public void Emitter_AcceptsBinary_Emits_Binary_RequestBody_No_Json_Content()
     {
         using var doc = EmitOpenApi(ChunkUploadSource);
 
-        var operation = doc.RootElement
-            .GetProperty("paths")
+        var operation = doc
+            .RootElement.GetProperty("paths")
             .GetProperty("/api/things/{id}/chunks/{chunkIndex}")
             .GetProperty("put");
 
@@ -294,8 +294,8 @@ public sealed class AcceptsBinaryTests
 
         using var doc = EmitOpenApi(source);
 
-        var content = doc.RootElement
-            .GetProperty("paths")
+        var content = doc
+            .RootElement.GetProperty("paths")
             .GetProperty("/api/recordings/{id}/audio")
             .GetProperty("put")
             .GetProperty("requestBody")
@@ -314,7 +314,8 @@ public sealed class AcceptsBinaryTests
         var json = ContractEmitter.Emit(
             walker.Definitions.ToDictionary(kv => kv.Key, kv => kv.Value),
             walker.Enums.ToDictionary(kv => kv.Key, kv => kv.Value),
-            endpoints);
+            endpoints
+        );
 
         var (_, _, readEndpoints, _) = JsonContractReader.Read(json);
 
@@ -328,7 +329,8 @@ public sealed class AcceptsBinaryTests
     [Fact]
     public void Import_Binary_RequestBody_Scaffolds_AcceptsBinary()
     {
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/api/things/{id}/chunks/{chunkIndex}": {
                 "put": {
                     "operationId": "things_uploadChunk",
@@ -348,7 +350,8 @@ public sealed class AcceptsBinaryTests
                     "responses": { "204": { "description": "No Content" } }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ThingsContract.cs");
@@ -370,7 +373,8 @@ public sealed class AcceptsBinaryTests
     [Fact]
     public void Import_Binary_RequestBody_NonOctetStream_Keeps_ContentType()
     {
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/api/recordings/{id}/audio": {
                 "put": {
                     "operationId": "recordings_uploadAudio",
@@ -389,7 +393,8 @@ public sealed class AcceptsBinaryTests
                     "responses": { "204": { "description": "No Content" } }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "RecordingsContract.cs");
@@ -402,7 +407,8 @@ public sealed class AcceptsBinaryTests
     {
         // multipart/form-data stays on the multipart path even when its schema
         // (pathologically) claims to be a bare binary string.
-        var spec = CompilationHelper.BuildSpec(paths: """
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
             "/api/upload": {
                 "post": {
                     "operationId": "files_upload",
@@ -417,7 +423,8 @@ public sealed class AcceptsBinaryTests
                     "responses": { "201": { "description": "Created" } }
                 }
             }
-            """);
+            """
+        );
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "FilesContract.cs");
@@ -434,12 +441,19 @@ public sealed class AcceptsBinaryTests
         var compilation = CompilationHelper.CreateCompilation(ChunkUploadSource);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var firstSpec = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+        var firstSpec = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
 
         // Reverse: OpenAPI → import → compile → walk
         var importResult = OpenApiImporter.Import(firstSpec, new ImportOptions("RoundTrip", null));
         var recompilation = CompilationHelper.CreateCompilationFromMultiple(
-            importResult.Files.Select(f => f.Content).ToArray());
+            importResult.Files.Select(f => f.Content).ToArray()
+        );
         var (reDiscovered, rewalker) = CompilationHelper.DiscoverAndWalk(recompilation);
         var reEndpoints = CompilationHelper.WalkContracts(recompilation, reDiscovered, rewalker);
 
@@ -459,21 +473,32 @@ public sealed class AcceptsBinaryTests
 
         // Forward again: the re-emitted operation must be equivalent
         var secondSpec = OpenApiEmitter.Emit(
-            reEndpoints, rewalker.Definitions, rewalker.Brands, rewalker.Enums, null);
+            reEndpoints,
+            rewalker.Definitions,
+            rewalker.Brands,
+            rewalker.Enums,
+            null
+        );
 
         using var first = JsonDocument.Parse(firstSpec);
         using var second = JsonDocument.Parse(secondSpec);
 
-        var firstOp = first.RootElement.GetProperty("paths")
-            .GetProperty("/api/things/{id}/chunks/{chunkIndex}").GetProperty("put");
-        var secondOp = second.RootElement.GetProperty("paths")
-            .GetProperty("/api/things/{id}/chunks/{chunkIndex}").GetProperty("put");
+        var firstOp = first
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/things/{id}/chunks/{chunkIndex}")
+            .GetProperty("put");
+        var secondOp = second
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/things/{id}/chunks/{chunkIndex}")
+            .GetProperty("put");
 
         Assert.Equal(
             firstOp.GetProperty("requestBody").GetRawText(),
-            secondOp.GetProperty("requestBody").GetRawText());
+            secondOp.GetProperty("requestBody").GetRawText()
+        );
         Assert.Equal(
             firstOp.GetProperty("parameters").GetRawText(),
-            secondOp.GetProperty("parameters").GetRawText());
+            secondOp.GetProperty("parameters").GetRawText()
+        );
     }
 }

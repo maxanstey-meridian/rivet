@@ -49,7 +49,9 @@ public sealed class NullableComponentImportTests
     [Fact]
     public void Nullable_Component_Refs_And_Required_Nullable_Props_Scaffold_Faithfully()
     {
-        var result = CompilationHelper.Import(CompilationHelper.BuildSpec(schemas: Schemas, paths: Paths, title: "API"));
+        var result = CompilationHelper.Import(
+            CompilationHelper.BuildSpec(schemas: Schemas, paths: Paths, title: "API")
+        );
         var item = CompilationHelper.FindFile(result, "ItemDto.cs");
 
         // required + nullable — only `required T?` says both
@@ -63,15 +65,27 @@ public sealed class NullableComponentImportTests
     [Fact]
     public void Required_And_Nullable_Both_Survive_To_The_Emitted_Spec()
     {
-        var result = CompilationHelper.Import(CompilationHelper.BuildSpec(schemas: Schemas, paths: Paths, title: "API"));
+        var result = CompilationHelper.Import(
+            CompilationHelper.BuildSpec(schemas: Schemas, paths: Paths, title: "API")
+        );
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var emitted = JsonSerializer.Deserialize<JsonElement>(
-            Rivet.Tool.Emit.OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null));
+            Rivet.Tool.Emit.OpenApiEmitter.Emit(
+                endpoints,
+                walker.Definitions,
+                walker.Brands,
+                walker.Enums,
+                null
+            )
+        );
 
         var item = emitted.GetProperty("components").GetProperty("schemas").GetProperty("ItemDto");
-        var required = item.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        var required = item.GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Contains("owner", required);
         Assert.Contains("label", required);
         Assert.DoesNotContain("note", required);
@@ -79,7 +93,9 @@ public sealed class NullableComponentImportTests
         // owner: nullable $ref — a null branch beside the component ref
         var owner = item.GetProperty("properties").GetProperty("owner");
         Assert.True(owner.TryGetProperty("oneOf", out var oneOf));
-        Assert.Contains(oneOf.EnumerateArray(), b =>
-            b.TryGetProperty("type", out var t) && t.GetString() == "null");
+        Assert.Contains(
+            oneOf.EnumerateArray(),
+            b => b.TryGetProperty("type", out var t) && t.GetString() == "null"
+        );
     }
 }

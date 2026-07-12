@@ -22,38 +22,59 @@ public sealed class FormatRoundTripTests
     /// </summary>
     private static JsonElement EmitSchemaFor(string recordSource, string typeName)
     {
-        var source = recordSource + $$"""
+        var source =
+            recordSource
+            + $$"""
 
-            [Rivet.RivetContract]
-            public static class FormatRoundTripContract
-            {
-                public static readonly Rivet.Define Get =
-                    Rivet.Define.Get<Test.{{typeName}}>("/api/format-roundtrip");
-            }
-            """;
+                [Rivet.RivetContract]
+                public static class FormatRoundTripContract
+                {
+                    public static readonly Rivet.Define Get =
+                        Rivet.Define.Get<Test.{{typeName}}>("/api/format-roundtrip");
+                }
+                """;
         var (endpoints, walker) = CompilationHelper.WalkContract(source);
-        var json = OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
-        return JsonDocument.Parse(json).RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty(typeName);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
+        return JsonDocument
+            .Parse(json)
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty(typeName);
     }
 
-    private static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker, string EmittedJson)
-        ForwardAndEmit(string csharpSource)
+    private static (
+        IReadOnlyList<TsEndpointDefinition> Endpoints,
+        TypeWalker Walker,
+        string EmittedJson
+    ) ForwardAndEmit(string csharpSource)
     {
         var compilation = CompilationHelper.CreateCompilation(csharpSource);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var openApiJson = OpenApiEmitter.Emit(
-            endpoints, walker.Definitions, walker.Brands, walker.Enums, null);
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
         return (endpoints, walker, openApiJson);
     }
 
-    private static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker)
-        ImportAndWalk(string openApiJson)
+    private static (IReadOnlyList<TsEndpointDefinition> Endpoints, TypeWalker Walker) ImportAndWalk(
+        string openApiJson
+    )
     {
         var importResult = OpenApiImporter.Import(openApiJson, new ImportOptions("RoundTrip"));
         var compilation = CompilationHelper.CreateCompilationFromMultiple(
-            importResult.Files.Select(f => f.Content).ToArray());
+            importResult.Files.Select(f => f.Content).ToArray()
+        );
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         return (endpoints, walker);
@@ -92,7 +113,9 @@ public sealed class FormatRoundTripTests
             public sealed record TimedDto(DateTime CreatedAt);
             """;
 
-        var prop = EmitSchemaFor(source, "TimedDto").GetProperty("properties").GetProperty("createdAt");
+        var prop = EmitSchemaFor(source, "TimedDto")
+            .GetProperty("properties")
+            .GetProperty("createdAt");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("date-time", prop.GetProperty("format").GetString());
     }
@@ -128,7 +151,9 @@ public sealed class FormatRoundTripTests
             public sealed record AlarmDto(TimeOnly RingAt);
             """;
 
-        var prop = EmitSchemaFor(source, "AlarmDto").GetProperty("properties").GetProperty("ringAt");
+        var prop = EmitSchemaFor(source, "AlarmDto")
+            .GetProperty("properties")
+            .GetProperty("ringAt");
         Assert.Equal("string", prop.GetProperty("type").GetString());
         Assert.Equal("time", prop.GetProperty("format").GetString());
     }
@@ -236,7 +261,11 @@ public sealed class FormatRoundTripTests
         // Nullable byte[] — 3.1 type array, contentEncoding intact
         var thumbnail = props.GetProperty("thumbnail");
         Assert.Equal(3, thumbnail.EnumerateObject().Count());
-        var typeArray = thumbnail.GetProperty("type").EnumerateArray().Select(e => e.GetString()).ToList();
+        var typeArray = thumbnail
+            .GetProperty("type")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Equal(new[] { "string", "null" }, typeArray);
         Assert.Equal("base64", thumbnail.GetProperty("contentEncoding").GetString());
         Assert.Equal("byte[]", thumbnail.GetProperty("x-rivet-csharp-type").GetString());
@@ -283,9 +312,13 @@ public sealed class FormatRoundTripTests
             """;
 
         var openApi = CompilationHelper.EmitOpenApiFromJson(contractJson);
-        var payload = JsonDocument.Parse(openApi).RootElement
-            .GetProperty("components").GetProperty("schemas").GetProperty("BlobDto")
-            .GetProperty("properties").GetProperty("payload");
+        var payload = JsonDocument
+            .Parse(openApi)
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("BlobDto")
+            .GetProperty("properties")
+            .GetProperty("payload");
 
         Assert.Equal(3, payload.EnumerateObject().Count());
         Assert.Equal("string", payload.GetProperty("type").GetString());
@@ -351,7 +384,11 @@ public sealed class FormatRoundTripTests
         // Nullable char — 3.1 type array, length bounds intact
         var modifier = props.GetProperty("modifier");
         Assert.Equal(4, modifier.EnumerateObject().Count());
-        var typeArray = modifier.GetProperty("type").EnumerateArray().Select(e => e.GetString()).ToList();
+        var typeArray = modifier
+            .GetProperty("type")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
         Assert.Equal(new[] { "string", "null" }, typeArray);
         Assert.Equal(1, modifier.GetProperty("minLength").GetInt32());
         Assert.Equal(1, modifier.GetProperty("maxLength").GetInt32());
@@ -420,7 +457,9 @@ public sealed class FormatRoundTripTests
             public sealed record BigDto(long BigNumber);
             """;
 
-        var prop = EmitSchemaFor(source, "BigDto").GetProperty("properties").GetProperty("bigNumber");
+        var prop = EmitSchemaFor(source, "BigDto")
+            .GetProperty("properties")
+            .GetProperty("bigNumber");
         Assert.Equal("integer", prop.GetProperty("type").GetString());
         Assert.Equal("int64", prop.GetProperty("format").GetString());
         // int64 exceeds JS safe integer — no minimum/maximum
@@ -664,7 +703,12 @@ public sealed class FormatRoundTripTests
 
     // ─── Helpers ────────────────────────────────────────────────
 
-    private static void AssertPrimitive(TsTypeDefinition def, string propName, string expectedName, string expectedFormat)
+    private static void AssertPrimitive(
+        TsTypeDefinition def,
+        string propName,
+        string expectedName,
+        string expectedFormat
+    )
     {
         var prop = def.Properties.First(p => p.Name == propName);
         var prim = Assert.IsType<TsType.Primitive>(prop.Type);

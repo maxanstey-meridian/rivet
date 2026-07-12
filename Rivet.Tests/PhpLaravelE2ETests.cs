@@ -8,15 +8,17 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class PhpLaravelE2ETests
 {
-    private static readonly string GoldenJson = File.ReadAllText(
-        Path.Combine("..", "..", "..", "Fixtures", "php-golden-contract.json"));
+    private static readonly string _goldenJson = File.ReadAllText(
+        Path.Combine("..", "..", "..", "Fixtures", "php-golden-contract.json")
+    );
 
-    private static readonly JsonElement Schemas = JsonDocument.Parse(
-        CompilationHelper.EmitOpenApiFromJson(GoldenJson)).RootElement
-        .GetProperty("components").GetProperty("schemas");
+    private static readonly JsonElement _schemas = JsonDocument
+        .Parse(CompilationHelper.EmitOpenApiFromJson(_goldenJson))
+        .RootElement.GetProperty("components")
+        .GetProperty("schemas");
 
-    private static JsonElement Prop(string type, string prop)
-        => Schemas.GetProperty(type).GetProperty("properties").GetProperty(prop);
+    private static JsonElement Prop(string type, string prop) =>
+        _schemas.GetProperty(type).GetProperty("properties").GetProperty(prop);
 
     private static void AssertNullable(JsonElement prop, string expectedType)
     {
@@ -28,7 +30,7 @@ public sealed class PhpLaravelE2ETests
     [Fact]
     public void ProductDto_Scalars()
     {
-        Assert.True(Schemas.TryGetProperty("ProductDto", out _));
+        Assert.True(_schemas.TryGetProperty("ProductDto", out _));
         Assert.Equal("string", Prop("ProductDto", "title").GetProperty("type").GetString());
         Assert.Equal("integer", Prop("ProductDto", "id").GetProperty("type").GetString());
         Assert.Equal("number", Prop("ProductDto", "price").GetProperty("type").GetString());
@@ -44,14 +46,23 @@ public sealed class PhpLaravelE2ETests
     [Fact]
     public void ProductDto_EnumRefs()
     {
-        Assert.Equal("#/components/schemas/ProductStatus", Prop("ProductDto", "status").GetProperty("$ref").GetString());
-        Assert.Equal("#/components/schemas/Priority", Prop("ProductDto", "priority").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "#/components/schemas/ProductStatus",
+            Prop("ProductDto", "status").GetProperty("$ref").GetString()
+        );
+        Assert.Equal(
+            "#/components/schemas/Priority",
+            Prop("ProductDto", "priority").GetProperty("$ref").GetString()
+        );
     }
 
     [Fact]
     public void ProductDto_NestedRef()
     {
-        Assert.Equal("#/components/schemas/UserDto", Prop("ProductDto", "author").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "#/components/schemas/UserDto",
+            Prop("ProductDto", "author").GetProperty("$ref").GetString()
+        );
     }
 
     [Fact]
@@ -67,7 +78,10 @@ public sealed class PhpLaravelE2ETests
     {
         var metadata = Prop("ProductDto", "metadata");
         Assert.Equal("object", metadata.GetProperty("type").GetString());
-        Assert.Equal("integer", metadata.GetProperty("additionalProperties").GetProperty("type").GetString());
+        Assert.Equal(
+            "integer",
+            metadata.GetProperty("additionalProperties").GetProperty("type").GetString()
+        );
     }
 
     [Fact]
@@ -76,36 +90,76 @@ public sealed class PhpLaravelE2ETests
         var dimensions = Prop("ProductDto", "dimensions");
         Assert.Equal("object", dimensions.GetProperty("type").GetString());
         // fixture declares width/height as int32 → OpenAPI "integer"
-        Assert.Equal("integer", dimensions.GetProperty("properties").GetProperty("width").GetProperty("type").GetString());
-        Assert.Equal("integer", dimensions.GetProperty("properties").GetProperty("height").GetProperty("type").GetString());
+        Assert.Equal(
+            "integer",
+            dimensions
+                .GetProperty("properties")
+                .GetProperty("width")
+                .GetProperty("type")
+                .GetString()
+        );
+        Assert.Equal(
+            "integer",
+            dimensions
+                .GetProperty("properties")
+                .GetProperty("height")
+                .GetProperty("type")
+                .GetString()
+        );
     }
 
     [Fact]
     public void ProductDto_StringUnion()
     {
-        Assert.Equal(new[] { "small", "medium", "large" },
-            Prop("ProductDto", "size").GetProperty("enum").EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal(
+            new[] { "small", "medium", "large" },
+            Prop("ProductDto", "size")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(e => e.GetString())
+                .ToArray()
+        );
     }
 
     [Fact]
     public void ProductDto_IntUnion()
     {
-        Assert.Equal(new[] { 1, 2, 3 },
-            Prop("ProductDto", "rating").GetProperty("enum").EnumerateArray().Select(e => e.GetInt32()).ToArray());
+        Assert.Equal(
+            new[] { 1, 2, 3 },
+            Prop("ProductDto", "rating")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(e => e.GetInt32())
+                .ToArray()
+        );
     }
 
     [Fact]
     public void StringEnum_Emits_Enum_Component()
     {
-        Assert.Equal(new[] { "active", "draft", "archived" },
-            Schemas.GetProperty("ProductStatus").GetProperty("enum").EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal(
+            new[] { "active", "draft", "archived" },
+            _schemas
+                .GetProperty("ProductStatus")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(e => e.GetString())
+                .ToArray()
+        );
     }
 
     [Fact]
     public void IntEnum_Emits_Enum_Component()
     {
-        Assert.Equal(new[] { 1, 2, 3 },
-            Schemas.GetProperty("Priority").GetProperty("enum").EnumerateArray().Select(e => e.GetInt32()).ToArray());
+        Assert.Equal(
+            new[] { 1, 2, 3 },
+            _schemas
+                .GetProperty("Priority")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(e => e.GetInt32())
+                .ToArray()
+        );
     }
 
     [Fact]
@@ -113,7 +167,10 @@ public sealed class PhpLaravelE2ETests
     {
         Assert.Equal("string", Prop("UserDto", "name").GetProperty("type").GetString());
         AssertNullable(Prop("UserDto", "email"), "string");
-        Assert.Equal("#/components/schemas/AddressDto", Prop("UserDto", "address").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "#/components/schemas/AddressDto",
+            Prop("UserDto", "address").GetProperty("$ref").GetString()
+        );
     }
 
     [Fact]
@@ -126,7 +183,7 @@ public sealed class PhpLaravelE2ETests
     [Fact]
     public void ProductFilterDto_Emits()
     {
-        Assert.True(Schemas.TryGetProperty("ProductFilterDto", out _));
+        Assert.True(_schemas.TryGetProperty("ProductFilterDto", out _));
     }
 
     [Fact]
@@ -134,13 +191,16 @@ public sealed class PhpLaravelE2ETests
     {
         var priorities = Prop("ProductFilterDto", "priorities");
         Assert.Equal("array", priorities.GetProperty("type").GetString());
-        Assert.Equal("#/components/schemas/Priority", priorities.GetProperty("items").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "#/components/schemas/Priority",
+            priorities.GetProperty("items").GetProperty("$ref").GetString()
+        );
     }
 
     [Fact]
     public void Endpoints_RoundTrip_FromGoldenJson()
     {
-        using var doc = JsonDocument.Parse(GoldenJson);
+        using var doc = JsonDocument.Parse(_goldenJson);
         var endpoints = doc.RootElement.GetProperty("endpoints");
 
         Assert.Equal(6, endpoints.GetArrayLength());
@@ -175,7 +235,7 @@ public sealed class PhpLaravelE2ETests
     [Fact]
     public void Endpoints_CorrectControllerNames()
     {
-        using var doc = JsonDocument.Parse(GoldenJson);
+        using var doc = JsonDocument.Parse(_goldenJson);
         var endpoints = doc.RootElement.GetProperty("endpoints");
 
         var controllers = new List<string>();
@@ -191,7 +251,7 @@ public sealed class PhpLaravelE2ETests
     [Fact]
     public void Endpoints_ParamSources_Correct()
     {
-        using var doc = JsonDocument.Parse(GoldenJson);
+        using var doc = JsonDocument.Parse(_goldenJson);
         var endpoints = doc.RootElement.GetProperty("endpoints");
 
         // Find the store endpoint (POST /products) — should have body param

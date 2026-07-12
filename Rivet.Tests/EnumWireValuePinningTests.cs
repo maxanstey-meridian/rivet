@@ -1,4 +1,3 @@
-using Microsoft.CodeAnalysis;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -17,34 +16,35 @@ public sealed class EnumWireValuePinningTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "StateDto": {
-                    "type": "string",
-                    "enum": ["Ready", "FLAT_RATE", "EastUs", "ALLCAPS", "open"]
-                },
-                "ItemDto": {
-                    "type": "object",
-                    "required": ["state"],
-                    "properties": { "state": { "$ref": "#/components/schemas/StateDto" } }
-                }
-                """,
+            "StateDto": {
+                "type": "string",
+                "enum": ["Ready", "FLAT_RATE", "EastUs", "ALLCAPS", "open"]
+            },
+            "ItemDto": {
+                "type": "object",
+                "required": ["state"],
+                "properties": { "state": { "$ref": "#/components/schemas/StateDto" } }
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "ListItems",
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
-                                    }
+            "/api/items": {
+                "get": {
+                    "operationId": "ListItems",
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ItemDto" }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         return CompilationHelper.FindFile(CompilationHelper.Import(spec), "StateDto.cs");
     }
@@ -69,34 +69,35 @@ public sealed class EnumWireValuePinningTests
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
-                "StateDto": {
-                    "type": "string",
-                    "enum": ["Ready", "FLAT_RATE", "EastUs", "ALLCAPS", "open"]
-                },
-                "ItemDto": {
-                    "type": "object",
-                    "required": ["state"],
-                    "properties": { "state": { "$ref": "#/components/schemas/StateDto" } }
-                }
-                """,
+            "StateDto": {
+                "type": "string",
+                "enum": ["Ready", "FLAT_RATE", "EastUs", "ALLCAPS", "open"]
+            },
+            "ItemDto": {
+                "type": "object",
+                "required": ["state"],
+                "properties": { "state": { "$ref": "#/components/schemas/StateDto" } }
+            }
+            """,
             paths: """
-                "/api/items": {
-                    "get": {
-                        "operationId": "ListItems",
-                        "responses": {
-                            "200": {
-                                "description": "Success",
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/ItemDto" }
-                                    }
+            "/api/items": {
+                "get": {
+                    "operationId": "ListItems",
+                    "responses": {
+                        "200": {
+                            "description": "Success",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/ItemDto" }
                                 }
                             }
                         }
                     }
                 }
-                """,
-            title: "API");
+            }
+            """,
+            title: "API"
+        );
 
         var result = CompilationHelper.Import(spec);
         var compilation = CompilationHelper.CompileImportResult(result);

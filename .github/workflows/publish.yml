@@ -20,8 +20,10 @@ jobs:
         with:
           node-version: 22
 
+      - uses: pnpm/action-setup@v4
+
       - name: Install vendored node test tooling (Rivet.Tests/js/README.md)
-        run: npm ci
+        run: pnpm install --frozen-lockfile
         working-directory: Rivet.Tests/js
 
       - run: dotnet restore

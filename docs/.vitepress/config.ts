@@ -63,9 +63,7 @@ export default defineConfig({
       },
     ],
 
-    socialLinks: [
-      { icon: "github", link: "https://github.com/maxanstey-meridian/rivet" },
-    ],
+    socialLinks: [{ icon: "github", link: "https://github.com/maxanstey-meridian/rivet" }],
 
     search: {
       provider: "local",

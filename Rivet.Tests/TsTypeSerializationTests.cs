@@ -6,7 +6,7 @@ namespace Rivet.Tests;
 
 public sealed class TsTypeSerializationTests
 {
-    private static readonly JsonSerializerOptions Options = new()
+    private static readonly JsonSerializerOptions _options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -17,7 +17,7 @@ public sealed class TsTypeSerializationTests
     public void Primitive_Serializes_With_Kind_And_Type()
     {
         var type = new TsType.Primitive("string");
-        var json = JsonSerializer.Serialize<TsType>(type, Options);
+        var json = JsonSerializer.Serialize<TsType>(type, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -31,7 +31,7 @@ public sealed class TsTypeSerializationTests
     public void Primitive_With_Format_And_CSharpType_Includes_All_Fields()
     {
         var type = new TsType.Primitive("string", "uuid", "Guid");
-        var json = JsonSerializer.Serialize<TsType>(type, Options);
+        var json = JsonSerializer.Serialize<TsType>(type, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -45,8 +45,8 @@ public sealed class TsTypeSerializationTests
     public void Primitive_RoundTrips()
     {
         var original = new TsType.Primitive("string", "uuid", "Guid");
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
-        var result = JsonSerializer.Deserialize<TsType>(json, Options);
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
+        var result = JsonSerializer.Deserialize<TsType>(json, _options);
         Assert.Equal(original, result);
     }
 
@@ -54,7 +54,7 @@ public sealed class TsTypeSerializationTests
     public void Nullable_Serializes_With_Inner()
     {
         var type = new TsType.Nullable(new TsType.Primitive("string"));
-        var json = JsonSerializer.Serialize<TsType>(type, Options);
+        var json = JsonSerializer.Serialize<TsType>(type, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -68,8 +68,8 @@ public sealed class TsTypeSerializationTests
     public void Nullable_RoundTrips()
     {
         var original = new TsType.Nullable(new TsType.Primitive("number"));
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
-        var result = JsonSerializer.Deserialize<TsType>(json, Options);
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
+        var result = JsonSerializer.Deserialize<TsType>(json, _options);
         Assert.Equal(original, result);
     }
 
@@ -77,7 +77,7 @@ public sealed class TsTypeSerializationTests
     public void Array_Serializes_With_Element()
     {
         var type = new TsType.Array(new TsType.Primitive("number"));
-        var json = JsonSerializer.Serialize<TsType>(type, Options);
+        var json = JsonSerializer.Serialize<TsType>(type, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -90,8 +90,8 @@ public sealed class TsTypeSerializationTests
     public void Array_RoundTrips()
     {
         var original = new TsType.Array(new TsType.Primitive("number"));
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
-        var result = JsonSerializer.Deserialize<TsType>(json, Options);
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
+        var result = JsonSerializer.Deserialize<TsType>(json, _options);
         Assert.Equal(original, result);
     }
 
@@ -99,12 +99,12 @@ public sealed class TsTypeSerializationTests
     public void Dictionary_RoundTrips()
     {
         var original = new TsType.Dictionary(new TsType.Primitive("boolean"));
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("dictionary", doc.RootElement.GetProperty("kind").GetString());
         Assert.True(doc.RootElement.TryGetProperty("value", out _));
 
-        var result = JsonSerializer.Deserialize<TsType>(json, Options);
+        var result = JsonSerializer.Deserialize<TsType>(json, _options);
         Assert.Equal(original, result);
     }
 
@@ -112,7 +112,7 @@ public sealed class TsTypeSerializationTests
     public void StringUnion_Serializes_Members_As_Values()
     {
         var type = new TsType.StringUnion(["active", "inactive", "pending"]);
-        var json = JsonSerializer.Serialize<TsType>(type, Options);
+        var json = JsonSerializer.Serialize<TsType>(type, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -127,8 +127,10 @@ public sealed class TsTypeSerializationTests
     public void StringUnion_RoundTrips()
     {
         var original = new TsType.StringUnion(["a", "b", "c"]);
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
-        var result = Assert.IsType<TsType.StringUnion>(JsonSerializer.Deserialize<TsType>(json, Options));
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
+        var result = Assert.IsType<TsType.StringUnion>(
+            JsonSerializer.Deserialize<TsType>(json, _options)
+        );
         Assert.Equal(original.Members, result.Members);
     }
 
@@ -141,12 +143,16 @@ public sealed class TsTypeSerializationTests
             new TsType.Literal(falseDocument.RootElement.Clone()),
         ]);
 
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
         using var document = JsonDocument.Parse(json);
         Assert.Equal("union", document.RootElement.GetProperty("kind").GetString());
-        Assert.False(document.RootElement.GetProperty("variants")[1].GetProperty("value").GetBoolean());
+        Assert.False(
+            document.RootElement.GetProperty("variants")[1].GetProperty("value").GetBoolean()
+        );
 
-        var result = Assert.IsType<TsType.Union>(JsonSerializer.Deserialize<TsType>(json, Options));
+        var result = Assert.IsType<TsType.Union>(
+            JsonSerializer.Deserialize<TsType>(json, _options)
+        );
         Assert.IsType<TsType.Primitive>(result.Variants[0]);
         var literal = Assert.IsType<TsType.Literal>(result.Variants[1]);
         Assert.Equal(JsonValueKind.False, literal.Value.ValueKind);
@@ -156,11 +162,11 @@ public sealed class TsTypeSerializationTests
     public void TypeRef_RoundTrips()
     {
         var original = new TsType.TypeRef("UserDto");
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("ref", doc.RootElement.GetProperty("kind").GetString());
 
-        var result = JsonSerializer.Deserialize<TsType>(json, Options);
+        var result = JsonSerializer.Deserialize<TsType>(json, _options);
         Assert.Equal(original, result);
     }
 
@@ -168,7 +174,7 @@ public sealed class TsTypeSerializationTests
     public void Generic_Serializes_TypeArguments_As_TypeArgs()
     {
         var type = new TsType.Generic("PagedResult", [new TsType.TypeRef("UserDto")]);
-        var json = JsonSerializer.Serialize<TsType>(type, Options);
+        var json = JsonSerializer.Serialize<TsType>(type, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -182,9 +188,14 @@ public sealed class TsTypeSerializationTests
     [Fact]
     public void Generic_RoundTrips()
     {
-        var original = new TsType.Generic("Result", [new TsType.Primitive("string"), new TsType.TypeRef("Error")]);
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
-        var result = Assert.IsType<TsType.Generic>(JsonSerializer.Deserialize<TsType>(json, Options));
+        var original = new TsType.Generic(
+            "Result",
+            [new TsType.Primitive("string"), new TsType.TypeRef("Error")]
+        );
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
+        var result = Assert.IsType<TsType.Generic>(
+            JsonSerializer.Deserialize<TsType>(json, _options)
+        );
         Assert.Equal(original.Name, result.Name);
         Assert.Equal(original.TypeArguments, result.TypeArguments);
     }
@@ -193,11 +204,11 @@ public sealed class TsTypeSerializationTests
     public void TypeParam_RoundTrips()
     {
         var original = new TsType.TypeParam("T");
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("typeParam", doc.RootElement.GetProperty("kind").GetString());
 
-        var result = JsonSerializer.Deserialize<TsType>(json, Options);
+        var result = JsonSerializer.Deserialize<TsType>(json, _options);
         Assert.Equal(original, result);
     }
 
@@ -205,7 +216,7 @@ public sealed class TsTypeSerializationTests
     public void Brand_Serializes_Inner_As_Underlying()
     {
         var type = new TsType.Brand("Email", new TsType.Primitive("string"));
-        var json = JsonSerializer.Serialize<TsType>(type, Options);
+        var json = JsonSerializer.Serialize<TsType>(type, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -219,16 +230,19 @@ public sealed class TsTypeSerializationTests
     public void Brand_RoundTrips()
     {
         var original = new TsType.Brand("Email", new TsType.Primitive("string"));
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
-        var result = JsonSerializer.Deserialize<TsType>(json, Options);
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
+        var result = JsonSerializer.Deserialize<TsType>(json, _options);
         Assert.Equal(original, result);
     }
 
     [Fact]
     public void InlineObject_Serializes_Fields_As_Properties()
     {
-        var type = new TsType.InlineObject([("key", new TsType.Primitive("string")), ("value", new TsType.Primitive("number"))]);
-        var json = JsonSerializer.Serialize<TsType>(type, Options);
+        var type = new TsType.InlineObject([
+            ("key", new TsType.Primitive("string")),
+            ("value", new TsType.Primitive("number")),
+        ]);
+        var json = JsonSerializer.Serialize<TsType>(type, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -243,13 +257,19 @@ public sealed class TsTypeSerializationTests
     [Fact]
     public void TaggedUnion_Serializes_With_Discriminator_And_Variants()
     {
-        var type = new TsType.TaggedUnion("kind", [
-            new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
-                ("kind", new TsType.StringUnion(["hidden"])),
-                ("message", new TsType.Primitive("string")),
-            ])),
-        ]);
-        var json = JsonSerializer.Serialize<TsType>(type, Options);
+        var type = new TsType.TaggedUnion(
+            "kind",
+            [
+                new TsType.TaggedUnionVariant(
+                    "hidden",
+                    new TsType.InlineObject([
+                        ("kind", new TsType.StringUnion(["hidden"])),
+                        ("message", new TsType.Primitive("string")),
+                    ])
+                ),
+            ]
+        );
+        var json = JsonSerializer.Serialize<TsType>(type, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -263,31 +283,51 @@ public sealed class TsTypeSerializationTests
     [Fact]
     public void TaggedUnion_RoundTrips()
     {
-        var original = new TsType.TaggedUnion("kind", [
-            new TsType.TaggedUnionVariant("hidden", new TsType.InlineObject([
-                ("kind", new TsType.StringUnion(["hidden"])),
-                ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
-            ])),
-            new TsType.TaggedUnionVariant("shown", new TsType.InlineObject([
-                ("kind", new TsType.StringUnion(["shown"])),
-                ("summary", new TsType.TypeRef("Summary")),
-            ])),
-        ]);
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
-        var result = Assert.IsType<TsType.TaggedUnion>(JsonSerializer.Deserialize<TsType>(json, Options));
+        var original = new TsType.TaggedUnion(
+            "kind",
+            [
+                new TsType.TaggedUnionVariant(
+                    "hidden",
+                    new TsType.InlineObject([
+                        ("kind", new TsType.StringUnion(["hidden"])),
+                        ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
+                    ])
+                ),
+                new TsType.TaggedUnionVariant(
+                    "shown",
+                    new TsType.InlineObject([
+                        ("kind", new TsType.StringUnion(["shown"])),
+                        ("summary", new TsType.TypeRef("Summary")),
+                    ])
+                ),
+            ]
+        );
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
+        var result = Assert.IsType<TsType.TaggedUnion>(
+            JsonSerializer.Deserialize<TsType>(json, _options)
+        );
         Assert.Equal(original.Discriminator, result.Discriminator);
         Assert.Equal(original.Variants.Select(v => v.Tag), result.Variants.Select(v => v.Tag));
-        var originalJson = original.Variants.Select(v => JsonSerializer.Serialize(v.Type, Options)).ToList();
-        var resultJson = result.Variants.Select(v => JsonSerializer.Serialize(v.Type, Options)).ToList();
+        var originalJson = original
+            .Variants.Select(v => JsonSerializer.Serialize(v.Type, _options))
+            .ToList();
+        var resultJson = result
+            .Variants.Select(v => JsonSerializer.Serialize(v.Type, _options))
+            .ToList();
         Assert.Equal(originalJson, resultJson);
     }
 
     [Fact]
     public void InlineObject_RoundTrips()
     {
-        var original = new TsType.InlineObject([("key", new TsType.Primitive("string")), ("value", new TsType.Primitive("number"))]);
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
-        var result = Assert.IsType<TsType.InlineObject>(JsonSerializer.Deserialize<TsType>(json, Options));
+        var original = new TsType.InlineObject([
+            ("key", new TsType.Primitive("string")),
+            ("value", new TsType.Primitive("number")),
+        ]);
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
+        var result = Assert.IsType<TsType.InlineObject>(
+            JsonSerializer.Deserialize<TsType>(json, _options)
+        );
         Assert.Equal(original.Fields, result.Fields);
     }
 
@@ -297,13 +337,19 @@ public sealed class TsTypeSerializationTests
         var original = new TsType.Nullable(
             new TsType.Array(
                 new TsType.Dictionary(
-                    new TsType.Generic("Result", [
-                        new TsType.Brand("Email", new TsType.Primitive("string")),
-                        new TsType.TypeRef("Error"),
-                    ]))));
+                    new TsType.Generic(
+                        "Result",
+                        [
+                            new TsType.Brand("Email", new TsType.Primitive("string")),
+                            new TsType.TypeRef("Error"),
+                        ]
+                    )
+                )
+            )
+        );
 
-        var json = JsonSerializer.Serialize<TsType>(original, Options);
-        var result = JsonSerializer.Deserialize<TsType>(json, Options);
+        var json = JsonSerializer.Serialize<TsType>(original, _options);
+        var result = JsonSerializer.Deserialize<TsType>(json, _options);
 
         // Unwrap and verify structure
         var nullable = Assert.IsType<TsType.Nullable>(result);
@@ -326,9 +372,10 @@ public sealed class TsTypeSerializationTests
             new TsType.Primitive("string"),
             IsOptional: true,
             Description: "User email",
-            Constraints: new TsPropertyConstraints(MinLength: 1));
+            Constraints: new TsPropertyConstraints(MinLength: 1)
+        );
 
-        var json = JsonSerializer.Serialize(prop, Options);
+        var json = JsonSerializer.Serialize(prop, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -350,7 +397,7 @@ public sealed class TsTypeSerializationTests
     public void Constraints_Omits_Null_Fields()
     {
         var constraints = new TsPropertyConstraints(MinLength: 1, MaxLength: 100);
-        var json = JsonSerializer.Serialize(constraints, Options);
+        var json = JsonSerializer.Serialize(constraints, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -370,12 +417,16 @@ public sealed class TsTypeSerializationTests
     [Fact]
     public void TypeDefinition_Serializes_With_Properties_Containing_Types()
     {
-        var def = new TsTypeDefinition("UserDto", [], [
-            new TsPropertyDefinition("id", new TsType.Primitive("number"), false),
-            new TsPropertyDefinition("name", new TsType.Primitive("string"), false),
-        ]);
+        var def = new TsTypeDefinition(
+            "UserDto",
+            [],
+            [
+                new TsPropertyDefinition("id", new TsType.Primitive("number"), false),
+                new TsPropertyDefinition("name", new TsType.Primitive("string"), false),
+            ]
+        );
 
-        var json = JsonSerializer.Serialize(def, Options);
+        var json = JsonSerializer.Serialize(def, _options);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -390,13 +441,13 @@ public sealed class TsTypeSerializationTests
     public void Deserialize_UnknownKind_Throws()
     {
         var json = """{"kind":"bogus"}""";
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<TsType>(json, Options));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<TsType>(json, _options));
     }
 
     [Fact]
     public void Deserialize_MissingKind_Throws()
     {
         var json = """{"type":"string"}""";
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<TsType>(json, Options));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<TsType>(json, _options));
     }
 }

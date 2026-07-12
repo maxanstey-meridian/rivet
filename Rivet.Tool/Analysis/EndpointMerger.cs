@@ -11,10 +11,12 @@ public static class EndpointMerger
 {
     public static IReadOnlyList<TsEndpointDefinition> Merge(
         IReadOnlyList<TsEndpointDefinition> contractEndpoints,
-        IReadOnlyList<TsEndpointDefinition> annotationEndpoints)
+        IReadOnlyList<TsEndpointDefinition> annotationEndpoints
+    )
     {
         var seen = new HashSet<(string, string)>(
-            contractEndpoints.Select(e => (e.ControllerName, e.Name)));
+            contractEndpoints.Select(e => (e.ControllerName, e.Name))
+        );
         var merged = new List<TsEndpointDefinition>(contractEndpoints);
         foreach (var ep in annotationEndpoints)
         {

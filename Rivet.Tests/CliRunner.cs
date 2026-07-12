@@ -9,21 +9,21 @@ namespace Rivet.Tests;
 /// </summary>
 internal static class CliRunner
 {
-    public static string ToolDllPath =>
-        Path.Combine(AppContext.BaseDirectory, "Rivet.Tool.dll");
+    public static string ToolDllPath => Path.Combine(AppContext.BaseDirectory, "Rivet.Tool.dll");
 
     public static string RepoPath(params string[] segments) =>
         Path.Combine([AppContext.BaseDirectory, "..", "..", "..", "..", .. segments]);
 
     public static (int ExitCode, string StdOut, string StdErr) RunCli(
         string workingDirectory,
-        IReadOnlyList<string> args) =>
-        Run(workingDirectory, "dotnet", ["exec", ToolDllPath, .. args]);
+        IReadOnlyList<string> args
+    ) => Run(workingDirectory, "dotnet", ["exec", ToolDllPath, .. args]);
 
     public static (int ExitCode, string StdOut, string StdErr) Run(
         string workingDirectory,
         string fileName,
-        IReadOnlyList<string> args)
+        IReadOnlyList<string> args
+    )
     {
         var startInfo = new ProcessStartInfo
         {
@@ -40,8 +40,20 @@ internal static class CliRunner
         using var process = Process.Start(startInfo)!;
         var stdOut = new StringBuilder();
         var stdErr = new StringBuilder();
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) { stdOut.AppendLine(e.Data); } };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) { stdErr.AppendLine(e.Data); } };
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is not null)
+            {
+                stdOut.AppendLine(e.Data);
+            }
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is not null)
+            {
+                stdErr.AppendLine(e.Data);
+            }
+        };
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
         if (!process.WaitForExit(TimeSpan.FromMinutes(5)))

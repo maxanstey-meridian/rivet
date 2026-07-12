@@ -9,7 +9,9 @@ internal sealed class ResolutionContext(List<string> warnings)
 
     // Case-insensitive (like ReservedTypeNames): names become Types/{Name}.cs files,
     // and case-insensitive filesystems clobber case-variant siblings at write time.
-    private readonly Dictionary<string, object> _syntheticsByName = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, object> _syntheticsByName = new(
+        StringComparer.OrdinalIgnoreCase
+    );
 
     /// <summary>
     /// Type names claimed by #/components/schemas (and generic templates) — synthetic records
@@ -26,8 +28,10 @@ internal sealed class ResolutionContext(List<string> warnings)
     /// </summary>
     public string AddOrReuseExtraRecord(GeneratedRecord record)
     {
-        var (name, existingName) = ResolveSyntheticName(record.Name, existing =>
-            existing is GeneratedRecord other && SameShape(other, record));
+        var (name, existingName) = ResolveSyntheticName(
+            record.Name,
+            existing => existing is GeneratedRecord other && SameShape(other, record)
+        );
 
         if (name is null)
         {
@@ -48,8 +52,11 @@ internal sealed class ResolutionContext(List<string> warnings)
     /// </summary>
     public string AddOrReuseExtraEnum(GeneratedEnum enumDef)
     {
-        var (name, existingName) = ResolveSyntheticName(enumDef.Name, existing =>
-            existing is GeneratedEnum other && other.Members.SequenceEqual(enumDef.Members));
+        var (name, existingName) = ResolveSyntheticName(
+            enumDef.Name,
+            existing =>
+                existing is GeneratedEnum other && other.Members.SequenceEqual(enumDef.Members)
+        );
 
         if (name is null)
         {
@@ -71,7 +78,8 @@ internal sealed class ResolutionContext(List<string> warnings)
     /// </summary>
     private (string? NewName, string? ExistingName) ResolveSyntheticName(
         string baseName,
-        Func<object, bool> isSameShape)
+        Func<object, bool> isSameShape
+    )
     {
         var candidate = baseName;
         var suffix = 1;
@@ -108,20 +116,23 @@ internal sealed class ResolutionContext(List<string> warnings)
             && (a.TypeParameters ?? []).SequenceEqual(b.TypeParameters ?? [])
             && a.Description == b.Description;
     }
+
     public List<GeneratedEnum> ExtraEnums { get; } = [];
 
     /// <summary>
     /// Records generated from #/components/schemas, keyed by final (deduped) C# name.
     /// Used for shape-checked reuse of synthesized parameter-input records (I3 residual).
     /// </summary>
-    public Dictionary<string, GeneratedRecord> MappedComponentRecords { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, GeneratedRecord> MappedComponentRecords { get; } =
+        new(StringComparer.Ordinal);
 
     /// <summary>
     /// P2 wave 5: component records that gained [RivetHeader] properties during contract
     /// building (header-aware input reuse). MapSchemas has already materialized its result
     /// by then, so OpenApiImporter consults these replacements when writing Types/ files.
     /// </summary>
-    public Dictionary<string, GeneratedRecord> ComponentRecordOverrides { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, GeneratedRecord> ComponentRecordOverrides { get; } =
+        new(StringComparer.Ordinal);
 
     /// <summary>Replaces a mapped component record (header augmentation) in both registries.</summary>
     public void ReplaceComponentRecord(string name, GeneratedRecord replacement)
@@ -129,6 +140,7 @@ internal sealed class ResolutionContext(List<string> warnings)
         MappedComponentRecords[name] = replacement;
         ComponentRecordOverrides[name] = replacement;
     }
+
     public List<string> Warnings { get; } = warnings;
     public HashSet<string> Resolving { get; } = [];
     public Dictionary<string, string> SchemaFingerprints { get; } = new();

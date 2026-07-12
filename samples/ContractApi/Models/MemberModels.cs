@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
-using Rivet;
 using ContractApi.Domain;
+using Rivet;
 
 namespace ContractApi.Models;
 

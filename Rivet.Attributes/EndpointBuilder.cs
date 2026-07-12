@@ -13,13 +13,19 @@ public sealed record RouteErrorResponse(int StatusCode, Type? ResponseType, stri
 /// targets the endpoint's success status. Spec-only: Rivet never sets or validates
 /// response headers at runtime — emitting them is handler code.
 /// </summary>
-public sealed record RouteResponseHeader(int? StatusCode, string Name, string? Description, bool Required);
+public sealed record RouteResponseHeader(
+    int? StatusCode,
+    string Name,
+    string? Description,
+    bool Required
+);
 
 /// <summary>
 /// Shared builder state and fluent methods for all RouteDefinition variants.
 /// Uses CRTP so each builder method returns the concrete type for chaining.
 /// </summary>
-public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBase<TSelf>
+public abstract class RouteDefinitionBase<TSelf>
+    where TSelf : RouteDefinitionBase<TSelf>
 {
     private int _successStatus;
     private bool _statusSet;
@@ -82,7 +88,8 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     /// Copy all builder state from this instance to another RouteDefinitionBase.
     /// Used by RouteDefinition.Accepts&lt;T&gt;() to transfer state during type conversion.
     /// </summary>
-    protected void CopyStateTo<TOther>(RouteDefinitionBase<TOther> target) where TOther : RouteDefinitionBase<TOther>
+    protected void CopyStateTo<TOther>(RouteDefinitionBase<TOther> target)
+        where TOther : RouteDefinitionBase<TOther>
     {
         target._summary = _summary;
         target._description = _description;
@@ -110,8 +117,9 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         if (_errorResponses?.Any(response => response.StatusCode == _successStatus) is true)
         {
             throw new InvalidOperationException(
-                $"Status {_successStatus} is declared as both the success status and via .Returns() — " +
-                "success and error responses cannot share a status.");
+                $"Status {_successStatus} is declared as both the success status and via .Returns() — "
+                    + "success and error responses cannot share a status."
+            );
         }
 
         _published = true;
@@ -122,9 +130,10 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         if (_published)
         {
             throw new InvalidOperationException(
-                $"{Method} {Route}: contract definitions are immutable once published — " +
-                "builder methods cannot be called after the endpoint has been invoked. " +
-                "Configure the definition fully in its static readonly initializer.");
+                $"{Method} {Route}: contract definitions are immutable once published — "
+                    + "builder methods cannot be called after the endpoint has been invoked. "
+                    + "Configure the definition fully in its static readonly initializer."
+            );
         }
     }
 
@@ -147,13 +156,16 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         EnsureMutable();
         if (_statusSet)
         {
-            throw new InvalidOperationException($"Status already set to {_successStatus} — cannot set to {statusCode}. Call .Status() only once.");
+            throw new InvalidOperationException(
+                $"Status already set to {_successStatus} — cannot set to {statusCode}. Call .Status() only once."
+            );
         }
 
         if (_errorResponses?.Any(response => response.StatusCode == statusCode) is true)
         {
             throw new InvalidOperationException(
-                $"Status {statusCode} is already declared via .Returns() — success and error responses cannot share a status.");
+                $"Status {statusCode} is already declared via .Returns() — success and error responses cannot share a status."
+            );
         }
 
         _successStatus = statusCode;
@@ -167,8 +179,9 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         if (_binaryRequestContentType is not null)
         {
             throw new InvalidOperationException(
-                $"{Method} {Route}: .FormEncoded() cannot be combined with .AcceptsBinary() — " +
-                "a request body is either raw binary or form-encoded, not both.");
+                $"{Method} {Route}: .FormEncoded() cannot be combined with .AcceptsBinary() — "
+                    + "a request body is either raw binary or form-encoded, not both."
+            );
         }
 
         _formEncoded = true;
@@ -187,8 +200,9 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         if (_formEncoded || _binaryRequestContentType is not null)
         {
             throw new InvalidOperationException(
-                $"{Method} {Route}: .AcceptsContentType() cannot be combined with " +
-                ".FormEncoded() or .AcceptsBinary() — those already declare the body media type.");
+                $"{Method} {Route}: .AcceptsContentType() cannot be combined with "
+                    + ".FormEncoded() or .AcceptsBinary() — those already declare the body media type."
+            );
         }
 
         _requestContentType = contentType;
@@ -207,8 +221,9 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         if (_fileContentType is not null)
         {
             throw new InvalidOperationException(
-                $"{Method} {Route}: .ProducesContentType() cannot be combined with .ProducesFile() — " +
-                "the file content type already declares the response media type.");
+                $"{Method} {Route}: .ProducesContentType() cannot be combined with .ProducesFile() — "
+                    + "the file content type already declares the response media type."
+            );
         }
 
         _responseContentType = contentType;
@@ -227,17 +242,15 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         return (TSelf)this;
     }
 
-    public TSelf Returns<TResponse>(int statusCode)
-        => Returns<TResponse>(statusCode, null);
+    public TSelf Returns<TResponse>(int statusCode) => Returns<TResponse>(statusCode, null);
 
-    public TSelf Returns<TResponse>(int statusCode, string? description)
-        => AddErrorResponse(new RouteErrorResponse(statusCode, typeof(TResponse), description));
+    public TSelf Returns<TResponse>(int statusCode, string? description) =>
+        AddErrorResponse(new RouteErrorResponse(statusCode, typeof(TResponse), description));
 
-    public TSelf Returns(int statusCode)
-        => Returns(statusCode, null);
+    public TSelf Returns(int statusCode) => Returns(statusCode, null);
 
-    public TSelf Returns(int statusCode, string? description)
-        => AddErrorResponse(new RouteErrorResponse(statusCode, null, description));
+    public TSelf Returns(int statusCode, string? description) =>
+        AddErrorResponse(new RouteErrorResponse(statusCode, null, description));
 
     private TSelf AddErrorResponse(RouteErrorResponse response)
     {
@@ -247,14 +260,16 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         if (_statusSet && response.StatusCode == _successStatus)
         {
             throw new InvalidOperationException(
-                $"Status {response.StatusCode} is already declared as the success status — success and error responses cannot share a status.");
+                $"Status {response.StatusCode} is already declared as the success status — success and error responses cannot share a status."
+            );
         }
 
         if (_errorResponses.Any(existing => existing.StatusCode == response.StatusCode))
         {
             throw new InvalidOperationException(
-                $"Status {response.StatusCode} is already declared via .Returns() — a status carries a single response shape. " +
-                "For multiple shapes at one status, declare a [RivetUnion] type and return it once.");
+                $"Status {response.StatusCode} is already declared via .Returns() — a status carries a single response shape. "
+                    + "For multiple shapes at one status, declare a [RivetUnion] type and return it once."
+            );
         }
 
         _errorResponses.Add(response);
@@ -267,26 +282,38 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
     /// emitting Location/ETag/... is handler code. <paramref name="required"/> is an
     /// explicit opt-in promise that the header is always present.
     /// </summary>
-    public TSelf WithResponseHeader(int statusCode, string name, string? description = null, bool required = false)
-        => AddResponseHeader(new RouteResponseHeader(statusCode, name, description, required));
+    public TSelf WithResponseHeader(
+        int statusCode,
+        string name,
+        string? description = null,
+        bool required = false
+    ) => AddResponseHeader(new RouteResponseHeader(statusCode, name, description, required));
 
     /// <summary>
     /// Declares a response header on the endpoint's success status (contract concept).
     /// See <see cref="WithResponseHeader(int, string, string?, bool)"/>.
     /// </summary>
-    public TSelf WithResponseHeader(string name, string? description = null, bool required = false)
-        => AddResponseHeader(new RouteResponseHeader(null, name, description, required));
+    public TSelf WithResponseHeader(
+        string name,
+        string? description = null,
+        bool required = false
+    ) => AddResponseHeader(new RouteResponseHeader(null, name, description, required));
 
     private TSelf AddResponseHeader(RouteResponseHeader header)
     {
         EnsureMutable();
         _responseHeaders ??= [];
 
-        if (_responseHeaders.Any(existing => existing.StatusCode == header.StatusCode
-            && string.Equals(existing.Name, header.Name, StringComparison.OrdinalIgnoreCase)))
+        if (
+            _responseHeaders.Any(existing =>
+                existing.StatusCode == header.StatusCode
+                && string.Equals(existing.Name, header.Name, StringComparison.OrdinalIgnoreCase)
+            )
+        )
         {
             throw new InvalidOperationException(
-                $"Response header '{header.Name}' is already declared for this status via .WithResponseHeader() — declare each header only once per status.");
+                $"Response header '{header.Name}' is already declared for this status via .WithResponseHeader() — declare each header only once per status."
+            );
         }
 
         _responseHeaders.Add(header);
@@ -295,16 +322,38 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
 
     public TSelf RequestExampleJson(string json, string? name = null, string? mediaType = null)
     {
+        // Example metadata is consumed by the Roslyn analyzer, not at runtime.
+        _ = json;
+        _ = name;
+        _ = mediaType;
         return (TSelf)this;
     }
 
-    public TSelf RequestExampleRef(string componentExampleId, string resolvedJson, string? name = null, string? mediaType = null)
+    public TSelf RequestExampleRef(
+        string componentExampleId,
+        string resolvedJson,
+        string? name = null,
+        string? mediaType = null
+    )
     {
+        _ = componentExampleId;
+        _ = resolvedJson;
+        _ = name;
+        _ = mediaType;
         return (TSelf)this;
     }
 
-    public TSelf ResponseExampleJson(int statusCode, string json, string? name = null, string? mediaType = null)
+    public TSelf ResponseExampleJson(
+        int statusCode,
+        string json,
+        string? name = null,
+        string? mediaType = null
+    )
     {
+        _ = statusCode;
+        _ = json;
+        _ = name;
+        _ = mediaType;
         return (TSelf)this;
     }
 
@@ -313,8 +362,14 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         string componentExampleId,
         string resolvedJson,
         string? name = null,
-        string? mediaType = null)
+        string? mediaType = null
+    )
     {
+        _ = statusCode;
+        _ = componentExampleId;
+        _ = resolvedJson;
+        _ = name;
+        _ = mediaType;
         return (TSelf)this;
     }
 
@@ -365,8 +420,9 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         if (_binaryRequestContentType is not null)
         {
             throw new InvalidOperationException(
-                $"{Method} {Route}: .AcceptsFile() cannot be combined with .AcceptsBinary() — " +
-                "a request body is either raw binary or multipart/form-data, not both.");
+                $"{Method} {Route}: .AcceptsFile() cannot be combined with .AcceptsBinary() — "
+                    + "a request body is either raw binary or multipart/form-data, not both."
+            );
         }
 
         _acceptsFile = true;
@@ -386,15 +442,17 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
         if (_acceptsFile)
         {
             throw new InvalidOperationException(
-                $"{Method} {Route}: .AcceptsBinary() cannot be combined with .AcceptsFile() — " +
-                "a request body is either raw binary or multipart/form-data, not both.");
+                $"{Method} {Route}: .AcceptsBinary() cannot be combined with .AcceptsFile() — "
+                    + "a request body is either raw binary or multipart/form-data, not both."
+            );
         }
 
         if (_formEncoded)
         {
             throw new InvalidOperationException(
-                $"{Method} {Route}: .AcceptsBinary() cannot be combined with .FormEncoded() — " +
-                "a request body is either raw binary or form-encoded, not both.");
+                $"{Method} {Route}: .AcceptsBinary() cannot be combined with .FormEncoded() — "
+                    + "a request body is either raw binary or form-encoded, not both."
+            );
         }
 
         _binaryRequestContentType = contentType;
@@ -406,7 +464,8 @@ public abstract class RouteDefinitionBase<TSelf> where TSelf : RouteDefinitionBa
 /// Route definition for endpoints with both input and output types.
 /// Roslyn reads the chain at generation time. Invoke provides type-safe runtime execution.
 /// </summary>
-public sealed class RouteDefinition<TInput, TOutput> : RouteDefinitionBase<RouteDefinition<TInput, TOutput>>
+public sealed class RouteDefinition<TInput, TOutput>
+    : RouteDefinitionBase<RouteDefinition<TInput, TOutput>>
 {
     internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
@@ -414,7 +473,10 @@ public sealed class RouteDefinition<TInput, TOutput> : RouteDefinitionBase<Route
     /// <summary>
     /// Execute the endpoint handler with type-safe input and output.
     /// </summary>
-    public async Task<RivetResult<TOutput>> Invoke(TInput input, Func<TInput, Task<TOutput>> handler)
+    public async Task<RivetResult<TOutput>> Invoke(
+        TInput input,
+        Func<TInput, Task<TOutput>> handler
+    )
     {
         MarkPublished();
         var result = await handler(input);
@@ -423,73 +485,66 @@ public sealed class RouteDefinition<TInput, TOutput> : RouteDefinitionBase<Route
 
     public async Task<Results<T1, T2>> Invoke<T1, T2>(
         TInput input,
-        Func<TInput, Task<Results<T1, T2>>> handler)
+        Func<TInput, Task<Results<T1, T2>>> handler
+    )
         where T1 : IResult
-        where T2 : IResult
-        => await InvokeTypedResult(
-            input,
-            typeof(TOutput),
-            handler);
+        where T2 : IResult => await InvokeTypedResult(input, typeof(TOutput), handler);
 
     public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(
         TInput input,
-        Func<TInput, Task<Results<T1, T2, T3>>> handler)
+        Func<TInput, Task<Results<T1, T2, T3>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
-        where T3 : IResult
-        => await InvokeTypedResult(
-            input,
-            typeof(TOutput),
-            handler);
+        where T3 : IResult => await InvokeTypedResult(input, typeof(TOutput), handler);
 
     public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(
         TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4>>> handler)
+        Func<TInput, Task<Results<T1, T2, T3, T4>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
-        where T4 : IResult
-        => await InvokeTypedResult(
-            input,
-            typeof(TOutput),
-            handler);
+        where T4 : IResult => await InvokeTypedResult(input, typeof(TOutput), handler);
 
     public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(
         TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4, T5>>> handler)
+        Func<TInput, Task<Results<T1, T2, T3, T4, T5>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
         where T4 : IResult
-        where T5 : IResult
-        => await InvokeTypedResult(
-            input,
-            typeof(TOutput),
-            handler);
+        where T5 : IResult => await InvokeTypedResult(input, typeof(TOutput), handler);
 
     public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(
         TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4, T5, T6>>> handler)
+        Func<TInput, Task<Results<T1, T2, T3, T4, T5, T6>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
         where T4 : IResult
         where T5 : IResult
-        where T6 : IResult
-        => await InvokeTypedResult(
-            input,
-            typeof(TOutput),
-            handler);
+        where T6 : IResult => await InvokeTypedResult(input, typeof(TOutput), handler);
 
     private async Task<TResult> InvokeTypedResult<TResult>(
         TInput input,
         Type successResponseType,
-        Func<TInput, Task<TResult>> handler)
+        Func<TInput, Task<TResult>> handler
+    )
         where TResult : IResult
     {
         MarkPublished();
         var result = await handler(input);
-        TypedResultValidator.Validate(Route, SuccessStatus, successResponseType, RouteErrorResponses, result, ShouldSkipValidation);
+        TypedResultValidator.Validate(
+            Route,
+            SuccessStatus,
+            successResponseType,
+            RouteErrorResponses,
+            result,
+            ShouldSkipValidation
+        );
         return result;
     }
 
@@ -514,59 +569,63 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
         return new RivetResult<TOutput>(SuccessStatus, result);
     }
 
-    public async Task<T1> Invoke<T1>(
-        Func<Task<T1>> handler)
-        where T1 : IResult
-        => await InvokeTypedResult(typeof(TOutput), handler);
+    public async Task<T1> Invoke<T1>(Func<Task<T1>> handler)
+        where T1 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
 
-    public async Task<Results<T1, T2>> Invoke<T1, T2>(
-        Func<Task<Results<T1, T2>>> handler)
+    public async Task<Results<T1, T2>> Invoke<T1, T2>(Func<Task<Results<T1, T2>>> handler)
         where T1 : IResult
-        where T2 : IResult
-        => await InvokeTypedResult(typeof(TOutput), handler);
+        where T2 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
 
     public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(
-        Func<Task<Results<T1, T2, T3>>> handler)
+        Func<Task<Results<T1, T2, T3>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
-        where T3 : IResult
-        => await InvokeTypedResult(typeof(TOutput), handler);
+        where T3 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
 
     public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(
-        Func<Task<Results<T1, T2, T3, T4>>> handler)
+        Func<Task<Results<T1, T2, T3, T4>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
-        where T4 : IResult
-        => await InvokeTypedResult(typeof(TOutput), handler);
+        where T4 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
 
     public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(
-        Func<Task<Results<T1, T2, T3, T4, T5>>> handler)
+        Func<Task<Results<T1, T2, T3, T4, T5>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
         where T4 : IResult
-        where T5 : IResult
-        => await InvokeTypedResult(typeof(TOutput), handler);
+        where T5 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
 
     public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(
-        Func<Task<Results<T1, T2, T3, T4, T5, T6>>> handler)
+        Func<Task<Results<T1, T2, T3, T4, T5, T6>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
         where T4 : IResult
         where T5 : IResult
-        where T6 : IResult
-        => await InvokeTypedResult(typeof(TOutput), handler);
+        where T6 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
 
     private async Task<TResult> InvokeTypedResult<TResult>(
         Type successResponseType,
-        Func<Task<TResult>> handler)
+        Func<Task<TResult>> handler
+    )
         where TResult : IResult
     {
         MarkPublished();
         var result = await handler();
-        TypedResultValidator.Validate(Route, SuccessStatus, successResponseType, RouteErrorResponses, result, ShouldSkipValidation);
+        TypedResultValidator.Validate(
+            Route,
+            SuccessStatus,
+            successResponseType,
+            RouteErrorResponses,
+            result,
+            ShouldSkipValidation
+        );
         return result;
     }
 
@@ -592,65 +651,70 @@ public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRout
         return new RivetResult(SuccessStatus);
     }
 
-    public async Task<T1> Invoke<T1>(
-        TInput input,
-        Func<TInput, Task<T1>> handler)
-        where T1 : IResult
-        => await InvokeTypedResult(input, handler);
+    public async Task<T1> Invoke<T1>(TInput input, Func<TInput, Task<T1>> handler)
+        where T1 : IResult => await InvokeTypedResult(input, handler);
 
     public async Task<Results<T1, T2>> Invoke<T1, T2>(
         TInput input,
-        Func<TInput, Task<Results<T1, T2>>> handler)
+        Func<TInput, Task<Results<T1, T2>>> handler
+    )
         where T1 : IResult
-        where T2 : IResult
-        => await InvokeTypedResult(input, handler);
+        where T2 : IResult => await InvokeTypedResult(input, handler);
 
     public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(
         TInput input,
-        Func<TInput, Task<Results<T1, T2, T3>>> handler)
+        Func<TInput, Task<Results<T1, T2, T3>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
-        where T3 : IResult
-        => await InvokeTypedResult(input, handler);
+        where T3 : IResult => await InvokeTypedResult(input, handler);
 
     public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(
         TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4>>> handler)
+        Func<TInput, Task<Results<T1, T2, T3, T4>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
-        where T4 : IResult
-        => await InvokeTypedResult(input, handler);
+        where T4 : IResult => await InvokeTypedResult(input, handler);
 
     public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(
         TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4, T5>>> handler)
+        Func<TInput, Task<Results<T1, T2, T3, T4, T5>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
         where T4 : IResult
-        where T5 : IResult
-        => await InvokeTypedResult(input, handler);
+        where T5 : IResult => await InvokeTypedResult(input, handler);
 
     public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(
         TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4, T5, T6>>> handler)
+        Func<TInput, Task<Results<T1, T2, T3, T4, T5, T6>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
         where T4 : IResult
         where T5 : IResult
-        where T6 : IResult
-        => await InvokeTypedResult(input, handler);
+        where T6 : IResult => await InvokeTypedResult(input, handler);
 
     private async Task<TResult> InvokeTypedResult<TResult>(
         TInput input,
-        Func<TInput, Task<TResult>> handler)
+        Func<TInput, Task<TResult>> handler
+    )
         where TResult : IResult
     {
         MarkPublished();
         var result = await handler(input);
-        TypedResultValidator.Validate(Route, SuccessStatus, null, RouteErrorResponses, result, ShouldSkipValidation);
+        TypedResultValidator.Validate(
+            Route,
+            SuccessStatus,
+            null,
+            RouteErrorResponses,
+            result,
+            ShouldSkipValidation
+        );
         return result;
     }
 
@@ -686,50 +750,59 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
     }
 
     public async Task<T1> Invoke<T1>(Func<Task<T1>> handler)
-        where T1 : IResult
-        => await InvokeTypedResult(handler);
+        where T1 : IResult => await InvokeTypedResult(handler);
 
     public async Task<Results<T1, T2>> Invoke<T1, T2>(Func<Task<Results<T1, T2>>> handler)
         where T1 : IResult
-        where T2 : IResult
-        => await InvokeTypedResult(handler);
+        where T2 : IResult => await InvokeTypedResult(handler);
 
-    public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(Func<Task<Results<T1, T2, T3>>> handler)
+    public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(
+        Func<Task<Results<T1, T2, T3>>> handler
+    )
+        where T1 : IResult
+        where T2 : IResult
+        where T3 : IResult => await InvokeTypedResult(handler);
+
+    public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(
+        Func<Task<Results<T1, T2, T3, T4>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
-        => await InvokeTypedResult(handler);
+        where T4 : IResult => await InvokeTypedResult(handler);
 
-    public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(Func<Task<Results<T1, T2, T3, T4>>> handler)
+    public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(
+        Func<Task<Results<T1, T2, T3, T4, T5>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
         where T4 : IResult
-        => await InvokeTypedResult(handler);
+        where T5 : IResult => await InvokeTypedResult(handler);
 
-    public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(Func<Task<Results<T1, T2, T3, T4, T5>>> handler)
+    public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(
+        Func<Task<Results<T1, T2, T3, T4, T5, T6>>> handler
+    )
         where T1 : IResult
         where T2 : IResult
         where T3 : IResult
         where T4 : IResult
         where T5 : IResult
-        => await InvokeTypedResult(handler);
-
-    public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(Func<Task<Results<T1, T2, T3, T4, T5, T6>>> handler)
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult
-        where T5 : IResult
-        where T6 : IResult
-        => await InvokeTypedResult(handler);
+        where T6 : IResult => await InvokeTypedResult(handler);
 
     private async Task<TResult> InvokeTypedResult<TResult>(Func<Task<TResult>> handler)
         where TResult : IResult
     {
         MarkPublished();
         var result = await handler();
-        TypedResultValidator.Validate(Route, SuccessStatus, null, RouteErrorResponses, result, ShouldSkipValidation);
+        TypedResultValidator.Validate(
+            Route,
+            SuccessStatus,
+            null,
+            RouteErrorResponses,
+            result,
+            ShouldSkipValidation
+        );
         return result;
     }
 
@@ -752,8 +825,7 @@ public sealed class FileRouteDefinition : RouteDefinitionBase<FileRouteDefinitio
     /// Sets the response content type for this file endpoint.
     /// Alias for ProducesFile — preferred on FileRouteDefinition for readability.
     /// </summary>
-    public FileRouteDefinition ContentType(string mediaType)
-        => ProducesFile(mediaType);
+    public FileRouteDefinition ContentType(string mediaType) => ProducesFile(mediaType);
 
     /// <summary>
     /// Execute the endpoint handler with runtime contract validation: the success
@@ -767,7 +839,13 @@ public sealed class FileRouteDefinition : RouteDefinitionBase<FileRouteDefinitio
         MarkPublished();
         var result = await handler();
         TypedResultValidator.ValidateFile(
-            Route, SuccessStatus, FileContentType, RouteErrorResponses, result, ShouldSkipValidation);
+            Route,
+            SuccessStatus,
+            FileContentType,
+            RouteErrorResponses,
+            result,
+            ShouldSkipValidation
+        );
         return result;
     }
 
@@ -790,8 +868,7 @@ public sealed class FileRouteDefinition<TInput> : RouteDefinitionBase<FileRouteD
     /// Sets the response content type for this file endpoint.
     /// Alias for ProducesFile — preferred on FileRouteDefinition for readability.
     /// </summary>
-    public FileRouteDefinition<TInput> ContentType(string mediaType)
-        => ProducesFile(mediaType);
+    public FileRouteDefinition<TInput> ContentType(string mediaType) => ProducesFile(mediaType);
 
     /// <summary>
     /// Execute the endpoint handler with runtime contract validation: the success
@@ -805,7 +882,13 @@ public sealed class FileRouteDefinition<TInput> : RouteDefinitionBase<FileRouteD
         MarkPublished();
         var result = await handler(input);
         TypedResultValidator.ValidateFile(
-            Route, SuccessStatus, FileContentType, RouteErrorResponses, result, ShouldSkipValidation);
+            Route,
+            SuccessStatus,
+            FileContentType,
+            RouteErrorResponses,
+            result,
+            ShouldSkipValidation
+        );
         return result;
     }
 

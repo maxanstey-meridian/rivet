@@ -10,4 +10,5 @@ namespace Rivet.Tool.Emit;
 public sealed record OpenApiDocumentInfo(
     string Title = "API",
     string Version = "1.0.0",
-    IReadOnlyList<string>? Servers = null);
+    IReadOnlyList<string>? Servers = null
+);
