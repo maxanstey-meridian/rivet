@@ -42,8 +42,8 @@ corpus fixtures), Taskfile.yml. (The PHP lowerer lives in its own repo,
 - `task build` / `task test` / `task samples:build` / `task check` (everything,
   incl. docs build) — or directly: `dotnet test ./Rivet.Tests/Rivet.Tests.csproj`.
 - Single area: `dotnet test --filter <TestClassName>`.
-- Conformance tests shell out to spectral in `Rivet.Tests/js/` (`npm install
-  --prefix Rivet.Tests/js` once, or `task install`).
+- Conformance tests shell out to spectral in `Rivet.Tests/js/` (`pnpm --dir
+  Rivet.Tests/js install` once, or `task install`).
 - Before done: full `dotnet test` + sample builds (`task samples:build`).
 
 ## Test conventions
