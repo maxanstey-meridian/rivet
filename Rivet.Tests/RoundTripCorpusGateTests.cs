@@ -8,6 +8,7 @@ namespace Rivet.Tests;
 /// Verified-corpus gate over the real, on-disk CLI pipeline. The local corpus is
 /// deliberately mandatory: a missing or changed artifact is a gate failure.
 /// </summary>
+[Trait("Category", "Local")]
 public sealed class RoundTripCorpusGateTests
 {
     private static readonly Lazy<VerifiedProfile> _profile = new(

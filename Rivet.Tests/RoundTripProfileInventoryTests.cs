@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 
 namespace Rivet.Tests;
 
+[Trait("Category", "Local")]
 public sealed class RoundTripProfileInventoryTests
 {
     [Fact]
