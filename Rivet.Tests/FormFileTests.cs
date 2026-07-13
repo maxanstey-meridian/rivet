@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rivet.Tool;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -265,7 +266,6 @@ public sealed class FormFileTests
 
             namespace Test;
 
-            [RivetType]
             public sealed record FileUploadRequest(IFormFile File);
 
             [RivetType]
@@ -290,7 +290,12 @@ public sealed class FormFileTests
 
         // OpenAPI: named input type — multipart schema is a $ref into components,
         // and the component carries the binary file property
-        using var doc = CompilationHelper.EmitOpenApi(source);
+        JsonDocument? emitted = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            emitted = CompilationHelper.EmitOpenApi(source)
+        );
+        using var doc = emitted!;
+        Assert.DoesNotContain(Diagnostics.MultipartInputTypeMissing, stderr);
         var operation = GetOperation(doc, "/api/files", "post");
         var schema = GetMultipartSchema(operation);
         Assert.Equal(
@@ -381,6 +386,44 @@ public sealed class FormFileTests
                 .GetProperty("schema")
                 .GetProperty("$ref")
                 .GetString()
+        );
+    }
+
+    [Fact]
+    public void Generic_Multipart_Input_Is_Emitted_Inline_Without_A_Dangling_Template_Reference()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Upload<T>(IFormFile File, T Metadata);
+
+            [RivetType]
+            public sealed record Metadata(string Name);
+
+            [RivetType]
+            public sealed record UploadResult(string Id);
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly Define Upload =
+                    Define.Post<Upload<Metadata>, UploadResult>("/api/files");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var schema = GetMultipartSchema(GetOperation(doc, "/api/files", "post"));
+
+        Assert.False(schema.TryGetProperty("$ref", out _));
+        var properties = schema.GetProperty("properties");
+        AssertBinaryFileProperty(schema, "file");
+        Assert.Equal(
+            "#/components/schemas/Metadata",
+            properties.GetProperty("metadata").GetProperty("$ref").GetString()
         );
     }
 

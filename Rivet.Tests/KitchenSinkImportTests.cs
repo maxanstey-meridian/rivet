@@ -579,7 +579,7 @@ public sealed class KitchenSinkImportTests
         var content = CompilationHelper.FindFile(result, "InlineParentDto.cs");
         // The nested property should reference the synthetic type, not JsonElement
         Assert.Contains("InlineParentDtoNested Nested", content);
-        Assert.DoesNotContain("JsonElement", content);
+        Assert.DoesNotContain("System.Text.Json.JsonElement Nested", content);
 
         // The synthetic record should be emitted
         var syntheticContent = CompilationHelper.FindFile(result, "InlineParentDtoNested.cs");
@@ -757,8 +757,8 @@ public sealed class KitchenSinkImportTests
         var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
         var content = CompilationHelper.FindFile(result, "InlineComposedArrayDto.cs");
 
-        // The array items allOf gets a context-derived name, not JsonElement
-        Assert.DoesNotContain("JsonElement", content);
+        // The array items allOf gets a context-derived name, not a JsonElement item.
+        Assert.DoesNotContain("List<System.Text.Json.JsonElement>", content);
         Assert.Contains("List<InlineComposedArrayDtoItems>", content);
 
         // The synthetic record should have the flattened properties

@@ -58,6 +58,72 @@ MAP_KEYS = {
     "pathItems", "paths", "patternProperties", "properties", "requestBodies", "schemas",
     "securityDefinitions", "securitySchemes", "variables",
 }
+CARRIER_SHAPES = (
+    "empty-schema",
+    "object-no-properties-additional-properties-false",
+    "object-no-properties-additional-properties-omitted",
+    "object-no-properties-additional-properties-schema",
+    "object-no-properties-additional-properties-true",
+    "object-properties-additional-properties-false",
+    "object-properties-additional-properties-omitted",
+    "object-properties-additional-properties-schema",
+    "object-properties-additional-properties-true",
+    "nullable-composition-branch",
+    "nested-discriminator",
+    "explicit-discriminator",
+    "parameter-content",
+    "encoding-object",
+    "external-value-example",
+    "component-header",
+    "component-example",
+    "cross-path-reference",
+)
+
+RECORD_EXPLICIT_OPEN_PROOF = (
+    "GeneratedCarrierFidelityTests.Explicit_open_object_preserves_additional_members_at_runtime"
+)
+RECORD_IMPLICIT_OPEN_PROOF = (
+    "GeneratedCarrierFidelityTests.Implicit_open_object_preserves_additional_members_at_runtime"
+)
+RECORD_CLOSED_PROOF = (
+    "OpaqueCarrierFidelityTests.Closed_object_preserves_every_valid_member_at_runtime"
+)
+RECORD_SCHEMA_OPEN_PROOF = (
+    "OpaqueCarrierFidelityTests.Open_record_preserves_typed_named_and_schema_valued_additional_properties"
+)
+DICTIONARY_PROOF = (
+    "OpaqueCarrierFidelityTests.Inline_free_form_carriers_preserve_valid_runtime_values_and_emitted_openness"
+)
+CLOSED_DICTIONARY_PROOF = (
+    "OpaqueCarrierFidelityTests.Inline_propertyless_closed_object_preserves_empty_value_and_emitted_closure"
+)
+PROPERTYLESS_RECORD_PROOF = (
+    "OpaqueCarrierFidelityTests.Propertyless_named_objects_keep_open_and_closed_runtime_carriers"
+)
+SCHEMA_DICTIONARY_PROOF = (
+    "OpaqueCarrierFidelityTests.MaxProperties_dictionary_preserves_a_valid_value_and_emits_the_constraint"
+)
+NULLABLE_UNION_PROOF = (
+    "GeneratedCarrierFidelityTests.Box_nullable_enum_union_preserves_valid_values_at_runtime"
+)
+NULLABLE_COMPOSITION_PROOF = (
+    "GeneratedCarrierFidelityTests.Nullable_all_of_record_and_scalar_round_trip_at_runtime"
+)
+DISCRIMINATOR_PROOF = (
+    "GeneratedCarrierFidelityTests.Spotify_nested_track_episode_discriminator_dispatches_episode_at_runtime"
+)
+PARAMETER_CONTENT_PROOF = "RoundTripDiffTests.Parameter_Surface_Mutations_Are_Reported"
+ENCODING_PROOF = "RoundTripDiffTests.Request_Body_Surface_Mutations_Are_Reported"
+EXTERNAL_VALUE_PROOF = (
+    "OpenApiReferenceNormalizationTests.ExternalValue_Example_Is_Reported_As_Unsupported"
+)
+COMPONENT_EXAMPLE_PROOF = (
+    "CliPipelineTests.Cli_Disk_Pipeline_Preserves_Component_Referenced_By_Schema_Example"
+)
+COMPONENT_HEADER_PROOF = "RoundTripDiffTests.Component_Namespace_Identity_Mutations_Are_Reported"
+CROSS_PATH_REFERENCE_PROOF = (
+    "RoundTripDiffTests.Integrity_Findings_Include_Refs_Security_Path_Parameters_And_Operation_Ids"
+)
 
 
 def parse_args():
@@ -78,6 +144,11 @@ def parse_args():
         "--update-profile",
         action="store_true",
         help="replace profile facts and reviewed hashes with the current reviewed roster",
+    )
+    parser.add_argument(
+        "--approve-disposition-change",
+        action="store_true",
+        help="explicitly approve changed vendor-extension dispositions during --update-profile",
     )
     return parser.parse_args()
 
@@ -168,6 +239,381 @@ class Walker:
         self.extensions[name].append((pointer, value_shape(value), canonical(value)))
 
 
+def json_pointer(pointer):
+    return f"#{pointer}" if pointer else "#"
+
+
+def is_component_schema_root(pointer):
+    parts = pointer.split("/")[1:]
+    return (
+        len(parts) == 3 and parts[0] == "components" and parts[1] == "schemas"
+    ) or (len(parts) == 2 and parts[0] == "definitions")
+
+
+def resolve_local_reference(document, reference):
+    if not isinstance(reference, str) or not reference.startswith("#/"):
+        return None
+    value = document
+    for raw_part in reference[2:].split("/"):
+        part = raw_part.replace("~1", "/").replace("~0", "~")
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    return value
+
+
+def additional_properties_status(schema):
+    if "additionalProperties" not in schema:
+        return "omitted"
+    value = schema["additionalProperties"]
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return "schema"
+
+
+def admits_null(schema):
+    if not isinstance(schema, dict):
+        return schema is None
+    if schema.get("nullable") is True:
+        return True
+    schema_type = schema.get("type")
+    if schema_type == "null" or isinstance(schema_type, list) and "null" in schema_type:
+        return True
+    return isinstance(schema.get("enum"), list) and None in schema["enum"]
+
+
+def has_carrier_shape(schema):
+    return isinstance(schema, dict) and any(
+        key in schema
+        for key in (
+            "$ref",
+            "type",
+            "properties",
+            "additionalProperties",
+            "items",
+            "oneOf",
+            "anyOf",
+            "allOf",
+            "enum",
+        )
+    )
+
+
+def group_carrier_occurrences(occurrences):
+    groups = collections.defaultdict(list)
+    for occurrence in occurrences:
+        key = (
+            occurrence["corpusId"],
+            occurrence["shape"],
+            occurrence["carrier"],
+            occurrence["behaviorTest"],
+        )
+        groups[key].append(occurrence["ownerPointer"])
+    return [
+        {
+            "corpusId": corpus_id,
+            "shape": shape,
+            "carrier": carrier,
+            "behaviorTest": behavior_test,
+            "ownerPointers": sorted(pointers),
+        }
+        for (corpus_id, shape, carrier, behavior_test), pointers in sorted(groups.items())
+    ]
+
+
+class CarrierWalker:
+    def __init__(self, corpus_id, document):
+        self.corpus_id = corpus_id
+        self.document = document
+        self.occurrences = []
+
+    def collect(self):
+        self._collect_components()
+        self.walk(self.document)
+        return sorted(
+            self.occurrences,
+            key=lambda item: (
+                item["corpusId"],
+                item["ownerPointer"],
+                item["shape"],
+                item["carrier"],
+            ),
+        )
+
+    def add(self, pointer, shape, carrier, behavior_test):
+        self.occurrences.append(
+            {
+                "corpusId": self.corpus_id,
+                "ownerPointer": json_pointer(pointer),
+                "shape": shape,
+                "carrier": carrier,
+                "behaviorTest": behavior_test,
+            }
+        )
+
+    def _collect_components(self):
+        components = self.document.get("components")
+        if not isinstance(components, dict):
+            return
+        for namespace, shape, proof in (
+            ("headers", "component-header", COMPONENT_HEADER_PROOF),
+            ("examples", "component-example", COMPONENT_EXAMPLE_PROOF),
+        ):
+            values = components.get(namespace)
+            if not isinstance(values, dict):
+                continue
+            for name in sorted(values):
+                self.add(
+                    f"/components/{namespace}/{pointer_part(name)}",
+                    shape,
+                    "provenance-only",
+                    proof,
+                )
+
+    def walk(
+        self,
+        value,
+        pointer="",
+        schema_context=False,
+        direct_all_of_branch=False,
+    ):
+        if isinstance(value, list):
+            for index, item in enumerate(value):
+                self.walk(item, f"{pointer}/{index}", schema_context=schema_context)
+            return
+        if not isinstance(value, dict):
+            return
+
+        self._inspect(value, pointer, schema_context, direct_all_of_branch)
+        for name, item in sorted(value.items()):
+            child_pointer = f"{pointer}/{pointer_part(name)}"
+            if name.lower().startswith("x-") or name in OPAQUE_KEYS:
+                continue
+            if name == "examples":
+                self._walk_examples(item, child_pointer)
+                continue
+            if name in {
+                "$defs",
+                "definitions",
+                "dependentSchemas",
+                "patternProperties",
+                "properties",
+                "schemas",
+            } and isinstance(item, dict):
+                for child_name, child in sorted(item.items()):
+                    self.walk(
+                        child,
+                        f"{child_pointer}/{pointer_part(child_name)}",
+                        schema_context=True,
+                    )
+                continue
+            if name in {"allOf", "anyOf", "oneOf", "prefixItems"} and isinstance(
+                item, list
+            ):
+                for index, child in enumerate(item):
+                    self.walk(
+                        child,
+                        f"{child_pointer}/{index}",
+                        schema_context=True,
+                        direct_all_of_branch=name == "allOf",
+                    )
+                continue
+            self.walk(
+                item,
+                child_pointer,
+                schema_context=name
+                in {
+                    "additionalProperties",
+                    "contains",
+                    "contentSchema",
+                    "items",
+                    "not",
+                    "propertyNames",
+                    "schema",
+                    "unevaluatedProperties",
+                },
+            )
+
+    def _walk_examples(self, value, pointer):
+        if not isinstance(value, dict):
+            return
+        for name, example in sorted(value.items()):
+            if isinstance(example, dict) and "externalValue" in example:
+                self.add(
+                    f"{pointer}/{pointer_part(name)}",
+                    "external-value-example",
+                    "provenance-only",
+                    EXTERNAL_VALUE_PROOF,
+                )
+
+    def _inspect(self, value, pointer, schema_context, direct_all_of_branch):
+        if schema_context and not value:
+            self.add(pointer, "empty-schema", "JsonElement", DICTIONARY_PROOF)
+
+        properties = value.get("properties")
+        if isinstance(properties, dict) and properties:
+            status = additional_properties_status(value)
+            carrier = self._object_carrier(pointer, status)
+            if carrier == "dictionary":
+                proof = DICTIONARY_PROOF
+            elif status == "omitted":
+                proof = RECORD_IMPLICIT_OPEN_PROOF
+            elif status == "false":
+                proof = RECORD_CLOSED_PROOF
+            elif status == "schema":
+                proof = RECORD_SCHEMA_OPEN_PROOF
+            else:
+                proof = RECORD_EXPLICIT_OPEN_PROOF
+            self.add(
+                pointer,
+                f"object-properties-additional-properties-{status}",
+                carrier,
+                proof,
+            )
+        elif (
+            isinstance(properties, dict)
+            or "additionalProperties" in value
+            or value.get("type") == "object"
+        ):
+            status = additional_properties_status(value)
+            component_record = direct_all_of_branch or (
+                is_component_schema_root(pointer) and status in {"omitted", "false"}
+            )
+            if component_record:
+                carrier = "record" if status == "false" else "extension-data record"
+                proof = (
+                    RECORD_SCHEMA_OPEN_PROOF
+                    if status == "schema"
+                    else PROPERTYLESS_RECORD_PROOF
+                )
+            else:
+                carrier = "dictionary"
+                proof = (
+                    SCHEMA_DICTIONARY_PROOF
+                    if status == "schema"
+                    else CLOSED_DICTIONARY_PROOF
+                    if status == "false"
+                    else DICTIONARY_PROOF
+                )
+            self.add(
+                pointer,
+                f"object-no-properties-additional-properties-{status}",
+                carrier,
+                proof,
+            )
+
+        for composition in ("oneOf", "anyOf", "allOf"):
+            branches = value.get(composition)
+            if not isinstance(branches, list):
+                continue
+            for index, branch in enumerate(branches):
+                if admits_null(branch):
+                    branch_pointer = f"{pointer}/{composition}/{index}"
+                    carrier = (
+                        "union"
+                        if composition in {"oneOf", "anyOf"}
+                        else self._all_of_carrier(value, pointer)
+                    )
+                    self.add(
+                        branch_pointer,
+                        "nullable-composition-branch",
+                        carrier,
+                        NULLABLE_UNION_PROOF
+                        if carrier == "union"
+                        else NULLABLE_COMPOSITION_PROOF,
+                    )
+
+        if isinstance(value.get("discriminator"), dict):
+            nested = not is_component_schema_root(pointer)
+            self.add(
+                pointer,
+                "nested-discriminator" if nested else "explicit-discriminator",
+                "union" if isinstance(value.get("oneOf"), list) or isinstance(value.get("anyOf"), list) else "record",
+                DISCRIMINATOR_PROOF,
+            )
+
+        if (
+            isinstance(value.get("name"), str)
+            and isinstance(value.get("in"), str)
+            and isinstance(value.get("content"), dict)
+        ):
+            schemas = [
+                media.get("schema")
+                for media in value["content"].values()
+                if isinstance(media, dict) and isinstance(media.get("schema"), dict)
+            ]
+            carrier = (
+                self._schema_carrier(schemas[0], pointer)
+                if len(schemas) == 1
+                else "provenance-only"
+            )
+            self.add(pointer, "parameter-content", carrier, PARAMETER_CONTENT_PROOF)
+
+        encoding = value.get("encoding")
+        if isinstance(encoding, dict):
+            for name, item in sorted(encoding.items()):
+                if isinstance(item, dict):
+                    self.add(
+                        f"{pointer}/encoding/{pointer_part(name)}",
+                        "encoding-object",
+                        "provenance-only",
+                        ENCODING_PROOF,
+                    )
+
+        if isinstance(value.get("externalValue"), str) and "/examples/" not in pointer:
+            self.add(pointer, "external-value-example", "provenance-only", EXTERNAL_VALUE_PROOF)
+
+        reference = value.get("$ref")
+        if isinstance(reference, str) and reference.startswith("#/paths/"):
+            self.add(
+                f"{pointer}/$ref",
+                "cross-path-reference",
+                "provenance-only",
+                CROSS_PATH_REFERENCE_PROOF,
+            )
+
+    def _object_carrier(self, pointer, status):
+        return "record" if status == "false" else "extension-data record"
+
+    def _all_of_carrier(self, schema, pointer):
+        for index, branch in enumerate(schema.get("allOf", [])):
+            if not has_carrier_shape(branch):
+                continue
+            carrier = self._schema_carrier(branch, f"{pointer}/allOf/{index}")
+            if carrier != "provenance-only":
+                return carrier
+        return "record"
+
+    def _schema_carrier(self, schema, pointer, depth=0):
+        if depth > 32:
+            return "provenance-only"
+        reference = schema.get("$ref")
+        if reference is not None:
+            resolved = resolve_local_reference(self.document, reference)
+            if isinstance(resolved, dict):
+                return self._schema_carrier(resolved, reference[1:], depth + 1)
+            return "provenance-only"
+        if isinstance(schema.get("oneOf"), list) or isinstance(schema.get("anyOf"), list):
+            return "union"
+        properties = schema.get("properties")
+        if isinstance(properties, dict) and properties:
+            return self._object_carrier(pointer, additional_properties_status(schema))
+        if schema.get("type") == "object" or "additionalProperties" in schema:
+            return "record" if is_component_schema_root(pointer) else "dictionary"
+        if isinstance(schema.get("allOf"), list):
+            for index, branch in enumerate(schema["allOf"]):
+                if not isinstance(branch, dict) or admits_null(branch):
+                    continue
+                carrier = self._schema_carrier(branch, f"{pointer}/allOf/{index}", depth + 1)
+                if carrier != "provenance-only":
+                    return carrier
+        if "type" not in schema:
+            return "JsonElement"
+        return "scalar"
+
+
 def load_json(path):
     try:
         with path.open(encoding="utf-8") as source:
@@ -226,6 +672,7 @@ def inventory(manifest_path, corpus_dir, overrides, corpus_ids):
     corpora = []
     normalized_totals = collections.Counter()
     source_totals = collections.Counter()
+    carrier_occurrences = []
 
     for corpus_id in corpus_ids:
         if corpus_id not in entries:
@@ -241,6 +688,7 @@ def inventory(manifest_path, corpus_dir, overrides, corpus_ids):
         normalized_totals.update(normalized_components)
         before_unknown = len(walker.unknown)
         walker.walk(document)
+        carrier_occurrences.extend(CarrierWalker(corpus_id, document).collect())
         corpora.append(
             {
                 "id": corpus_id,
@@ -260,6 +708,9 @@ def inventory(manifest_path, corpus_dir, overrides, corpus_ids):
         values = sorted({value for _, _, value in occurrences})
         extensions[name] = {
             "count": len(occurrences),
+            "ownerPointers": sorted(
+                pointer.rpartition("/")[0] or "/" for pointer, _, _ in occurrences
+            ),
             "valueShapes": dict(sorted(collections.Counter(shape for _, shape, _ in occurrences).items())),
             "distinctValueCount": len(values),
             "valuesSha256": hashlib.sha256("\n".join(values).encode()).hexdigest(),
@@ -272,6 +723,18 @@ def inventory(manifest_path, corpus_dir, overrides, corpus_ids):
         "standardKeywordCounts": dict(sorted(walker.keywords.items())),
         "extensions": extensions,
         "unknownKeywords": sorted(walker.unknown),
+        "carrierSensitiveGroups": group_carrier_occurrences(carrier_occurrences),
+        "carrierSensitiveCounts": dict(
+            sorted(
+                {
+                    shape: sum(
+                        occurrence["shape"] == shape
+                        for occurrence in carrier_occurrences
+                    )
+                    for shape in CARRIER_SHAPES
+                }.items()
+            )
+        ),
     }
 
 
@@ -318,6 +781,8 @@ def validate_profile(profile, manifest):
 def main():
     args = parse_args()
     try:
+        if args.approve_disposition_change and not args.update_profile:
+            raise ValueError("--approve-disposition-change requires --update-profile")
         profile = load_json(args.profile)
         manifest = load_json(args.manifest)
         corpus_ids, profile_errors = validate_profile(profile, manifest)
@@ -328,17 +793,17 @@ def main():
             corpus_ids,
         )
         if args.update_profile:
-            source_defect_errors = [
-                error
-                for error in profile_errors
-                if error.startswith("reviewed source-defect policy")
-                or error.startswith("source-defect policy")
-            ]
-            if source_defect_errors:
-                raise ValueError("; ".join(source_defect_errors))
+            if profile_errors:
+                raise ValueError("; ".join(profile_errors))
             if observed["unknownKeywords"]:
                 raise ValueError("cannot update a profile with unknown keywords")
             dispositions = profile.get("vendorExtensionDispositions", {})
+            disposition_sha256 = hashlib.sha256(canonical(dispositions).encode()).hexdigest()
+            if (
+                profile.get("reviewedDispositionSha256") != disposition_sha256
+                and not args.approve_disposition_change
+            ):
+                raise ValueError("reviewed vendor-extension disposition changed")
             observed_extensions = set(observed["extensions"])
             reviewed_extensions = set(dispositions)
             if observed_extensions != reviewed_extensions:

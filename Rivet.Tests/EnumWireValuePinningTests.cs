@@ -3,12 +3,9 @@ using Rivet.Tool.Model;
 namespace Rivet.Tests;
 
 /// <summary>
-/// FABLE_ROUNDTRIP #3 — enum wire-value identity. The emitter camelCases
-/// unpinned member names, so the import-side pin trigger must compare the
-/// original value against that EMITTED form, not against the C# member name:
-/// 'Ready' (Pascal == original) still emitted as 'ready', silently, in both
-/// directions. Pin whenever emitted ≠ original; skip the pin when camelCasing
-/// already reproduces the original exactly.
+/// FABLE_ROUNDTRIP #3 — enum wire-value identity. Imported string enums pin every
+/// member explicitly so runtime serialization and forward emission use the exact
+/// authored value rather than inferring it from the generated C# member name.
 /// </summary>
 public sealed class EnumWireValuePinningTests
 {
@@ -50,7 +47,7 @@ public sealed class EnumWireValuePinningTests
     }
 
     [Fact]
-    public void CaseVariant_Values_Are_Pinned_CamelCase_Equivalents_Are_Not()
+    public void Every_String_Enum_Value_Is_Pinned_Explicitly()
     {
         var enumContent = ImportStateEnum();
 
@@ -60,8 +57,9 @@ public sealed class EnumWireValuePinningTests
         Assert.Contains("[JsonStringEnumMemberName(\"EastUs\")]", enumContent);
         Assert.Contains("[JsonStringEnumMemberName(\"ALLCAPS\")]", enumContent);
 
-        // 'open' -> member 'Open' -> emitted 'open': already wire-true, no pin
-        Assert.DoesNotContain("[JsonStringEnumMemberName(\"open\")]", enumContent);
+        // Runtime enum conversion does not apply the emitter's camel-case convention,
+        // so wire-true values are explicit too.
+        Assert.Contains("[JsonStringEnumMemberName(\"open\")]", enumContent);
     }
 
     [Fact]

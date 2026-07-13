@@ -425,7 +425,8 @@ public sealed class PolymorphismTests
         // wire — keeping it would double-emit), base clause present, no [RivetType]
         // (the walker reaches them through the base's registrations).
         var circleContent = CompilationHelper.FindFile(result, "ShapeCircle.cs");
-        Assert.Contains(": Shape;", circleContent);
+        Assert.Contains(") : Shape", circleContent);
+        Assert.Contains("[JsonExtensionData]", circleContent);
         Assert.Contains("double Radius", circleContent);
         Assert.Contains("string Id", circleContent);
         Assert.DoesNotContain("string Type", circleContent.Split("record ShapeCircle")[1]);

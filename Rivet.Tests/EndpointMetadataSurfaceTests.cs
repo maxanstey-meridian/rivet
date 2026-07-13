@@ -5,7 +5,7 @@ namespace Rivet.Tests;
 public sealed class EndpointMetadataSurfaceTests
 {
     [Fact]
-    public void Parameter_examples_survive_public_cli_disk_pipeline()
+    public void Parameter_metadata_survives_public_cli_disk_pipeline()
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
@@ -16,6 +16,7 @@ public sealed class EndpointMetadataSurfaceTests
                         {
                             "name": "q",
                             "in": "query",
+                            "allowEmptyValue": true,
                             "schema": {
                                 "type": "string",
                                 "examples": ["alpha", "beta"]
@@ -42,7 +43,11 @@ public sealed class EndpointMetadataSurfaceTests
             """
         );
 
-        using var emitted = RunDiskPipeline(spec, "rivet-parameter-metadata-");
+        using var emitted = RunDiskPipeline(
+            spec,
+            "rivet-parameter-metadata-",
+            generatedSource => Assert.Contains("\\\"allowEmptyValue\\\":true", generatedSource)
+        );
         var parameters = emitted
             .RootElement.GetProperty("paths")
             .GetProperty("/items")
@@ -59,6 +64,7 @@ public sealed class EndpointMetadataSurfaceTests
                 .EnumerateArray()
                 .Select(value => value.GetString())
         );
+        Assert.True(parameters["q"].GetProperty("allowEmptyValue").GetBoolean());
         Assert.Equal("trace-123", parameters["trace"].GetProperty("example").GetString());
         Assert.Equal(
             "fast",
@@ -67,6 +73,106 @@ public sealed class EndpointMetadataSurfaceTests
                 .GetProperty("fast")
                 .GetProperty("value")
                 .GetString()
+        );
+    }
+
+    [Fact]
+    public void Framework_scalar_names_survive_component_name_collisions()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "DateTime": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "format": "date" },
+                    "to": { "type": "string", "format": "date" }
+              }
+            },
+            "DateTimeOffset": {
+              "type": "object",
+              "properties": { "offset": { "type": "string" } }
+            },
+            "System": {
+              "type": "object",
+              "properties": { "value": { "type": "string" } }
+            },
+            "Event": {
+                "type": "object",
+                "properties": {
+                    "occurredAt": { "type": "string", "format": "date-time" },
+                    "receivedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "x-rivet-csharp-type": "DateTimeOffset"
+                    },
+                    "untypedOffset": { "x-rivet-csharp-type": "DateTimeOffset" },
+                    "nullableOffset": {
+                      "type": "null",
+                      "x-rivet-csharp-type": "DateTimeOffset"
+                    },
+                    "node": { "x-rivet-csharp-type": "JsonNode" },
+                    "raw": {},
+                    "systemValue": { "$ref": "#/components/schemas/System" },
+                    "window": { "$ref": "#/components/schemas/DateTime" },
+                    "offset": { "$ref": "#/components/schemas/DateTimeOffset" }
+                  },
+                  "required": ["occurredAt", "receivedAt", "untypedOffset", "nullableOffset", "node", "raw", "systemValue", "window", "offset"]
+            }
+            """,
+            paths: """
+            "/events": {
+                "get": {
+                    "operationId": "events_get",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "$ref": "#/components/schemas/Event" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        using var emitted = RunDiskPipeline(
+            spec,
+            "rivet-framework-scalar-collision-",
+            generatedSource =>
+            {
+                Assert.Contains("global::System.DateTime OccurredAt", generatedSource);
+                Assert.Contains("global::System.DateTimeOffset ReceivedAt", generatedSource);
+                Assert.Contains("global::System.DateTimeOffset UntypedOffset", generatedSource);
+                Assert.Contains("global::System.DateTimeOffset? NullableOffset", generatedSource);
+                Assert.Contains("global::System.Text.Json.Nodes.JsonNode Node", generatedSource);
+                Assert.Contains("global::System.Text.Json.JsonElement Raw", generatedSource);
+                Assert.Contains("System SystemValue", generatedSource);
+                Assert.Contains("DateTime Window", generatedSource);
+                Assert.Contains("DateTimeOffset Offset", generatedSource);
+            }
+        );
+        var properties = emitted
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Event")
+            .GetProperty("properties");
+        var occurredAt = properties.GetProperty("occurredAt");
+        Assert.Equal("string", occurredAt.GetProperty("type").GetString());
+        Assert.Equal("date-time", occurredAt.GetProperty("format").GetString());
+        Assert.Equal(
+            "DateTimeOffset",
+            properties.GetProperty("receivedAt").GetProperty("x-rivet-csharp-type").GetString()
+        );
+        Assert.Equal(
+            "#/components/schemas/DateTime",
+            properties.GetProperty("window").GetProperty("$ref").GetString()
+        );
+        Assert.Equal(
+            "#/components/schemas/DateTimeOffset",
+            properties.GetProperty("offset").GetProperty("$ref").GetString()
         );
     }
 

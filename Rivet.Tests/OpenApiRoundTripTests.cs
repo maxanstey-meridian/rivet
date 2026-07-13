@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Rivet.Tool;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
@@ -1559,7 +1560,6 @@ public sealed class OpenApiRoundTripTests
 
             namespace Test;
 
-            [RivetType]
             public sealed record UploadInput(IFormFile Document, string Title);
 
             [RivetType]
@@ -1578,16 +1578,20 @@ public sealed class OpenApiRoundTripTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var openApiJson = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            null
+        string? openApiJson = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            openApiJson = OpenApiEmitter.Emit(
+                endpoints,
+                walker.Definitions,
+                walker.Brands,
+                walker.Enums,
+                null
+            )
         );
+        Assert.DoesNotContain(Diagnostics.MultipartInputTypeMissing, stderr);
 
         // Verify the multipart schema uses $ref to the named input type
-        var jsonDoc = System.Text.Json.JsonDocument.Parse(openApiJson);
+        var jsonDoc = System.Text.Json.JsonDocument.Parse(openApiJson!);
         var multipartSchema = jsonDoc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/files")
@@ -1602,7 +1606,7 @@ public sealed class OpenApiRoundTripTests
         );
 
         // Reverse: OpenAPI → import → compile → walk
-        var importResult = OpenApiImporter.Import(openApiJson, new ImportOptions("RoundTrip"));
+        var importResult = OpenApiImporter.Import(openApiJson!, new ImportOptions("RoundTrip"));
 
         // The input type name should be "UploadInput" (not "UploadRequest")
         var contractFile = importResult.Files.First(f => f.FileName.Contains("Contract"));

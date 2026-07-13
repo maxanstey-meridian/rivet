@@ -3573,11 +3573,10 @@ public sealed class OpenApiImporterTests
         Assert.Contains("Inactive", enumContent);
         Assert.Contains("Pending", enumContent);
 
-        // No pin needed: the emitted wire value for member 'Active' is already
-        // 'active' (camelCase) — pins exist only where the wire value would
-        // otherwise change (FABLE_ROUNDTRIP #3 broadened the trigger to
-        // emitted-value inequality, which also dropped redundant pins like this)
-        Assert.DoesNotContain("JsonStringEnumMemberName", enumContent);
+        Assert.Contains("[JsonConverter(typeof(JsonStringEnumConverter<StatusDto>))]", enumContent);
+        Assert.Contains("[JsonStringEnumMemberName(\"active\")]", enumContent);
+        Assert.Contains("[JsonStringEnumMemberName(\"inactive\")]", enumContent);
+        Assert.Contains("[JsonStringEnumMemberName(\"pending\")]", enumContent);
 
         // Should compile
         var compilation = CompilationHelper.CompileImportResult(result);
@@ -4703,8 +4702,10 @@ public sealed class OpenApiImporterTests
 
         var output = CSharpWriter.WriteEnum(enumDef, "Test");
 
+        Assert.Contains("[JsonConverter(typeof(JsonStringEnumConverter<Status>))]", output);
         Assert.Contains("[JsonStringEnumMemberName(\"active\")]", output);
         Assert.Contains("[JsonStringEnumMemberName(\"inactive\")]", output);
+        Assert.Contains("[JsonStringEnumMemberName(\"archived\")]", output);
         Assert.DoesNotContain("[JsonStringEnumMemberName(\"Archived\")]", output);
         Assert.DoesNotContain("= ", output);
     }
@@ -5771,8 +5772,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Inline_Properties_With_AdditionalProperties_Warns_Loudly() // I5 — marker
     {
-        // Inline object declaring BOTH properties and additionalProperties: the dictionary
-        // side wins, the declared properties are dropped — must not be silent.
+        // Inline object declaring BOTH properties and additionalProperties retains both
+        // surfaces: typed named properties plus JSON extension data.
         var spec = CompilationHelper.BuildSpec(
             paths: """
             "/api/things": {
@@ -5799,9 +5800,13 @@ public sealed class OpenApiImporterTests
 
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ThingsContract.cs");
+        var request = CompilationHelper.FindFile(result, "CreateRequest.cs");
 
-        Assert.Contains("Dictionary<string, string>", contract);
-        Assert.Contains(
+        Assert.Contains(".RequestContent<CreateRequest>", contract);
+        Assert.Contains("string Alpha", request);
+        Assert.Contains("[JsonExtensionData]", request);
+        Assert.Contains("Dictionary<string, JsonElement> AdditionalProperties", request);
+        Assert.DoesNotContain(
             result.Warnings,
             w => w.StartsWith("RIV3013: Declared properties dropped", StringComparison.Ordinal)
         );
@@ -5810,8 +5815,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Named_Schema_Properties_With_AdditionalProperties_Warns_Loudly() // I5 — marker (named side)
     {
-        // Named schemas take the opposite branch: the record wins, additionalProperties
-        // is dropped — equally loud.
+        // Named schemas retain both the declared record surface and extension data.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
             "Mixed": {
@@ -5827,7 +5831,9 @@ public sealed class OpenApiImporterTests
         var mixed = CompilationHelper.FindFile(result, "Mixed.cs");
 
         Assert.Contains("string Alpha", mixed);
-        Assert.Contains(
+        Assert.Contains("[JsonExtensionData]", mixed);
+        Assert.Contains("Dictionary<string, JsonElement> AdditionalProperties", mixed);
+        Assert.DoesNotContain(
             result.Warnings,
             w => w.StartsWith("RIV3004: additionalProperties dropped", StringComparison.Ordinal)
         );
@@ -6129,9 +6135,10 @@ public sealed class OpenApiImporterTests
             result.Warnings
         );
         var contract = CompilationHelper.FindFile(result, "ImageContract.cs");
-        Assert.Contains(".AcceptsBinary(\"application/x-tar\")", contract);
-        Assert.Contains(".RequestBinaryContent(\"application/x-tar\")", contract);
-        Assert.DoesNotContain("application/octet-stream", contract);
+        Assert.Contains(".AcceptsBinary()", contract);
+        Assert.Contains(".RequestBinaryContent(\"application/octet-stream\")", contract);
+        Assert.DoesNotContain(".AcceptsBinary(\"application/x-tar\")", contract);
+        Assert.DoesNotContain(".RequestBinaryContent(\"application/x-tar\")", contract);
     }
 
     [Fact]
@@ -6263,8 +6270,9 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "DefaultContract.cs");
 
-        Assert.Contains(".AcceptsBinary(\"application/x-tar\")", contract);
-        Assert.Contains(".RequestBinaryContent(\"application/x-tar\")", contract);
+        Assert.Contains(".AcceptsBinary()", contract);
+        Assert.Contains(".RequestBinaryContent(\"application/octet-stream\")", contract);
+        Assert.DoesNotContain(".RequestBinaryContent(\"application/x-tar\")", contract);
         Assert.DoesNotContain("reserved-content-type-unrepresented", contract);
     }
 

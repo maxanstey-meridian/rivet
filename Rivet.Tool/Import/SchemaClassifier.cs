@@ -114,13 +114,24 @@ internal static class SchemaClassifier
 
         foreach (var item in oneOfList)
         {
-            if (item.Type.HasValue && item.Type.Value == JsonSchemaType.Null)
+            if (IsNullOnlyBranch(item))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    internal static bool IsNullOnlyBranch(IOpenApiSchema schema)
+    {
+        if (schema.Type is not { } type || !type.HasFlag(JsonSchemaType.Null))
+        {
+            return false;
+        }
+
+        var nonNullType = type & ~JsonSchemaType.Null;
+        return nonNullType == 0 || nonNullType == JsonSchemaType.String && schema.Pattern == ".^";
     }
 
     /// <summary>
@@ -321,6 +332,9 @@ internal static class SchemaClassifier
             "DateTime" => "DateTime",
             "Guid" => "Guid",
             "System.Text.Json.JsonElement" => "Object",
+            _ when csharpType.StartsWith("global::System.", StringComparison.Ordinal) => csharpType[
+                "global::System.".Length..
+            ],
             _ when csharpType.StartsWith("List<") || csharpType.StartsWith("IReadOnlyList<") =>
                 "ListOf" + Naming.StripInvalidIdentifierChars(csharpType),
             _ when csharpType.StartsWith("Dictionary<string,") => "DictionaryOf"
@@ -604,6 +618,7 @@ internal static class SchemaClassifier
 
         sb.Append('{');
         sb.Append("t:").Append(schema.Type.HasValue ? (int)schema.Type.Value : -1);
+        sb.Append(",apa:").Append(schema.AdditionalPropertiesAllowed);
 
         if (schema.Format is not null)
         {

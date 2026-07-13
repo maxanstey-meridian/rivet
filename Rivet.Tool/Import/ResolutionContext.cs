@@ -114,7 +114,8 @@ internal sealed class ResolutionContext(List<string> warnings)
     {
         return a.Properties.SequenceEqual(b.Properties)
             && (a.TypeParameters ?? []).SequenceEqual(b.TypeParameters ?? [])
-            && a.Description == b.Description;
+            && a.Description == b.Description
+            && a.HasExtensionData == b.HasExtensionData;
     }
 
     public List<GeneratedEnum> ExtraEnums { get; } = [];

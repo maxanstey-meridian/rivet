@@ -564,6 +564,14 @@ public sealed class ContractSchemaTests
     }
 
     [Fact]
+    public void Query_AllowEmptyValue_Is_Accepted()
+    {
+        var json =
+            """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"option","type":{"kind":"primitive","type":"string"},"source":"query","allowEmptyValue":true}],"controllerName":"C","responses":[]}]}""";
+        Assert.True(Validate(json).IsValid);
+    }
+
+    [Fact]
     public void Endpoint_Example_Missing_Json_And_ComponentExampleId_Rejected()
     {
         var json = """

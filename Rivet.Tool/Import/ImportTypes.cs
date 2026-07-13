@@ -40,7 +40,8 @@ internal sealed record GeneratedRecord(
     bool IsUnion = false,
     string? ComponentId = null,
     bool IsSynthetic = true,
-    IReadOnlyList<GeneratedSchemaMetadata>? SchemaMetadata = null
+    IReadOnlyList<GeneratedSchemaMetadata>? SchemaMetadata = null,
+    bool HasExtensionData = false
 );
 
 internal sealed record GeneratedSchemaMetadata(string Pointer, TsScalarMetadata Metadata);

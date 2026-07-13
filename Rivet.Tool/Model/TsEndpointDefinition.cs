@@ -149,7 +149,9 @@ public sealed record TsEndpointParam(
         string? SchemaType = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Format = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        bool IsFormatSpecified = false
+        bool IsFormatSpecified = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool AllowEmptyValue = false
 );
 
 public enum ParamSource

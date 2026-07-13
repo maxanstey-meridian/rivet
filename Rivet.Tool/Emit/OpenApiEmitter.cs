@@ -1537,6 +1537,10 @@ public static class OpenApiEmitter
         {
             result["explode"] = explode;
         }
+        if (location == "query" && parameter.AllowEmptyValue)
+        {
+            result["allowEmptyValue"] = true;
+        }
 
         return result;
     }

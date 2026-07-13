@@ -102,7 +102,7 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV3001` | Warning | Alias schema is part of a `$ref` cycle — replaced with an empty schema; consumers resolve to an untyped object. | Break the cycle in the source spec, or type the affected members after scaffolding. |
 | `RIV3002` | Warning | Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented. | Review the scaffold's `.Secure(...)` calls; multi-scheme semantics are out of scope. |
 | `RIV3003` | Warning | TRACE operation dropped — the HTTP method has no contract representation. | No action; TRACE is out of scope for the contract model. |
-| `RIV3004` | Warning | Named schema declares both `properties` and `additionalProperties` — imported as a record; extra members are not represented. | Pick one side in the scaffolded C# (record vs dictionary) and adjust by hand. |
+| `RIV3004` | Retired | Reserved diagnostic ID. Mixed named objects now retain typed properties plus extension data. | No action. |
 | `RIV3005` | Warning | `discriminator` with no reversible polymorphic shape (plain object without `oneOf`, or `oneOf` whose `mapping` is absent/unusable) — imported without dispatch semantics. | Model the polymorphism as a `oneOf` with a complete `discriminator.mapping` whose variants carry the tag property, or accept the non-polymorphic import. |
 | `RIV3006` | Warning | Alias schema references a missing schema — consumers fall back to `JsonElement`. | Fix the dangling `$ref` in the source spec, or type the member after scaffolding. |
 | `RIV3007` | Warning | Alias schema is part of a `$ref` cycle — consumers fall back to `JsonElement`. | Break the cycle in the source spec, or type the member after scaffolding. |
@@ -111,7 +111,7 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV3010` | Warning | Unhandled JSON Schema `type` — mapped to `JsonElement`. | Type the member by hand in the scaffolded C#. |
 | `RIV3011` | Warning | Array schema without `items` — mapped to `List<JsonElement>`. | Add `items` to the source spec, or type the list element after scaffolding. |
 | `RIV3012` | Warning | Enum constraint that cannot become a C# enum (single-value, mixed/float, out-of-int32-range) — degraded to a primitive. | Accept the primitive, or hand-model the constraint in the scaffolded C#. |
-| `RIV3013` | Warning | Inline schema declares both `properties` and `additionalProperties` — imported as a dictionary; the declared properties are not represented. | Pick one side in the scaffolded C# (dictionary vs record) and adjust by hand. |
+| `RIV3013` | Retired | Reserved diagnostic ID. Mixed inline objects now retain typed properties plus extension data. | No action. |
 | `RIV3014` | Warning | Dictionary `propertyNames` schema has no C# dictionary-key representation — imported with `string` keys. | Reference a string enum / string-backed brand or use a string key schema in the source spec, or type the dictionary key by hand after scaffolding. |
 | `RIV3015` | Warning | Named scalar component uses const, composition, heterogeneous leaves, or a non-flat enum outside bounded scalar preservation. | Replace it with one primitive leaf (optionally nullable) or a flat string/Int32 enum; the existing fallback mapping is retained. |
 | `RIV3020` | Warning | Parameter has an empty name, so the invalid parameter is dropped while the operation and its other parameters are preserved. | Give the source parameter a non-empty OpenAPI name. |

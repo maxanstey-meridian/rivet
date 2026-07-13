@@ -474,16 +474,6 @@ internal sealed class SchemaMapper
             // inherits from the abstract base.
             if (_polymorphicVariantKeys.TryGetValue(key, out var polymorphicBaseKey))
             {
-                if (schema.AdditionalProperties is not null)
-                {
-                    _ctx.Warnings.Add(
-                        Diagnostics.Prefix(
-                            Diagnostics.ImportAdditionalPropertiesDropped,
-                            $"additionalProperties dropped on '{name}': schema has both 'properties' and 'additionalProperties' — imported as a record; extra members are not represented."
-                        )
-                    );
-                }
-
                 var derived = _synth.MapRecord(name, schema);
                 var discName = Naming.ToPascalCaseFromSegments(
                     _polymorphicBases[polymorphicBaseKey].DiscriminatorProperty
@@ -611,23 +601,12 @@ internal sealed class SchemaMapper
                                 name,
                                 [],
                                 Description: schemaDescription,
-                                SchemaMetadata: CollectGeneratedSchemaMetadata(schema)
+                                SchemaMetadata: CollectGeneratedSchemaMetadata(schema),
+                                HasExtensionData: schema.AdditionalPropertiesAllowed
                             )
                         );
                     }
                     continue;
-                }
-
-                // Named diagnostic (I5, named-schema side): a record is generated from
-                // `properties`, so an `additionalProperties` declared alongside is dropped.
-                if (schema.AdditionalProperties is not null)
-                {
-                    _ctx.Warnings.Add(
-                        Diagnostics.Prefix(
-                            Diagnostics.ImportAdditionalPropertiesDropped,
-                            $"additionalProperties dropped on '{name}': schema has both 'properties' and 'additionalProperties' — imported as a record; extra members are not represented."
-                        )
-                    );
                 }
 
                 // Named diagnostic (I.A-17): a discriminator on a plain object schema (no oneOf
@@ -1099,7 +1078,7 @@ internal sealed class SchemaMapper
         if (++_ctx.RecursionDepth > MaxRecursionDepth)
         {
             _ctx.RecursionDepth--;
-            return "System.Text.Json.JsonElement";
+            return QualifyFrameworkScalarIfShadowed("System.Text.Json.JsonElement");
         }
 
         try
@@ -1530,7 +1509,7 @@ internal sealed class SchemaMapper
                     $"Reference to unresolvable alias schema '{refId}'{(context is null ? "" : $" (in '{context}')")} — using JsonElement."
                 )
             );
-            result = "System.Text.Json.JsonElement";
+            result = QualifyFrameworkScalarIfShadowed("System.Text.Json.JsonElement");
             return true;
         }
 
@@ -1680,11 +1659,14 @@ internal sealed class SchemaMapper
             );
             if (nullableCsharpType is not null)
             {
-                result = SchemaClassifier.ResolveJsonNodeFqn(nullableCsharpType) + "?";
+                result =
+                    QualifyFrameworkScalarIfShadowed(
+                        SchemaClassifier.ResolveJsonNodeFqn(nullableCsharpType)
+                    ) + "?";
                 return true;
             }
 
-            result = "System.Text.Json.JsonElement";
+            result = QualifyFrameworkScalarIfShadowed("System.Text.Json.JsonElement");
             return true;
         }
 
@@ -1738,7 +1720,7 @@ internal sealed class SchemaMapper
 
         foreach (var item in branches)
         {
-            if (item.Type.HasValue && item.Type.Value == JsonSchemaType.Null)
+            if (SchemaClassifier.IsNullOnlyBranch(item))
             {
                 hasNull = true;
             }
@@ -1765,16 +1747,25 @@ internal sealed class SchemaMapper
         // allOf inline → synthetic flattened record
         if (schema.AllOf is { Count: > 0 })
         {
-            // Short-circuit: allOf with a single $ref and no sibling properties → resolve the ref
-            // recursively (I2): refs to primitives/enums resolve to the underlying type instead
-            // of a dangling name for a record that was never emitted.
+            // Some generators use allOf to attach annotations to one actual value
+            // schema. Those annotation-only branches do not create an object carrier.
+            var valueBranches = schema.AllOf.Where(ContributesRuntimeShape).ToList();
+            var constrainedScalarBranches = schema
+                .AllOf.Where(branch => branch.Enum is { Count: > 0 } || branch.Const is not null)
+                .ToList();
+            if (constrainedScalarBranches.Count == 1 && valueBranches.All(IsPrimitiveTypeBranch))
+            {
+                valueBranches = constrainedScalarBranches;
+            }
             if (
-                schema.AllOf.Count == 1
-                && schema.AllOf[0] is OpenApiSchemaReference
+                valueBranches.Count == 1
                 && schema.Properties is not { Count: > 0 }
+                && schema.Items is null
+                && schema.AdditionalProperties is null
+                && schema.AdditionalPropertiesAllowed
             )
             {
-                result = ResolveCSharpType(schema.AllOf[0], context);
+                result = ResolveCSharpType(valueBranches[0], context);
                 return true;
             }
 
@@ -1805,6 +1796,34 @@ internal sealed class SchemaMapper
 
         return false;
     }
+
+    private static bool ContributesRuntimeShape(IOpenApiSchema schema) =>
+        schema is OpenApiSchemaReference
+        || schema.Type is { } type && (type & ~JsonSchemaType.Null) != 0
+        || schema.Properties is { Count: > 0 }
+        || schema.Items is not null
+        || schema.AdditionalProperties is not null
+        || schema.AllOf is { Count: > 0 }
+        || schema.OneOf is { Count: > 0 }
+        || schema.AnyOf is { Count: > 0 }
+        || schema.Required is { Count: > 0 }
+        || schema.PatternProperties is { Count: > 0 }
+        || schema.Discriminator is not null
+        || !schema.AdditionalPropertiesAllowed;
+
+    private static bool IsPrimitiveTypeBranch(IOpenApiSchema schema) =>
+        schema.Type is { } type
+        && (type & ~JsonSchemaType.Null)
+            is JsonSchemaType.String
+                or JsonSchemaType.Integer
+                or JsonSchemaType.Number
+                or JsonSchemaType.Boolean
+        && schema.Properties is not { Count: > 0 }
+        && schema.Items is null
+        && schema.AdditionalProperties is null
+        && schema.AllOf is not { Count: > 0 }
+        && schema.OneOf is not { Count: > 0 }
+        && schema.AnyOf is not { Count: > 0 };
 
     private string ResolveUnionType(string? context, IList<IOpenApiSchema> variants)
     {
@@ -1856,7 +1875,9 @@ internal sealed class SchemaMapper
         var untypedCsharpType = SchemaClassifier.GetExtensionString(schema, "x-rivet-csharp-type");
         if (untypedCsharpType is not null)
         {
-            return SchemaClassifier.ResolveJsonNodeFqn(untypedCsharpType);
+            return QualifyFrameworkScalarIfShadowed(
+                SchemaClassifier.ResolveJsonNodeFqn(untypedCsharpType)
+            );
         }
 
         // Final fallback — only warn if the schema had structural properties we should have handled
@@ -1868,7 +1889,7 @@ internal sealed class SchemaMapper
             );
         }
 
-        return "System.Text.Json.JsonElement";
+        return QualifyFrameworkScalarIfShadowed("System.Text.Json.JsonElement");
     }
 
     private static string ResolveConstType(string constValue)
@@ -1899,7 +1920,9 @@ internal sealed class SchemaMapper
         var csharpType = SchemaClassifier.GetExtensionString(schema, "x-rivet-csharp-type");
         if (csharpType is not null)
         {
-            return SchemaClassifier.ResolveJsonNodeFqn(csharpType);
+            return QualifyFrameworkScalarIfShadowed(
+                SchemaClassifier.ResolveJsonNodeFqn(csharpType)
+            );
         }
 
         if (type.HasFlag(JsonSchemaType.String))
@@ -1909,7 +1932,9 @@ internal sealed class SchemaMapper
                 return SynthesizeInlineEnum(schema, context);
             }
 
-            var stringType = SchemaClassifier.ResolveStringType(schema);
+            var stringType = QualifyFrameworkScalarIfShadowed(
+                SchemaClassifier.ResolveStringType(schema)
+            );
             if (schema.Enum is { Count: > 0 })
             {
                 WarnEnumConstraintDropped(schema, context, stringType);
@@ -1973,7 +1998,7 @@ internal sealed class SchemaMapper
     private string WarnAndFallback(string diagnosticId, string reason)
     {
         _ctx.Warnings.Add(Diagnostics.Prefix(diagnosticId, $"{reason} — mapped to 'JsonElement'."));
-        return "System.Text.Json.JsonElement";
+        return QualifyFrameworkScalarIfShadowed("System.Text.Json.JsonElement");
     }
 
     /// <summary>
@@ -2040,28 +2065,6 @@ internal sealed class SchemaMapper
 
     private string ResolveObjectType(IOpenApiSchema schema, string? context)
     {
-        if (schema.AdditionalProperties is not null)
-        {
-            // Named diagnostic (I5): an inline object declaring BOTH `properties` and
-            // `additionalProperties` maps to a dictionary — the declared properties are
-            // dropped, never silently.
-            if (schema.Properties is { Count: > 0 })
-            {
-                var dropped = string.Join(", ", schema.Properties.Keys);
-                var where = context is not null ? $" at '{context}'" : "";
-                _ctx.Warnings.Add(
-                    Diagnostics.Prefix(
-                        Diagnostics.ImportDeclaredPropertiesDropped,
-                        $"Declared properties dropped{where}: schema has both 'properties' and 'additionalProperties' — imported as a dictionary; properties [{dropped}] are not represented."
-                    )
-                );
-            }
-
-            var valueType = ResolveCSharpType(schema.AdditionalProperties, context);
-            var keyType = ResolveDictionaryKeyType(schema, context);
-            return $"Dictionary<{keyType}, {valueType}>";
-        }
-
         // Inline object with properties
         if (schema.Properties is { Count: > 0 })
         {
@@ -2100,8 +2103,15 @@ internal sealed class SchemaMapper
             return finalName;
         }
 
+        if (schema.AdditionalProperties is not null)
+        {
+            var valueType = ResolveCSharpType(schema.AdditionalProperties, context);
+            var keyType = ResolveDictionaryKeyType(schema, context);
+            return $"Dictionary<{keyType}, {valueType}>";
+        }
+
         // Bare object with no properties or additionalProperties → untyped map
-        return "Dictionary<string, System.Text.Json.JsonElement>";
+        return $"Dictionary<string, {QualifyFrameworkScalarIfShadowed("System.Text.Json.JsonElement")}>";
     }
 
     /// <summary>
@@ -2141,12 +2151,14 @@ internal sealed class SchemaMapper
                 // x-rivet-csharp-type pins the exact key type (numeric-keyed dictionaries etc.)
                 if (GetStringMember(obj, "x-rivet-csharp-type") is { } csharpType)
                 {
-                    return csharpType;
+                    return QualifyFrameworkScalarIfShadowed(
+                        SchemaClassifier.ResolveJsonNodeFqn(csharpType)
+                    );
                 }
 
                 if (GetStringMember(obj, "type") == "string")
                 {
-                    return GetStringMember(obj, "format") switch
+                    var keyType = GetStringMember(obj, "format") switch
                     {
                         "date-time" => "DateTime",
                         "date" => "DateOnly",
@@ -2167,6 +2179,7 @@ internal sealed class SchemaMapper
                         // No/unknown format on string keys — still plain string keys
                         _ => "string",
                     };
+                    return QualifyFrameworkScalarIfShadowed(keyType);
                 }
             }
         }
@@ -2179,6 +2192,33 @@ internal sealed class SchemaMapper
             )
         );
         return "string";
+    }
+
+    private string QualifyFrameworkScalarIfShadowed(string typeName)
+    {
+        if (
+            typeName.StartsWith("System.", StringComparison.Ordinal)
+            && _ctx.ReservedTypeNames.Contains("System")
+        )
+        {
+            return "global::" + typeName;
+        }
+
+        if (!_ctx.ReservedTypeNames.Contains(typeName))
+        {
+            return typeName;
+        }
+
+        return typeName switch
+        {
+            "DateTime" => "global::System.DateTime",
+            "DateTimeOffset" => "global::System.DateTimeOffset",
+            "DateOnly" => "global::System.DateOnly",
+            "TimeOnly" => "global::System.TimeOnly",
+            "Guid" => "global::System.Guid",
+            "Uri" => "global::System.Uri",
+            _ => typeName,
+        };
     }
 
     private static string? GetStringMember(JsonObject obj, string name) =>

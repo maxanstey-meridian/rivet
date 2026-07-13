@@ -81,7 +81,11 @@ internal sealed class RecordSynthesizer(
         }
 
         ctx.Resolving.Remove(name);
-        return new GeneratedRecord(name, merged);
+        return new GeneratedRecord(
+            name,
+            merged,
+            HasExtensionData: allOfList.All(schema => schema.AdditionalPropertiesAllowed)
+        );
     }
 
     public GeneratedRecord ResolveUnionRecord(string name, IList<IOpenApiSchema> variants)
@@ -278,7 +282,11 @@ internal sealed class RecordSynthesizer(
     {
         if (schema.Properties is not { Count: > 0 })
         {
-            return record;
+            return record with
+            {
+                Name = name,
+                HasExtensionData = record.HasExtensionData && schema.AdditionalPropertiesAllowed,
+            };
         }
 
         var siblingProps = ExtractProperties(schema, name, inheritedRequired);
@@ -292,7 +300,12 @@ internal sealed class RecordSynthesizer(
             }
         }
 
-        return new GeneratedRecord(name, merged);
+        return record with
+        {
+            Name = name,
+            Properties = merged,
+            HasExtensionData = record.HasExtensionData && schema.AdditionalPropertiesAllowed,
+        };
     }
 
     public GeneratedRecord MapRecord(string name, IOpenApiSchema schema)
@@ -309,7 +322,8 @@ internal sealed class RecordSynthesizer(
             name,
             properties,
             Description: description,
-            SchemaMetadata: SchemaMapper.CollectGeneratedSchemaMetadata(schema)
+            SchemaMetadata: SchemaMapper.CollectGeneratedSchemaMetadata(schema),
+            HasExtensionData: schema.AdditionalPropertiesAllowed
         );
     }
 
@@ -353,7 +367,12 @@ internal sealed class RecordSynthesizer(
             templateProps.Add(prop with { CSharpType = templatedType });
         }
 
-        return new GeneratedRecord(templateName, templateProps, info.TypeParams);
+        return new GeneratedRecord(
+            templateName,
+            templateProps,
+            info.TypeParams,
+            HasExtensionData: firstInstance.AdditionalPropertiesAllowed
+        );
     }
 
     internal static TsPropertyConstraints? ExtractConstraints(IOpenApiSchema schema)

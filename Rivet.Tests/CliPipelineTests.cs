@@ -342,7 +342,7 @@ public sealed class CliPipelineTests
     }
 
     [Fact]
-    public void Cli_Import_Maps_A_Finite_Content_Type_Header_To_Request_Content()
+    public void Cli_Import_Preserves_Request_Content_And_Drops_A_Finite_Content_Type_Header()
     {
         var workDir = Directory.CreateTempSubdirectory("rivet-content-type-map-");
         try
@@ -371,6 +371,10 @@ public sealed class CliPipelineTests
                 ["--from-openapi", sourcePath, "--output", sourceDirectory]
             );
             Assert.Equal(0, import.ExitCode);
+            Assert.Contains(
+                "warning RIV3021: Reserved header parameter dropped: POST /build declares 'Content-type'; request media types are represented by requestBody.content.",
+                import.StdErr
+            );
             var emit = RunCli(
                 workDir.FullName,
                 [sourceDirectory, "--openapi", "--output", outputDirectory]
@@ -385,8 +389,8 @@ public sealed class CliPipelineTests
                 .GetProperty("/build")
                 .GetProperty("post");
             var content = operation.GetProperty("requestBody").GetProperty("content");
-            Assert.True(content.TryGetProperty("application/x-tar", out _));
-            Assert.False(content.TryGetProperty("application/octet-stream", out _));
+            Assert.True(content.TryGetProperty("application/octet-stream", out _));
+            Assert.False(content.TryGetProperty("application/x-tar", out _));
             if (operation.TryGetProperty("parameters", out var parameters))
             {
                 Assert.DoesNotContain(

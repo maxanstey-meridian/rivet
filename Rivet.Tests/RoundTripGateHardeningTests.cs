@@ -123,6 +123,9 @@ public sealed class RoundTripGateHardeningTests
                 "sendgrid",
                 "spotify",
                 "asana",
+                "box",
+                "kubernetes",
+                "zoom",
             ],
             profile.VerifiedCorpusIds
         );
@@ -297,6 +300,161 @@ public sealed class RoundTripGateHardeningTests
         Assert.True(metrics.GetProperty("components").TryGetProperty("securitySchemes", out _));
         Assert.Equal(1, metrics.GetProperty("sourceDefects").GetInt32());
         Assert.Equal(3, metrics.GetProperty("comparatorIntegrityFindings").GetInt32());
+    }
+
+    [Fact]
+    public void Comparator_Exit_One_Fails_Even_When_Reports_Are_Empty()
+    {
+        var report = new RoundTripCorpusGateTests.GateReport("probe", new string('0', 64));
+        var diff = ReadDiffResult(
+            exitCode: 1,
+            summaryJson: """
+            {
+              "originalOps": 1,
+              "reemittedOps": 1,
+              "sharedOps": 1,
+              "missingOperations": 0,
+              "inventedOperations": 0,
+              "operationsWithFindings": 0,
+              "originalSchemas": 0,
+              "reemittedSchemas": 0,
+              "matchedSchemas": 0,
+              "unmatchedOriginalSchemas": 0,
+              "unmatchedReemittedSchemas": 0,
+              "originalComponents": 0,
+              "reemittedComponents": 0,
+              "matchedComponents": 0,
+              "unmatchedOriginalComponents": 0,
+              "unmatchedReemittedComponents": 0,
+              "documentFindings": {},
+              "opFindings": {},
+              "schemaFindings": {},
+              "integrityFindings": {},
+              "sourceDefects": 0
+            }
+            """
+        );
+
+        Assert.NotNull(diff.Summary);
+        RoundTripCorpusGateTests.RecordSemanticFindings(report, diff);
+
+        Assert.False(report.Passed);
+        Assert.Contains(
+            RoundTripCorpusGateTests.DescribeSemanticFindings(diff),
+            finding => finding.Message.Contains("exited 1", StringComparison.Ordinal)
+        );
+    }
+
+    [Fact]
+    public void Incomplete_Comparator_Summary_Fails_Closed()
+    {
+        var report = new RoundTripCorpusGateTests.GateReport("probe", new string('0', 64));
+        var diff = ReadDiffResult(
+            exitCode: 0,
+            summaryJson: """{"originalOps":1,"reemittedOps":1,"sharedOps":1}"""
+        );
+
+        RoundTripCorpusGateTests.RecordSemanticFindings(report, diff);
+
+        Assert.False(report.Passed);
+    }
+
+    [Fact]
+    public void Negative_Comparator_Count_Fails_Closed()
+    {
+        var report = new RoundTripCorpusGateTests.GateReport("probe", new string('0', 64));
+        var diff = ReadDiffResult(
+            exitCode: 0,
+            summaryJson: CompleteSummaryJson.Replace(
+                "\"missingOperations\": 0",
+                "\"missingOperations\": -1",
+                StringComparison.Ordinal
+            )
+        );
+
+        RoundTripCorpusGateTests.RecordSemanticFindings(report, diff);
+
+        Assert.False(report.Passed);
+    }
+
+    [Fact]
+    public void Actual_Gate_Marker_Scanner_Detects_A_Planted_CSharp_Marker()
+    {
+        using var source = TemporaryDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(source.Path, "Contract.cs"),
+            "// [rivet:unsupported body content-type=text/plain]\n"
+        );
+        var report = new RoundTripCorpusGateTests.GateReport("probe", new string('0', 64));
+
+        RoundTripCorpusGateTests.RecordMarkers(report, "markers", "probe import", source.Path);
+
+        Assert.False(report.Passed);
+        using var result = JsonDocument.Parse(RoundTripCorpusGateTests.SerializeReport(report));
+        var markers = result.RootElement.GetProperty("categories").GetProperty("markers");
+        Assert.Equal(1, markers.GetProperty("count").GetInt32());
+        Assert.Contains(
+            "Contract.cs:1: // [rivet:unsupported body content-type=text/plain]",
+            markers.GetProperty("findings")[0].GetProperty("message").GetString()
+        );
+    }
+
+    [Fact]
+    public void Gate_Marker_Scanner_Ignores_Marker_Text_Inside_A_String_Literal()
+    {
+        using var source = TemporaryDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(source.Path, "Contract.cs"),
+            "const string description = \"[rivet:unsupported is quoted data\";\n"
+        );
+        var report = new RoundTripCorpusGateTests.GateReport("probe", new string('0', 64));
+
+        RoundTripCorpusGateTests.RecordMarkers(report, "markers", "probe import", source.Path);
+
+        Assert.True(report.Passed);
+    }
+
+    private const string CompleteSummaryJson = """
+        {
+          "originalOps": 1,
+          "reemittedOps": 1,
+          "sharedOps": 1,
+          "missingOperations": 0,
+          "inventedOperations": 0,
+          "operationsWithFindings": 0,
+          "originalSchemas": 0,
+          "reemittedSchemas": 0,
+          "matchedSchemas": 0,
+          "unmatchedOriginalSchemas": 0,
+          "unmatchedReemittedSchemas": 0,
+          "originalComponents": 0,
+          "reemittedComponents": 0,
+          "matchedComponents": 0,
+          "unmatchedOriginalComponents": 0,
+          "unmatchedReemittedComponents": 0,
+          "documentFindings": {},
+          "opFindings": {},
+          "schemaFindings": {},
+          "integrityFindings": {},
+          "sourceDefects": 0
+        }
+        """;
+
+    private static RoundTripCorpusGateTests.DiffResult ReadDiffResult(
+        int exitCode,
+        string summaryJson
+    )
+    {
+        using var reports = TemporaryDirectory.Create();
+        var summaryPath = Path.Combine(reports.Path, "summary.json");
+        var detailsPath = Path.Combine(reports.Path, "details.json");
+        File.WriteAllText(summaryPath, summaryJson);
+        File.WriteAllText(detailsPath, """{"sourceDefects":[]}""");
+        return RoundTripCorpusGateTests.ReadDiffResult(
+            new RoundTripCorpusGateTests.ProcessResult(exitCode, "", ""),
+            summaryPath,
+            detailsPath
+        );
     }
 
     private sealed class TemporaryJson(string path) : IDisposable

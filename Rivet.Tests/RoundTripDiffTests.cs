@@ -560,6 +560,21 @@ public sealed class RoundTripDiffTests
         Assert.Equal(1, FindingCount(result.OperationFindings, category));
     }
 
+    [Fact]
+    public void Schema_Reference_Replaced_By_Equivalent_Inline_Shape_Is_Reported()
+    {
+        var original = LoadFixture();
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["owner"] = reemitted[
+            "components"
+        ]!["schemas"]!["nullable-owner"]!.DeepClone();
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(1, FindingCount(result.SchemaFindings, "schema-ref-identity"));
+    }
+
     [Theory]
     [InlineData("array-item", "schema-type")]
     [InlineData("array-constraint", "schema-constraints")]
@@ -671,20 +686,6 @@ public sealed class RoundTripDiffTests
     }
 
     [Fact]
-    public void Equivalent_Inline_And_Ref_Schemas_Are_Normalized()
-    {
-        var original = LoadFixture();
-        var reemitted = original.DeepClone().AsObject();
-        reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["owner"] = reemitted[
-            "components"
-        ]!["schemas"]!["nullable-owner"]!.DeepClone();
-
-        var result = RunDiff(original, reemitted);
-
-        Assert.Equal(0, result.ExitCode);
-    }
-
-    [Fact]
     public void Materialized_Ref_Target_Annotations_And_Required_Are_Not_Use_Site_Drift()
     {
         var original = LoadFixture();
@@ -711,7 +712,8 @@ public sealed class RoundTripDiffTests
 
         var result = RunDiff(original, reemitted);
 
-        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(1, FindingCount(result.SchemaFindings, "schema-ref-identity"));
     }
 
     [Theory]
@@ -983,10 +985,10 @@ public sealed class RoundTripDiffTests
 
         var result = RunDiff(original, reemitted);
 
-        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, result.Summary.GetProperty("sourceDefects").GetInt32());
         Assert.Equal(0, FindingCount(result.OperationFindings, "parameter-missing"));
-        Assert.Equal(0, FindingCount(result.OperationFindings, "request-content-types"));
+        Assert.Equal(1, FindingCount(result.OperationFindings, "request-content-types"));
     }
 
     [Fact]
@@ -1220,6 +1222,14 @@ public sealed class RoundTripDiffTests
 
             Assert.Equal(1, result.ExitCode);
             Assert.Equal(1, FindingCount(result.IntegrityFindings, "unsupported-marker"));
+
+            File.WriteAllText(
+                sourcePath,
+                "const string description = \"[rivet:unsupported quoted data\";\n"
+            );
+            var quoted = RunDiff(fixture, fixture.DeepClone().AsObject(), sourceDirectory.FullName);
+            Assert.Equal(0, quoted.ExitCode);
+            Assert.Equal(0, FindingCount(quoted.IntegrityFindings, "unsupported-marker"));
         }
         finally
         {

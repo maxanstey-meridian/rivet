@@ -291,6 +291,10 @@ internal static class CSharpWriter
         var sb = new StringBuilder();
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
+        if (record.HasExtensionData)
+        {
+            sb.AppendLine("using System.Text.Json;");
+        }
         if (
             record.Properties.Any(p => p.Constraints is { } cc && HasStandardConstraints(cc))
             || record.Properties.Any(p => p.Format is "email" or "uri")
@@ -298,7 +302,11 @@ internal static class CSharpWriter
         {
             sb.AppendLine("using System.ComponentModel.DataAnnotations;");
         }
-        if (record.Polymorphism is not null || record.Properties.Any(p => p.WireName is not null))
+        if (
+            record.HasExtensionData
+            || record.Polymorphism is not null
+            || record.Properties.Any(p => p.WireName is not null)
+        )
         {
             sb.AppendLine("using System.Text.Json.Serialization;");
         }
@@ -386,16 +394,34 @@ internal static class CSharpWriter
                     $"    public {requiredKeyword}{prop.CSharpType} {prop.Name} {{ get; init; }}{initializer}"
                 );
             }
+            if (record.HasExtensionData)
+            {
+                if (record.Properties.Count > 0)
+                {
+                    sb.AppendLine();
+                }
+                EmitExtensionDataProperty(sb, record);
+            }
             sb.AppendLine("}");
             return sb.ToString();
         }
 
-        var closeSuffix = record.BaseTypeName is null ? ");" : $") : {record.BaseTypeName};";
+        var closeSuffix = record.BaseTypeName is null ? ")" : $") : {record.BaseTypeName}";
+        if (!record.HasExtensionData)
+        {
+            closeSuffix += ";";
+        }
         sb.Append($"public {modifier} record {record.Name}{typeParamSuffix}(");
 
         if (record.Properties.Count == 0)
         {
             sb.AppendLine(closeSuffix);
+            if (record.HasExtensionData)
+            {
+                sb.AppendLine("{");
+                EmitExtensionDataProperty(sb, record);
+                sb.AppendLine("}");
+            }
             return sb.ToString();
         }
 
@@ -409,7 +435,27 @@ internal static class CSharpWriter
             sb.AppendLine($"    {prop.CSharpType} {prop.Name}{separator}");
         }
 
+        if (record.HasExtensionData)
+        {
+            sb.AppendLine("{");
+            EmitExtensionDataProperty(sb, record);
+            sb.AppendLine("}");
+        }
+
         return sb.ToString();
+    }
+
+    private static void EmitExtensionDataProperty(StringBuilder sb, GeneratedRecord record)
+    {
+        var propertyName = "AdditionalProperties";
+        while (record.Properties.Any(property => property.Name == propertyName))
+        {
+            propertyName = "Rivet" + propertyName;
+        }
+        sb.AppendLine("    [JsonExtensionData]");
+        sb.AppendLine(
+            $"    public Dictionary<string, JsonElement> {propertyName} {{ get; init; }} = [];"
+        );
     }
 
     /// <summary>
@@ -530,19 +576,19 @@ internal static class CSharpWriter
     public static string WriteEnum(GeneratedEnum enumDef, string ns)
     {
         var isIntBacked = enumDef.Members.Any(m => m.IntValue.HasValue);
-        var needsJsonImport = isIntBacked || enumDef.Members.Any(m => m.OriginalName is not null);
 
         var sb = new StringBuilder();
-        if (needsJsonImport)
-        {
-            sb.AppendLine("using System.Text.Json.Serialization;");
-            sb.AppendLine();
-        }
+        sb.AppendLine("using System.Text.Json.Serialization;");
+        sb.AppendLine();
         sb.AppendLine($"namespace {ns};");
         sb.AppendLine();
         if (isIntBacked)
         {
             sb.AppendLine($"[JsonConverter(typeof(JsonNumberEnumConverter<{enumDef.Name}>))]");
+        }
+        else
+        {
+            sb.AppendLine($"[JsonConverter(typeof(JsonStringEnumConverter<{enumDef.Name}>))]");
         }
         if (enumDef.Description is not null)
         {
@@ -563,9 +609,10 @@ internal static class CSharpWriter
         {
             var member = enumDef.Members[i];
             var separator = i < enumDef.Members.Count - 1 ? "," : "";
-            if (!isIntBacked && member.OriginalName is not null)
+            if (!isIntBacked)
             {
-                sb.AppendLine($"    [JsonStringEnumMemberName(\"{member.OriginalName}\")]");
+                var wireName = member.OriginalName ?? Naming.ToCamelCase(member.CSharpName);
+                sb.AppendLine($"    [JsonStringEnumMemberName(\"{wireName}\")]");
             }
             var valueAssignment = member.IntValue.HasValue ? $" = {member.IntValue.Value}" : "";
             sb.AppendLine($"    {member.CSharpName}{valueAssignment}{separator}");

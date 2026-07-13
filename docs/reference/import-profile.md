@@ -1,11 +1,12 @@
 # Import profile (`--from-openapi`)
 
-> **Round-trip status (2026-07-13): 13/25 verified locally.** The real-disk gate
-> covers 1,599 operations and 2,366 normalized component identities: 2,081
-> schemas, 69 request bodies, 107 parameters, 95 responses, and 14 security
+> **Round-trip status (2026-07-13): 16/25 verified locally.** The hardened real-disk gate
+> covers 2,516 operations and 3,104 normalized component identities: 2,764
+> schemas, 72 request bodies, 154 parameters, 95 responses, and 19 security
 > schemes. All valid finding categories, unsupported markers, compilation,
-> integrity, and fixed-point findings are empty. Eleven exact invalid-source
-> constructs are hash- and pointer-bound in the verified profile. Corpus
+> integrity, fixed-point, generated-carrier shape-class behavior, and independently
+> recomputed source-to-first audit findings are empty. One invalid parameter and
+> ten ignored reserved Header Parameters are hash- and pointer-bound in the profile. Corpus
 > artifacts and reports remain local/gitignored, so this is not reproducible CI
 > proof.
 
@@ -19,7 +20,7 @@ a re-onboarding, not an incremental merge.
 The importer contract is that nothing is dropped silently: anything the
 generated C# representation cannot preserve must produce a stable `RIV`
 diagnostic or a structured marker at the affected site. The verified corpus gate
-proves that contract over its inventoried 13-corpus surface. Broader limitations
+proves that contract over its inventoried 16-corpus surface. Broader limitations
 are listed below rather than being treated as permitted equivalences.
 
 ## Verified corpus inventory
@@ -29,11 +30,11 @@ are listed below rather than being treated as permitted equivalences.
 component namespaces, and vendor-extension families and fails on an unknown
 keyword/extension, artifact or profile drift, or changed reviewed disposition.
 
-The source namespaces contain 2,075 `components.schemas` plus 6 Swagger
-`definitions` (2,081 normalized schemas), 69 `components.requestBodies`, 107
-`components.parameters`, 95 `components.responses`, 12
-`components.securitySchemes`, and 2 Swagger `securityDefinitions` (14 normalized
-security schemes). Together these are 2,366 normalized component identities.
+The source namespaces contain 2,758 `components.schemas` plus 6 Swagger
+`definitions` (2,764 normalized schemas), 72 `components.requestBodies`, 154
+`components.parameters`, 95 `components.responses`, 17
+`components.securitySchemes`, and 2 Swagger `securityDefinitions` (19 normalized
+security schemes). Together these are 3,104 normalized component identities.
 The full preserve/map/exclude table and value-based evidence are in
 `corpus/verified-profile.json`.
 Preserve/map families cover enum member metadata, concrete request/response
@@ -41,7 +42,10 @@ examples, OAuth permissions, read-only/deprecation mappings, lifecycle and SDK
 visibility, Square request-version behavior, and Twilio client/resource metadata.
 Catalog provenance, documentation navigation, vendor SDK naming, and
 language-specific Java annotations are explicitly excluded rather than being
-blanket-ignored.
+blanket-ignored. Box's 14, Kubernetes' 8, and Zoom's 4 newly observed private
+extension families are explicit excludes; the profile does not claim
+provider-specific Box behavior, Kubernetes discovery/merge/apply/union
+semantics, or Zoom private example and enum-description behavior.
 
 All preserve rows survive as exact opaque JSON provenance at their owning
 pointers through the fixed point; this does not mean Rivet interprets
@@ -49,6 +53,13 @@ provider-private semantics. Map rows are comparator-validated and excludes are
 explicit. Swagger `collectionFormat` comparison is fixed and mutation-covered.
 Named request-body components retain identity and content even when shared or
 unused.
+
+The carrier inventory contains 7,851 owner/shape classifications across 7,818
+unique pointers. It covers named-property records, empty-schema `JsonElement`
+carriers, propertyless open/closed objects, and 123 schema-valued dictionaries;
+each observed carrier shape class is tied to an executable compiled-runtime
+behavior test. This is shape-class proof, not an assertion that every pointer is
+independently deserialized.
 
 ## Current represented behavior
 
@@ -94,14 +105,17 @@ honest degradation, not full support.
 - **Parameters**: path, query, header, and cookie parameters retain their exact
   name, location, requiredness, schema/reference identity, descriptions,
   deprecation, defaults, examples, constraints, and represented serialization
-  metadata through explicit `.Parameter<T>(...)` provenance. Parameters and
-  request bodies remain independent on the same operation, so query/cookie/body
-  locations are not inferred from a merged input record or erased.
+  metadata (including query `allowEmptyValue`) through explicit
+  `.Parameter<T>(...)` provenance. Parameters and request bodies remain
+  independent on the same operation, so query/cookie/body locations are not
+  inferred from a merged input record or erased.
 - **Schemas**: named objects → sealed records; `allOf` inheritance chains —
   including middle layers' own properties and top-level `required` tightening;
   `oneOf`/`anyOf` → `As*` wrapper union records; string/int enums; single-value
   branded primitives (`x-rivet-brand`); generics (`x-rivet-generic`);
   dictionaries via `additionalProperties`; `$ref` aliases (resolved to targets).
+  Framework scalar names are globally qualified when a generated component name
+  would otherwise shadow their CLR type.
 - **Nullability and requiredness — independent axes, both preserved.**
   3.0 (`nullable: true`) and 3.1 (`type` arrays, null branches) forms import on
   inline properties AND on components: a `$ref` to a component that is itself
@@ -114,9 +128,11 @@ honest degradation, not full support.
   branch inside a 3+-variant `oneOf` union is also still dropped (the `As*`
   wrapper has no nullability slot; the `{"type": "null"}` degradation marker
   covers the 2-variant case).
-- **Enum wire values**: pinned with `[JsonStringEnumMemberName]` whenever the
-  emitted value (`camelCase(member)`) differs from the original — `Ready`,
-  `COLLABORATOR` and `EastUs` survive exactly, not case-mangled.
+- **Enum wire values**: every string member is pinned with
+  `[JsonStringEnumMemberName]`; `Ready`, `COLLABORATOR`, `EastUs`, and already-
+  camel-cased values survive runtime serialization and emission exactly. This
+  attribute is a .NET 9+ API, so imported projects containing these generated
+  string enums require .NET 9 or later.
 - **Responses**: the exact response-key set survives, including concrete codes,
   informational responses, `2XX`/`4XX`/`5XX` ranges, and `default`; keys are not
   narrowed to representative concrete statuses. Every response retains its
@@ -172,8 +188,6 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3012` | `enum-constraint-dropped` | Enum that can't be a C# enum (single-value, mixed, out-of-range) degrades to a primitive. |
 | `RIV3005` | `discriminator-dropped` | `discriminator` with no reversible polymorphic shape (plain object without `oneOf`, or `oneOf` whose `mapping` is absent/unusable) — dispatch semantics dropped. |
 | `RIV3001`, `RIV3006`, `RIV3007`, `RIV3008` | `alias-unresolvable` | Cyclic / dangling `$ref` alias chains broken with placeholders. |
-| `RIV3013` | `properties-dropped` | Schema declares both `properties` and `additionalProperties`; the dictionary side won (inline objects). |
-| `RIV3004` | `additional-properties-dropped` | Same conflict on a named schema; the record side won. |
 | `RIV3014` | `dictionary-key-dropped` | A `propertyNames` schema has no C# dictionary-key representation; keys degrade to `string`. |
 | `RIV3015` | `named-scalar-algebra-unsupported` | A named scalar component uses const/composition/heterogeneous leaves outside bounded scalar preservation; its fallback mapping is retained. |
 | `RIV3003` | `operation-method-dropped` | TRACE operation dropped — the HTTP method has no contract representation. |
@@ -189,14 +203,15 @@ preserved beyond the diagnostics above where applicable. This is an
 implementation inventory, not an amendment to the verified profile:
 
 - `callbacks`, `webhooks`, `links`
-- Parameter `content`, `allowReserved`, and `allowEmptyValue`; `style` and
-  `explode` are represented by the explicit parameter metadata channel
+- Parameter `content` and `allowReserved`
+- Parameter `style`, `explode`, and query `allowEmptyValue` are represented by
+  the explicit parameter metadata channel
 - Polymorphic `discriminator` dispatch *without* a usable `oneOf` mapping
   (imports as plain records/unions, loudly); usable mappings reverse to
   `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies
-- General schema algebra beyond the generated provenance model, including mixed
-  `properties` + `additionalProperties`, malformed/cyclic aliases, arrays without
-  `items`, and enum/const combinations that cannot become a C# type; these paths
+- General schema algebra beyond the generated provenance model, including
+  malformed/cyclic aliases, arrays without `items`, and enum/const combinations
+  that cannot become a C# type; these paths
   diagnose and degrade rather than silently claim equivalence
 - Operation-level `externalValue` examples, which have no in-document value to
   attach to the generated endpoint
@@ -214,7 +229,8 @@ fixed-point findings are reported independently, and any non-zero category
 fails. Exact invalid-source classifications are pinned by corpus hash, pointer,
 diagnostic, and cardinality; they are not tolerated valid-contract findings.
 
-The retained audit covers all 13 verified corpora, 1,599 operations, and 2,366
-normalized component identities with no valid findings. The source documents and
-generated reports are gitignored local artifacts, so this remains local
-verification rather than reproducible CI proof.
+The retained audit independently recompiles both generated-source passes and
+recomputes source-to-first semantics for all 16 verified corpora, 2,516
+operations, and 3,104 normalized component identities with no valid findings.
+The source documents and generated reports are gitignored local artifacts, so
+this remains local verification rather than reproducible CI proof.

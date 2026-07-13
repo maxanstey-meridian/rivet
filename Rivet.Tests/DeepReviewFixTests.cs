@@ -505,6 +505,57 @@ public sealed class DeepReviewFixTests
         // document is File, title is FormField
         Assert.Single(ep.Params, p => p.Source == ParamSource.File);
         Assert.Single(formFields, f => f.Name == "title");
+
+        using var document = EmitOpenApi(source);
+        var bodySchema = document
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/tasks/{taskId}/files")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("multipart/form-data")
+            .GetProperty("schema");
+        Assert.False(bodySchema.TryGetProperty("$ref", out _));
+        var bodyProperties = bodySchema.GetProperty("properties");
+        Assert.False(bodyProperties.TryGetProperty("taskId", out _));
+        Assert.True(bodyProperties.TryGetProperty("document", out _));
+        Assert.True(bodyProperties.TryGetProperty("title", out _));
+    }
+
+    [Fact]
+    public void User_Attribute_Named_JsonExtensionData_Does_Not_Hide_A_Property()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            [AttributeUsage(AttributeTargets.Property)]
+            public sealed class JsonExtensionDataAttribute : Attribute;
+
+            [RivetType]
+            public sealed record Input(
+                [property: JsonExtensionData] string Value,
+                string Other);
+
+            [RivetType]
+            public sealed record Result(string Id);
+
+            [RivetContract]
+            public static class TestContract
+            {
+                public static readonly Define Create = Define.Post<Input, Result>("/api/items");
+            }
+            """;
+
+        using var document = EmitOpenApi(source);
+        var input = document
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Input");
+
+        Assert.True(input.GetProperty("properties").TryGetProperty("value", out _));
     }
 
     // --- Fix 10: OpenAPI InlineObject nullable (already fixed, verify) ---

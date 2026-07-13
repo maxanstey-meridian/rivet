@@ -25,6 +25,31 @@ public sealed class RoundTripCorpusGateTests
         "securitySchemes",
     ];
 
+    private static readonly string[] _requiredSummaryProperties =
+    [
+        "originalOps",
+        "reemittedOps",
+        "sharedOps",
+        "missingOperations",
+        "inventedOperations",
+        "operationsWithFindings",
+        "originalSchemas",
+        "reemittedSchemas",
+        "matchedSchemas",
+        "unmatchedOriginalSchemas",
+        "unmatchedReemittedSchemas",
+        "originalComponents",
+        "reemittedComponents",
+        "matchedComponents",
+        "unmatchedOriginalComponents",
+        "unmatchedReemittedComponents",
+        "documentFindings",
+        "opFindings",
+        "schemaFindings",
+        "integrityFindings",
+        "sourceDefects",
+    ];
+
     internal static readonly string[] RequiredArtifactFiles =
     [
         "source.json",
@@ -378,6 +403,15 @@ public sealed class RoundTripCorpusGateTests
         );
         WriteProcessLog(reportDirectory, $"{name}-diff", process);
 
+        return ReadDiffResult(process, summaryPath, detailsPath);
+    }
+
+    internal static DiffResult ReadDiffResult(
+        ProcessResult process,
+        string summaryPath,
+        string detailsPath
+    )
+    {
         if (
             process.ExitCode is not (0 or 1)
             || !File.Exists(summaryPath)
@@ -387,11 +421,58 @@ public sealed class RoundTripCorpusGateTests
             return new DiffResult(process, null, null);
         }
 
-        return new DiffResult(
-            process,
-            JsonSerializer.Deserialize<Summary>(File.ReadAllText(summaryPath), _jsonOptions),
-            JsonSerializer.Deserialize<Details>(File.ReadAllText(detailsPath), _jsonOptions)
-        );
+        try
+        {
+            var summaryJson = File.ReadAllText(summaryPath);
+            var detailsJson = File.ReadAllText(detailsPath);
+            using var summaryDocument = JsonDocument.Parse(summaryJson);
+            using var detailsDocument = JsonDocument.Parse(detailsJson);
+            if (
+                summaryDocument.RootElement.ValueKind != JsonValueKind.Object
+                || _requiredSummaryProperties.Any(property =>
+                    !summaryDocument.RootElement.TryGetProperty(property, out var value)
+                    || !IsValidSummaryValue(property, value)
+                )
+                || detailsDocument.RootElement.ValueKind != JsonValueKind.Object
+                || !detailsDocument.RootElement.TryGetProperty(
+                    "sourceDefects",
+                    out var sourceDefects
+                )
+                || sourceDefects.ValueKind != JsonValueKind.Array
+            )
+            {
+                return new DiffResult(process, null, null);
+            }
+
+            return new DiffResult(
+                process,
+                JsonSerializer.Deserialize<Summary>(summaryJson, _jsonOptions),
+                JsonSerializer.Deserialize<Details>(detailsJson, _jsonOptions)
+            );
+        }
+        catch (JsonException)
+        {
+            return new DiffResult(process, null, null);
+        }
+    }
+
+    private static bool IsValidSummaryValue(string property, JsonElement value)
+    {
+        if (
+            property
+            is "documentFindings"
+                or "opFindings"
+                or "schemaFindings"
+                or "integrityFindings"
+        )
+        {
+            return value.ValueKind == JsonValueKind.Object
+                && value
+                    .EnumerateObject()
+                    .All(item => item.Value.TryGetInt32(out var count) && count >= 0);
+        }
+
+        return value.TryGetInt32(out var count) && count >= 0;
     }
 
     private static void RecordDiagnostics(
@@ -537,7 +618,7 @@ public sealed class RoundTripCorpusGateTests
         }
     }
 
-    private static void RecordMarkers(
+    internal static void RecordMarkers(
         GateReport report,
         string category,
         string stage,
@@ -554,7 +635,7 @@ public sealed class RoundTripCorpusGateTests
             foreach (var line in File.ReadLines(file))
             {
                 lineNumber++;
-                if (line.Contains("[rivet:unsupported", StringComparison.Ordinal))
+                if (line.TrimStart().StartsWith("// [rivet:unsupported", StringComparison.Ordinal))
                 {
                     report.Add(
                         category,
@@ -565,14 +646,22 @@ public sealed class RoundTripCorpusGateTests
         }
     }
 
-    private static void RecordSemanticFindings(GateReport report, DiffResult diff)
+    internal static void RecordSemanticFindings(GateReport report, DiffResult diff)
     {
-        if (diff.Summary is null)
+        if (diff.Process.ExitCode != 0)
         {
             report.Add(
                 "document",
                 $"semantic comparator exited {diff.Process.ExitCode}: {string.Join(" | ", Lines(diff.Process.StdErr))}"
             );
+        }
+
+        if (diff.Summary is null)
+        {
+            if (diff.Process.ExitCode == 0)
+            {
+                report.Add("document", "semantic comparator reports were missing or incomplete");
+            }
             return;
         }
 
@@ -592,16 +681,24 @@ public sealed class RoundTripCorpusGateTests
         AddFindings(report, "integrity", summary.IntegrityFindings);
     }
 
-    private static IEnumerable<(string Message, int Count)> DescribeSemanticFindings(
+    internal static IEnumerable<(string Message, int Count)> DescribeSemanticFindings(
         DiffResult diff
     )
     {
-        if (diff.Summary is null)
+        if (diff.Process.ExitCode != 0)
         {
             yield return (
                 $"semantic comparator exited {diff.Process.ExitCode}: {string.Join(" | ", Lines(diff.Process.StdErr))}",
                 1
             );
+        }
+
+        if (diff.Summary is null)
+        {
+            if (diff.Process.ExitCode == 0)
+            {
+                yield return ("semantic comparator reports were missing or incomplete", 1);
+            }
             yield break;
         }
 
@@ -1086,8 +1183,16 @@ public sealed class RoundTripCorpusGateTests
         public int MissingOperations { get; init; }
         public int InventedOperations { get; init; }
         public int OperationsWithFindings { get; init; }
+        public int OriginalSchemas { get; init; }
+        public int ReemittedSchemas { get; init; }
+        public int MatchedSchemas { get; init; }
         public int UnmatchedOriginalSchemas { get; init; }
         public int UnmatchedReemittedSchemas { get; init; }
+        public int OriginalComponents { get; init; }
+        public int ReemittedComponents { get; init; }
+        public int MatchedComponents { get; init; }
+        public int UnmatchedOriginalComponents { get; init; }
+        public int UnmatchedReemittedComponents { get; init; }
         public Dictionary<string, int> DocumentFindings { get; init; } = [];
         public Dictionary<string, int> OpFindings { get; init; } = [];
         public Dictionary<string, int> SchemaFindings { get; init; } = [];
@@ -1141,9 +1246,9 @@ public sealed class RoundTripCorpusGateTests
         int Invented
     );
 
-    private sealed record DiffResult(ProcessResult Process, Summary? Summary, Details? Details);
+    internal sealed record DiffResult(ProcessResult Process, Summary? Summary, Details? Details);
 
-    private sealed record ProcessResult(int ExitCode, string StdOut, string StdErr)
+    internal sealed record ProcessResult(int ExitCode, string StdOut, string StdErr)
     {
         public static ProcessResult From((int ExitCode, string StdOut, string StdErr) value) =>
             new(value.ExitCode, value.StdOut, value.StdErr);

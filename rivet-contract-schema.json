@@ -328,7 +328,8 @@
         "explode": { "type": "boolean" },
         "schemaType": { "type": "string", "enum": ["string", "integer", "number", "boolean"] },
         "format": { "type": "string" },
-        "isFormatSpecified": { "type": "boolean" }
+        "isFormatSpecified": { "type": "boolean" },
+        "allowEmptyValue": { "type": "boolean" }
       },
       "required": ["name", "type", "source"],
       "additionalProperties": false

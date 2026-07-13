@@ -4,9 +4,12 @@
 import argparse
 import collections
 import hashlib
+import importlib.util
 import json
 import pathlib
+import subprocess
 import sys
+import tempfile
 
 
 METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
@@ -83,12 +86,31 @@ TWILIO_DEFAULT_EQUIVALENT_PATHS = {
 }
 
 
+def load_roundtrip_diff():
+    path = pathlib.Path(__file__).with_name("roundtrip-diff.py")
+    spec = importlib.util.spec_from_file_location("rivet_roundtrip_diff", path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load semantic comparator from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+ROUNDTRIP_DIFF = load_roundtrip_diff()
+
+
 def parse_args():
     root = pathlib.Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-dir", type=pathlib.Path, default=root / "TestResults" / "roundtrip")
     parser.add_argument("--manifest", type=pathlib.Path, default=root / "corpus" / "openapi-manifest.json")
     parser.add_argument("--profile", type=pathlib.Path, default=root / "corpus" / "verified-profile.json")
+    parser.add_argument(
+        "--tool-dll",
+        type=pathlib.Path,
+        default=root / "Rivet.Tool" / "bin" / "Debug" / "net9.0" / "Rivet.Tool.dll",
+        help="built Rivet.Tool DLL used to recompile retained generated C#",
+    )
     return parser.parse_args()
 
 
@@ -156,34 +178,42 @@ def value_shape(value):
     return "object"
 
 
-def collect_extensions(value, reviewed_names, found=None):
+def collect_extensions(value, reviewed_names, found=None, pointer=""):
     """Collect reviewed OpenAPI extensions while ignoring opaque example payloads."""
     if found is None:
         found = collections.defaultdict(list)
     if isinstance(value, list):
-        for item in value:
-            collect_extensions(item, reviewed_names, found)
+        for index, item in enumerate(value):
+            collect_extensions(item, reviewed_names, found, f"{pointer}/{index}")
     elif isinstance(value, dict):
         for name, item in value.items():
             if name in reviewed_names:
-                found[name].append((value_shape(item), canonical(item)))
+                found[name].append((pointer or "/", value_shape(item), canonical(item)))
             elif name not in OPAQUE_KEYS and not name.lower().startswith("x-"):
-                collect_extensions(item, reviewed_names, found)
+                collect_extensions(
+                    item,
+                    reviewed_names,
+                    found,
+                    f"{pointer}/{pointer_part(name)}",
+                )
     return found
 
 
 def extension_fact(occurrences):
-    values = sorted({value for _, value in occurrences})
+    values = sorted({value for _, _, value in occurrences})
     return {
         "count": len(occurrences),
+        "ownerPointers": sorted(pointer for pointer, _, _ in occurrences),
         "distinctValueCount": len(values),
-        "valueShapes": dict(sorted(collections.Counter(shape for shape, _ in occurrences).items())),
+        "valueShapes": dict(
+            sorted(collections.Counter(shape for _, shape, _ in occurrences).items())
+        ),
         "valuesSha256": sha256_bytes("\n".join(values).encode()),
     }
 
 
 def occurrence_digest(occurrences):
-    values = sorted(value for _, value in occurrences)
+    values = sorted(value for _, _, value in occurrences)
     return len(values), sha256_bytes("\n".join(values).encode())
 
 
@@ -272,6 +302,11 @@ def scan_generated(path, expected_operations, expected_extensions, errors):
         except (OSError, UnicodeError) as error:
             errors.append(f"cannot read generated C# {file}: {error}")
     text = "\n".join(texts)
+    unsupported_markers = sum(
+        line.lstrip().startswith("// [rivet:unsupported")
+        for item in texts
+        for line in item.splitlines()
+    )
     extension_evidence = {
         name: text.count(name)
         for name, expected in expected_extensions.items()
@@ -283,10 +318,12 @@ def scan_generated(path, expected_operations, expected_extensions, errors):
         "operationProvenance": text.count("[RivetOperationProvenance("),
         "vendorExtensions": sum(extension_evidence.values()),
         "vendorExtensionEvidence": extension_evidence,
+        "unsupportedMarkers": unsupported_markers,
     }
     if not files:
         errors.append(f"{path}: no generated C# files")
     check_equal(errors, f"{path.name} operation provenance", evidence["operationProvenance"], expected_operations)
+    check_equal(errors, f"{path.name} unsupported markers", unsupported_markers, 0)
     for name, expected in sorted(expected_extensions.items()):
         check_equal(
             errors,
@@ -295,6 +332,38 @@ def scan_generated(path, expected_operations, expected_extensions, errors):
             expected,
         )
     return evidence
+
+
+def compile_generated(path, tool_command, errors, runner=subprocess.run):
+    with tempfile.TemporaryDirectory(prefix="rivet-roundtrip-audit-") as output:
+        try:
+            process = runner(
+                [*tool_command, str(path.resolve()), "--routes", "--output", output],
+                cwd=output,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            errors.append(f"{path.name} compilation could not run: {error}")
+            return {"exitCode": None, "stderr": str(error)}
+
+    stderr_lines = [line.strip() for line in process.stderr.splitlines() if line.strip()]
+    diagnostics = [
+        line
+        for line in stderr_lines
+        if not (
+            line.endswith(" route(s).")
+            and line[: -len(" route(s).")].isdigit()
+        )
+    ]
+    stderr = " | ".join(diagnostics)
+    if process.returncode != 0:
+        errors.append(f"{path.name} compilation exited {process.returncode}: {stderr}")
+    elif stderr:
+        errors.append(f"{path.name} compilation diagnostics: {stderr}")
+    return {"exitCode": process.returncode, "stderr": stderr}
 
 
 def check_summary(path, expected_operations, expected_components, expected_source_defects, errors):
@@ -383,7 +452,15 @@ def check_result(
     check_equal(errors, "result comparator integrity metric", metrics.get("comparatorIntegrityFindings"), 0)
 
 
-def audit_corpus(corpus_id, results_dir, manifest_entry, profile_entry, profile, aggregate_extensions):
+def audit_corpus(
+    corpus_id,
+    results_dir,
+    manifest_entry,
+    profile_entry,
+    profile,
+    aggregate_extensions,
+    tool_command=None,
+):
     corpus_dir = results_dir / corpus_id
     artifacts = corpus_dir / "artifacts"
     errors = []
@@ -417,6 +494,32 @@ def audit_corpus(corpus_id, results_dir, manifest_entry, profile_entry, profile,
     expected_source_defect_count = sum(
         defect["cardinality"] for defect in expected_source_defects
     )
+    source_to_first = ROUNDTRIP_DIFF.Comparator(source, first, [])
+    source_to_first.run()
+    source_to_first_summary = source_to_first.summary()
+    source_to_first_details = source_to_first.details()
+    expected_comparator_defects = [
+        {"path": defect["pointer"], "reason": defect["reason"]}
+        for defect in expected_source_defects
+        for _ in range(defect["cardinality"])
+    ]
+    check_equal(
+        errors,
+        "source-to-first source defects",
+        source_to_first_details["sourceDefects"],
+        expected_comparator_defects,
+    )
+    if source_to_first.has_findings():
+        errors.append(
+            "source-to-first semantic findings: "
+            + canonical(
+                {
+                    key: value
+                    for key, value in source_to_first_summary.items()
+                    if key in SUMMARY_FINDING_KEYS + SUMMARY_ZERO_KEYS and value
+                }
+            )
+        )
     check_equal(errors, "manifest operation count", manifest_entry.get("operationCount"), expected_operations)
     check_equal(errors, "manifest path count", manifest_entry.get("pathCount"), profile_entry.get("pathCount"))
     check_equal(errors, "manifest API version", manifest_entry.get("apiVersion"), profile_entry.get("apiVersion"))
@@ -459,6 +562,13 @@ def audit_corpus(corpus_id, results_dir, manifest_entry, profile_entry, profile,
         "first": scan_generated(paths["firstGenerated"], expected_operations, expected_extensions, errors),
         "second": scan_generated(paths["secondGenerated"], expected_operations, expected_extensions, errors),
     }
+    if tool_command is not None:
+        generated["first"]["compilation"] = compile_generated(
+            paths["firstGenerated"], tool_command, errors
+        )
+        generated["second"]["compilation"] = compile_generated(
+            paths["secondGenerated"], tool_command, errors
+        )
     expected_component_total = sum(expected_components.values())
     first_summary = check_summary(
         artifacts / "first-summary.json",
@@ -510,6 +620,7 @@ def audit_corpus(corpus_id, results_dir, manifest_entry, profile_entry, profile,
         "rejectedDeltas": rejected,
         "firstSummary": first_summary,
         "fixedSummary": fixed_summary,
+        "sourceToFirstSummary": source_to_first_summary,
     }
     write_corpus_report(corpus_dir / "artifacts" / "audit.md", audit, results_dir)
     return audit
@@ -528,9 +639,9 @@ def write_corpus_report(path, audit, results_dir):
         "| Stage | Path | Operations | Components | Physical evidence |",
         "|---|---|---:|---|---|",
         f"| Source | `{relative(audit['paths']['source'], results_dir)}` | {audit['operations']} | {component_text} | sha256 `{audit['sourceHash']}` |",
-        f"| Generated C# (first) | `{relative(audit['paths']['firstGenerated'], results_dir)}` | {audit['generated']['first']['operationProvenance']} provenance attributes | n/a | {audit['generated']['first']['files']} files, {audit['generated']['first']['bytes']} bytes, {audit['generated']['first']['vendorExtensions']} preserved-extension provenance occurrences |",
+        f"| Generated C# (first) | `{relative(audit['paths']['firstGenerated'], results_dir)}` | {audit['generated']['first']['operationProvenance']} provenance attributes | n/a | {audit['generated']['first']['files']} files, independently compiled, {audit['generated']['first']['bytes']} bytes, {audit['generated']['first']['vendorExtensions']} preserved-extension provenance occurrences |",
         f"| First OpenAPI | `{relative(audit['paths']['first'], results_dir)}` | {audit['operations']} | {component_text} | parsed JSON |",
-        f"| Generated C# (second) | `{relative(audit['paths']['secondGenerated'], results_dir)}` | {audit['generated']['second']['operationProvenance']} provenance attributes | n/a | {audit['generated']['second']['files']} files, {audit['generated']['second']['bytes']} bytes, {audit['generated']['second']['vendorExtensions']} preserved-extension provenance occurrences |",
+        f"| Generated C# (second) | `{relative(audit['paths']['secondGenerated'], results_dir)}` | {audit['generated']['second']['operationProvenance']} provenance attributes | n/a | {audit['generated']['second']['files']} files, independently compiled, {audit['generated']['second']['bytes']} bytes, {audit['generated']['second']['vendorExtensions']} preserved-extension provenance occurrences |",
         f"| Second OpenAPI | `{relative(audit['paths']['second'], results_dir)}` | {audit['operations']} | {component_text} | parsed JSON |",
         "",
         "## Comparator and fixed point",
@@ -608,6 +719,9 @@ def main():
     try:
         manifest = load_json(args.manifest)
         profile = load_json(args.profile)
+        if not args.tool_dll.is_file():
+            raise ValueError(f"built Rivet.Tool DLL is missing: {args.tool_dll}")
+        tool_command = ["dotnet", "exec", str(args.tool_dll.resolve())]
         corpus_ids = profile.get("verifiedCorpusIds")
         if not isinstance(corpus_ids, list) or not corpus_ids or any(
             not isinstance(corpus_id, str) for corpus_id in corpus_ids
@@ -651,6 +765,7 @@ def main():
                 profile_entries[corpus_id],
                 profile,
                 aggregate_extensions,
+                tool_command,
             )
             for corpus_id in corpus_ids
         ]

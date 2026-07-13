@@ -1172,9 +1172,7 @@ class Comparator:
     def compare_request_body(self, key, original, reemitted):
         path = f"#/paths/{key[0]}/{key[1]}/requestBody"
         self.compare_request_body_value(
-            self.effective_request_body(
-                self.original, original, original.get("requestBody")
-            ),
+            original.get("requestBody"),
             reemitted.get("requestBody"),
             path,
             "operation",
@@ -1491,6 +1489,14 @@ class Comparator:
 
         original_ref = original.get("$ref") if isinstance(original, dict) else None
         reemitted_ref = reemitted.get("$ref") if isinstance(reemitted, dict) else None
+        if bool(original_ref) != bool(reemitted_ref):
+            self.add(
+                scope,
+                f"{category}-ref-identity",
+                path,
+                schema_ref_identity(original_ref) if original_ref else None,
+                schema_ref_identity(reemitted_ref) if reemitted_ref else None,
+            )
         if original_ref and reemitted_ref:
             original_identity = schema_ref_identity(original_ref)
             reemitted_identity = schema_ref_identity(reemitted_ref)
@@ -1879,7 +1885,7 @@ class Comparator:
                 try:
                     with open(path, encoding="utf-8") as source:
                         for line_number, line in enumerate(source, 1):
-                            if marker in line:
+                            if line.lstrip().startswith("// " + marker):
                                 self.add("integrity", "unsupported-marker", f"{path}:{line_number}", None, line.strip())
                 except (OSError, UnicodeError) as error:
                     raise ValueError(f"cannot scan generated source {path}: {error}") from error

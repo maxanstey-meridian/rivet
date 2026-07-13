@@ -269,7 +269,6 @@ internal static class OpenApiProvenanceReader
             type.ValueKind == JsonValueKind.String
             && type.GetString() == "object"
             && schema.TryGetProperty("additionalProperties", out _)
-            && !schema.TryGetProperty("properties", out _)
         )
         {
             return true;

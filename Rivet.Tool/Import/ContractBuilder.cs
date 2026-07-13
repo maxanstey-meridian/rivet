@@ -952,7 +952,7 @@ internal static class ContractBuilder
         {
             return false;
         }
-        return declared.All(requestContentTypes.Contains);
+        return requestContentTypes.Count == 1 || declared.All(requestContentTypes.Contains);
     }
 
     private static IReadOnlyList<string> ReadFiniteStringValues(IOpenApiSchema? schema)
@@ -1109,6 +1109,10 @@ internal static class ContractBuilder
         if (parameter.Explode is { } explode && explode != (parameter.Style is ParameterStyle.Form))
         {
             metadata["explode"] = explode;
+        }
+        if (parameter.In is ParameterLocation.Query && parameter.AllowEmptyValue)
+        {
+            metadata["allowEmptyValue"] = true;
         }
 
         return metadata.Count == 0 ? null : metadata.ToJsonString();

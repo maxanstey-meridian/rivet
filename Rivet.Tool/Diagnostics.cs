@@ -172,7 +172,7 @@ public static class Diagnostics
         [ImportOperationMethodDropped] =
             "TRACE operation dropped — the HTTP method has no contract representation.",
         [ImportAdditionalPropertiesDropped] =
-            "Named schema declares both 'properties' and 'additionalProperties' — imported as a record; extra members are not represented.",
+            "Retired diagnostic ID: mixed named objects now retain typed properties and extension data.",
         [ImportDiscriminatorDropped] =
             "Discriminator with no reversible polymorphic shape (plain object without oneOf, or oneOf whose mapping is absent/unusable) — imported without dispatch semantics.",
         [ImportAliasTargetMissing] =
@@ -188,7 +188,7 @@ public static class Diagnostics
         [ImportEnumConstraintDropped] =
             "Enum constraint that cannot become a C# enum (single-value, mixed/float, out-of-int32-range) — degraded to a primitive.",
         [ImportDeclaredPropertiesDropped] =
-            "Inline schema declares both 'properties' and 'additionalProperties' — imported as a dictionary; the declared properties are not represented.",
+            "Retired diagnostic ID: mixed inline objects now retain typed properties and extension data.",
         [ImportDictionaryKeyDropped] =
             "Dictionary 'propertyNames' schema has no C# dictionary-key representation — imported with string keys.",
         [ImportNamedScalarAlgebraUnsupported] =

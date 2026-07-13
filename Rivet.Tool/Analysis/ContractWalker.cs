@@ -609,7 +609,8 @@ public static class ContractWalker
                         Format: call.GetStringArg("format") is ""
                             ? null
                             : call.GetStringArg("format"),
-                        IsFormatSpecified: call.GetStringArg("format") is not null
+                        IsFormatSpecified: call.GetStringArg("format") is not null,
+                        AllowEmptyValue: metadata.AllowEmptyValue
                     )
                 );
             }
@@ -1367,7 +1368,14 @@ public static class ContractWalker
                 // Check if TInput is a record containing IFormFile properties
                 else if (HasFormFileProperty(wkt, typeWalker, tInput))
                 {
-                    inputTypeName = tInput.Name;
+                    // A route-split input cannot safely reference its complete definition:
+                    // that would put route properties back into the multipart body. Inputs
+                    // used wholly as multipart can be registered and referenced normally.
+                    var mappedInput =
+                        routeMatchedProps.Count == 0
+                            ? typeWalker.MapType(tInput, $"multipart input '{tInput.Name}'")
+                            : null;
+                    inputTypeName = mappedInput is TsType.TypeRef typeRef ? typeRef.Name : null;
                     // A3: walk the flattened property surface (incl. inherited)
                     foreach (var prop in typeWalker.GetEffectiveProperties(tInput))
                     {
@@ -1397,7 +1405,8 @@ public static class ContractWalker
                                 new TsEndpointParam(
                                     tsName,
                                     new TsType.Primitive("File"),
-                                    ParamSource.File
+                                    ParamSource.File,
+                                    IsOptional: TypeWalker.IsOptionalProperty(prop)
                                 )
                             );
                         }
@@ -1409,7 +1418,8 @@ public static class ContractWalker
                                 new TsEndpointParam(
                                     tsName,
                                     new TsType.Array(new TsType.Primitive("File")),
-                                    ParamSource.File
+                                    ParamSource.File,
+                                    IsOptional: TypeWalker.IsOptionalProperty(prop)
                                 )
                             );
                         }
@@ -1420,7 +1430,8 @@ public static class ContractWalker
                                 new TsEndpointParam(
                                     tsName,
                                     typeWalker.MapPropertyType(prop),
-                                    ParamSource.FormField
+                                    ParamSource.FormField,
+                                    IsOptional: TypeWalker.IsOptionalProperty(prop)
                                 )
                             );
                         }
@@ -1647,7 +1658,9 @@ public static class ContractWalker
             root.TryGetProperty("explode", out var explode) ? explode.GetBoolean() : null,
             root.TryGetProperty("itemMetadata", out var itemMetadata)
                 ? itemMetadata.Deserialize<TsScalarMetadata>()
-                : null
+                : null,
+            root.TryGetProperty("allowEmptyValue", out var allowEmptyValue)
+                && allowEmptyValue.GetBoolean()
         );
     }
 
@@ -1965,7 +1978,8 @@ public static class ContractWalker
         JsonElement? Examples = null,
         string? Style = null,
         bool? Explode = null,
-        TsScalarMetadata? ItemMetadata = null
+        TsScalarMetadata? ItemMetadata = null,
+        bool AllowEmptyValue = false
     );
 
     /// <summary>A .WithResponseHeader(...) call; null StatusKey = the success response.</summary>

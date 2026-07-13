@@ -44,6 +44,7 @@ public sealed class TypeWalker
     // Attribute symbols for property-level metadata
     private readonly INamedTypeSymbol? _jsonPropertyNameType;
     private readonly INamedTypeSymbol? _jsonIgnoreType;
+    private readonly INamedTypeSymbol? _jsonExtensionDataType;
     private readonly INamedTypeSymbol? _obsoleteType;
 
     // STJ polymorphism attributes (P2 wave 4): [JsonPolymorphic]/[JsonDerivedType]
@@ -140,6 +141,9 @@ public sealed class TypeWalker
         );
         _jsonIgnoreType = compilation.GetTypeByMetadataName(
             "System.Text.Json.Serialization.JsonIgnoreAttribute"
+        );
+        _jsonExtensionDataType = compilation.GetTypeByMetadataName(
+            "System.Text.Json.Serialization.JsonExtensionDataAttribute"
         );
         _obsoleteType = compilation.GetTypeByMetadataName("System.ObsoleteAttribute");
         _jsonPolymorphicType = compilation.GetTypeByMetadataName(
@@ -326,13 +330,23 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// Returns true if the property has [JsonIgnore].
+    /// Returns true if the property is not a named JSON member.
     /// </summary>
     public bool IsJsonIgnored(IPropertySymbol prop)
     {
-        return _jsonIgnoreType is not null
-            && prop.GetAttributes()
-                .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIgnoreType));
+        return prop.GetAttributes()
+            .Any(attribute =>
+                _jsonExtensionDataType is not null
+                    && SymbolEqualityComparer.Default.Equals(
+                        attribute.AttributeClass,
+                        _jsonExtensionDataType
+                    )
+                || _jsonIgnoreType is not null
+                    && SymbolEqualityComparer.Default.Equals(
+                        attribute.AttributeClass,
+                        _jsonIgnoreType
+                    )
+            );
     }
 
     /// <summary>
@@ -501,15 +515,7 @@ public sealed class TypeWalker
         // A3: include inherited properties by flattening the BaseType chain
         foreach (var member in GetEffectiveProperties(definition))
         {
-            // [JsonIgnore] → skip property
-            if (
-                _jsonIgnoreType is not null
-                && member
-                    .GetAttributes()
-                    .Any(a =>
-                        SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIgnoreType)
-                    )
-            )
+            if (IsJsonIgnored(member))
             {
                 continue;
             }

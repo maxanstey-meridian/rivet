@@ -364,7 +364,8 @@ public sealed class ComponentProvenanceTests
         var imported = CompilationHelper.Import(spec, "EmptyDescription");
         var source = CompilationHelper.FindFile(imported, "AcceptDisputeRequest.cs");
         Assert.Contains("[RivetDescription(\"Defines the request parameters.\")]", source);
-        Assert.Contains("record AcceptDisputeRequest();", source);
+        Assert.Contains("record AcceptDisputeRequest()", source);
+        Assert.Contains("[JsonExtensionData]", source);
 
         using var emitted = ImportCompileWalkContractJsonAndEmit(spec);
         var schema = emitted
