@@ -292,6 +292,70 @@ public sealed class CliPipelineTests
         }
     }
 
+    [Fact]
+    public void Cli_Import_Maps_A_Finite_Content_Type_Header_To_Request_Content()
+    {
+        var workDir = Directory.CreateTempSubdirectory("rivet-content-type-map-");
+        try
+        {
+            var sourcePath = Path.Combine(workDir.FullName, "source.json");
+            File.WriteAllText(
+                sourcePath,
+                """
+                {
+                  "openapi":"3.1.0","info":{"title":"Mapped header","version":"1"},
+                  "paths":{"/build":{"post":{
+                    "operationId":"build","parameters":[
+                      {"name":"Content-type","in":"header","schema":{"type":"string","enum":["application/x-tar"]}}
+                    ],
+                    "requestBody":{"content":{"application/octet-stream":{"schema":{"type":"string","format":"binary"}}}},
+                    "responses":{"200":{"description":"Done"}}
+                  }}}
+                }
+                """
+            );
+            var sourceDirectory = Path.Combine(workDir.FullName, "src");
+            var outputDirectory = Path.Combine(workDir.FullName, "out");
+
+            var import = RunCli(
+                workDir.FullName,
+                ["--from-openapi", sourcePath, "--output", sourceDirectory]
+            );
+            Assert.Equal(0, import.ExitCode);
+            var emit = RunCli(
+                workDir.FullName,
+                [sourceDirectory, "--openapi", "--output", outputDirectory]
+            );
+            Assert.Equal(0, emit.ExitCode);
+
+            using var document = JsonDocument.Parse(
+                File.ReadAllText(Path.Combine(outputDirectory, "openapi.json"))
+            );
+            var operation = document
+                .RootElement.GetProperty("paths")
+                .GetProperty("/build")
+                .GetProperty("post");
+            var content = operation.GetProperty("requestBody").GetProperty("content");
+            Assert.True(content.TryGetProperty("application/x-tar", out _));
+            Assert.False(content.TryGetProperty("application/octet-stream", out _));
+            if (operation.TryGetProperty("parameters", out var parameters))
+            {
+                Assert.DoesNotContain(
+                    parameters.EnumerateArray(),
+                    parameter =>
+                        parameter
+                            .GetProperty("name")
+                            .GetString()
+                            ?.Equals("Content-Type", StringComparison.OrdinalIgnoreCase) == true
+                );
+            }
+        }
+        finally
+        {
+            workDir.Delete(recursive: true);
+        }
+    }
+
     private static string ToCliSecuritySpec(
         string name,
         IReadOnlyDictionary<string, JsonElement> sourceSchemes,

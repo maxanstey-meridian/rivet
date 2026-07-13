@@ -955,25 +955,117 @@ public sealed class RoundTripDiffTests
         Assert.Equal(0, FindingCount(result.OperationFindings, "parameter-invented"));
     }
 
-    [Theory]
-    [InlineData("Content-Type", "application/xml")]
-    [InlineData("Accept", "application/json")]
-    [InlineData("Authorization", "token")]
-    public void Reserved_Header_Is_A_Source_Defect_Even_When_Its_Value_Is_Not_Represented(
-        string headerName,
-        string mediaType
-    )
+    [Fact]
+    public void Content_Type_Header_Normalizes_A_Single_Request_Content()
     {
         var original = CreateSemanticSurfaceDocument();
         original["paths"]!["/surface"]!["post"]!["parameters"]!
             .AsArray()
             .Add(
                 JsonNode.Parse(
-                    $"{{\"name\":\"{headerName}\",\"in\":\"header\",\"schema\":{{\"type\":\"string\",\"enum\":[\"{mediaType}\"]}}}}"
+                    """{"name":"Content-Type","in":"header","schema":{"type":"string","enum":["application/x-tar"]}}"""
+                )
+            );
+        var originalContent = original["paths"]!["/surface"]!["post"]!["requestBody"]![
+            "content"
+        ]!.AsObject();
+        var media = originalContent.First().Value!.DeepClone();
+        originalContent.Clear();
+        originalContent["application/octet-stream"] = media;
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
+        var reemittedContent = reemitted["paths"]!["/surface"]!["post"]!["requestBody"]![
+            "content"
+        ]!.AsObject();
+        media = reemittedContent.First().Value!.DeepClone();
+        reemittedContent.Clear();
+        reemittedContent["application/x-tar"] = media;
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(1, result.Summary.GetProperty("sourceDefects").GetInt32());
+        Assert.Equal(0, FindingCount(result.OperationFindings, "parameter-missing"));
+        Assert.Equal(0, FindingCount(result.OperationFindings, "request-content-types"));
+    }
+
+    [Fact]
+    public void Unrepresented_Content_Type_Header_Remains_Parameter_Drift()
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["paths"]!["/surface"]!["post"]!["parameters"]!
+            .AsArray()
+            .Add(
+                JsonNode.Parse(
+                    """{"name":"Content-Type","in":"header","schema":{"type":"string","enum":["application/xml"]}}"""
                 )
             );
         var reemitted = original.DeepClone().AsObject();
         reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
+        Assert.Equal(1, FindingCount(result.OperationFindings, "parameter-missing"));
+    }
+
+    [Fact]
+    public void Multi_Value_Content_Type_Header_Remains_Parameter_Drift()
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["paths"]!["/surface"]!["post"]!["parameters"]!
+            .AsArray()
+            .Add(
+                JsonNode.Parse(
+                    """{"name":"Content-Type","in":"header","schema":{"type":"string","enum":["application/json","application/xml"]}}"""
+                )
+            );
+        var content = original["paths"]!["/surface"]!["post"]!["requestBody"]![
+            "content"
+        ]!.AsObject();
+        content["application/xml"] = content["application/json"]!.DeepClone();
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
+        Assert.Equal(1, FindingCount(result.OperationFindings, "parameter-missing"));
+    }
+
+    [Fact]
+    public void Referenced_Content_Type_Header_Remains_Parameter_Drift()
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["components"]!["parameters"]!["ContentType"] = JsonNode.Parse(
+            """{"name":"Content-Type","in":"header","schema":{"type":"string","enum":["application/json"]}}"""
+        );
+        original["paths"]!["/surface"]!["post"]!["parameters"]!
+            .AsArray()
+            .Add(JsonNode.Parse("""{"$ref":"#/components/parameters/ContentType"}"""));
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
+        Assert.Equal(1, FindingCount(result.OperationFindings, "parameter-missing"));
+    }
+
+    [Fact]
+    public void Represented_Path_Level_Content_Type_Header_Is_Classified()
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["paths"]!["/surface"]!["parameters"] = new JsonArray(
+            JsonNode.Parse(
+                """{"name":"Content-Type","in":"header","schema":{"type":"string","enum":["application/json"]}}"""
+            )
+        );
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["paths"]!["/surface"]!.AsObject().Remove("parameters");
 
         var result = RunDiff(original, reemitted);
 

@@ -6098,6 +6098,219 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Reserved_Content_Type_Header_Normalizes_A_Single_Binary_Request_Content()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/build": {
+                "post": {
+                    "operationId": "image_build",
+                    "tags": ["Image"],
+                    "parameters": [
+                        { "name": "Content-type", "in": "header", "schema": { "type": "string", "enum": ["application/x-tar"], "default": "application/x-tar" } }
+                    ],
+                    "requestBody": {
+                        "content": {
+                            "application/octet-stream": {
+                                "schema": { "type": "string", "format": "binary" }
+                            }
+                        }
+                    },
+                    "responses": { "200": { "description": "Build output" } }
+                }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+
+        Assert.Contains(
+            "RIV3021: Reserved header parameter dropped: POST /build declares 'Content-type'; request media types are represented by requestBody.content.",
+            result.Warnings
+        );
+        var contract = CompilationHelper.FindFile(result, "ImageContract.cs");
+        Assert.Contains(".AcceptsBinary(\"application/x-tar\")", contract);
+        Assert.Contains(".RequestBinaryContent(\"application/x-tar\")", contract);
+        Assert.DoesNotContain("application/octet-stream", contract);
+    }
+
+    [Fact]
+    public void Ambiguous_Reserved_Content_Type_Header_Remains_Loud()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/ambiguous": {
+                "post": {
+                    "operationId": "ambiguous_create",
+                    "tags": ["Ambiguous"],
+                    "parameters": [
+                        { "name": "Content-Type", "in": "header", "schema": { "type": "string", "enum": ["application/json", "application/xml"] } }
+                    ],
+                    "requestBody": {
+                        "content": {
+                            "application/json": { "schema": { "type": "object" } },
+                            "application/xml": { "schema": { "type": "object" } }
+                        }
+                    },
+                    "responses": { "204": { "description": "Done" } }
+                }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "AmbiguousContract.cs");
+
+        Assert.Contains(
+            "[rivet:unsupported param name=Content-Type in=header reason=reserved-content-type-unrepresented]",
+            contract
+        );
+    }
+
+    [Theory]
+    [InlineData("application/octet-stream")]
+    [InlineData("application/x-tar")]
+    public void Referenced_Content_Type_Header_Remains_Loud(string bodyMediaType)
+    {
+        var spec = $$"""
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Referenced header", "version": "1" },
+              "components": {
+                "parameters": {
+                  "ContentType": {
+                    "name": "Content-Type",
+                    "in": "header",
+                    "schema": { "type": "string", "enum": ["application/x-tar"] }
+                  },
+                  "ContentTypeAlias": { "$ref": "#/components/parameters/ContentType" }
+                }
+              },
+              "paths": {
+                "/build": {
+                  "parameters": [
+                    { "name": "Content-Type", "in": "header", "schema": { "type": "string", "enum": ["application/json"] } }
+                  ],
+                  "post": {
+                    "operationId": "build",
+                    "parameters": [
+                      { "$ref": "#/components/parameters/ContentTypeAlias" }
+                    ],
+                    "requestBody": {
+                      "content": {
+                        "{{bodyMediaType}}": {
+                          "schema": { "type": "string", "format": "binary" }
+                        }
+                      }
+                    },
+                    "responses": { "200": { "description": "Done" } }
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "DefaultContract.cs");
+
+        Assert.Contains(
+            "[rivet:unsupported param name=Content-Type in=header reason=reserved-content-type-unrepresented]",
+            contract
+        );
+        Assert.Contains($".RequestBinaryContent(\"{bodyMediaType}\")", contract);
+    }
+
+    [Fact]
+    public void Inline_Operation_Content_Type_Overrides_A_Referenced_Path_Header()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Inline override", "version": "1" },
+              "components": {
+                "parameters": {
+                  "ContentType": {
+                    "name": "Content-Type",
+                    "in": "header",
+                    "schema": { "type": "string", "enum": ["application/json"] }
+                  }
+                }
+              },
+              "paths": {
+                "/build": {
+                  "parameters": [
+                    { "$ref": "#/components/parameters/ContentType" }
+                  ],
+                  "post": {
+                    "operationId": "build",
+                    "parameters": [
+                      { "name": "Content-Type", "in": "header", "schema": { "type": "string", "enum": ["application/x-tar"] } }
+                    ],
+                    "requestBody": {
+                      "content": {
+                        "application/octet-stream": {
+                          "schema": { "type": "string", "format": "binary" }
+                        }
+                      }
+                    },
+                    "responses": { "200": { "description": "Done" } }
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "DefaultContract.cs");
+
+        Assert.Contains(".AcceptsBinary(\"application/x-tar\")", contract);
+        Assert.Contains(".RequestBinaryContent(\"application/x-tar\")", contract);
+        Assert.DoesNotContain("reserved-content-type-unrepresented", contract);
+    }
+
+    [Fact]
+    public void Content_Type_Header_On_A_Referenced_Request_Body_Remains_Loud()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Referenced body", "version": "1" },
+              "components": {
+                "requestBodies": {
+                  "TarBody": {
+                    "content": {
+                      "application/x-tar": {
+                        "schema": { "type": "string", "format": "binary" }
+                      }
+                    }
+                  }
+                }
+              },
+              "paths": {
+                "/build": {
+                  "post": {
+                    "operationId": "build",
+                    "parameters": [
+                      { "name": "Content-Type", "in": "header", "schema": { "type": "string", "enum": ["application/x-tar"] } }
+                    ],
+                    "requestBody": { "$ref": "#/components/requestBodies/TarBody" },
+                    "responses": { "200": { "description": "Done" } }
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "DefaultContract.cs");
+
+        Assert.Contains(
+            "[rivet:unsupported param name=Content-Type in=header reason=reserved-content-type-unrepresented]",
+            contract
+        );
+    }
+
+    [Fact]
     public void Param_Metadata_Is_Preserved_Explicitly()
     {
         // Parameter metadata is endpoint provenance, independent of the synthesized input.

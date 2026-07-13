@@ -731,7 +731,55 @@ class Comparator:
                     )
 
     @staticmethod
-    def reserved_header_reason(document, raw_parameter):
+    def finite_parameter_values(parameter):
+        schema = parameter.get("schema", {}) if isinstance(parameter, dict) else {}
+        if isinstance(schema.get("const"), str):
+            return [schema["const"]]
+        values = schema.get("enum")
+        if not isinstance(values, list) or not values or not all(
+            isinstance(value, str) for value in values
+        ):
+            return []
+        result = []
+        seen = set()
+        for value in values:
+            if value.lower() not in seen:
+                seen.add(value.lower())
+                result.append(value)
+        return result
+
+    @classmethod
+    def effective_request_body(cls, document, operation, raw_body):
+        if not isinstance(raw_body, dict) or "$ref" in raw_body:
+            return raw_body
+        content = raw_body.get("content")
+        if not isinstance(content, dict) or not content:
+            return raw_body
+        declared = []
+        for raw_parameter in operation.get("parameters", []):
+            if isinstance(raw_parameter, dict) and "$ref" in raw_parameter:
+                continue
+            parameter = resolve_once(document, raw_parameter)
+            if (
+                isinstance(parameter, dict)
+                and parameter.get("in") == "header"
+                and str(parameter.get("name", "")).lower() == "content-type"
+            ):
+                declared = cls.finite_parameter_values(parameter)
+        if not declared:
+            return raw_body
+        existing = {media_type.lower() for media_type in content}
+        if all(media_type.lower() in existing for media_type in declared):
+            return raw_body
+        if len(declared) != 1 or len(content) != 1:
+            return raw_body
+        media = next(iter(content.values()))
+        normalized = dict(raw_body)
+        normalized["content"] = {media_type: media for media_type in declared}
+        return normalized
+
+    @classmethod
+    def reserved_header_reason(cls, document, operation, raw_parameter):
         parameter = resolve_once(document, raw_parameter)
         if (
             not isinstance(parameter, dict)
@@ -739,6 +787,21 @@ class Comparator:
         ):
             return None
         name = str(parameter.get("name", "")).lower()
+        if name == "content-type":
+            if isinstance(raw_parameter, dict) and "$ref" in raw_parameter:
+                return None
+            declared = cls.finite_parameter_values(parameter)
+            request_body = cls.effective_request_body(
+                document, operation, operation.get("requestBody")
+            )
+            represented = {
+                media_type.lower()
+                for media_type in request_body.get("content", {})
+            } if isinstance(request_body, dict) else set()
+            if len(declared) != 1 or not all(
+                value.lower() in represented for value in declared
+            ):
+                return None
         return {
             "content-type": "reserved Content-Type header parameter is ignored by OpenAPI; request media types are represented by requestBody.content",
             "accept": "reserved Accept header parameter is ignored by OpenAPI; response media types are represented by responses content",
@@ -749,12 +812,31 @@ class Comparator:
         for route, path_item in self.original.get("paths", {}).items():
             if not isinstance(path_item, dict):
                 continue
+            path_parameters = path_item.get("parameters", [])
             for method in METHODS:
                 operation = path_item.get(method)
                 if not isinstance(operation, dict):
                     continue
+                effective_operation = dict(operation)
+                effective_operation["parameters"] = [
+                    *path_parameters,
+                    *operation.get("parameters", []),
+                ]
+                for index, raw_parameter in enumerate(path_parameters):
+                    reason = self.reserved_header_reason(
+                        self.original, effective_operation, raw_parameter
+                    )
+                    if reason is not None:
+                        self.source_defects.append(
+                            {
+                                "path": f"#/paths/{pointer_token(route)}/parameters/{index}/name",
+                                "reason": reason,
+                            }
+                        )
                 for index, raw_parameter in enumerate(operation.get("parameters", [])):
-                    reason = self.reserved_header_reason(self.original, raw_parameter)
+                    reason = self.reserved_header_reason(
+                        self.original, effective_operation, raw_parameter
+                    )
                     if reason is None:
                         continue
                     self.source_defects.append(
@@ -961,7 +1043,7 @@ class Comparator:
                 and parameter.get("name") != ""
                 and not (
                     omit_reserved_headers
-                    and self.reserved_header_reason(document, raw_parameter) is not None
+                    and self.reserved_header_reason(document, operation, raw_parameter) is not None
                 )
             ):
                 result[(parameter.get("name"), parameter.get("in"))] = parameter
@@ -975,7 +1057,7 @@ class Comparator:
                 not isinstance(parameter, dict)
                 or parameter.get("name") == ""
                 or omit_reserved_headers
-                and self.reserved_header_reason(document, raw_parameter) is not None
+                and self.reserved_header_reason(document, operation, raw_parameter) is not None
             ):
                 continue
             reference = raw_parameter.get("$ref") if isinstance(raw_parameter, dict) else None
@@ -1090,7 +1172,9 @@ class Comparator:
     def compare_request_body(self, key, original, reemitted):
         path = f"#/paths/{key[0]}/{key[1]}/requestBody"
         self.compare_request_body_value(
-            original.get("requestBody"),
+            self.effective_request_body(
+                self.original, original, original.get("requestBody")
+            ),
             reemitted.get("requestBody"),
             path,
             "operation",

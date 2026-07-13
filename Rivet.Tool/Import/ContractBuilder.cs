@@ -11,6 +11,10 @@ namespace Rivet.Tool.Import;
 /// </summary>
 internal static class ContractBuilder
 {
+    private const string ImportedParameterReferenceExtension =
+        "x-rivet-imported-parameter-reference";
+    private const string ImportedRequestBodyReferenceExtension =
+        "x-rivet-imported-request-body-reference";
     private static readonly HashSet<HttpMethod> _supportedMethods =
     [
         HttpMethod.Get,
@@ -152,7 +156,13 @@ internal static class ContractBuilder
             queryAuthParameterName,
             warnings,
             httpMethod,
-            route
+            route,
+            operation.RequestBody?.Content?.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase)
+                ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            operation.RequestBody is OpenApiRequestBodyReference
+                || operation.RequestBody?.Extensions?.ContainsKey(
+                    ImportedRequestBodyReferenceExtension
+                ) == true
         );
 
         var explicitParameters = BuildExplicitParameters(
@@ -761,7 +771,9 @@ internal static class ContractBuilder
         string? queryAuthParameterName,
         List<string> warnings,
         string httpMethod,
-        string route
+        string route,
+        IReadOnlySet<string> requestContentTypes,
+        bool requestBodyIsReference
     )
     {
         if (sourceParameters.Count == 0)
@@ -810,6 +822,17 @@ internal static class ContractBuilder
                 && param.Name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
             )
             {
+                if (
+                    param is OpenApiParameterReference
+                    || param.Extensions?.ContainsKey(ImportedParameterReferenceExtension) == true
+                    || requestBodyIsReference
+                    || !IsReservedContentTypeRepresented(requestContentTypes, param.Schema)
+                )
+                {
+                    unsupported.Add(
+                        $"param name={param.Name} in=header reason=reserved-content-type-unrepresented"
+                    );
+                }
                 warnings.Add(
                     Diagnostics.Prefix(
                         Diagnostics.ImportReservedContentTypeHeaderDropped,
@@ -917,6 +940,44 @@ internal static class ContractBuilder
         }
 
         return properties;
+    }
+
+    private static bool IsReservedContentTypeRepresented(
+        IReadOnlySet<string> requestContentTypes,
+        IOpenApiSchema? schema
+    )
+    {
+        var declared = ReadFiniteStringValues(schema);
+        if (declared.Count != 1 || requestContentTypes.Count == 0)
+        {
+            return false;
+        }
+        return declared.All(requestContentTypes.Contains);
+    }
+
+    private static IReadOnlyList<string> ReadFiniteStringValues(IOpenApiSchema? schema)
+    {
+        if (schema?.Const is string value)
+        {
+            return [value];
+        }
+        if (schema?.Enum is not { Count: > 0 } values)
+        {
+            return [];
+        }
+        var result = new List<string>();
+        foreach (var item in values)
+        {
+            if (item is not JsonValue itemValue || !itemValue.TryGetValue<string>(out var text))
+            {
+                return [];
+            }
+            if (!result.Contains(text, StringComparer.OrdinalIgnoreCase))
+            {
+                result.Add(text);
+            }
+        }
+        return result;
     }
 
     private static string? SynthesizeParamInputType(

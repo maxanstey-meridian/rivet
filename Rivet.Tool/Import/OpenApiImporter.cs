@@ -14,6 +14,10 @@ public static class OpenApiImporter
     private const string ComponentHeadersPrefix = "#/components/headers/";
     private const string ComponentRequestBodiesPrefix = "#/components/requestBodies/";
     private const string ComponentResponsesPrefix = "#/components/responses/";
+    private const string ImportedParameterReferenceExtension =
+        "x-rivet-imported-parameter-reference";
+    private const string ImportedRequestBodyReferenceExtension =
+        "x-rivet-imported-request-body-reference";
 
     private static readonly string[] _operationNames =
     [
@@ -36,6 +40,7 @@ public static class OpenApiImporter
         // they must be broken at the raw-JSON level before parsing.
         json = BreakAliasCycles(json, warnings);
         json = NormalizeMappedVendorExtensions(json);
+        json = NormalizeReservedContentTypeHeaders(json);
         var provenance = OpenApiProvenanceReader.Read(json, warnings);
         json = NormalizeLocalPathReferences(json);
         json = NormalizeSchemaReferenceMetadataSiblings(json);
@@ -384,6 +389,151 @@ public static class OpenApiImporter
     private static bool IsOpaqueOpenApiValue(string name) =>
         name is "const" or "default" or "enum" or "example" or "examples"
         || name.StartsWith("x-", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeReservedContentTypeHeaders(string json)
+    {
+        JsonNode? parsed;
+        try
+        {
+            parsed = JsonNode.Parse(json);
+        }
+        catch (JsonException)
+        {
+            return json;
+        }
+
+        if (parsed is not JsonObject root || root["paths"] is not JsonObject paths)
+        {
+            return json;
+        }
+
+        var changed = false;
+        foreach (var (_, pathNode) in paths)
+        {
+            if (pathNode is not JsonObject pathItem)
+            {
+                continue;
+            }
+            foreach (var method in _operationNames)
+            {
+                if (pathItem[method] is not JsonObject operation)
+                {
+                    continue;
+                }
+                var declaredMediaTypes = ReadReservedContentTypes(
+                    root,
+                    pathItem["parameters"] as JsonArray,
+                    operation["parameters"] as JsonArray
+                );
+                if (
+                    declaredMediaTypes.Count == 0
+                    || operation["requestBody"] is not JsonObject requestBody
+                    || GetLocalReference(requestBody) is not null
+                    || requestBody["content"] is not JsonObject content
+                )
+                {
+                    continue;
+                }
+                var existing = content
+                    .Select(entry => entry.Key)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (declaredMediaTypes.All(existing.Contains))
+                {
+                    continue;
+                }
+                if (declaredMediaTypes.Count != 1 || content.Count != 1)
+                {
+                    continue;
+                }
+
+                var media = content.Single().Value?.DeepClone();
+                content.Clear();
+                foreach (var mediaType in declaredMediaTypes)
+                {
+                    content[mediaType] = media?.DeepClone();
+                }
+                changed = true;
+            }
+        }
+
+        return changed ? root.ToJsonString() : json;
+    }
+
+    private static IReadOnlyList<string> ReadReservedContentTypes(
+        JsonObject root,
+        JsonArray? pathParameters,
+        JsonArray? operationParameters
+    )
+    {
+        JsonObject? contentTypeParameter = null;
+        var contentTypeParameterIsReference = false;
+        foreach (var rawParameter in (pathParameters ?? []).Concat(operationParameters ?? []))
+        {
+            if (rawParameter is not JsonObject parameter)
+            {
+                continue;
+            }
+            if (GetLocalReference(parameter) is not null)
+            {
+                var referenced = ResolveReferenceObject(parameter, root, "parameter");
+                if (
+                    referenced?["in"]?.GetValue<string>() == "header"
+                    && referenced["name"]?.GetValue<string>() is { } referencedName
+                    && referencedName.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    contentTypeParameter = null;
+                    contentTypeParameterIsReference = true;
+                }
+                continue;
+            }
+            var resolved = parameter;
+            if (
+                resolved?["in"]?.GetValue<string>() == "header"
+                && resolved["name"]?.GetValue<string>() is { } name
+                && name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                contentTypeParameter = resolved;
+                contentTypeParameterIsReference = false;
+            }
+        }
+        if (
+            contentTypeParameterIsReference
+            || contentTypeParameter?["schema"] is not JsonObject schema
+        )
+        {
+            return [];
+        }
+        if (
+            schema["const"] is JsonValue constValue
+            && constValue.TryGetValue<string>(out var value)
+        )
+        {
+            return [value];
+        }
+        if (schema["enum"] is not JsonArray values)
+        {
+            return [];
+        }
+
+        var result = new List<string>();
+        foreach (var item in values)
+        {
+            if (
+                item is not JsonValue itemValue
+                || !itemValue.TryGetValue<string>(out var mediaType)
+            )
+            {
+                return [];
+            }
+            if (!result.Contains(mediaType, StringComparer.OrdinalIgnoreCase))
+            {
+                result.Add(mediaType);
+            }
+        }
+        return result;
+    }
 
     private static void NormalizeSchemaReferenceMetadataSiblings(JsonNode node)
     {
@@ -863,9 +1013,17 @@ public static class OpenApiImporter
 
             if (operation["requestBody"] is JsonObject requestBody)
             {
+                var reference = GetLocalReference(requestBody);
                 var resolved = ShouldNormalizeReference(requestBody, ComponentRequestBodiesPrefix)
                     ? ResolveReferenceObject(requestBody, root, "request body")
                     : (JsonObject)requestBody.DeepClone();
+                if (
+                    reference is not null
+                    && ShouldNormalizeReference(requestBody, ComponentRequestBodiesPrefix)
+                )
+                {
+                    resolved[ImportedRequestBodyReferenceExtension] = reference;
+                }
                 if (GetLocalReference(resolved) is null)
                 {
                     NormalizeContentExamples(resolved, root);
@@ -963,7 +1121,12 @@ public static class OpenApiImporter
                 continue;
             }
 
+            var reference = GetLocalReference(parameterObject);
             var resolved = ResolveReferenceObject(parameterObject, root, "parameter");
+            if (reference is not null)
+            {
+                resolved[ImportedParameterReferenceExtension] = reference;
+            }
             NormalizeExamples(resolved, root);
             NormalizeContentExamples(resolved, root);
             normalized.Add(resolved);
