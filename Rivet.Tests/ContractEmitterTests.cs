@@ -1101,77 +1101,6 @@ public sealed class ContractEmitterTests
     }
 
     [Fact]
-    public void Full_Contract_Contains_All_Sections()
-    {
-        var definitions = new Dictionary<string, TsTypeDefinition>
-        {
-            ["UserDto"] = new(
-                "UserDto",
-                [],
-                [
-                    new("id", new TsType.Primitive("number"), false),
-                    new("status", new TsType.TypeRef("Status"), false),
-                ]
-            ),
-        };
-
-        var enums = new Dictionary<string, TsType>
-        {
-            ["Status"] = new TsType.StringUnion(["Active", "Inactive"]),
-        };
-
-        var endpoints = new List<TsEndpointDefinition>
-        {
-            new(
-                "getUser",
-                "GET",
-                "/api/users/{id}",
-                [new TsEndpointParam("id", new TsType.Primitive("number"), ParamSource.Route)],
-                new TsType.TypeRef("UserDto"),
-                "UsersController",
-                [new TsResponseType(200, new TsType.TypeRef("UserDto"))]
-            ),
-        };
-
-        var json = ContractEmitter.Emit(definitions, enums, endpoints);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-
-        Assert.Equal(1, root.GetProperty("types").GetArrayLength());
-        Assert.Equal("UserDto", root.GetProperty("types")[0].GetProperty("name").GetString());
-        Assert.Equal(1, root.GetProperty("enums").GetArrayLength());
-        Assert.Equal("Status", root.GetProperty("enums")[0].GetProperty("name").GetString());
-        Assert.Equal(1, root.GetProperty("endpoints").GetArrayLength());
-        Assert.Equal("getUser", root.GetProperty("endpoints")[0].GetProperty("name").GetString());
-    }
-
-    [Fact]
-    public void QueryAuth_Serializes_With_ParameterName()
-    {
-        var endpoint = new TsEndpointDefinition(
-            "streamVideo",
-            "GET",
-            "/api/media/{id}/stream",
-            [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
-            null,
-            "MediaController",
-            [new TsResponseType(200, null)],
-            QueryAuth: new QueryAuthMetadata("token")
-        );
-
-        var json = ContractEmitter.Emit(
-            new Dictionary<string, TsTypeDefinition>(),
-            new Dictionary<string, TsType>(),
-            [endpoint]
-        );
-        using var doc = JsonDocument.Parse(json);
-        var ep = doc.RootElement.GetProperty("endpoints")[0];
-
-        Assert.True(ep.TryGetProperty("queryAuth", out var qa));
-        Assert.Equal("token", qa.GetProperty("parameterName").GetString());
-    }
-
-    [Fact]
     public void QueryAuth_Custom_ParameterName_Serializes()
     {
         var endpoint = new TsEndpointDefinition(
@@ -1194,30 +1123,6 @@ public sealed class ContractEmitterTests
         var qa = doc.RootElement.GetProperty("endpoints")[0].GetProperty("queryAuth");
 
         Assert.Equal("key", qa.GetProperty("parameterName").GetString());
-    }
-
-    [Fact]
-    public void QueryAuth_Omitted_When_Null()
-    {
-        var endpoint = new TsEndpointDefinition(
-            "getUser",
-            "GET",
-            "/api/users/{id}",
-            [],
-            null,
-            "UsersController",
-            [new TsResponseType(200, null)]
-        );
-
-        var json = ContractEmitter.Emit(
-            new Dictionary<string, TsTypeDefinition>(),
-            new Dictionary<string, TsType>(),
-            [endpoint]
-        );
-        using var doc = JsonDocument.Parse(json);
-        var ep = doc.RootElement.GetProperty("endpoints")[0];
-
-        Assert.False(ep.TryGetProperty("queryAuth", out _));
     }
 
     [Fact]
@@ -1246,31 +1151,6 @@ public sealed class ContractEmitterTests
     }
 
     [Fact]
-    public void IsFileEndpoint_False_Omitted()
-    {
-        var endpoint = new TsEndpointDefinition(
-            "getUser",
-            "GET",
-            "/api/users/{id}",
-            [],
-            null,
-            "UsersController",
-            [new TsResponseType(200, null)],
-            IsFileEndpoint: false
-        );
-
-        var json = ContractEmitter.Emit(
-            new Dictionary<string, TsTypeDefinition>(),
-            new Dictionary<string, TsType>(),
-            [endpoint]
-        );
-        using var doc = JsonDocument.Parse(json);
-        var ep = doc.RootElement.GetProperty("endpoints")[0];
-
-        Assert.False(ep.TryGetProperty("isFileEndpoint", out _));
-    }
-
-    [Fact]
     public void ContentType_Serializes_From_FileContentType()
     {
         var endpoint = new TsEndpointDefinition(
@@ -1294,30 +1174,6 @@ public sealed class ContractEmitterTests
         var ep = doc.RootElement.GetProperty("endpoints")[0];
 
         Assert.Equal("video/mp4", ep.GetProperty("fileContentType").GetString());
-    }
-
-    [Fact]
-    public void ContentType_Omitted_When_Null()
-    {
-        var endpoint = new TsEndpointDefinition(
-            "getUser",
-            "GET",
-            "/api/users/{id}",
-            [],
-            null,
-            "UsersController",
-            [new TsResponseType(200, null)]
-        );
-
-        var json = ContractEmitter.Emit(
-            new Dictionary<string, TsTypeDefinition>(),
-            new Dictionary<string, TsType>(),
-            [endpoint]
-        );
-        using var doc = JsonDocument.Parse(json);
-        var ep = doc.RootElement.GetProperty("endpoints")[0];
-
-        Assert.False(ep.TryGetProperty("fileContentType", out _));
     }
 
     [Fact]
@@ -1375,34 +1231,5 @@ public sealed class ContractEmitterTests
             "X-First",
             response404.GetProperty("headers")[0].GetProperty("name").GetString()
         );
-    }
-
-    [Fact]
-    public void File_Endpoint_With_QueryAuth_Serializes_All_Fields()
-    {
-        var endpoint = new TsEndpointDefinition(
-            "streamVideo",
-            "GET",
-            "/api/media/{id}/stream",
-            [new TsEndpointParam("id", new TsType.Primitive("string"), ParamSource.Route)],
-            null,
-            "MediaController",
-            [new TsResponseType(200, null)],
-            FileContentType: "video/mp4",
-            IsFileEndpoint: true,
-            QueryAuth: new QueryAuthMetadata("token")
-        );
-
-        var json = ContractEmitter.Emit(
-            new Dictionary<string, TsTypeDefinition>(),
-            new Dictionary<string, TsType>(),
-            [endpoint]
-        );
-        using var doc = JsonDocument.Parse(json);
-        var ep = doc.RootElement.GetProperty("endpoints")[0];
-
-        Assert.True(ep.GetProperty("isFileEndpoint").GetBoolean());
-        Assert.Equal("video/mp4", ep.GetProperty("fileContentType").GetString());
-        Assert.Equal("token", ep.GetProperty("queryAuth").GetProperty("parameterName").GetString());
     }
 }

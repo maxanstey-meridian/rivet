@@ -46,6 +46,7 @@ tasks:
         desc: Run test suite
         cmds:
             - dotnet test ./Rivet.slnx
+            - python3 -m unittest tools/test_roundtrip_audit.py -v
 
     format:
         desc: Format C# projects

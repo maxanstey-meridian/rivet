@@ -556,21 +556,4 @@ public sealed class RoundTripProfileInventoryTests
         );
         Assert.Null(fact.Skip);
     }
-
-    private sealed class TemporaryJson(string path) : IDisposable
-    {
-        public string Path { get; } = path;
-
-        public static TemporaryJson Write(JsonNode value)
-        {
-            var path = System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(),
-                $"rivet-verified-profile-{Guid.NewGuid():N}.json"
-            );
-            File.WriteAllText(path, value.ToJsonString());
-            return new TemporaryJson(path);
-        }
-
-        public void Dispose() => File.Delete(Path);
-    }
 }

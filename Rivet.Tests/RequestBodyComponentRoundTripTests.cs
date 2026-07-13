@@ -150,14 +150,26 @@ public sealed class RequestBodyComponentRoundTripTests
             var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
             File.WriteAllText(sourcePath, spec);
 
-            var first = RunPass(workDirectory.FullName, sourcePath, "first", out var generated);
-            Assert.Contains("RivetDocumentRequestBody(0, \"Used/Body\"", generated);
-            Assert.Contains("RivetDocumentRequestBody(2, \"Unused~Body\"", generated);
+            var firstPass = RealCliOpenApiPass.ImportEmitAndReadGeneratedSource(
+                workDirectory.FullName,
+                sourcePath,
+                "first"
+            );
+            var first = firstPass.Document;
+            Assert.Contains("RivetDocumentRequestBody(0, \"Used/Body\"", firstPass.GeneratedSource);
+            Assert.Contains(
+                "RivetDocumentRequestBody(2, \"Unused~Body\"",
+                firstPass.GeneratedSource
+            );
             AssertRequestBodyComponents(first);
 
             var secondPath = Path.Combine(workDirectory.FullName, "first.json");
             File.WriteAllText(secondPath, first.ToJsonString());
-            var second = RunPass(workDirectory.FullName, secondPath, "second", out _);
+            var second = RealCliOpenApiPass.ImportAndEmit(
+                workDirectory.FullName,
+                secondPath,
+                "second"
+            );
             AssertRequestBodyComponents(second);
 
             Assert.True(
@@ -220,7 +232,11 @@ public sealed class RequestBodyComponentRoundTripTests
             var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
             File.WriteAllText(sourcePath, spec);
 
-            var first = RunPass(workDirectory.FullName, sourcePath, "first", out _);
+            var first = RealCliOpenApiPass.ImportAndEmit(
+                workDirectory.FullName,
+                sourcePath,
+                "first"
+            );
             var firstSchema = first["paths"]!["/empty"]!["post"]!["requestBody"]!["content"]![
                 "application/json"
             ]!["schema"]!;
@@ -231,7 +247,11 @@ public sealed class RequestBodyComponentRoundTripTests
 
             var secondPath = Path.Combine(workDirectory.FullName, "first.json");
             File.WriteAllText(secondPath, first.ToJsonString());
-            var second = RunPass(workDirectory.FullName, secondPath, "second", out _);
+            var second = RealCliOpenApiPass.ImportAndEmit(
+                workDirectory.FullName,
+                secondPath,
+                "second"
+            );
             var secondSchema = second["paths"]!["/empty"]!["post"]!["requestBody"]!["content"]![
                 "application/json"
             ]!["schema"]!;
@@ -278,7 +298,11 @@ public sealed class RequestBodyComponentRoundTripTests
             var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
             File.WriteAllText(sourcePath, spec);
 
-            var first = RunPass(workDirectory.FullName, sourcePath, "first", out _);
+            var first = RealCliOpenApiPass.ImportAndEmit(
+                workDirectory.FullName,
+                sourcePath,
+                "first"
+            );
             var firstSchema = first["paths"]!["/array"]!["post"]!["requestBody"]!["content"]![
                 "application/json"
             ]!["schema"]!;
@@ -288,7 +312,11 @@ public sealed class RequestBodyComponentRoundTripTests
 
             var secondPath = Path.Combine(workDirectory.FullName, "first.json");
             File.WriteAllText(secondPath, first.ToJsonString());
-            var second = RunPass(workDirectory.FullName, secondPath, "second", out _);
+            var second = RealCliOpenApiPass.ImportAndEmit(
+                workDirectory.FullName,
+                secondPath,
+                "second"
+            );
             var secondSchema = second["paths"]!["/array"]!["post"]!["requestBody"]!["content"]![
                 "application/json"
             ]!["schema"]!;
@@ -302,44 +330,6 @@ public sealed class RequestBodyComponentRoundTripTests
         {
             workDirectory.Delete(recursive: true);
         }
-    }
-
-    private static JsonObject RunPass(
-        string workingDirectory,
-        string sourcePath,
-        string pass,
-        out string generatedSource
-    )
-    {
-        var generatedDirectory = Path.Combine(workingDirectory, $"generated-{pass}");
-        var import = CliRunner.RunCli(
-            workingDirectory,
-            [
-                "--from-openapi",
-                sourcePath,
-                "--output",
-                generatedDirectory,
-                "--namespace",
-                "Generated",
-            ]
-        );
-        Assert.True(import.ExitCode == 0, import.StdErr);
-        generatedSource = string.Join(
-            "\n",
-            Directory
-                .GetFiles(generatedDirectory, "*.cs", SearchOption.AllDirectories)
-                .Select(File.ReadAllText)
-        );
-
-        var outputDirectory = Path.Combine(workingDirectory, $"output-{pass}");
-        var emit = CliRunner.RunCli(
-            workingDirectory,
-            [generatedDirectory, "--openapi", "--output", outputDirectory]
-        );
-        Assert.True(emit.ExitCode == 0, emit.StdErr);
-        return JsonNode
-            .Parse(File.ReadAllText(Path.Combine(outputDirectory, "openapi.json")))!
-            .AsObject();
     }
 
     private static void AssertRequestBodyComponents(JsonObject document)

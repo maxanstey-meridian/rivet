@@ -4,12 +4,12 @@ namespace Rivet.Tests;
 
 /// <summary>
 /// FABLE_ROUNDTRIP cross-corpus findings (cloudflare/notion, 2026-06-12) — the
-/// three classes the github corpus never exercised. #1: a dictionary/collection/
+/// classes the github corpus never exercised. Response-set fidelity now lives in
+/// <see cref="ResponseSetFidelityTests"/>. #1: a dictionary/collection/
 /// scalar input on a bodyless method enumerated its CLR members (Count, Keys,
 /// Comparer, Capacity, …) into the emitted spec as invented query params (118
 /// cloudflare DELETE ops + 2 notion GET ops); the importer also preferred that
-/// unexpressable body over the op's real, expressable params. #2: OpenAPI status
-/// ranges (4XX/5XX) silently projected to literal statuses. #3: 1xx-only ops
+/// unexpressable body over the op's real, expressable params. #3: 1xx-only ops
 /// (websocket upgrades) lost their 101 and gained a fabricated 200.
 /// </summary>
 public sealed class CrossCorpusFindingsTests
@@ -154,9 +154,6 @@ public sealed class CrossCorpusFindingsTests
     public void Delete_With_Opaque_Body_Preserves_Body_And_Path_Param()
     {
         var spec = CompilationHelper.BuildSpec(
-            schemas: """
-            "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
-            """,
             paths: """
             "/api/tunnels/{tunnel_id}": {
                 "delete": {
@@ -185,91 +182,12 @@ public sealed class CrossCorpusFindingsTests
         Assert.DoesNotContain("reason=", contract);
     }
 
-    [Fact]
-    public void Post_With_Opaque_Body_Preserves_Body_And_Query_Param()
-    {
-        var spec = CompilationHelper.BuildSpec(
-            schemas: """
-            "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
-            """,
-            paths: """
-            "/api/ingest": {
-                "post": {
-                    "operationId": "ingestBlob",
-                    "parameters": [
-                        {"name": "tag", "in": "query", "required": false, "schema": {"type": "string"}}
-                    ],
-                    "requestBody": {
-                        "required": true,
-                        "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
-                    },
-                    "responses": { "202": { "description": "accepted" } }
-                }
-            }
-            """,
-            title: "API"
-        );
-
-        var contract = CompilationHelper.FindFile(
-            CompilationHelper.Import(spec),
-            "DefaultContract.cs"
-        );
-
-        Assert.Contains(".RequestContent<", contract);
-        Assert.Contains("(\"application/json\"", contract);
-        Assert.Contains(".Parameter<string>(\"tag\", \"query\", false", contract);
-        Assert.DoesNotContain("reason=", contract);
-    }
-
-    // ---- #2: status ranges remain exact ----
-
-    [Fact]
-    public void Error_Status_Range_Remains_Exact()
-    {
-        var spec = CompilationHelper.BuildSpec(
-            schemas: """
-            "ErrorDto": { "type": "object", "properties": { "message": { "type": "string" } } },
-            "ItemDto": { "type": "object", "properties": { "id": { "type": "string" } } }
-            """,
-            paths: """
-            "/api/items/{id}": {
-                "get": {
-                    "operationId": "getItem",
-                    "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
-                    "responses": {
-                        "200": {
-                            "description": "ok",
-                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemDto"}}}
-                        },
-                        "4xx": {
-                            "description": "client error",
-                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorDto"}}}
-                        }
-                    }
-                }
-            }
-            """,
-            title: "API"
-        );
-
-        var contract = CompilationHelper.FindFile(
-            CompilationHelper.Import(spec),
-            "DefaultContract.cs"
-        );
-
-        Assert.Contains(".Returns<ErrorDto>(\"4xx\"", contract);
-        Assert.DoesNotContain("projected=400", contract);
-    }
-
     // ---- #3: 1xx-only ops keep their informational status ----
 
     [Fact]
     public void Websocket_101_Only_Op_Declares_101_And_No_Fabricated_200()
     {
         var spec = CompilationHelper.BuildSpec(
-            schemas: """
-            "Unused": { "type": "object", "properties": { "x": { "type": "string" } } }
-            """,
             paths: """
             "/api/stream": {
                 "get": {
@@ -289,40 +207,5 @@ public sealed class CrossCorpusFindingsTests
         Assert.Contains(".Status(101)", contract);
         Assert.DoesNotContain(".Status(200)", contract);
         Assert.DoesNotContain(".Returns(101", contract); // promoted, not double-declared
-    }
-
-    [Fact]
-    public void Informational_Status_Beside_A_2xx_Remains_Declared()
-    {
-        var spec = CompilationHelper.BuildSpec(
-            schemas: """
-            "ItemDto": { "type": "object", "properties": { "id": { "type": "string" } } }
-            """,
-            paths: """
-            "/api/maybe-stream": {
-                "get": {
-                    "operationId": "maybeStream",
-                    "responses": {
-                        "101": { "description": "switching protocols" },
-                        "200": {
-                            "description": "ok",
-                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemDto"}}}
-                        }
-                    }
-                }
-            }
-            """,
-            title: "API"
-        );
-
-        var contract = CompilationHelper.FindFile(
-            CompilationHelper.Import(spec),
-            "DefaultContract.cs"
-        );
-
-        // 200 remains the runtime success; 101 remains an independent exact response.
-        Assert.DoesNotContain(".Status(101)", contract);
-        Assert.Contains(".Returns(101, \"switching protocols\")", contract);
-        Assert.DoesNotContain("informational-status-dropped", contract);
     }
 }

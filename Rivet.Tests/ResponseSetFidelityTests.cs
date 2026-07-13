@@ -50,6 +50,16 @@ public sealed class ResponseSetFidelityTests
     public void Imported_Wildcard_Response_Keys_Survive_Exactly()
     {
         var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "ErrorDto": {
+                "type": "object",
+                "properties": { "message": { "type": "string" } }
+            },
+            "ServerErrorDto": {
+                "type": "object",
+                "properties": { "message": { "type": "string" } }
+            }
+            """,
             paths: """
             "/wildcards": {
                 "get": {
@@ -61,15 +71,25 @@ public sealed class ResponseSetFidelityTests
                                 "application/json": { "schema": { "type": "string" } }
                             }
                         },
-                        "4XX": { "description": "Any client failure" },
-                        "5XX": { "description": "Any server failure" }
+                        "4xx": {
+                            "description": "Any client failure",
+                            "content": {
+                                "application/json": { "schema": { "$ref": "#/components/schemas/ErrorDto" } }
+                            }
+                        },
+                        "5XX": {
+                            "description": "Server error",
+                            "content": {
+                                "application/json": { "schema": { "$ref": "#/components/schemas/ServerErrorDto" } }
+                            }
+                        }
                     }
                 }
             }
             """
         );
 
-        var (contractJson, openApiJson, _) = TraceImport(spec);
+        var (contractJson, openApiJson, generatedContract) = TraceImport(spec);
         using var contract = JsonDocument.Parse(contractJson);
         using var openApi = JsonDocument.Parse(openApiJson);
         var contractKeys = contract
@@ -79,11 +99,14 @@ public sealed class ResponseSetFidelityTests
             .Select(response => response.GetProperty("statusKey").GetString());
         var responses = Responses(openApi, "/wildcards", "get");
 
-        Assert.Equal(new[] { "2XX", "4XX", "5XX" }, contractKeys);
+        Assert.Equal(new[] { "2XX", "4xx", "5XX" }, contractKeys);
         Assert.Equal(
-            new[] { "2XX", "4XX", "5XX" },
+            new[] { "2XX", "4xx", "5XX" },
             responses.EnumerateObject().Select(p => p.Name)
         );
+        Assert.Contains(".Returns<ErrorDto>(\"4xx\", \"Any client failure\")", generatedContract);
+        Assert.Contains(".Returns<ServerErrorDto>(\"5XX\", \"Server error\")", generatedContract);
+        Assert.DoesNotContain("projected=400", generatedContract);
         Assert.Equal(
             "string",
             responses
@@ -143,7 +166,7 @@ public sealed class ResponseSetFidelityTests
     }
 
     [Fact]
-    public void Imported_Concrete_Response_Set_And_Descriptions_Survive()
+    public void Imported_Concrete_Response_Set_Including_Informational_Statuses_Survives()
     {
         var spec = CompilationHelper.BuildSpec(
             paths: """
@@ -151,6 +174,7 @@ public sealed class ResponseSetFidelityTests
                 "post": {
                     "operationId": "Responses_Many",
                     "responses": {
+                        "101": { "description": "Switching protocols" },
                         "102": { "description": "Processing" },
                         "201": { "description": "Created primary" },
                         "202": { "description": "Accepted secondary" },
@@ -161,13 +185,17 @@ public sealed class ResponseSetFidelityTests
             """
         );
 
-        var (_, openApiJson, _) = TraceImport(spec);
+        var (_, openApiJson, generatedContract) = TraceImport(spec);
         using var openApi = JsonDocument.Parse(openApiJson);
         var responses = Responses(openApi, "/many", "post");
 
         Assert.Equal(
-            new[] { "102", "201", "202", "304" },
+            new[] { "101", "102", "201", "202", "304" },
             responses.EnumerateObject().Select(p => p.Name)
+        );
+        Assert.Equal(
+            "Switching protocols",
+            responses.GetProperty("101").GetProperty("description").GetString()
         );
         Assert.Equal(
             "Processing",
@@ -185,6 +213,9 @@ public sealed class ResponseSetFidelityTests
             "Not modified",
             responses.GetProperty("304").GetProperty("description").GetString()
         );
+        Assert.DoesNotContain(".Status(101)", generatedContract);
+        Assert.Contains(".Returns(101, \"Switching protocols\")", generatedContract);
+        Assert.DoesNotContain("informational-status-dropped", generatedContract);
     }
 
     [Fact]

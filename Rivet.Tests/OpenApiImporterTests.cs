@@ -2380,57 +2380,6 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Wildcard_5XX_Status_Code_Remains_Exact()
-    {
-        var spec = CompilationHelper.BuildSpec(
-            schemas: """
-            "TaskDto": {
-                "type": "object",
-                "properties": { "id": { "type": "string" } },
-                "required": ["id"]
-            },
-            "ServerErrorDto": {
-                "type": "object",
-                "properties": { "error": { "type": "string" } },
-                "required": ["error"]
-            }
-            """,
-            paths: """
-            "/api/tasks": {
-                "get": {
-                    "operationId": "tasks_list",
-                    "tags": ["Tasks"],
-                    "responses": {
-                        "200": {
-                            "description": "OK",
-                            "content": {
-                                "application/json": {
-                                    "schema": { "$ref": "#/components/schemas/TaskDto" }
-                                }
-                            }
-                        },
-                        "5XX": {
-                            "description": "Server error",
-                            "content": {
-                                "application/json": {
-                                    "schema": { "$ref": "#/components/schemas/ServerErrorDto" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            """,
-            title: "API"
-        );
-
-        Assert.Contains(
-            ".Returns<ServerErrorDto>(\"5XX\", \"Server error\")",
-            CompilationHelper.FindFile(CompilationHelper.Import(spec), "TasksContract.cs")
-        );
-    }
-
-    [Fact]
     public void Wildcard_2XX_Status_Code_Remains_Exact_Typed_Response()
     {
         // A range is not a concrete runtime success status. Keep it as an exact typed
@@ -6606,7 +6555,8 @@ public sealed class OpenApiImporterTests
                     "operationId": "batchUpdate",
                     "tags": ["Batch"],
                     "parameters": [
-                        { "name": "groupId", "in": "path", "required": true, "schema": { "type": "string" } }
+                        { "name": "groupId", "in": "path", "required": true, "schema": { "type": "string" } },
+                        { "name": "tag", "in": "query", "required": false, "schema": { "type": "string" } }
                     ],
                     "requestBody": {
                         "content": {
@@ -6628,6 +6578,7 @@ public sealed class OpenApiImporterTests
         Assert.DoesNotContain("BatchUpdateInput", contract);
         Assert.Contains(".RequestContent<List<string>>(\"application/json\"", contract);
         Assert.Contains(".Parameter<string>(\"groupId\", \"path\", true", contract);
+        Assert.Contains(".Parameter<string>(\"tag\", \"query\", false", contract);
         Assert.DoesNotContain("reason=dropped-unmergeable-body", contract);
     }
 

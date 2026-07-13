@@ -1,6 +1,4 @@
-using System.Reflection;
 using System.Text.Json;
-using Microsoft.CodeAnalysis.CSharp;
 
 namespace Rivet.Tests;
 
@@ -9,7 +7,7 @@ public sealed class GeneratedCarrierFidelityTests
     [Fact]
     public void Explicit_open_object_preserves_additional_members_at_runtime()
     {
-        var requestType = ImportCompileAndLoadRequestType(
+        var requestType = GeneratedCarrierFixture.ImportCompileAndLoad(
             """
             "OpenRequest": {
                 "type": "object",
@@ -27,7 +25,7 @@ public sealed class GeneratedCarrierFidelityTests
     [Fact]
     public void Implicit_open_object_preserves_additional_members_at_runtime()
     {
-        var requestType = ImportCompileAndLoadRequestType(
+        var requestType = GeneratedCarrierFixture.ImportCompileAndLoad(
             """
             "ImplicitOpenRequest": {
                 "type": "object",
@@ -44,7 +42,7 @@ public sealed class GeneratedCarrierFidelityTests
     [Fact]
     public void Inline_open_and_closed_objects_with_the_same_properties_keep_distinct_carriers()
     {
-        var envelopeType = ImportCompileAndLoadRequestType(
+        var envelopeType = GeneratedCarrierFixture.ImportCompileAndLoad(
             """
             "Envelope": {
                 "type": "object",
@@ -122,7 +120,7 @@ public sealed class GeneratedCarrierFidelityTests
     [Fact]
     public void Nullable_all_of_record_and_scalar_round_trip_at_runtime()
     {
-        var envelopeType = ImportCompileAndLoadRequestType(
+        var envelopeType = GeneratedCarrierFixture.ImportCompileAndLoad(
             """
             "User": {
                 "type": "object",
@@ -193,7 +191,7 @@ public sealed class GeneratedCarrierFidelityTests
     [Fact]
     public void Outer_closed_all_of_removes_unknown_members_at_runtime()
     {
-        var requestType = ImportCompileAndLoadRequestType(
+        var requestType = GeneratedCarrierFixture.ImportCompileAndLoad(
             """
             "OpenBase": {
                 "type": "object",
@@ -224,7 +222,7 @@ public sealed class GeneratedCarrierFidelityTests
     [Fact]
     public void Inline_closed_all_of_removes_unknown_members_at_runtime()
     {
-        var requestType = ImportCompileAndLoadRequestType(
+        var requestType = GeneratedCarrierFixture.ImportCompileAndLoad(
             """
             "OpenBase": {
                 "type": "object",
@@ -260,23 +258,6 @@ public sealed class GeneratedCarrierFidelityTests
     }
 
     [Fact]
-    public void Spotify_episode_variant_accepts_its_wire_discriminator_at_runtime()
-    {
-        var playlistTrackType = ImportCompileAndLoadSpotifyPlaylistTrackType();
-        var episodeType = Assert.IsAssignableFrom<Type>(
-            playlistTrackType.Assembly.GetType("Generated.EpisodeObject")
-        );
-
-        Assert.NotNull(
-            JsonSerializer.Deserialize(
-                """{"type":"episode","description":"Episode","show":"Show"}""",
-                episodeType,
-                JsonSerializerOptions.Web
-            )
-        );
-    }
-
-    [Fact]
     public void Spotify_nested_track_episode_discriminator_dispatches_episode_at_runtime()
     {
         var playlistTrackType = ImportCompileAndLoadSpotifyPlaylistTrackType();
@@ -302,7 +283,7 @@ public sealed class GeneratedCarrierFidelityTests
     }
 
     private static Type ImportCompileAndLoadSpotifyPlaylistTrackType() =>
-        ImportCompileAndLoadRequestType(
+        GeneratedCarrierFixture.ImportCompileAndLoad(
             """
             "TrackObject": {
                 "type": "object",
@@ -347,7 +328,7 @@ public sealed class GeneratedCarrierFidelityTests
         );
 
     private static Type ImportCompileAndLoadBoxUpdateRequestType() =>
-        ImportCompileAndLoadRequestType(
+        GeneratedCarrierFixture.ImportCompileAndLoad(
             """
             "BoxUpdateRequest": {
                 "type": "object",
@@ -370,79 +351,6 @@ public sealed class GeneratedCarrierFidelityTests
             """,
             "BoxUpdateRequest"
         );
-
-    private static Type ImportCompileAndLoadRequestType(string schema, string typeName)
-    {
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-open-carrier-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(
-                sourcePath,
-                CompilationHelper.BuildSpec(
-                    schemas: schema,
-                    paths: $$"""
-                    "/items": {
-                        "post": {
-                            "operationId": "items_create",
-                            "requestBody": {
-                                "required": true,
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/{{typeName}}" }
-                                    }
-                                }
-                            },
-                            "responses": { "204": { "description": "Created" } }
-                        }
-                    }
-                    """
-                )
-            );
-            var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
-
-            var import = CliRunner.RunCli(
-                workDirectory.FullName,
-                [
-                    "--from-openapi",
-                    sourcePath,
-                    "--output",
-                    generatedDirectory,
-                    "--namespace",
-                    "Generated",
-                ]
-            );
-            Assert.True(import.ExitCode == 0, import.StdErr);
-
-            var sourceFiles = Directory.GetFiles(
-                generatedDirectory,
-                "*.cs",
-                SearchOption.AllDirectories
-            );
-            var compilation = (
-                (CSharpCompilation)
-                    CompilationHelper.CreateCompilationFromMultiple(
-                        sourceFiles.Select(File.ReadAllText).ToArray(),
-                        sourceFiles
-                    )
-            ).WithAssemblyName($"GeneratedCarrier_{Guid.NewGuid():N}");
-            using var assemblyStream = new MemoryStream();
-            var emit = compilation.Emit(assemblyStream);
-            Assert.True(
-                emit.Success,
-                string.Join(
-                    Environment.NewLine,
-                    emit.Diagnostics.Select(diagnostic => diagnostic.ToString())
-                )
-            );
-            var assembly = Assembly.Load(assemblyStream.ToArray());
-            return Assert.IsAssignableFrom<Type>(assembly.GetType($"Generated.{typeName}"));
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
-    }
 
     private static void AssertAdditionalMemberSurvives(Type requestType)
     {

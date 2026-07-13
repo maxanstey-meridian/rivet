@@ -110,12 +110,20 @@ public sealed class ReusableComponentIdentityRoundTripTests
             var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
             File.WriteAllText(sourcePath, spec);
 
-            var first = RunPass(workDirectory.FullName, sourcePath, "first");
+            var first = RealCliOpenApiPass.ImportAndEmit(
+                workDirectory.FullName,
+                sourcePath,
+                "first"
+            );
             AssertReusableComponents(first);
 
             var secondPath = Path.Combine(workDirectory.FullName, "first.json");
             File.WriteAllText(secondPath, first.ToJsonString());
-            var second = RunPass(workDirectory.FullName, secondPath, "second");
+            var second = RealCliOpenApiPass.ImportAndEmit(
+                workDirectory.FullName,
+                secondPath,
+                "second"
+            );
             AssertReusableComponents(second);
 
             Assert.True(
@@ -273,20 +281,27 @@ public sealed class ReusableComponentIdentityRoundTripTests
             var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
             File.WriteAllText(sourcePath, spec);
 
-            var first = RunPass(
+            var firstPass = RealCliOpenApiPass.ImportEmitAndReadGeneratedSource(
                 workDirectory.FullName,
                 sourcePath,
-                "array-first",
-                out var generated
+                "array-first"
             );
-            Assert.Contains("RivetGeneratedSchema(\"PetList\", \"Pet/List\"", generated);
-            Assert.Contains("ResponseContent<List<Pet>>", generated);
-            Assert.Contains("schemaRef: \"PetList\"", generated);
+            var first = firstPass.Document;
+            Assert.Contains(
+                "RivetGeneratedSchema(\"PetList\", \"Pet/List\"",
+                firstPass.GeneratedSource
+            );
+            Assert.Contains("ResponseContent<List<Pet>>", firstPass.GeneratedSource);
+            Assert.Contains("schemaRef: \"PetList\"", firstPass.GeneratedSource);
             AssertNamedArray(first);
 
             var secondPath = Path.Combine(workDirectory.FullName, "array-first.json");
             File.WriteAllText(secondPath, first.ToJsonString());
-            var second = RunPass(workDirectory.FullName, secondPath, "array-second");
+            var second = RealCliOpenApiPass.ImportAndEmit(
+                workDirectory.FullName,
+                secondPath,
+                "array-second"
+            );
             AssertNamedArray(second);
             Assert.True(
                 JsonNode.DeepEquals(
@@ -382,7 +397,11 @@ public sealed class ReusableComponentIdentityRoundTripTests
         {
             var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
             File.WriteAllText(sourcePath, spec);
-            var emitted = RunPass(workDirectory.FullName, sourcePath, "fallback-identities");
+            var emitted = RealCliOpenApiPass.ImportAndEmit(
+                workDirectory.FullName,
+                sourcePath,
+                "fallback-identities"
+            );
 
             Assert.NotNull(emitted["components"]!["schemas"]!["Constrained/Id"]);
             Assert.Equal(
@@ -432,7 +451,11 @@ public sealed class ReusableComponentIdentityRoundTripTests
         {
             var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
             File.WriteAllText(sourcePath, spec);
-            var emitted = RunPass(workDirectory.FullName, sourcePath, "missing-schema");
+            var emitted = RealCliOpenApiPass.ImportAndEmit(
+                workDirectory.FullName,
+                sourcePath,
+                "missing-schema"
+            );
 
             Assert.NotNull(emitted["components"]!["schemas"]!["MissingFilter"]);
             Assert.Equal(
@@ -446,49 +469,6 @@ public sealed class ReusableComponentIdentityRoundTripTests
         {
             workDirectory.Delete(recursive: true);
         }
-    }
-
-    private static JsonObject RunPass(string workingDirectory, string sourcePath, string pass)
-    {
-        return RunPass(workingDirectory, sourcePath, pass, out _);
-    }
-
-    private static JsonObject RunPass(
-        string workingDirectory,
-        string sourcePath,
-        string pass,
-        out string generatedSource
-    )
-    {
-        var generatedDirectory = Path.Combine(workingDirectory, $"generated-{pass}");
-        var import = CliRunner.RunCli(
-            workingDirectory,
-            [
-                "--from-openapi",
-                sourcePath,
-                "--output",
-                generatedDirectory,
-                "--namespace",
-                "Generated",
-            ]
-        );
-        Assert.True(import.ExitCode == 0, import.StdErr);
-        generatedSource = string.Join(
-            "\n",
-            Directory
-                .GetFiles(generatedDirectory, "*.cs", SearchOption.AllDirectories)
-                .Select(File.ReadAllText)
-        );
-
-        var outputDirectory = Path.Combine(workingDirectory, $"output-{pass}");
-        var emit = CliRunner.RunCli(
-            workingDirectory,
-            [generatedDirectory, "--openapi", "--output", outputDirectory]
-        );
-        Assert.True(emit.ExitCode == 0, emit.StdErr);
-        return JsonNode
-            .Parse(File.ReadAllText(Path.Combine(outputDirectory, "openapi.json")))!
-            .AsObject();
     }
 
     private static void AssertNamedArray(JsonObject document)

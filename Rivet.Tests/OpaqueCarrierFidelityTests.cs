@@ -1,6 +1,4 @@
-using System.Reflection;
 using System.Text.Json;
-using Microsoft.CodeAnalysis.CSharp;
 
 namespace Rivet.Tests;
 
@@ -9,7 +7,7 @@ public sealed class OpaqueCarrierFidelityTests
     [Fact]
     public void Closed_object_preserves_every_valid_member_at_runtime()
     {
-        var fixture = ImportCompileLoadAndEmit(
+        var fixture = GeneratedCarrierFixture.ImportCompileLoadAndEmit(
             """
             "ClosedEnvelope": {
                 "type": "object",
@@ -42,7 +40,7 @@ public sealed class OpaqueCarrierFidelityTests
     [Fact]
     public void Open_record_preserves_typed_named_and_schema_valued_additional_properties()
     {
-        var fixture = ImportCompileLoadAndEmit(
+        var fixture = GeneratedCarrierFixture.ImportCompileLoadAndEmit(
             """
             "MixedEnvelope": {
                 "type": "object",
@@ -75,7 +73,7 @@ public sealed class OpaqueCarrierFidelityTests
     [Fact]
     public void Inline_free_form_carriers_preserve_valid_runtime_values_and_emitted_openness()
     {
-        var fixture = ImportCompileLoadAndEmit(
+        var fixture = GeneratedCarrierFixture.ImportCompileLoadAndEmit(
             """
             "FreeFormEnvelope": {
                 "type": "object",
@@ -109,13 +107,13 @@ public sealed class OpaqueCarrierFidelityTests
     [Fact]
     public void Propertyless_named_objects_keep_open_and_closed_runtime_carriers()
     {
-        var open = ImportCompileLoadAndEmit(
+        var open = GeneratedCarrierFixture.ImportCompileLoadAndEmit(
             """
             "OpenEmpty": { "type": "object" }
             """,
             "OpenEmpty"
         );
-        var closed = ImportCompileLoadAndEmit(
+        var closed = GeneratedCarrierFixture.ImportCompileLoadAndEmit(
             """
             "ClosedEmpty": { "type": "object", "additionalProperties": false }
             """,
@@ -142,7 +140,7 @@ public sealed class OpaqueCarrierFidelityTests
     [Fact]
     public void Inline_propertyless_closed_object_preserves_empty_value_and_emitted_closure()
     {
-        var fixture = ImportCompileLoadAndEmit(
+        var fixture = GeneratedCarrierFixture.ImportCompileLoadAndEmit(
             """
             "Envelope": {
                 "type": "object",
@@ -171,7 +169,7 @@ public sealed class OpaqueCarrierFidelityTests
     [Fact]
     public void SendGrid_style_pattern_dictionary_preserves_a_valid_entry_and_opaque_schema()
     {
-        var fixture = ImportCompileLoadAndEmit(
+        var fixture = GeneratedCarrierFixture.ImportCompileLoadAndEmit(
             """
             "PatternEnvelope": {
                 "type": "object",
@@ -228,7 +226,7 @@ public sealed class OpaqueCarrierFidelityTests
     [Fact]
     public void MaxProperties_dictionary_preserves_a_valid_value_and_emits_the_constraint()
     {
-        var fixture = ImportCompileLoadAndEmit(
+        var fixture = GeneratedCarrierFixture.ImportCompileLoadAndEmit(
             """
             "LabelsEnvelope": {
                 "type": "object",
@@ -266,91 +264,6 @@ public sealed class OpaqueCarrierFidelityTests
         );
     }
 
-    private static GeneratedFixture ImportCompileLoadAndEmit(string schema, string typeName)
-    {
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-opaque-carrier-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(
-                sourcePath,
-                CompilationHelper.BuildSpec(
-                    schemas: schema,
-                    paths: $$"""
-                    "/items": {
-                        "post": {
-                            "operationId": "items_create",
-                            "requestBody": {
-                                "required": true,
-                                "content": {
-                                    "application/json": {
-                                        "schema": { "$ref": "#/components/schemas/{{typeName}}" }
-                                    }
-                                }
-                            },
-                            "responses": { "204": { "description": "Created" } }
-                        }
-                    }
-                    """
-                )
-            );
-            var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
-            var import = CliRunner.RunCli(
-                workDirectory.FullName,
-                [
-                    "--from-openapi",
-                    sourcePath,
-                    "--output",
-                    generatedDirectory,
-                    "--namespace",
-                    "Generated",
-                ]
-            );
-            Assert.True(import.ExitCode == 0, import.StdErr);
-
-            var emittedDirectory = Path.Combine(workDirectory.FullName, "emitted");
-            var emission = CliRunner.RunCli(
-                workDirectory.FullName,
-                [generatedDirectory, "--openapi", "--output", emittedDirectory]
-            );
-            Assert.True(emission.ExitCode == 0, emission.StdErr);
-            using var emittedDocument = JsonDocument.Parse(
-                File.ReadAllText(Path.Combine(emittedDirectory, "openapi.json"))
-            );
-
-            var sourceFiles = Directory.GetFiles(
-                generatedDirectory,
-                "*.cs",
-                SearchOption.AllDirectories
-            );
-            var compilation = (
-                (CSharpCompilation)
-                    CompilationHelper.CreateCompilationFromMultiple(
-                        sourceFiles.Select(File.ReadAllText).ToArray(),
-                        sourceFiles
-                    )
-            ).WithAssemblyName($"OpaqueCarrier_{Guid.NewGuid():N}");
-            using var assemblyStream = new MemoryStream();
-            var emit = compilation.Emit(assemblyStream);
-            Assert.True(
-                emit.Success,
-                string.Join(
-                    Environment.NewLine,
-                    emit.Diagnostics.Select(diagnostic => diagnostic.ToString())
-                )
-            );
-            var assembly = Assembly.Load(assemblyStream.ToArray());
-            var requestType = Assert.IsAssignableFrom<Type>(
-                assembly.GetType($"Generated.{typeName}")
-            );
-            return new GeneratedFixture(requestType, emittedDocument.RootElement.Clone());
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
-    }
-
     private static void AssertRuntimeRoundTrip(Type requestType, string payload)
     {
         using var expected = JsonDocument.Parse(payload);
@@ -368,6 +281,4 @@ public sealed class OpaqueCarrierFidelityTests
         );
         return actual.RootElement.Clone();
     }
-
-    private sealed record GeneratedFixture(Type RequestType, JsonElement EmittedRoot);
 }

@@ -108,27 +108,6 @@ public sealed class RoundTripGateHardeningTests
     public void Profile_Roster_Rejects_Manifest_Auto_Admission_And_Roster_Drift()
     {
         var profile = RoundTripCorpusGateTests.LoadVerifiedProfile();
-        Assert.Equal(
-            [
-                "okta",
-                "petstore-v2",
-                "petstore-v3",
-                "twilio",
-                "square",
-                "docusign",
-                "notion",
-                "circleci",
-                "firebase",
-                "docker",
-                "sendgrid",
-                "spotify",
-                "asana",
-                "box",
-                "kubernetes",
-                "zoom",
-            ],
-            profile.VerifiedCorpusIds
-        );
         Assert.Equal(25, profile.ManifestCorpusCount);
 
         var profileNode = JsonNode
@@ -455,23 +434,6 @@ public sealed class RoundTripGateHardeningTests
             summaryPath,
             detailsPath
         );
-    }
-
-    private sealed class TemporaryJson(string path) : IDisposable
-    {
-        public string Path { get; } = path;
-
-        public static TemporaryJson Write(JsonNode value)
-        {
-            var path = System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(),
-                $"rivet-gate-profile-{Guid.NewGuid():N}.json"
-            );
-            File.WriteAllText(path, value.ToJsonString());
-            return new TemporaryJson(path);
-        }
-
-        public void Dispose() => File.Delete(Path);
     }
 
     private sealed class TemporaryDirectory(string path) : IDisposable

@@ -1,25 +1,27 @@
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Rivet.Tool.Emit;
+using Rivet.Tool.Import;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
 public sealed class KitchenSinkImportTests
 {
-    private static string LoadFixture()
-    {
-        return File.ReadAllText(
-            Path.Combine(AppContext.BaseDirectory, "Fixtures", "openapi-kitchen-sink.json")
-        );
-    }
+    private static readonly string _fixture = File.ReadAllText(
+        Path.Combine(AppContext.BaseDirectory, "Fixtures", "openapi-kitchen-sink.json")
+    );
+    private static readonly ImportResult _fixtureImport = CompilationHelper.Import(
+        _fixture,
+        "KitchenSink"
+    );
 
     // ========== Compilation ==========
 
     [Fact]
     public void Generated_CSharp_Compiles()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
 
         var errors = CompilationHelper
             .CompileImportResult(result)
@@ -34,7 +36,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Contracts_Survive_Roslyn_RoundTrip()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
@@ -114,7 +116,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Types_Survive_Roslyn_RoundTrip()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var compilation = CompilationHelper.CompileImportResult(result);
         var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
@@ -153,7 +155,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void All_Primitive_Types_Map_Correctly()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "AllPrimitivesDto.cs");
 
         Assert.Contains("string StringField", content);
@@ -169,7 +171,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Nullable_Types_Handled()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "NullableFieldsDto.cs");
 
         Assert.Contains("string? NullableString", content);
@@ -180,7 +182,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Collection_Types_Map_Correctly()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "CollectionsDto.cs");
 
         Assert.Contains("List<string> StringList", content);
@@ -194,7 +196,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Enum_Values_Preserve_Original_Names()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var compilation = CompilationHelper.CompileImportResult(result);
         var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
@@ -220,7 +222,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void All_Brand_Formats_Produce_Value_Objects()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
 
         Assert.Contains(
             "public sealed record Email(string Value)",
@@ -250,7 +252,7 @@ public sealed class KitchenSinkImportTests
     public void Nested_Refs_Resolved_Transitively()
     {
         // ProjectTaskDto → CompanyDto → AddressDto (3 deep)
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var compilation = CompilationHelper.CompileImportResult(result);
         var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
@@ -274,7 +276,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Multi_Segment_Routes_Preserved()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
@@ -290,7 +292,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Void_Endpoints_Have_No_OutputType()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "UsersContract.cs");
 
         // DELETE with 204 → bare RouteDefinition (no type param), 204 is default for DELETE
@@ -302,7 +304,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Error_Responses_Preserved()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "UsersContract.cs");
 
         // PUT /api/users/{userId} has 400, 404, 409, 422 error responses
@@ -315,7 +317,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Security_Annotations_Correct()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
 
         // Health endpoint has an explicit empty requirement list.
         Assert.Contains(
@@ -341,7 +343,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Tags_Produce_Separate_Contracts()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var contractFiles = result.Files.Where(f => f.FileName.StartsWith("Contracts/")).ToList();
 
         Assert.Contains(contractFiles, f => f.FileName == "Contracts/Users/UsersContract.cs");
@@ -362,7 +364,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void No_Tag_Produces_DefaultContract()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         Assert.Contains(result.Files, f => f.FileName == "Contracts/Default/DefaultContract.cs");
     }
 
@@ -371,7 +373,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Form_Encoded_Request_Body_Produces_Input_Type()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "FormsContract.cs");
 
         Assert.Contains("SubmitRequest", content);
@@ -390,7 +392,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Default_Error_Response_Remains_Exact()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "FormsContract.cs");
 
         Assert.Contains(".Returns<ValidationErrorDto>(\"default\", \"Unexpected error\")", content);
@@ -401,7 +403,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void AllOf_Produces_Flattened_Record()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "ComposedDto.cs");
 
         // Should have AddressDto props flattened in
@@ -416,7 +418,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void AllOf_MultiRef_Merges_Properties()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "ComposedMultiRefDto.cs");
 
         // AddressDto props
@@ -430,7 +432,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void AllOf_With_Sibling_Properties_Merges()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "AllOfWithSiblingPropsDto.cs");
 
         // AddressDto props from allOf
@@ -444,7 +446,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void OneOf_Produces_Union_Wrapper()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "UnionShape.cs");
 
         Assert.Contains("AddressDto? AsAddressDto", content);
@@ -454,7 +456,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void AnyOf_Produces_Union_Wrapper()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "FlexibleDto.cs");
 
         Assert.Contains("AddressDto? AsAddressDto", content);
@@ -464,7 +466,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void OneOf_With_Primitives_Produces_Union()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "UnionWithPrimitiveDto.cs");
 
         Assert.Contains("string? AsString", content);
@@ -474,7 +476,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Discriminator_Object_Becomes_Regular_Record_With_Named_Warning()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "DiscriminatedShape.cs");
 
         Assert.Contains("string Kind", content);
@@ -494,7 +496,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void File_Upload_Maps_To_IFormFile()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "AvatarUploadRequest.cs");
 
         Assert.Contains("IFormFile File", content);
@@ -509,7 +511,7 @@ public sealed class KitchenSinkImportTests
     public void OperationId_Stripped_Of_Tag_Prefix()
     {
         // "users_listAll" with tag "Users" → field name "ListAll"
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         Assert.Contains("ListAll", CompilationHelper.FindFile(result, "UsersContract.cs"));
     }
 
@@ -517,7 +519,7 @@ public sealed class KitchenSinkImportTests
     public void Missing_OperationId_Derives_FieldName()
     {
         // GET /api/status with no operationId, no tag → DefaultContract, derived name "GetApiStatus"
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         Assert.Contains("GetApiStatus", CompilationHelper.FindFile(result, "DefaultContract.cs"));
     }
 
@@ -526,7 +528,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void AdditionalProperties_False_Does_Not_Crash()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "StrictDto.cs");
 
         Assert.Contains("string Name", content);
@@ -538,7 +540,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Named_AdditionalProperties_True_Preserves_Component_Identity()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         Assert.Contains(result.Files, f => f.FileName.EndsWith("OpenMapDto.cs"));
 
         var consumer = CompilationHelper.FindFile(result, "MapRefConsumerDto.cs");
@@ -550,7 +552,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Named_Bare_Object_Preserves_Component_Identity()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         Assert.Contains(result.Files, f => f.FileName.EndsWith("BareObjectDto.cs"));
 
         var consumer = CompilationHelper.FindFile(result, "MapRefConsumerDto.cs");
@@ -562,7 +564,7 @@ public sealed class KitchenSinkImportTests
     {
         // A $ref pointing to a property-less object schema (OpenMapDto, BareObjectDto)
         // should resolve to Dictionary on the consuming property, not to a dead type name.
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "MapRefConsumerDto.cs");
 
         Assert.Contains("OpenMapDto OpenMap", content);
@@ -575,7 +577,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Inline_Object_In_Schema_Produces_Synthetic_Record()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "InlineParentDto.cs");
         // The nested property should reference the synthetic type, not JsonElement
         Assert.Contains("InlineParentDtoNested Nested", content);
@@ -590,7 +592,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Inline_Object_In_Endpoint_Produces_Synthetic_Record()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
 
         // Inline request body → synthetic CreateRequest record
         var requestContent = CompilationHelper.FindFile(result, "CreateRequest.cs");
@@ -609,7 +611,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Inline_Enum_Property_Produces_Synthetic_Enum()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "InlineParentDto.cs");
 
         // Multi-value inline enums should reference synthesised enum types
@@ -628,7 +630,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Inline_Enum_Emits_Correct_Members()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
 
         var statusContent = CompilationHelper.FindFile(result, "InlineParentDtoStatus.cs");
         Assert.Contains("enum InlineParentDtoStatus", statusContent);
@@ -648,7 +650,7 @@ public sealed class KitchenSinkImportTests
     public void Enum_Without_Type_Treated_As_String()
     {
         // UntypedEnumDto has enum but no type field — should not crash or warn
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
 
         // UntypedEnumDto has enum values but no explicit type field.
         // IsStringEnum infers type from values — all strings → generates an enum.
@@ -660,7 +662,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void No_Required_Array_Makes_All_Properties_Optional()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "AllOptionalDto.cs");
 
         Assert.Contains("[RivetOptional]", content);
@@ -671,7 +673,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Empty_Required_Array_Makes_All_Properties_Optional()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "EmptyRequiredDto.cs");
 
         Assert.Contains("[RivetOptional]", content);
@@ -682,7 +684,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Named_Empty_Object_Preserves_Component_Identity()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         Assert.Contains(result.Files, f => f.FileName.EndsWith("EmptyDto.cs"));
 
         var consumer = CompilationHelper.FindFile(result, "MapRefConsumerDto.cs");
@@ -692,7 +694,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Single_Property_Record()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "SinglePropDto.cs");
 
         Assert.Contains("string Value", content);
@@ -703,7 +705,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Const_Int_Infers_Int_Type()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "ConstIntDto.cs");
 
         Assert.Contains("int Version", content);
@@ -713,7 +715,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Const_String_Infers_String_Type()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "ConstStringDto.cs");
 
         Assert.Contains("string Kind", content);
@@ -725,7 +727,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Bare_Nullable_Uses_Provenance_Without_Inventing_A_Null_Union()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "BareNullableDto.cs");
         // OpenAPI 3.1 does not define the legacy `nullable` keyword. SIX preserves
         // that authored provenance independently without inventing a null type union.
@@ -742,7 +744,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Properties_Without_Type_Implies_Object()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "ImpliedObjectDto.cs");
 
         Assert.Contains("string Title", content);
@@ -754,7 +756,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Inline_AllOf_In_Array_Items_Gets_Named()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "InlineComposedArrayDto.cs");
 
         // The array items allOf gets a context-derived name, not a JsonElement item.
@@ -772,7 +774,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Bare_Schema_Does_Not_Warn()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "BareSchemaDto.cs");
 
         // Should map to JsonElement without a warning
@@ -785,7 +787,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Wide_Record_Has_All_Properties()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "UserDto.cs");
 
         Assert.Contains("Guid Id", content);
@@ -809,7 +811,7 @@ public sealed class KitchenSinkImportTests
     public void Full_RoundTrip_Emit_And_ReImport()
     {
         // Pass 1: Import → compile → walk
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
@@ -911,7 +913,7 @@ public sealed class KitchenSinkImportTests
     public void Emitted_OpenApi_Preserves_Every_Schema_Property()
     {
         // Import → compile → walk → emit OpenAPI
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
@@ -1081,7 +1083,7 @@ public sealed class KitchenSinkImportTests
     [Fact]
     public void Emitted_OpenApi_Preserves_Every_Endpoint()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "KitchenSink");
+        var result = _fixtureImport;
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
