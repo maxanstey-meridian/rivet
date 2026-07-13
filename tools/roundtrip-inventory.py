@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inventory the reviewed OpenAPI surface of the pinned SIX corpus.
+"""Inventory the reviewed OpenAPI surface of the verified corpus profile.
 
 The profile is intentionally hand-reviewed. This tool computes deterministic
 facts from the artifacts and fails when the facts, keyword vocabulary, or
@@ -44,9 +44,9 @@ STANDARD_KEYWORDS = {
     "implicit", "in", "info", "items", "jsonSchemaDialect", "license", "links", "mapping", "maxContains",
     "maximum", "maxItems", "maxLength", "maxProperties", "mediaType", "minContains", "minimum",
     "minItems", "minLength", "minProperties", "multipleOf", "mutualTLS", "name", "not", "nullable",
-    "oauth2", "openIdConnect", "openIdConnectUrl", "openapi", "operationId", "parameters", "password",
+    "oauth2", "oneOf", "openIdConnect", "openIdConnectUrl", "openapi", "operationId", "parameters", "password",
     "pathItems", "paths", "pattern", "patternProperties", "prefixItems", "produces", "properties",
-    "propertyNames", "readOnly", "refreshUrl", "requestBodies", "requestBody", "required", "responses",
+    "propertyName", "propertyNames", "readOnly", "refreshUrl", "requestBodies", "requestBody", "required", "responses",
     "schema", "schemas", "scheme", "schemes", "scopes", "security", "securityDefinitions", "securitySchemes",
     "servers", "source", "style", "summary", "swagger", "tags", "termsOfService", "title", "tokenUrl",
     "type", "unevaluatedItems", "unevaluatedProperties", "uniqueItems", "url", "variables", "version",
@@ -74,6 +74,11 @@ def parse_args():
         help="override one corpus artifact (used by mutation controls)",
     )
     parser.add_argument("--observed", action="store_true", help="print observed facts without checking")
+    parser.add_argument(
+        "--update-profile",
+        action="store_true",
+        help="replace profile facts and reviewed hashes with the current reviewed roster",
+    )
     return parser.parse_args()
 
 
@@ -224,7 +229,7 @@ def inventory(manifest_path, corpus_dir, overrides, corpus_ids):
 
     for corpus_id in corpus_ids:
         if corpus_id not in entries:
-            raise ValueError(f"manifest is missing SIX corpus '{corpus_id}'")
+            raise ValueError(f"manifest is missing verified corpus '{corpus_id}'")
         entry = entries[corpus_id]
         path = overrides.get(corpus_id, corpus_dir / entry["file"])
         data = path.read_bytes()
@@ -322,6 +327,39 @@ def main():
             parse_overrides(args.document, set(corpus_ids)),
             corpus_ids,
         )
+        if args.update_profile:
+            source_defect_errors = [
+                error
+                for error in profile_errors
+                if error.startswith("reviewed source-defect policy")
+                or error.startswith("source-defect policy")
+            ]
+            if source_defect_errors:
+                raise ValueError("; ".join(source_defect_errors))
+            if observed["unknownKeywords"]:
+                raise ValueError("cannot update a profile with unknown keywords")
+            dispositions = profile.get("vendorExtensionDispositions", {})
+            observed_extensions = set(observed["extensions"])
+            reviewed_extensions = set(dispositions)
+            if observed_extensions != reviewed_extensions:
+                missing = sorted(observed_extensions - reviewed_extensions)
+                stale = sorted(reviewed_extensions - observed_extensions)
+                raise ValueError(
+                    "cannot update an incomplete extension review: "
+                    f"unreviewed={missing}, stale={stale}"
+                )
+            for name, review in dispositions.items():
+                if review.get("disposition") not in {"preserve", "map", "exclude"}:
+                    raise ValueError(f"invalid disposition for {name}")
+                if not review.get("evidence"):
+                    raise ValueError(f"missing disposition evidence for {name}")
+            profile["facts"] = observed
+            profile["reviewedDispositionSha256"] = hashlib.sha256(
+                canonical(dispositions).encode()
+            ).hexdigest()
+            args.profile.write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")
+            print(f"roundtrip-inventory: updated {args.profile}")
+            return 0
         if args.observed:
             print(json.dumps(observed, indent=2, sort_keys=True))
             return 0

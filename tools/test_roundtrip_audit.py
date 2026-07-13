@@ -3,6 +3,7 @@
 
 import importlib.util
 import pathlib
+import tempfile
 import unittest
 
 
@@ -71,6 +72,26 @@ class ExtensionEvidenceTests(unittest.TestCase):
 
         self.assertEqual(AUDIT.occurrence_digest(first), AUDIT.occurrence_digest(reordered))
         self.assertNotEqual(AUDIT.occurrence_digest(first), AUDIT.occurrence_digest(mutated))
+
+    def test_generated_evidence_counts_attribute_and_opaque_schema_channels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory)
+            (path / "Generated.cs").write_text(
+                '[assembly: RivetVendorExtension("#", "x-is-beta", "true")]\n'
+                '[assembly: RivetDocumentSchema(0, "Payload", "{\\"x-release-status\\":\\"PUBLIC\\"}")]\n',
+                encoding="utf-8",
+            )
+            errors = []
+
+            evidence = AUDIT.scan_generated(
+                path,
+                0,
+                {"x-is-beta": 1, "x-release-status": 1},
+                errors,
+            )
+
+            self.assertEqual([], errors)
+            self.assertEqual(2, evidence["vendorExtensions"])
 
 
 class ComponentMetricTests(unittest.TestCase):

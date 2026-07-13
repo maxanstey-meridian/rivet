@@ -95,22 +95,19 @@ public static class OpenApiImporter
         // Operations own the generated runtime type names. Materialize reusable
         // request-body provenance afterwards so used components reuse those names,
         // while genuinely unused components still receive stable synthetic types.
+        var componentRequestBodies = ContractBuilder.BuildRequestBodyComponents(
+            doc.Components?.RequestBodies,
+            mapper,
+            warnings,
+            doc.Components?.Examples
+        );
         var documentProvenance = provenance.Document with
         {
-            ComponentRequestBodies = ContractBuilder.BuildRequestBodyComponents(
-                doc.Components?.RequestBodies,
-                mapper,
-                warnings,
-                doc.Components?.Examples
+            ComponentRequestBodies = MergeRequestBodySchemaProvenance(
+                componentRequestBodies,
+                provenance.Document.ComponentRequestBodies ?? []
             ),
         };
-        files.Add(
-            new GeneratedFile(
-                "RivetDocument.cs",
-                CSharpWriter.WriteDocumentProvenance(documentProvenance, options.Namespace)
-            )
-        );
-
         // Emit type files (records → Types/, enums → Types/, brands → Domain/)
         var ns = options.Namespace;
 
@@ -161,8 +158,67 @@ public static class OpenApiImporter
             );
         }
 
+        if (HasRawSchemaProvenance(documentProvenance, contracts))
+        {
+            documentProvenance = documentProvenance with
+            {
+                ImportedSourceFiles = files
+                    .Select(file => new OpenApiImportedSourceFileProvenance(
+                        file.FileName.Replace('\\', '/'),
+                        ImportedSourceFingerprint.Compute(file.Content)
+                    ))
+                    .OrderBy(file => file.Path, StringComparer.Ordinal)
+                    .ToList(),
+            };
+        }
+        files.Add(
+            new GeneratedFile(
+                "RivetDocument.cs",
+                CSharpWriter.WriteDocumentProvenance(documentProvenance, options.Namespace)
+            )
+        );
+
         return new ImportResult(files, warnings);
     }
+
+    private static bool HasRawSchemaProvenance(
+        OpenApiDocumentProvenance document,
+        IReadOnlyList<GeneratedContract> contracts
+    ) =>
+        document.ComponentSchemas is { Count: > 0 }
+        || document.ComponentParameters is { Count: > 0 }
+        || document.ComponentResponses is { Count: > 0 }
+        || document.ComponentRequestBodies?.Any(requestBody =>
+            requestBody.Contents.Any(content => content.SchemaJson is not null)
+        ) == true
+        || contracts.Any(contract =>
+            contract.Fields.Any(field => field.Provenance?.Schemas is not null)
+        );
+
+    private static IReadOnlyList<OpenApiComponentRequestBodyProvenance> MergeRequestBodySchemaProvenance(
+        IReadOnlyList<OpenApiComponentRequestBodyProvenance> mapped,
+        IReadOnlyList<OpenApiComponentRequestBodyProvenance> raw
+    ) =>
+        mapped
+            .Select(requestBody =>
+            {
+                var rawRequestBody = raw.FirstOrDefault(candidate =>
+                    candidate.Name == requestBody.Name
+                );
+                return requestBody with
+                {
+                    Contents = requestBody
+                        .Contents.Select(content =>
+                        {
+                            var source = rawRequestBody?.Contents.FirstOrDefault(candidate =>
+                                candidate.MediaType == content.MediaType
+                            );
+                            return content with { SchemaJson = source?.SchemaJson };
+                        })
+                        .ToList(),
+                };
+            })
+            .ToList();
 
     private static IReadOnlySet<string> ReadPreservedSchemaReferences(
         OpenApiDocumentProvenance provenance
@@ -230,10 +286,17 @@ public static class OpenApiImporter
     private static string NormalizeMappedVendorExtensions(string json)
     {
         var root = JsonNode.Parse(json)!;
-        return NormalizeMappedVendorExtensions(root) ? root.ToJsonString() : json;
+        var swagger2 = root["swagger"] is not null;
+        return NormalizeMappedVendorExtensions(root, swagger2, exampleObject: false)
+            ? root.ToJsonString()
+            : json;
     }
 
-    private static bool NormalizeMappedVendorExtensions(JsonNode node)
+    private static bool NormalizeMappedVendorExtensions(
+        JsonNode node,
+        bool swagger2,
+        bool exampleObject
+    )
     {
         if (node is JsonArray array)
         {
@@ -242,7 +305,11 @@ public static class OpenApiImporter
             {
                 if (child is not null)
                 {
-                    changed |= NormalizeMappedVendorExtensions(child);
+                    changed |= NormalizeMappedVendorExtensions(
+                        child,
+                        swagger2,
+                        exampleObject: false
+                    );
                 }
             }
             return changed;
@@ -267,16 +334,56 @@ public static class OpenApiImporter
             obj["readOnly"] = true;
             result = true;
         }
-
-        foreach (var child in obj.Select(entry => entry.Value).ToList())
+        if (obj["description"] is null)
         {
-            if (child is not null)
+            foreach (
+                var extensionName in new[] { "x-Description", "x-desc", "x-public-description" }
+            )
             {
-                result |= NormalizeMappedVendorExtensions(child);
+                if (obj[extensionName] is JsonValue extension)
+                {
+                    obj["description"] = extension.GetValue<string>();
+                    result = true;
+                    break;
+                }
+            }
+        }
+
+        foreach (var child in obj.ToList())
+        {
+            if (!swagger2 && child.Key == "examples" && child.Value is JsonObject examples)
+            {
+                foreach (var example in examples.Select(entry => entry.Value))
+                {
+                    if (example is not null)
+                    {
+                        result |= NormalizeMappedVendorExtensions(
+                            example,
+                            swagger2,
+                            exampleObject: true
+                        );
+                    }
+                }
+            }
+            else if (
+                child.Value is not null
+                && !(exampleObject && child.Key == "value")
+                && !IsOpaqueOpenApiValue(child.Key)
+            )
+            {
+                result |= NormalizeMappedVendorExtensions(
+                    child.Value,
+                    swagger2,
+                    exampleObject: false
+                );
             }
         }
         return result;
     }
+
+    private static bool IsOpaqueOpenApiValue(string name) =>
+        name is "const" or "default" or "enum" or "example" or "examples"
+        || name.StartsWith("x-", StringComparison.OrdinalIgnoreCase);
 
     private static void NormalizeSchemaReferenceMetadataSiblings(JsonNode node)
     {

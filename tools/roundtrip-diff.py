@@ -82,16 +82,22 @@ VENDOR_EXTENSION_DISPOSITIONS = {
     "x-ds-api-status": "preserve",
     "x-ds-examples": "preserve",
     "x-ds-in-sdk": "preserve",
+    "x-docs-overrides": "preserve",
     "x-enum-elements": "preserve",
+    "x-errors": "preserve",
     "x-is-beta": "preserve",
     "x-is-deprecated": "map",
     "x-ms-summary": "map",
     "x-oauthpermissions": "map",
+    "x-patternProperties": "preserve",
+    "x-public-description": "map",
     "x-read-only": "map",
     "x-release-status": "preserve",
     "x-sq-version": "preserve",
     "x-twilio": "preserve",
     "x-visibility": "preserve",
+    "x-Description": "map",
+    "x-desc": "map",
 }
 
 
@@ -129,6 +135,17 @@ def contact_projection(value):
     if not isinstance(value, dict):
         return value
     return {key: value[key] for key in ("name", "url", "email") if key in value}
+
+
+def tags_projection(value):
+    if not isinstance(value, list):
+        return value
+    return [
+        {key: tag[key] for key in ("name", "description", "externalDocs") if key in tag}
+        if isinstance(tag, dict)
+        else tag
+        for tag in value
+    ]
 
 
 def json_value(value):
@@ -201,13 +218,29 @@ def normalize_owner_pointer(document, pointer):
 
 def reviewed_extensions(document, disposition):
     result = {}
+    swagger2 = str(document.get("swagger", "")).startswith("2.")
 
-    def visit(value, pointer):
+    def visit(value, pointer, example_object=False):
         if isinstance(value, dict):
             for name, child in value.items():
                 if VENDOR_EXTENSION_DISPOSITIONS.get(name) == disposition:
                     result[(normalize_owner_pointer(document, pointer), name)] = child
-                elif not name.startswith("x-"):
+                elif not swagger2 and name == "examples" and isinstance(child, dict):
+                    for example_name, example in child.items():
+                        visit(
+                            example,
+                            f"{pointer}/examples/{pointer_token(example_name)}",
+                            example_object=True,
+                        )
+                elif not (example_object and name == "value") and not name.startswith(
+                    "x-"
+                ) and name not in (
+                    "const",
+                    "default",
+                    "enum",
+                    "example",
+                    "examples",
+                ):
                     visit(child, f"{pointer}/{pointer_token(name)}")
         elif isinstance(value, list):
             for index, child in enumerate(value):
@@ -502,7 +535,7 @@ class Comparator:
         self.invented_components = sorted(self.reemitted_components - self.original_components)
         self.source_defects = []
         self.collect_source_defects(self.original, "#")
-        self.collect_reserved_content_type_source_defects()
+        self.collect_reserved_header_source_defects()
 
     @staticmethod
     def schemas(document):
@@ -511,23 +544,25 @@ class Comparator:
         return document.get("components", {}).get("schemas", {})
 
     @staticmethod
-    def component_identities(document):
+    def component_maps(document):
         if str(document.get("swagger", "")).startswith("2."):
-            mappings = {
+            return {
                 "schemas": document.get("definitions", {}),
                 "responses": document.get("responses", {}),
                 "parameters": document.get("parameters", {}),
                 "securitySchemes": document.get("securityDefinitions", {}),
             }
-        else:
-            components = document.get("components", {})
-            mappings = {
-                namespace: components.get(namespace, {})
-                for namespace in COMPONENT_NAMESPACES
-            }
+        components = document.get("components", {})
+        return {
+            namespace: components.get(namespace, {})
+            for namespace in COMPONENT_NAMESPACES
+        }
+
+    @classmethod
+    def component_identities(cls, document):
         return {
             (namespace, name)
-            for namespace, values in mappings.items()
+            for namespace, values in cls.component_maps(document).items()
             if isinstance(values, dict)
             for name in values
         }
@@ -548,19 +583,47 @@ class Comparator:
         declared_type = schema.get("type")
         if isinstance(declared_type, list):
             non_null_types = [value for value in declared_type if value != "null"]
-            return bool(non_null_types) and "object" not in non_null_types
+            return "object" not in non_null_types
         return declared_type is not None and declared_type != "object"
 
-    def collect_source_defects(self, value, path):
-        if isinstance(value, dict):
-            if self.invalid_additional_properties(value):
-                self.source_defects.append(
-                    {
-                        "path": f"{path}/additionalProperties",
-                        "reason": "additionalProperties is an object-only keyword on a non-object schema",
-                    }
-                )
-            if value.get("name") == "" and value.get("in") in (
+    def collect_source_defects(self, document, path):
+        def collect_schema(schema, schema_path):
+            if not isinstance(schema, dict):
+                return
+            for key in (
+                "items",
+                "additionalProperties",
+                "not",
+                "propertyNames",
+                "contains",
+                "if",
+                "then",
+                "else",
+                "unevaluatedItems",
+                "unevaluatedProperties",
+            ):
+                collect_schema(schema.get(key), f"{schema_path}/{key}")
+            for key in (
+                "properties",
+                "patternProperties",
+                "dependentSchemas",
+                "$defs",
+                "definitions",
+            ):
+                values = schema.get(key, {})
+                if isinstance(values, dict):
+                    for name, child in values.items():
+                        collect_schema(child, f"{schema_path}/{key}/{pointer_token(name)}")
+            for key in ("allOf", "oneOf", "anyOf", "prefixItems"):
+                values = schema.get(key, [])
+                if isinstance(values, list):
+                    for index, child in enumerate(values):
+                        collect_schema(child, f"{schema_path}/{key}/{index}")
+
+        def collect_parameter(parameter, parameter_path):
+            if not isinstance(parameter, dict):
+                return
+            if parameter.get("name") == "" and parameter.get("in") in (
                 "query",
                 "header",
                 "path",
@@ -570,38 +633,119 @@ class Comparator:
             ):
                 self.source_defects.append(
                     {
-                        "path": f"{path}/name",
+                        "path": f"{parameter_path}/name",
                         "reason": "parameter name is empty and therefore invalid",
                     }
                 )
-            for key, child in value.items():
-                escaped = key.replace("~", "~0").replace("/", "~1")
-                self.collect_source_defects(child, f"{path}/{escaped}")
-        elif isinstance(value, list):
-            for index, child in enumerate(value):
-                self.collect_source_defects(child, f"{path}/{index}")
+            if "schema" in parameter:
+                collect_schema(parameter["schema"], f"{parameter_path}/schema")
+            elif parameter.get("in") in ("query", "header", "path", "formData"):
+                collect_schema(parameter, parameter_path)
+            content = parameter.get("content", {})
+            if isinstance(content, dict):
+                for media_type, media in content.items():
+                    if isinstance(media, dict):
+                        collect_schema(
+                            media.get("schema"),
+                            f"{parameter_path}/content/{pointer_token(media_type)}/schema",
+                        )
+
+        def collect_parameters(parameters, parameters_path):
+            if isinstance(parameters, list):
+                for index, parameter in enumerate(parameters):
+                    collect_parameter(parameter, f"{parameters_path}/{index}")
+            elif isinstance(parameters, dict):
+                for name, parameter in parameters.items():
+                    collect_parameter(parameter, f"{parameters_path}/{pointer_token(name)}")
+
+        def collect_content(content, content_path):
+            if not isinstance(content, dict):
+                return
+            for media_type, media in content.items():
+                if isinstance(media, dict):
+                    collect_schema(
+                        media.get("schema"),
+                        f"{content_path}/{pointer_token(media_type)}/schema",
+                    )
+
+        def collect_response(response, response_path):
+            if not isinstance(response, dict):
+                return
+            collect_schema(response.get("schema"), f"{response_path}/schema")
+            collect_content(response.get("content"), f"{response_path}/content")
+            headers = response.get("headers", {})
+            if isinstance(headers, dict):
+                for name, header in headers.items():
+                    collect_parameter(header, f"{response_path}/headers/{pointer_token(name)}")
+
+        for name, schema in document.get("definitions", {}).items():
+            collect_schema(schema, f"{path}/definitions/{pointer_token(name)}")
+        collect_parameters(document.get("parameters"), f"{path}/parameters")
+        for name, response in document.get("responses", {}).items():
+            collect_response(response, f"{path}/responses/{pointer_token(name)}")
+
+        components = document.get("components", {})
+        if isinstance(components, dict):
+            for name, schema in components.get("schemas", {}).items():
+                collect_schema(schema, f"{path}/components/schemas/{pointer_token(name)}")
+            collect_parameters(
+                components.get("parameters"), f"{path}/components/parameters"
+            )
+            for name, request_body in components.get("requestBodies", {}).items():
+                if isinstance(request_body, dict):
+                    collect_content(
+                        request_body.get("content"),
+                        f"{path}/components/requestBodies/{pointer_token(name)}/content",
+                    )
+            for name, response in components.get("responses", {}).items():
+                collect_response(
+                    response, f"{path}/components/responses/{pointer_token(name)}"
+                )
+            for name, header in components.get("headers", {}).items():
+                collect_parameter(
+                    header, f"{path}/components/headers/{pointer_token(name)}"
+                )
+
+        for route, path_item in document.get("paths", {}).items():
+            if not isinstance(path_item, dict):
+                continue
+            route_path = f"{path}/paths/{pointer_token(route)}"
+            collect_parameters(path_item.get("parameters"), f"{route_path}/parameters")
+            for method in METHODS:
+                operation = path_item.get(method)
+                if not isinstance(operation, dict):
+                    continue
+                operation_path = f"{route_path}/{method}"
+                collect_parameters(
+                    operation.get("parameters"), f"{operation_path}/parameters"
+                )
+                request_body = operation.get("requestBody")
+                if isinstance(request_body, dict):
+                    collect_content(
+                        request_body.get("content"), f"{operation_path}/requestBody/content"
+                    )
+                for status, response in operation.get("responses", {}).items():
+                    collect_response(
+                        response,
+                        f"{operation_path}/responses/{pointer_token(status)}",
+                    )
 
     @staticmethod
-    def represented_content_types(document, operation, raw_parameter):
+    def reserved_header_reason(document, raw_parameter):
         parameter = resolve_once(document, raw_parameter)
         if (
             not isinstance(parameter, dict)
             or parameter.get("in") != "header"
-            or str(parameter.get("name", "")).lower() != "content-type"
         ):
-            return ()
-        schema = resolve_once(document, parameter.get("schema", {}))
-        media_types = schema.get("enum") if isinstance(schema, dict) else None
-        if not isinstance(media_types, list) or not media_types:
-            return ()
-        if not all(isinstance(media_type, str) for media_type in media_types):
-            return ()
-        request_body = resolve_once(document, operation.get("requestBody", {}))
-        content = request_body.get("content", {}) if isinstance(request_body, dict) else {}
-        represented = {media_type.lower() for media_type in content}
-        return tuple(media_types) if all(media_type.lower() in represented for media_type in media_types) else ()
+            return None
+        name = str(parameter.get("name", "")).lower()
+        return {
+            "content-type": "reserved Content-Type header parameter is ignored by OpenAPI; request media types are represented by requestBody.content",
+            "accept": "reserved Accept header parameter is ignored by OpenAPI; response media types are represented by responses content",
+            "authorization": "reserved Authorization header parameter is ignored by OpenAPI; authentication is represented by security schemes",
+        }.get(name)
 
-    def collect_reserved_content_type_source_defects(self):
+    def collect_reserved_header_source_defects(self):
         for route, path_item in self.original.get("paths", {}).items():
             if not isinstance(path_item, dict):
                 continue
@@ -610,19 +754,13 @@ class Comparator:
                 if not isinstance(operation, dict):
                     continue
                 for index, raw_parameter in enumerate(operation.get("parameters", [])):
-                    media_types = self.represented_content_types(
-                        self.original, operation, raw_parameter
-                    )
-                    if not media_types:
+                    reason = self.reserved_header_reason(self.original, raw_parameter)
+                    if reason is None:
                         continue
-                    rendered_media_types = ", ".join(
-                        f"'{media_type}'" for media_type in media_types
-                    )
                     self.source_defects.append(
                         {
                             "path": f"#/paths/{pointer_token(route)}/{method}/parameters/{index}/name",
-                            "reason": "reserved Content-Type header parameter is represented by "
-                            f"requestBody content type {rendered_media_types}",
+                            "reason": reason,
                         }
                     )
 
@@ -667,15 +805,22 @@ class Comparator:
             root_servers(self.reemitted),
             servers_projection,
         )
-        for field in ("tags", "externalDocs"):
-            self.compare_value(
-                "document",
-                field,
-                f"#/{field}",
-                self.original.get(field),
-                self.reemitted.get(field),
-                canonical_json,
-            )
+        self.compare_value(
+            "document",
+            "tags",
+            "#/tags",
+            self.original.get("tags"),
+            self.reemitted.get("tags"),
+            tags_projection,
+        )
+        self.compare_value(
+            "document",
+            "externalDocs",
+            "#/externalDocs",
+            self.original.get("externalDocs"),
+            self.reemitted.get("externalDocs"),
+            canonical_json,
+        )
         self.compare_value(
             "document",
             "security",
@@ -807,7 +952,7 @@ class Comparator:
             self.compare_request_body(key, original, reemitted)
             self.compare_responses(key, original, reemitted)
 
-    def parameter_map(self, document, operation, omit_represented_content_type=False):
+    def parameter_map(self, document, operation, omit_reserved_headers=False):
         result = {}
         for raw_parameter in operation.get("parameters", []):
             parameter = resolve_once(document, raw_parameter)
@@ -815,11 +960,28 @@ class Comparator:
                 isinstance(parameter, dict)
                 and parameter.get("name") != ""
                 and not (
-                    omit_represented_content_type
-                    and self.represented_content_types(document, operation, raw_parameter)
+                    omit_reserved_headers
+                    and self.reserved_header_reason(document, raw_parameter) is not None
                 )
             ):
                 result[(parameter.get("name"), parameter.get("in"))] = parameter
+        return result
+
+    def parameter_reference_map(self, document, operation, omit_reserved_headers=False):
+        result = {}
+        for raw_parameter in operation.get("parameters", []):
+            parameter = resolve_once(document, raw_parameter)
+            if (
+                not isinstance(parameter, dict)
+                or parameter.get("name") == ""
+                or omit_reserved_headers
+                and self.reserved_header_reason(document, raw_parameter) is not None
+            ):
+                continue
+            reference = raw_parameter.get("$ref") if isinstance(raw_parameter, dict) else None
+            result[(parameter.get("name"), parameter.get("in"))] = (
+                component_ref_identity(reference, "parameters") if reference else None
+            )
         return result
 
     @staticmethod
@@ -848,7 +1010,7 @@ class Comparator:
     def compare_parameters(self, key, original, reemitted):
         all_original_parameters = self.parameter_map(self.original, original)
         original_parameters = self.parameter_map(
-            self.original, original, omit_represented_content_type=True
+            self.original, original, omit_reserved_headers=True
         )
         reemitted_parameters = self.parameter_map(self.reemitted, reemitted)
         for identity in set(all_original_parameters) - set(original_parameters):
@@ -856,6 +1018,10 @@ class Comparator:
         path = f"#/paths/{key[0]}/{key[1]}/parameters"
         original_keys = set(original_parameters)
         reemitted_keys = set(reemitted_parameters)
+        original_references = self.parameter_reference_map(
+            self.original, original, omit_reserved_headers=True
+        )
+        reemitted_references = self.parameter_reference_map(self.reemitted, reemitted)
         for identity in sorted(original_keys - reemitted_keys, key=repr):
             self.add("operation", "parameter-missing", path, identity, None)
         for identity in sorted(reemitted_keys - original_keys, key=repr):
@@ -866,37 +1032,75 @@ class Comparator:
             parameter_path = f"{path}/{identity[1]}:{identity[0]}"
             self.compare_value(
                 "operation",
-                "parameter-metadata",
+                "parameter-ref-identity",
                 parameter_path,
-                self.parameter_projection(original_parameter),
-                self.parameter_projection(reemitted_parameter),
+                original_references.get(identity),
+                reemitted_references.get(identity),
             )
-            original_content = original_parameter.get("content", {})
-            reemitted_content = reemitted_parameter.get("content", {})
-            if original_content or reemitted_content:
-                for media_type in set(original_content) & set(reemitted_content):
-                    self.compare_schema(
-                        original_content[media_type].get("schema", {}),
-                        reemitted_content[media_type].get("schema", {}),
-                        f"{parameter_path}/content/{media_type}/schema",
-                        "operation",
-                        "parameter-schema",
-                        set(),
-                    )
-            else:
+            self.compare_parameter_value(
+                original_parameter,
+                reemitted_parameter,
+                parameter_path,
+                "operation",
+                "parameter",
+            )
+
+    def compare_parameter_value(self, original, reemitted, path, scope, category):
+        if not isinstance(original, dict) or not isinstance(reemitted, dict):
+            self.compare_value(scope, category, path, original, reemitted)
+            return
+        self.compare_value(
+            scope,
+            f"{category}-metadata",
+            path,
+            self.parameter_projection(original),
+            self.parameter_projection(reemitted),
+        )
+        original_content = original.get("content", {})
+        reemitted_content = reemitted.get("content", {})
+        if original_content or reemitted_content:
+            for media_type in set(original_content) & set(reemitted_content):
+                original_media = original_content[media_type] or {}
+                reemitted_media = reemitted_content[media_type] or {}
+                self.compare_value(
+                    scope,
+                    f"{category}-examples",
+                    f"{path}/content/{media_type}",
+                    examples_projection(original_media),
+                    examples_projection(reemitted_media),
+                )
                 self.compare_schema(
-                    original_parameter.get("schema", {}),
-                    reemitted_parameter.get("schema", {}),
-                    f"{parameter_path}/schema",
-                    "operation",
-                    "parameter-schema",
+                    original_media.get("schema", {}),
+                    reemitted_media.get("schema", {}),
+                    f"{path}/content/{media_type}/schema",
+                    scope,
+                    f"{category}-schema",
                     set(),
                 )
+        else:
+            self.compare_schema(
+                original.get("schema", {}),
+                reemitted.get("schema", {}),
+                f"{path}/schema",
+                scope,
+                f"{category}-schema",
+                set(),
+            )
 
     def compare_request_body(self, key, original, reemitted):
         path = f"#/paths/{key[0]}/{key[1]}/requestBody"
-        original_raw = original.get("requestBody")
-        reemitted_raw = reemitted.get("requestBody")
+        self.compare_request_body_value(
+            original.get("requestBody"),
+            reemitted.get("requestBody"),
+            path,
+            "operation",
+            "request-body",
+            "request",
+        )
+
+    def compare_request_body_value(
+        self, original_raw, reemitted_raw, path, scope, category, content_category
+    ):
         original_ref = original_raw.get("$ref") if isinstance(original_raw, dict) else None
         reemitted_ref = reemitted_raw.get("$ref") if isinstance(reemitted_raw, dict) else None
         original_identity = (
@@ -907,8 +1111,8 @@ class Comparator:
         )
         if original_identity != reemitted_identity:
             self.add(
-                "operation",
-                "request-body-ref-identity",
+                scope,
+                f"{category}-ref-identity",
                 path,
                 original_identity,
                 reemitted_identity,
@@ -917,11 +1121,11 @@ class Comparator:
         reemitted_body = resolve_once(self.reemitted, reemitted_raw)
         if not isinstance(original_body, dict) or not isinstance(reemitted_body, dict):
             if original_body != reemitted_body:
-                self.add("operation", "request-body-presence", path, original_body, reemitted_body)
+                self.add(scope, f"{category}-presence", path, original_body, reemitted_body)
             return
         self.compare_value(
-            "operation",
-            "request-body-metadata",
+            scope,
+            f"{category}-metadata",
             path,
             {
                 "required": bool(original_body.get("required", False)),
@@ -936,7 +1140,8 @@ class Comparator:
             original_body.get("content", {}),
             reemitted_body.get("content", {}),
             f"{path}/content",
-            "request",
+            content_category,
+            scope,
         )
 
     def compare_responses(self, key, original, reemitted):
@@ -952,82 +1157,109 @@ class Comparator:
         if invented:
             self.add("operation", "response-key-invented", path, None, invented)
         for status in sorted(original_keys & reemitted_keys):
-            original_response = resolve_once(self.original, original_responses[status])
-            reemitted_response = resolve_once(self.reemitted, reemitted_responses[status])
             response_path = f"{path}/{status}"
-            if not isinstance(original_response, dict) or not isinstance(reemitted_response, dict):
-                self.compare_value(
-                    "operation",
-                    "response",
-                    response_path,
-                    original_response,
-                    reemitted_response,
-                )
-                continue
+            original_raw = original_responses[status]
+            reemitted_raw = reemitted_responses[status]
+            original_ref = original_raw.get("$ref") if isinstance(original_raw, dict) else None
+            reemitted_ref = reemitted_raw.get("$ref") if isinstance(reemitted_raw, dict) else None
             self.compare_value(
                 "operation",
-                "response-description",
-                f"{response_path}/description",
-                original_response.get("description"),
-                reemitted_response.get("description"),
-                text_projection,
+                "response-ref-identity",
+                response_path,
+                component_ref_identity(original_ref, "responses") if original_ref else None,
+                component_ref_identity(reemitted_ref, "responses") if reemitted_ref else None,
             )
-            self.compare_headers(
-                original_response.get("headers", {}),
-                reemitted_response.get("headers", {}),
-                f"{response_path}/headers",
-            )
-            self.compare_value(
+            self.compare_response_value(
+                original_raw,
+                reemitted_raw,
+                response_path,
                 "operation",
-                "response-links",
-                f"{response_path}/links",
-                original_response.get("links", {}),
-                reemitted_response.get("links", {}),
-                canonical_json,
-            )
-            self.compare_content(
-                original_response.get("content", {}),
-                reemitted_response.get("content", {}),
-                f"{response_path}/content",
                 "response",
             )
 
-    def compare_headers(self, original_headers, reemitted_headers, path):
+    def compare_response_value(self, original_raw, reemitted_raw, path, scope, category):
+        original = resolve_once(self.original, original_raw)
+        reemitted = resolve_once(self.reemitted, reemitted_raw)
+        if not isinstance(original, dict) or not isinstance(reemitted, dict):
+            self.compare_value(scope, category, path, original, reemitted)
+            return
+        self.compare_value(
+            scope,
+            f"{category}-description",
+            f"{path}/description",
+            original.get("description"),
+            reemitted.get("description"),
+            text_projection,
+        )
+        self.compare_headers(
+            original.get("headers", {}),
+            reemitted.get("headers", {}),
+            f"{path}/headers",
+            scope,
+            f"{category}-header",
+        )
+        self.compare_value(
+            scope,
+            f"{category}-links",
+            f"{path}/links",
+            original.get("links", {}),
+            reemitted.get("links", {}),
+            canonical_json,
+        )
+        self.compare_content(
+            original.get("content", {}),
+            reemitted.get("content", {}),
+            f"{path}/content",
+            category,
+            scope,
+        )
+
+    def compare_headers(
+        self,
+        original_headers,
+        reemitted_headers,
+        path,
+        scope="operation",
+        category="response-header",
+    ):
         original_names = {name.lower(): (name, value) for name, value in original_headers.items()}
         reemitted_names = {name.lower(): (name, value) for name, value in reemitted_headers.items()}
         self.compare_value(
-            "operation",
-            "response-header-set",
+            scope,
+            f"{category}-set",
             path,
             sorted(original_names),
             sorted(reemitted_names),
         )
         for name in set(original_names) & set(reemitted_names):
-            original = resolve_once(self.original, original_names[name][1])
-            reemitted = resolve_once(self.reemitted, reemitted_names[name][1])
+            original_raw = original_names[name][1]
+            reemitted_raw = reemitted_names[name][1]
+            original_ref = original_raw.get("$ref") if isinstance(original_raw, dict) else None
+            reemitted_ref = reemitted_raw.get("$ref") if isinstance(reemitted_raw, dict) else None
+            self.compare_value(
+                scope,
+                f"{category}-ref-identity",
+                f"{path}/{name}",
+                component_ref_identity(original_ref, "headers") if original_ref else None,
+                component_ref_identity(reemitted_ref, "headers") if reemitted_ref else None,
+            )
+            original = resolve_once(self.original, original_raw)
+            reemitted = resolve_once(self.reemitted, reemitted_raw)
             if not isinstance(original, dict) or not isinstance(reemitted, dict):
                 continue
-            self.compare_value(
-                "operation",
-                "response-header-metadata",
+            self.compare_parameter_value(
+                {"in": "header", **original},
+                {"in": "header", **reemitted},
                 f"{path}/{name}",
-                self.parameter_projection({"in": "header", **original}),
-                self.parameter_projection({"in": "header", **reemitted}),
-            )
-            self.compare_schema(
-                original.get("schema", {}),
-                reemitted.get("schema", {}),
-                f"{path}/{name}/schema",
-                "operation",
-                "response-header-schema",
-                set(),
+                scope,
+                category,
             )
 
-    def compare_content(self, original, reemitted, path, label):
+    def compare_content(self, original, reemitted, path, label, scope="operation"):
         original_types = set(original)
         reemitted_types = set(reemitted)
         self.compare_value(
-            "operation",
+            scope,
             f"{label}-content-types",
             path,
             sorted(original_types),
@@ -1038,14 +1270,14 @@ class Comparator:
             reemitted_media = reemitted[media_type] or {}
             media_path = f"{path}/{media_type}"
             self.compare_value(
-                "operation",
+                scope,
                 f"{label}-examples",
                 media_path,
                 examples_projection(original_media),
                 examples_projection(reemitted_media),
             )
             self.compare_value(
-                "operation",
+                scope,
                 f"{label}-encoding",
                 f"{media_path}/encoding",
                 original_media.get("encoding", {}),
@@ -1056,7 +1288,7 @@ class Comparator:
                 original_media.get("schema", {}),
                 reemitted_media.get("schema", {}),
                 f"{media_path}/schema",
-                "operation",
+                scope,
                 f"{label}-schema",
                 set(),
             )
@@ -1141,7 +1373,22 @@ class Comparator:
                 }.get(field)
                 result[field] = bool(schema.get(field, schema.get(mapped, False)))
             elif field == "description":
-                result[field] = text_projection(schema.get(field))
+                description = schema.get(field)
+                if description is None:
+                    description = next(
+                        (
+                            schema[name]
+                            for name in (
+                                "x-ms-summary",
+                                "x-Description",
+                                "x-desc",
+                                "x-public-description",
+                            )
+                            if name in schema
+                        ),
+                        None,
+                    )
+                result[field] = text_projection(description)
             elif field in ("default", "const"):
                 result[field] = {
                     "present": field in schema,
@@ -1253,9 +1500,8 @@ class Comparator:
                 visited,
             )
 
-        # A non-object schema carrying additionalProperties is malformed input, not
-        # representable contract semantics. Section 12 excludes only that keyword
-        # while the containing valid scalar schema remains fully compared.
+        # JSON Schema ignores object-only applicators for non-object instances. Their
+        # presence or absence on a scalar therefore has no wire-contract effect.
         if not self.invalid_additional_properties(original):
             original_additional = original.get("additionalProperties", True)
             reemitted_additional = reemitted.get("additionalProperties", True)
@@ -1326,6 +1572,85 @@ class Comparator:
                 set(),
             )
 
+    def compare_component_content(self):
+        original_components = self.component_maps(self.original)
+        reemitted_components = self.component_maps(self.reemitted)
+        for namespace in sorted(
+            namespace
+            for namespace in COMPONENT_NAMESPACES
+            if namespace not in ("schemas", "securitySchemes")
+        ):
+            original_values = original_components.get(namespace, {})
+            reemitted_values = reemitted_components.get(namespace, {})
+            if not isinstance(original_values, dict) or not isinstance(
+                reemitted_values, dict
+            ):
+                continue
+            for name in sorted(set(original_values) & set(reemitted_values)):
+                original = original_values[name]
+                reemitted = reemitted_values[name]
+                path = f"#/components/{namespace}/{pointer_token(name)}"
+                if namespace == "parameters":
+                    original_parameter = resolve_once(self.original, original)
+                    reemitted_parameter = resolve_once(self.reemitted, reemitted)
+                    if isinstance(original_parameter, dict) and isinstance(
+                        reemitted_parameter, dict
+                    ):
+                        self.compare_value(
+                            "document",
+                            "component-parameter-identity",
+                            path,
+                            (original_parameter.get("name"), original_parameter.get("in")),
+                            (reemitted_parameter.get("name"), reemitted_parameter.get("in")),
+                        )
+                    self.compare_parameter_value(
+                        original_parameter,
+                        reemitted_parameter,
+                        path,
+                        "document",
+                        "component-parameter",
+                    )
+                elif namespace == "requestBodies":
+                    self.compare_request_body_value(
+                        original,
+                        reemitted,
+                        path,
+                        "document",
+                        "component-request-body",
+                        "component-request-body",
+                    )
+                elif namespace == "responses":
+                    self.compare_response_value(
+                        original,
+                        reemitted,
+                        path,
+                        "document",
+                        "component-response",
+                    )
+                elif namespace == "headers":
+                    self.compare_headers(
+                        {name: original},
+                        {name: reemitted},
+                        "#/components/headers",
+                        "document",
+                        "component-header",
+                    )
+                else:
+                    component_category = {
+                        "pathItems": "path-item",
+                    }.get(
+                        namespace,
+                        namespace[:-1] if namespace.endswith("s") else namespace,
+                    )
+                    self.compare_value(
+                        "document",
+                        f"component-{component_category}",
+                        path,
+                        original,
+                        reemitted,
+                        canonical_json,
+                    )
+
     def compare_reviewed_extensions(self):
         original = reviewed_extensions(self.original, "preserve")
         reemitted = reviewed_extensions(self.reemitted, "preserve")
@@ -1360,6 +1685,9 @@ class Comparator:
                     actual = bool(emitted_owner.get("readOnly", False))
                     matches = isinstance(expected, bool) and actual == expected
                 elif name == "x-ms-summary":
+                    actual = emitted_owner.get("description")
+                    matches = isinstance(expected, str) and actual == expected
+                elif name in ("x-Description", "x-desc", "x-public-description"):
                     actual = emitted_owner.get("description")
                     matches = isinstance(expected, str) and actual == expected
                 elif name == "x-oauthpermissions":
@@ -1476,6 +1804,7 @@ class Comparator:
         self.compare_document()
         self.compare_operations()
         self.compare_component_schemas()
+        self.compare_component_content()
         self.compare_reviewed_extensions()
         self.validate_integrity()
 

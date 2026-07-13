@@ -154,6 +154,21 @@ public sealed class RoundTripDiffTests
         Assert.Equal(1, FindingCount(result.DocumentFindings, category));
     }
 
+    [Fact]
+    public void Excluded_Tag_Extensions_Do_Not_Count_As_Standard_Tag_Drift()
+    {
+        var original = LoadFixture();
+        AddDocumentMetadata(original);
+        original["tags"]![0]!["x-displayName"] = "Things";
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["tags"]![0]!.AsObject().Remove("x-displayName");
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(0, FindingCount(result.DocumentFindings, "tags"));
+    }
+
     [Theory]
     [InlineData("operationId", "operation-id")]
     [InlineData("tags", "operation-tags")]
@@ -411,6 +426,53 @@ public sealed class RoundTripDiffTests
     }
 
     [Theory]
+    [InlineData("parameters", "component-parameter-metadata")]
+    [InlineData("requestBodies", "component-request-body-metadata")]
+    [InlineData("responses", "component-response-description")]
+    [InlineData("examples", "component-example")]
+    [InlineData("headers", "component-header-schema-type")]
+    [InlineData("links", "component-link")]
+    [InlineData("callbacks", "component-callback")]
+    [InlineData("pathItems", "component-path-item")]
+    public void Unused_Component_Content_Mutations_Are_Reported(
+        string componentNamespace,
+        string category
+    )
+    {
+        var original = CreateSemanticSurfaceDocument();
+        var reemitted = original.DeepClone().AsObject();
+        var component = reemitted["components"]![componentNamespace]!.AsObject().First().Value!;
+        switch (componentNamespace)
+        {
+            case "parameters":
+            case "requestBodies":
+            case "responses":
+                component["description"] = "Changed";
+                break;
+            case "examples":
+                component["value"]!["name"] = "changed";
+                break;
+            case "headers":
+                component["schema"]!["type"] = "integer";
+                break;
+            case "links":
+                component["operationId"] = "changed";
+                break;
+            case "callbacks":
+                component["{$request.body#/callbackUrl}"] = new JsonObject();
+                break;
+            case "pathItems":
+                component["summary"] = "Changed";
+                break;
+        }
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(1, FindingCount(result.DocumentFindings, category));
+    }
+
+    [Theory]
     [InlineData("changed-target")]
     [InlineData("inlined")]
     public void Named_Request_Body_Reference_Identity_Is_Compared(string mutation)
@@ -433,6 +495,69 @@ public sealed class RoundTripDiffTests
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.OperationFindings, "request-body-ref-identity"));
+    }
+
+    [Theory]
+    [InlineData("parameter", "parameter-ref-identity")]
+    [InlineData("response", "response-ref-identity")]
+    [InlineData("header", "response-header-ref-identity")]
+    public void Equivalent_Component_Reference_Target_Mutations_Are_Reported(
+        string mutation,
+        string category
+    )
+    {
+        var original = CreateSemanticSurfaceDocument();
+        var components = original["components"]!;
+        switch (mutation)
+        {
+            case "parameter":
+                components["parameters"]!["EquivalentParameter"] = components["parameters"]![
+                    "NamedParameter"
+                ]!.DeepClone();
+                original["paths"]!["/surface"]!["post"]!["parameters"] = new JsonArray(
+                    new JsonObject { ["$ref"] = "#/components/parameters/NamedParameter" }
+                );
+                break;
+            case "response":
+                components["responses"]!["EquivalentResponse"] = components["responses"]![
+                    "NamedResponse"
+                ]!.DeepClone();
+                original["paths"]!["/surface"]!["post"]!["responses"]!["200"] = new JsonObject
+                {
+                    ["$ref"] = "#/components/responses/NamedResponse",
+                };
+                break;
+            case "header":
+                components["headers"]!["EquivalentHeader"] = components["headers"]![
+                    "NamedHeader"
+                ]!.DeepClone();
+                original["paths"]!["/surface"]!["post"]!["responses"]!["200"]!["headers"]![
+                    "X-Rate"
+                ] = new JsonObject { ["$ref"] = "#/components/headers/NamedHeader" };
+                break;
+        }
+        var reemitted = original.DeepClone().AsObject();
+        switch (mutation)
+        {
+            case "parameter":
+                reemitted["paths"]!["/surface"]!["post"]!["parameters"]![0]!["$ref"] =
+                    "#/components/parameters/EquivalentParameter";
+                break;
+            case "response":
+                reemitted["paths"]!["/surface"]!["post"]!["responses"]!["200"]!["$ref"] =
+                    "#/components/responses/EquivalentResponse";
+                break;
+            case "header":
+                reemitted["paths"]!["/surface"]!["post"]!["responses"]!["200"]!["headers"]![
+                    "X-Rate"
+                ]!["$ref"] = "#/components/headers/EquivalentHeader";
+                break;
+        }
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(1, FindingCount(result.OperationFindings, category));
     }
 
     [Theory]
@@ -683,7 +808,7 @@ public sealed class RoundTripDiffTests
     }
 
     [Fact]
-    public void Invalid_Additional_Properties_Is_Classified_Without_Hiding_Valid_Scalar_Drift()
+    public void Non_Object_Additional_Properties_Is_Ignored_Without_Hiding_Valid_Scalar_Drift()
     {
         var original = LoadFixture();
         original["components"]!["schemas"]!["Thing"]!["properties"]!["sourceDefect"] =
@@ -696,8 +821,7 @@ public sealed class RoundTripDiffTests
         var equivalentResult = RunDiff(original, equivalent);
 
         Assert.Equal(0, equivalentResult.ExitCode);
-        Assert.Equal(1, equivalentResult.Summary.GetProperty("sourceDefects").GetInt32());
-        Assert.Single(equivalentResult.Details.GetProperty("sourceDefects").EnumerateArray());
+        Assert.Equal(0, equivalentResult.Summary.GetProperty("sourceDefects").GetInt32());
 
         equivalent["components"]!["schemas"]!["Thing"]!["properties"]!["sourceDefect"]!["type"] =
             "integer";
@@ -705,6 +829,38 @@ public sealed class RoundTripDiffTests
 
         Assert.Equal(1, changedResult.ExitCode);
         Assert.Equal(1, FindingCount(changedResult.SchemaFindings, "schema-type"));
+    }
+
+    [Fact]
+    public void Null_Only_Additional_Properties_Is_Also_A_No_Op()
+    {
+        var original = LoadFixture();
+        original["components"]!["schemas"]!["Thing"]!["properties"]!["sourceDefect"] =
+            JsonNode.Parse("""{"type":["null"],"additionalProperties":{"type":"string"}}""");
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["sourceDefect"]![
+            "additionalProperties"
+        ] = true;
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
+    }
+
+    [Fact]
+    public void Schema_Like_Example_Payload_Is_Not_Classified_As_A_Source_Defect()
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["components"]!["examples"]!["NamedExample"]!["value"] = JsonNode.Parse(
+            """{"type":"string","additionalProperties":{"type":"integer"},"name":"","in":"header"}"""
+        );
+        var reemitted = original.DeepClone().AsObject();
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
     }
 
     [Fact]
@@ -774,7 +930,7 @@ public sealed class RoundTripDiffTests
             defect.GetProperty("path").GetString()
         );
         Assert.Equal(
-            "reserved Content-Type header parameter is represented by requestBody content type 'application/json'",
+            "reserved Content-Type header parameter is ignored by OpenAPI; request media types are represented by requestBody.content",
             defect.GetProperty("reason").GetString()
         );
         Assert.Equal(0, FindingCount(result.OperationFindings, "parameter-missing"));
@@ -802,7 +958,8 @@ public sealed class RoundTripDiffTests
     [Theory]
     [InlineData("Content-Type", "application/xml")]
     [InlineData("Accept", "application/json")]
-    public void Unrepresented_Reserved_Header_Remains_Parameter_Drift(
+    [InlineData("Authorization", "token")]
+    public void Reserved_Header_Is_A_Source_Defect_Even_When_Its_Value_Is_Not_Represented(
         string headerName,
         string mediaType
     )
@@ -820,9 +977,9 @@ public sealed class RoundTripDiffTests
 
         var result = RunDiff(original, reemitted);
 
-        Assert.Equal(1, result.ExitCode);
-        Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
-        Assert.Equal(1, FindingCount(result.OperationFindings, "parameter-missing"));
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(1, result.Summary.GetProperty("sourceDefects").GetInt32());
+        Assert.Equal(0, FindingCount(result.OperationFindings, "parameter-missing"));
     }
 
     [Fact]

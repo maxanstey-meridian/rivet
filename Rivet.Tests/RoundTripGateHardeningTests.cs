@@ -9,7 +9,7 @@ public sealed class RoundTripGateHardeningTests
     public void Only_The_Exact_Profiled_Source_Defect_Is_Exempt()
     {
         var profile = RoundTripCorpusGateTests.LoadVerifiedProfile();
-        var policy = profile.SourceDefects.Single(defect => defect.CorpusId == "docusign");
+        var policy = profile.SourceDefects.Single(defect => defect.CorpusId == "notion");
         Assert.True(
             RoundTripCorpusGateTests.IsSourceDefectDiagnostic(
                 profile,
@@ -44,8 +44,8 @@ public sealed class RoundTripGateHardeningTests
                 policy.CorpusId,
                 policy.SourceSha256,
                 policy.Diagnostic.Replace(
-                    "customParameters",
-                    "otherParameters",
+                    "/v1/pages/{id}",
+                    "/v1/other/{id}",
                     StringComparison.Ordinal
                 ),
                 existingSourceDefectCount: 0
@@ -119,6 +119,10 @@ public sealed class RoundTripGateHardeningTests
                 "notion",
                 "circleci",
                 "firebase",
+                "docker",
+                "sendgrid",
+                "spotify",
+                "asana",
             ],
             profile.VerifiedCorpusIds
         );
@@ -127,7 +131,7 @@ public sealed class RoundTripGateHardeningTests
         var profileNode = JsonNode
             .Parse(File.ReadAllText(CliRunner.RepoPath("corpus", "verified-profile.json")))!
             .AsObject();
-        profileNode["verifiedCorpusIds"]!.AsArray().Add("asana");
+        profileNode["verifiedCorpusIds"]!.AsArray().Add("bitbucket");
         using var mutation = TemporaryJson.Write(profileNode);
 
         Assert.Throws<InvalidDataException>(() =>
@@ -136,18 +140,17 @@ public sealed class RoundTripGateHardeningTests
     }
 
     [Theory]
-    [InlineData("docusign")]
     [InlineData("notion")]
     [InlineData("circleci")]
+    [InlineData("docker")]
+    [InlineData("sendgrid")]
     public void Profile_Rejects_Source_Defect_Policy_Broadening(string corpusId)
     {
         var profileNode = JsonNode
             .Parse(File.ReadAllText(CliRunner.RepoPath("corpus", "verified-profile.json")))!
             .AsObject();
         var sourceDefects = profileNode["sourceDefects"]!.AsArray();
-        var defect = sourceDefects.Single(item =>
-            item!["corpusId"]!.GetValue<string>() == corpusId
-        );
+        var defect = sourceDefects.First(item => item!["corpusId"]!.GetValue<string>() == corpusId);
         sourceDefects.Add(defect!.DeepClone());
         using var mutation = TemporaryJson.Write(profileNode);
 
@@ -238,19 +241,19 @@ public sealed class RoundTripGateHardeningTests
     public void Result_Report_Contains_Exact_Gate_Metric_Shape()
     {
         var report = new RoundTripCorpusGateTests.GateReport(
-            "docusign",
+            "notion",
             RoundTripCorpusGateTests
                 .LoadVerifiedProfile()
-                .SourceDefects.Single(defect => defect.CorpusId == "docusign")
+                .SourceDefects.Single(defect => defect.CorpusId == "notion")
                 .SourceSha256
         );
         report.Add("sourceDefects", "pinned defect");
         var summary = JsonSerializer.Deserialize<RoundTripCorpusGateTests.Summary>(
             """
             {
-              "originalOps": 393,
-              "reemittedOps": 393,
-              "sharedOps": 393,
+              "originalOps": 13,
+              "reemittedOps": 13,
+              "sharedOps": 13,
               "operationsWithFindings": 0,
               "integrityFindings": {
                 "unresolved-reference": 2,
@@ -264,8 +267,8 @@ public sealed class RoundTripGateHardeningTests
             summary,
             new Dictionary<string, RoundTripCorpusGateTests.ComponentMetric>
             {
-                ["schemas"] = new(565, 565, 565, 0, 0),
-                ["requestBodies"] = new(52, 52, 52, 0, 0),
+                ["schemas"] = new(0, 0, 0, 0, 0),
+                ["requestBodies"] = new(0, 0, 0, 0, 0),
                 ["parameters"] = new(0, 0, 0, 0, 0),
                 ["responses"] = new(0, 0, 0, 0, 0),
                 ["securitySchemes"] = new(0, 0, 0, 0, 0),
@@ -274,9 +277,9 @@ public sealed class RoundTripGateHardeningTests
 
         using var result = JsonDocument.Parse(RoundTripCorpusGateTests.SerializeReport(report));
         var metrics = result.RootElement.GetProperty("metrics");
-        Assert.Equal(393, metrics.GetProperty("operations").GetProperty("source").GetInt32());
+        Assert.Equal(13, metrics.GetProperty("operations").GetProperty("source").GetInt32());
         Assert.Equal(
-            565,
+            0,
             metrics
                 .GetProperty("components")
                 .GetProperty("schemas")
@@ -284,7 +287,7 @@ public sealed class RoundTripGateHardeningTests
                 .GetInt32()
         );
         Assert.Equal(
-            52,
+            0,
             metrics
                 .GetProperty("components")
                 .GetProperty("requestBodies")

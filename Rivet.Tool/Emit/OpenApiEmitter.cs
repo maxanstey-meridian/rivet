@@ -138,6 +138,13 @@ public static class OpenApiEmitter
             responseComponents.Select(component => component.Name).ToHashSet(StringComparer.Ordinal)
         );
         var schemas = BuildSchemas(endpoints, definitions, brands, enums);
+        foreach (var schema in documentInfo.Provenance?.ComponentSchemas ?? [])
+        {
+            schemas[schema.Name] = ParseSchemaObject(
+                schema.Json,
+                $"preserved component schema '{schema.Name}'"
+            );
+        }
         var examples = BuildComponentExamples(
             endpoints,
             documentInfo.Provenance?.ComponentExamples ?? [],
@@ -1329,8 +1336,92 @@ public static class OpenApiEmitter
             };
         }
 
+        ApplyOperationSchemaProvenance(operation, ep.Provenance?.Schemas);
+
         return operation;
     }
+
+    private static void ApplyOperationSchemaProvenance(
+        Dictionary<string, object> operation,
+        OpenApiOperationSchemaProvenance? provenance
+    )
+    {
+        if (provenance is null)
+        {
+            return;
+        }
+
+        if (operation.TryGetValue("parameters", out var parameterValue))
+        {
+            var parameters = (List<object>)parameterValue;
+            foreach (var source in provenance.Parameters)
+            {
+                var parameter = parameters
+                    .OfType<Dictionary<string, object>>()
+                    .FirstOrDefault(candidate =>
+                        candidate.GetValueOrDefault("name") as string == source.Name
+                        && candidate.GetValueOrDefault("in") as string == source.Location
+                    );
+                if (parameter is not null)
+                {
+                    parameter["schema"] = ParseSchemaObject(
+                        source.Json,
+                        $"parameter '{source.Location}:{source.Name}'"
+                    );
+                }
+            }
+        }
+
+        if (
+            operation.TryGetValue("requestBody", out var requestBodyValue)
+            && requestBodyValue is Dictionary<string, object> requestBody
+            && requestBody.TryGetValue("content", out var requestContentValue)
+            && requestContentValue is Dictionary<string, object> requestContent
+        )
+        {
+            foreach (var source in provenance.Requests)
+            {
+                if (
+                    requestContent.TryGetValue(source.MediaType, out var mediaValue)
+                    && mediaValue is Dictionary<string, object> media
+                )
+                {
+                    media["schema"] = ParseSchemaObject(
+                        source.Json,
+                        $"request content '{source.MediaType}'"
+                    );
+                }
+            }
+        }
+
+        if (
+            operation.TryGetValue("responses", out var responseValue)
+            && responseValue is Dictionary<string, object> responses
+        )
+        {
+            foreach (var source in provenance.Responses)
+            {
+                if (
+                    responses.TryGetValue(source.StatusKey, out var statusValue)
+                    && statusValue is Dictionary<string, object> status
+                    && status.TryGetValue("content", out var contentValue)
+                    && contentValue is Dictionary<string, object> content
+                    && content.TryGetValue(source.MediaType, out var mediaValue)
+                    && mediaValue is Dictionary<string, object> media
+                )
+                {
+                    media["schema"] = ParseSchemaObject(
+                        source.Json,
+                        $"response '{source.StatusKey}' content '{source.MediaType}'"
+                    );
+                }
+            }
+        }
+    }
+
+    private static Dictionary<string, object> ParseSchemaObject(string json, string context) =>
+        JsonSerializer.Deserialize<Dictionary<string, object>>(json)
+        ?? throw new OpenApiEmissionException($"{context} is not a JSON object.");
 
     private static Dictionary<string, object> BuildServer(OpenApiServerProvenance server)
     {
@@ -1734,6 +1825,13 @@ public static class OpenApiEmitter
                 if (entry.IsBinary)
                 {
                     media["schema"] = BinarySchema();
+                }
+                else if (entry.SchemaJson is not null)
+                {
+                    media["schema"] = ParseSchemaObject(
+                        entry.SchemaJson,
+                        $"request-body component '{requestBody.Name}' content '{entry.MediaType}'"
+                    );
                 }
                 else if (entry.Schema is not null)
                 {

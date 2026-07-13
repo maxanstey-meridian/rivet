@@ -838,12 +838,29 @@ internal static class ContractBuilder
                 continue;
             }
 
-            // Accept and Authorization are not legal OpenAPI header params. Keep their
-            // existing loud fallback until their semantics have a dedicated source diagnosis.
-            if (param.In is ParameterLocation.Header && IsReservedHeaderName(param.Name))
+            if (
+                param.In is ParameterLocation.Header
+                && param.Name.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
+            )
             {
-                unsupported.Add(
-                    $"param name={param.Name} in=header reason=reserved-header-dropped"
+                warnings.Add(
+                    Diagnostics.Prefix(
+                        Diagnostics.ImportReservedAuthorizationHeaderDropped,
+                        $"Reserved header parameter dropped: {httpMethod.ToUpperInvariant()} {route} declares '{param.Name}'; authentication is represented by security and components.securitySchemes."
+                    )
+                );
+                continue;
+            }
+            if (
+                param.In is ParameterLocation.Header
+                && param.Name.Equals("Accept", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                warnings.Add(
+                    Diagnostics.Prefix(
+                        Diagnostics.ImportReservedAcceptHeaderDropped,
+                        $"Reserved header parameter dropped: {httpMethod.ToUpperInvariant()} {route} declares '{param.Name}'; response media types are represented by responses[*].content."
+                    )
                 );
                 continue;
             }
@@ -966,15 +983,6 @@ internal static class ContractBuilder
         // component schema) gets a disambiguated name.
         return mapper.AddExtraRecord(new GeneratedRecord(recordName, deduped));
     }
-
-    /// <summary>
-    /// OpenAPI 3.x rule (kept in sync with OpenApiEmitter.IsReservedHeaderName):
-    /// Accept, Content-Type and Authorization must not be declared as header parameters.
-    /// </summary>
-    private static bool IsReservedHeaderName(string name) =>
-        name.Equals("Accept", StringComparison.OrdinalIgnoreCase)
-        || name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
-        || name.Equals("Authorization", StringComparison.OrdinalIgnoreCase);
 
     private static string? BuildParameterMetadataJson(
         IOpenApiParameter parameter,

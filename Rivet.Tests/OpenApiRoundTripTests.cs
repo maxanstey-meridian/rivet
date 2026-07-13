@@ -3660,7 +3660,7 @@ public sealed class OpenApiRoundTripTests
 
         // Import: OpenAPI → C# — verify correct types
         var importResult = OpenApiImporter.Import(json, new ImportOptions("Test"));
-        var dtoFile = importResult.Files.First(f => f.Content.Contains("DynamicDto"));
+        var dtoFile = importResult.Files.First(f => f.FileName.EndsWith("DynamicDto.cs"));
 
         Assert.Contains("System.Text.Json.Nodes.JsonObject Condition", dtoFile.Content);
         Assert.Contains("System.Text.Json.Nodes.JsonArray Items", dtoFile.Content);

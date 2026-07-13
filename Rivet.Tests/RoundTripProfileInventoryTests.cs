@@ -25,6 +25,10 @@ public sealed class RoundTripProfileInventoryTests
                 "notion",
                 "circleci",
                 "firebase",
+                "docker",
+                "sendgrid",
+                "spotify",
+                "asana",
             ],
             facts
                 .GetProperty("corpora")
@@ -34,30 +38,30 @@ public sealed class RoundTripProfileInventoryTests
         );
         Assert.Empty(facts.GetProperty("unknownKeywords").EnumerateArray());
         Assert.Equal(
-            1600,
+            2081,
             facts.GetProperty("normalizedComponentTotals").GetProperty("schemas").GetInt32()
         );
         Assert.Equal(
-            58,
+            69,
             facts.GetProperty("normalizedComponentTotals").GetProperty("requestBodies").GetInt32()
         );
         Assert.Equal(
-            8,
+            12,
             facts
                 .GetProperty("sourceComponentTotals")
                 .GetProperty("components.securitySchemes")
                 .GetInt32()
         );
         Assert.Equal(
-            10,
+            14,
             facts.GetProperty("normalizedComponentTotals").GetProperty("securitySchemes").GetInt32()
         );
         Assert.Equal(
-            20,
+            107,
             facts.GetProperty("normalizedComponentTotals").GetProperty("parameters").GetInt32()
         );
         Assert.Equal(
-            3,
+            95,
             facts.GetProperty("normalizedComponentTotals").GetProperty("responses").GetInt32()
         );
     }
@@ -128,16 +132,15 @@ public sealed class RoundTripProfileInventoryTests
     }
 
     [Theory]
-    [InlineData("docusign")]
     [InlineData("notion")]
     [InlineData("circleci")]
+    [InlineData("docker")]
+    [InlineData("sendgrid")]
     public void Source_Defect_Policy_Broadening_Fails_The_Inventory(string corpusId)
     {
         var profile = ReadProfile();
         var sourceDefects = profile["sourceDefects"]!.AsArray();
-        var defect = sourceDefects.Single(item =>
-            item!["corpusId"]!.GetValue<string>() == corpusId
-        );
+        var defect = sourceDefects.First(item => item!["corpusId"]!.GetValue<string>() == corpusId);
         sourceDefects.Add(defect!.DeepClone());
         using var mutation = TemporaryJson.Write(profile);
 
@@ -145,6 +148,20 @@ public sealed class RoundTripProfileInventoryTests
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("reviewed source-defect policy changed", Errors(result.StdOut));
+    }
+
+    [Fact]
+    public void Profile_Update_Cannot_Approve_A_Source_Defect_Policy_Change()
+    {
+        var profile = ReadProfile();
+        var sourceDefects = profile["sourceDefects"]!.AsArray();
+        sourceDefects.Add(sourceDefects[0]!.DeepClone());
+        using var mutation = TemporaryJson.Write(profile);
+
+        var result = RunInventory("--profile", mutation.Path, "--update-profile");
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("reviewed source-defect policy changed", result.StdErr);
     }
 
     private static JsonObject ReadProfile() =>
@@ -188,7 +205,7 @@ public sealed class RoundTripProfileInventoryTests
         {
             var path = System.IO.Path.Combine(
                 System.IO.Path.GetTempPath(),
-                $"rivet-six-profile-{Guid.NewGuid():N}.json"
+                $"rivet-verified-profile-{Guid.NewGuid():N}.json"
             );
             File.WriteAllText(path, value.ToJsonString());
             return new TemporaryJson(path);

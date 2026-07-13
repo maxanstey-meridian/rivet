@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace Rivet.Tests;
 
 /// <summary>
-/// SIX section 8 gate over the real, on-disk CLI pipeline. The local corpus is
+/// Verified-corpus gate over the real, on-disk CLI pipeline. The local corpus is
 /// deliberately mandatory: a missing or changed artifact is a gate failure.
 /// </summary>
 public sealed class RoundTripCorpusGateTests
@@ -79,7 +79,7 @@ public sealed class RoundTripCorpusGateTests
             if (corpus is null)
             {
                 throw new InvalidDataException(
-                    $"SIX corpus '{corpusId}' is absent from the manifest."
+                    $"Verified corpus '{corpusId}' is absent from the manifest."
                 );
             }
 
@@ -89,9 +89,13 @@ public sealed class RoundTripCorpusGateTests
 
     [Theory]
     [MemberData(nameof(Corpora))]
-    public void Corpus_Satisfies_The_Six_Gate(string corpusId, string corpusFile, string sha256)
+    public void Corpus_Satisfies_The_Verified_Gate(
+        string corpusId,
+        string corpusFile,
+        string sha256
+    )
     {
-        var workDir = Directory.CreateTempSubdirectory($"rivet-six-{corpusId}-");
+        var workDir = Directory.CreateTempSubdirectory($"rivet-corpus-{corpusId}-");
         var reportDirectory = CliRunner.RepoPath("TestResults", "roundtrip", corpusId);
         if (Directory.Exists(reportDirectory))
         {
@@ -1063,7 +1067,7 @@ public sealed class RoundTripCorpusGateTests
             var counts = _findings.Select(pair =>
                 $"{pair.Key}={pair.Value.Sum(finding => finding.Count)}"
             );
-            return $"{CorpusId}: SIX gate failed ({string.Join(", ", counts)}). Full report: {reportDirectory}";
+            return $"{CorpusId}: verified-corpus gate failed ({string.Join(", ", counts)}). Full report: {reportDirectory}";
         }
     }
 

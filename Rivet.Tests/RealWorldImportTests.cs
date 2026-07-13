@@ -34,11 +34,13 @@ public sealed class RealWorldImportTests
     {
         // Identical-content duplicates are tolerated (importer may emit the same shared schema
         // twice); same-name-different-content duplicates are the I3 corruption shape and fail loudly.
-        var uniqueFiles = DeduplicateFiles(result).Append(ImportStubs).ToArray();
+        var uniqueFiles = DeduplicateFiles(result);
+        var sources = uniqueFiles.Select(file => file.Content).Append(ImportStubs).ToArray();
+        var paths = uniqueFiles.Select(file => file.FileName).Append("").ToArray();
 
         try
         {
-            var compilation = CompilationHelper.CreateCompilationFromMultiple(uniqueFiles);
+            var compilation = CompilationHelper.CreateCompilationFromMultiple(sources, paths);
             return compilation
                 .GetDiagnostics()
                 .Where(d => d.Severity == DiagnosticSeverity.Error)
@@ -48,14 +50,16 @@ public sealed class RealWorldImportTests
         {
             // CompilationHelper throws on errors — we want the error list instead
             // Re-compile without throwing
-            var trees = uniqueFiles
-                .Select(s =>
-                    Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
-                        s,
-                        new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
-                            Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest
+            var trees = sources
+                .Select(
+                    (source, index) =>
+                        Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+                            source,
+                            new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
+                                Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest
+                            ),
+                            paths[index]
                         )
-                    )
                 )
                 .ToList();
 
@@ -125,24 +129,32 @@ public sealed class RealWorldImportTests
 
         // Pass 1: Import → compile → walk
         var sources1 = DeduplicateFiles(import1);
-        var comp1 = CompilationHelper.CreateCompilationFromMultiple(sources1);
+        var comp1 = CompilationHelper.CreateCompilationFromMultiple(
+            sources1.Select(file => file.Content).ToArray(),
+            sources1.Select(file => file.FileName).ToArray()
+        );
         var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
         var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
 
         // Emit OpenAPI from walked model
         var security = SecurityMetadataWalker.Walk(comp1);
+        var provenance = OpenApiProvenanceWalker.Walk(comp1, wlk1);
         var emittedJson = OpenApiEmitter.EmitWithSecurityMetadata(
             eps1,
             wlk1.Definitions,
             wlk1.Brands,
             wlk1.Enums,
-            security
+            security,
+            new OpenApiDocumentInfo(Provenance: provenance)
         );
 
         // Pass 2: Re-import emitted OpenAPI → compile → walk
         var import2 = CompilationHelper.Import(emittedJson, ns);
         var sources2 = DeduplicateFiles(import2);
-        var comp2 = CompilationHelper.CreateCompilationFromMultiple(sources2);
+        var comp2 = CompilationHelper.CreateCompilationFromMultiple(
+            sources2.Select(file => file.Content).ToArray(),
+            sources2.Select(file => file.FileName).ToArray()
+        );
         var (disc2, wlk2) = CompilationHelper.DiscoverAndWalk(comp2);
         var eps2 = CompilationHelper.WalkContracts(comp2, disc2, wlk2);
 
@@ -176,12 +188,14 @@ public sealed class RealWorldImportTests
         var (disc1, wlk1) = CompilationHelper.DiscoverAndWalk(comp1);
         var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
         var security = SecurityMetadataWalker.Walk(comp1);
+        var provenance = OpenApiProvenanceWalker.Walk(comp1, wlk1);
         var emittedJson = OpenApiEmitter.EmitWithSecurityMetadata(
             eps1,
             wlk1.Definitions,
             wlk1.Brands,
             wlk1.Enums,
-            security
+            security,
+            new OpenApiDocumentInfo(Provenance: provenance)
         );
 
         // Pass 2
@@ -211,7 +225,7 @@ public sealed class RealWorldImportTests
     /// filename with NON-identical content. Last-write-wins on such collisions silently hands one
     /// contract the wrong type (finding I3) — the old filename-only dedupe here masked exactly that.
     /// </summary>
-    private static string[] DeduplicateFiles(ImportResult result)
+    private static GeneratedFile[] DeduplicateFiles(ImportResult result)
     {
         var conflicting = result
             .Files.GroupBy(f => f.FileName)
@@ -225,18 +239,19 @@ public sealed class RealWorldImportTests
                 + $"would silently get the wrong type): {string.Join(", ", conflicting)}"
         );
 
-        return result.Files.GroupBy(f => f.FileName).Select(g => g.First().Content).ToArray();
+        return result.Files.GroupBy(f => f.FileName).Select(g => g.First()).ToArray();
     }
 
-    private static Compilation CreateCompilationLenient(string[] sources)
+    private static Compilation CreateCompilationLenient(GeneratedFile[] sources)
     {
         var trees = sources
-            .Select(s =>
+            .Select(file =>
                 Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
-                    s,
+                    file.Content,
                     new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
                         Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest
-                    )
+                    ),
+                    file.FileName
                 )
             )
             .ToList();
@@ -860,12 +875,20 @@ public sealed class RealWorldImportTests
                 .GetInt32()
         );
 
-        var responseExamples = emitted
+        var responseReference = emitted
             .GetProperty("paths")
             .GetProperty("/organizations/{org}/settings/billing/budgets/{budget_id}")
             .GetProperty("delete")
             .GetProperty("responses")
-            .GetProperty("200")
+            .GetProperty("200");
+        Assert.Equal(
+            "#/components/responses/delete-budget",
+            responseReference.GetProperty("$ref").GetString()
+        );
+        var responseExamples = emitted
+            .GetProperty("components")
+            .GetProperty("responses")
+            .GetProperty("delete-budget")
             .GetProperty("content")
             .GetProperty("application/json")
             .GetProperty("examples");

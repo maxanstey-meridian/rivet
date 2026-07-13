@@ -290,13 +290,6 @@ internal sealed class SchemaMapper
             _requiredComponentSchemas.UnionWith(requiredComponentSchemas);
         }
         ResolveAliasTargets(schemas);
-        foreach (var (componentId, schema) in schemas)
-        {
-            DiagnoseNonObjectAdditionalProperties(
-                schema,
-                $"#/components/schemas/{EscapeJsonPointerToken(componentId)}"
-            );
-        }
 
         // Pre-scan: collect generic template info from x-rivet-generic extensions
         var genericTemplates = new Dictionary<string, GenericTemplateInfo>();
@@ -725,6 +718,8 @@ internal sealed class SchemaMapper
                 || !schemas.TryGetValue(componentId, out var schema)
                 || schema is OpenApiSchemaReference
                 || !_ctx.SchemaNameMap.TryGetValue(componentId, out var name)
+                || (schema.Type & ~JsonSchemaType.Null) == JsonSchemaType.Array
+                    && schema.Items is not null
             )
             {
                 continue;
@@ -1635,55 +1630,6 @@ internal sealed class SchemaMapper
             ?.Replace("~1", "/", StringComparison.Ordinal)
             .Replace("~0", "~", StringComparison.Ordinal);
 
-    private void DiagnoseNonObjectAdditionalProperties(IOpenApiSchema schema, string pointer)
-    {
-        if (schema is OpenApiSchemaReference)
-        {
-            return;
-        }
-
-        var nonNullType = schema.Type & ~JsonSchemaType.Null;
-        if (
-            schema.AdditionalProperties is not null
-            && nonNullType.HasValue
-            && nonNullType.Value != JsonSchemaType.Object
-        )
-        {
-            _ctx.Warnings.Add(
-                Diagnostics.Prefix(
-                    Diagnostics.ImportUnsupportedSchemaType,
-                    $"Invalid additionalProperties at '{pointer}/additionalProperties': containing schema declares non-object type '{nonNullType.Value}'. The construct is classified as a source defect and is not reinterpreted."
-                )
-            );
-        }
-
-        foreach (
-            var (name, property) in schema.Properties ?? new Dictionary<string, IOpenApiSchema>()
-        )
-        {
-            DiagnoseNonObjectAdditionalProperties(
-                property,
-                $"{pointer}/properties/{EscapeJsonPointerToken(name)}"
-            );
-        }
-        if (schema.Items is not null)
-        {
-            DiagnoseNonObjectAdditionalProperties(schema.Items, pointer + "/items");
-        }
-        if (schema.AdditionalProperties is not null)
-        {
-            DiagnoseNonObjectAdditionalProperties(
-                schema.AdditionalProperties,
-                pointer + "/additionalProperties"
-            );
-        }
-    }
-
-    private static string EscapeJsonPointerToken(string value) =>
-        value
-            .Replace("~", "~0", StringComparison.Ordinal)
-            .Replace("/", "~1", StringComparison.Ordinal);
-
     private bool TryResolveNullableType(IOpenApiSchema schema, string? context, out string result)
     {
         result = "";
@@ -1890,6 +1836,14 @@ internal sealed class SchemaMapper
         if (schema.Properties is { Count: > 0 })
         {
             return ResolveObjectType(schema, context);
+        }
+
+        // JSON Schema permits structural array keywords without an explicit type.
+        // Keep the exact typeless transport shape in generated provenance while using
+        // the only runtime collection shape compatible with an authored items schema.
+        if (schema.Items is not null)
+        {
+            return ResolveArrayType(schema, context);
         }
 
         // const without type — infer from the const value

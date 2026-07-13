@@ -9,12 +9,18 @@ public sealed record OpenApiDocumentProvenance(
     IReadOnlyList<OpenApiComponentRequestBodyProvenance>? ComponentRequestBodies = null,
     IReadOnlyList<OpenApiVendorExtensionProvenance>? VendorExtensions = null,
     IReadOnlyList<OpenApiComponentParameterProvenance>? ComponentParameters = null,
-    IReadOnlyList<OpenApiComponentResponseProvenance>? ComponentResponses = null
+    IReadOnlyList<OpenApiComponentResponseProvenance>? ComponentResponses = null,
+    IReadOnlyList<OpenApiComponentSchemaProvenance>? ComponentSchemas = null,
+    IReadOnlyList<OpenApiImportedSourceFileProvenance>? ImportedSourceFiles = null
 );
+
+public sealed record OpenApiImportedSourceFileProvenance(string Path, string Fingerprint);
 
 public sealed record OpenApiComponentParameterProvenance(string Name, string Json);
 
 public sealed record OpenApiComponentResponseProvenance(string Name, string Json);
+
+public sealed record OpenApiComponentSchemaProvenance(string Name, string Json);
 
 public sealed record OpenApiVendorExtensionProvenance(
     string OwnerPointer,
@@ -38,7 +44,8 @@ public sealed record OpenApiRequestBodyContentProvenance(
     string? SchemaRef = null,
     string? SchemaType = null,
     string? Format = null,
-    bool IsFormatSpecified = false
+    bool IsFormatSpecified = false,
+    string? SchemaJson = null
 );
 
 public sealed record OpenApiComponentExampleProvenance
@@ -120,7 +127,24 @@ public sealed record OpenApiOperationProvenance(
     OpenApiRivetIdentityProvenance? RivetIdentity,
     string? RequestBodyComponentId = null,
     IReadOnlyList<OpenApiParameterComponentReference>? ParameterComponentReferences = null,
-    IReadOnlyList<OpenApiResponseComponentReference>? ResponseComponentReferences = null
+    IReadOnlyList<OpenApiResponseComponentReference>? ResponseComponentReferences = null,
+    OpenApiOperationSchemaProvenance? Schemas = null
+);
+
+public sealed record OpenApiOperationSchemaProvenance(
+    IReadOnlyList<OpenApiParameterSchemaProvenance> Parameters,
+    IReadOnlyList<OpenApiRequestSchemaProvenance> Requests,
+    IReadOnlyList<OpenApiResponseSchemaProvenance> Responses
+);
+
+public sealed record OpenApiParameterSchemaProvenance(string Name, string Location, string Json);
+
+public sealed record OpenApiRequestSchemaProvenance(string MediaType, string Json);
+
+public sealed record OpenApiResponseSchemaProvenance(
+    string StatusKey,
+    string MediaType,
+    string Json
 );
 
 public sealed record OpenApiParameterComponentReference(

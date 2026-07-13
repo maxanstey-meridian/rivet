@@ -10,18 +10,14 @@
     "docusign",
     "notion",
     "circleci",
-    "firebase"
+    "firebase",
+    "docker",
+    "sendgrid",
+    "spotify",
+    "asana"
   ],
-  "reviewedSourceDefectsSha256": "9fbc9cf3ce807c9bf5c45e76245bd5709426c54dbeb8ae2680e98c8071e5acac",
+  "reviewedSourceDefectsSha256": "630b952965158a83a97394f06c6a844458fe12bf8a952120f7342fc492e629f1",
   "sourceDefects": [
-    {
-      "corpusId": "docusign",
-      "sourceSha256": "bcdba766a39b7760e00c7822946879192a63db1f440f91f2d57335c9b78ffaef",
-      "pointer": "#/components/schemas/connectOAuthConfig/properties/customParameters/additionalProperties",
-      "reason": "additionalProperties is an object-only keyword on a non-object schema",
-      "diagnostic": "warning RIV3010: Invalid additionalProperties at '#/components/schemas/connectOAuthConfig/properties/customParameters/additionalProperties': containing schema declares non-object type 'String'. The construct is classified as a source defect and is not reinterpreted.",
-      "cardinality": 1
-    },
     {
       "corpusId": "notion",
       "sourceSha256": "6df5889eac35a3f4eb99115eac7dd9b28b9d6040c664a742368ef7b68d45d983",
@@ -34,541 +30,888 @@
       "corpusId": "circleci",
       "sourceSha256": "1aecb0fe4075b7dce69ed91e5c12b872e09f83064192679ae52ff64513d32c95",
       "pointer": "#/paths/~1project~1{username}~1{project}~1ssh-key/post/parameters/0/name",
-      "reason": "reserved Content-Type header parameter is represented by requestBody content type 'application/json'",
+      "reason": "reserved Content-Type header parameter is ignored by OpenAPI; request media types are represented by requestBody.content",
       "diagnostic": "warning RIV3021: Reserved header parameter dropped: POST /project/{username}/{project}/ssh-key declares 'Content-Type'; request media types are represented by requestBody.content.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "docker",
+      "sourceSha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+      "pointer": "#/paths/~1build/post/parameters/21/name",
+      "reason": "reserved Content-Type header parameter is ignored by OpenAPI; request media types are represented by requestBody.content",
+      "diagnostic": "warning RIV3021: Reserved header parameter dropped: POST /build declares 'Content-type'; request media types are represented by requestBody.content.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1alerts/get/parameters/0/name",
+      "reason": "reserved Authorization header parameter is ignored by OpenAPI; authentication is represented by security schemes",
+      "diagnostic": "warning RIV3022: Reserved header parameter dropped: GET /alerts declares 'Authorization'; authentication is represented by security and components.securitySchemes.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1alerts/post/parameters/0/name",
+      "reason": "reserved Authorization header parameter is ignored by OpenAPI; authentication is represented by security schemes",
+      "diagnostic": "warning RIV3022: Reserved header parameter dropped: POST /alerts declares 'Authorization'; authentication is represented by security and components.securitySchemes.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1alerts~1{alert_id}/get/parameters/0/name",
+      "reason": "reserved Authorization header parameter is ignored by OpenAPI; authentication is represented by security schemes",
+      "diagnostic": "warning RIV3022: Reserved header parameter dropped: GET /alerts/{alert_id} declares 'Authorization'; authentication is represented by security and components.securitySchemes.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1messages/get/parameters/4/name",
+      "reason": "reserved Authorization header parameter is ignored by OpenAPI; authentication is represented by security schemes",
+      "diagnostic": "warning RIV3022: Reserved header parameter dropped: GET /messages declares 'Authorization'; authentication is represented by security and components.securitySchemes.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1messages~1download/post/parameters/1/name",
+      "reason": "reserved Authorization header parameter is ignored by OpenAPI; authentication is represented by security schemes",
+      "diagnostic": "warning RIV3022: Reserved header parameter dropped: POST /messages/download declares 'Authorization'; authentication is represented by security and components.securitySchemes.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1messages~1download~1{download_uuid}/get/parameters/0/name",
+      "reason": "reserved Authorization header parameter is ignored by OpenAPI; authentication is represented by security schemes",
+      "diagnostic": "warning RIV3022: Reserved header parameter dropped: GET /messages/download/{download_uuid} declares 'Authorization'; authentication is represented by security and components.securitySchemes.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1messages~1{msg_id}/get/parameters/0/name",
+      "reason": "reserved Authorization header parameter is ignored by OpenAPI; authentication is represented by security schemes",
+      "diagnostic": "warning RIV3022: Reserved header parameter dropped: GET /messages/{msg_id} declares 'Authorization'; authentication is represented by security and components.securitySchemes.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1bounces/get/parameters/2/name",
+      "reason": "reserved Accept header parameter is ignored by OpenAPI; response media types are represented by responses content",
+      "diagnostic": "warning RIV3023: Reserved header parameter dropped: GET /suppression/bounces declares 'Accept'; response media types are represented by responses[*].content.",
       "cardinality": 1
     }
   ],
   "facts": {
     "corpora": [
       {
-        "apiVersion": "1.0.0",
-        "dialect": "3.0.3",
         "id": "okta",
-        "normalizedComponentCounts": {},
-        "operationCount": 19,
-        "pathCount": 17,
         "sha256": "24d758ad8e32c83bc900c60695636d02366cebc5e38187857d2c2089c14b1b06",
+        "dialect": "3.0.3",
+        "apiVersion": "1.0.0",
+        "pathCount": 17,
+        "operationCount": 19,
         "sourceComponentCounts": {},
+        "normalizedComponentCounts": {},
         "unknownKeywordCount": 0
       },
       {
-        "apiVersion": "1.0.7",
-        "dialect": "2.0",
         "id": "petstore-v2",
-        "normalizedComponentCounts": {
-          "schemas": 6,
-          "securitySchemes": 2
-        },
-        "operationCount": 20,
-        "pathCount": 14,
         "sha256": "bb116730d391e330119c691f9b124d07b9afdea61b5a252345b577e9a4c2f98b",
+        "dialect": "2.0",
+        "apiVersion": "1.0.7",
+        "pathCount": 14,
+        "operationCount": 20,
         "sourceComponentCounts": {
           "definitions": 6,
           "securityDefinitions": 2
         },
-        "unknownKeywordCount": 0
-      },
-      {
-        "apiVersion": "1.0.27",
-        "dialect": "3.0.4",
-        "id": "petstore-v3",
         "normalizedComponentCounts": {
-          "requestBodies": 2,
           "schemas": 6,
           "securitySchemes": 2
         },
-        "operationCount": 19,
-        "pathCount": 13,
+        "unknownKeywordCount": 0
+      },
+      {
+        "id": "petstore-v3",
         "sha256": "00441c05add60f28da55eb4563d3fb6bbda364ba8eb7b381e2e2c98613005c82",
+        "dialect": "3.0.4",
+        "apiVersion": "1.0.27",
+        "pathCount": 13,
+        "operationCount": 19,
         "sourceComponentCounts": {
           "components.requestBodies": 2,
           "components.schemas": 6,
           "components.securitySchemes": 2
         },
+        "normalizedComponentCounts": {
+          "requestBodies": 2,
+          "schemas": 6,
+          "securitySchemes": 2
+        },
         "unknownKeywordCount": 0
       },
       {
-        "apiVersion": "1.0.0",
-        "dialect": "3.0.1",
         "id": "twilio",
-        "normalizedComponentCounts": {
-          "schemas": 148,
-          "securitySchemes": 1
-        },
-        "operationCount": 197,
-        "pathCount": 121,
         "sha256": "a922c3aef8aad8dbf2c7abadcde04df25d94ff3e5856185732ef88ad17bfcf0a",
+        "dialect": "3.0.1",
+        "apiVersion": "1.0.0",
+        "pathCount": 121,
+        "operationCount": 197,
         "sourceComponentCounts": {
           "components.schemas": 148,
           "components.securitySchemes": 1
         },
+        "normalizedComponentCounts": {
+          "schemas": 148,
+          "securitySchemes": 1
+        },
         "unknownKeywordCount": 0
       },
       {
-        "apiVersion": "2.0",
-        "dialect": "3.0.0",
         "id": "square",
-        "normalizedComponentCounts": {
-          "requestBodies": 4,
-          "schemas": 807,
-          "securitySchemes": 2
-        },
-        "operationCount": 200,
-        "pathCount": 159,
         "sha256": "1001c992f9e5f68f71356390c160044a555afd036d0b6c5509f5ab492ad56c43",
+        "dialect": "3.0.0",
+        "apiVersion": "2.0",
+        "pathCount": 159,
+        "operationCount": 200,
         "sourceComponentCounts": {
           "components.requestBodies": 4,
           "components.schemas": 807,
           "components.securitySchemes": 2
         },
+        "normalizedComponentCounts": {
+          "requestBodies": 4,
+          "schemas": 807,
+          "securitySchemes": 2
+        },
         "unknownKeywordCount": 0
       },
       {
-        "apiVersion": "v2.1",
-        "dialect": "3.0.0",
         "id": "docusign",
-        "normalizedComponentCounts": {
-          "requestBodies": 52,
-          "schemas": 565
-        },
-        "operationCount": 393,
-        "pathCount": 204,
         "sha256": "bcdba766a39b7760e00c7822946879192a63db1f440f91f2d57335c9b78ffaef",
+        "dialect": "3.0.0",
+        "apiVersion": "v2.1",
+        "pathCount": 204,
+        "operationCount": 393,
         "sourceComponentCounts": {
           "components.requestBodies": 52,
           "components.schemas": 565
         },
-        "unknownKeywordCount": 0
-      },
-      {
-        "apiVersion": "1.0.0",
-        "dialect": "3.0.3",
-        "id": "notion",
-        "normalizedComponentCounts": {},
-        "operationCount": 13,
-        "pathCount": 8,
-        "sha256": "6df5889eac35a3f4eb99115eac7dd9b28b9d6040c664a742368ef7b68d45d983",
-        "sourceComponentCounts": {},
-        "unknownKeywordCount": 0
-      },
-      {
-        "apiVersion": "v1",
-        "dialect": "3.0.0",
-        "id": "circleci",
         "normalizedComponentCounts": {
-          "parameters": 9,
-          "responses": 3,
-          "schemas": 28,
-          "securitySchemes": 1
+          "requestBodies": 52,
+          "schemas": 565
         },
-        "operationCount": 22,
-        "pathCount": 17,
+        "unknownKeywordCount": 0
+      },
+      {
+        "id": "notion",
+        "sha256": "6df5889eac35a3f4eb99115eac7dd9b28b9d6040c664a742368ef7b68d45d983",
+        "dialect": "3.0.3",
+        "apiVersion": "1.0.0",
+        "pathCount": 8,
+        "operationCount": 13,
+        "sourceComponentCounts": {},
+        "normalizedComponentCounts": {},
+        "unknownKeywordCount": 0
+      },
+      {
+        "id": "circleci",
         "sha256": "1aecb0fe4075b7dce69ed91e5c12b872e09f83064192679ae52ff64513d32c95",
+        "dialect": "3.0.0",
+        "apiVersion": "v1",
+        "pathCount": 17,
+        "operationCount": 22,
         "sourceComponentCounts": {
           "components.parameters": 9,
           "components.responses": 3,
           "components.schemas": 28,
           "components.securitySchemes": 1
         },
+        "normalizedComponentCounts": {
+          "parameters": 9,
+          "responses": 3,
+          "schemas": 28,
+          "securitySchemes": 1
+        },
         "unknownKeywordCount": 0
       },
       {
-        "apiVersion": "v1beta1",
-        "dialect": "3.0.0",
         "id": "firebase",
-        "normalizedComponentCounts": {
-          "parameters": 11,
-          "schemas": 40,
-          "securitySchemes": 2
-        },
-        "operationCount": 21,
-        "pathCount": 15,
         "sha256": "7cf348721a83b5e72fb3dab1ac324bd539d93bb8b00ac11486b8fa229854cae9",
+        "dialect": "3.0.0",
+        "apiVersion": "v1beta1",
+        "pathCount": 15,
+        "operationCount": 21,
         "sourceComponentCounts": {
           "components.parameters": 11,
           "components.schemas": 40,
           "components.securitySchemes": 2
         },
+        "normalizedComponentCounts": {
+          "parameters": 11,
+          "schemas": 40,
+          "securitySchemes": 2
+        },
+        "unknownKeywordCount": 0
+      },
+      {
+        "id": "docker",
+        "sha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+        "dialect": "3.0.0",
+        "apiVersion": "1.33",
+        "pathCount": 97,
+        "operationCount": 105,
+        "sourceComponentCounts": {
+          "components.requestBodies": 1,
+          "components.schemas": 78
+        },
+        "normalizedComponentCounts": {
+          "requestBodies": 1,
+          "schemas": 78
+        },
+        "unknownKeywordCount": 0
+      },
+      {
+        "id": "sendgrid",
+        "sha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+        "dialect": "3.0.0",
+        "apiVersion": "1.0.0",
+        "pathCount": 201,
+        "operationCount": 334,
+        "sourceComponentCounts": {
+          "components.parameters": 25,
+          "components.requestBodies": 10,
+          "components.responses": 25,
+          "components.schemas": 145,
+          "components.securitySchemes": 1
+        },
+        "normalizedComponentCounts": {
+          "parameters": 25,
+          "requestBodies": 10,
+          "responses": 25,
+          "schemas": 145,
+          "securitySchemes": 1
+        },
+        "unknownKeywordCount": 0
+      },
+      {
+        "id": "spotify",
+        "sha256": "d71eff045735eb3304322d03d0632d2742addcd05cd676b7d61d718c2664b244",
+        "dialect": "3.0.3",
+        "apiVersion": "2023.2.27",
+        "pathCount": 68,
+        "operationCount": 89,
+        "sourceComponentCounts": {
+          "components.parameters": 17,
+          "components.responses": 56,
+          "components.schemas": 93,
+          "components.securitySchemes": 1
+        },
+        "normalizedComponentCounts": {
+          "parameters": 17,
+          "responses": 56,
+          "schemas": 93,
+          "securitySchemes": 1
+        },
+        "unknownKeywordCount": 0
+      },
+      {
+        "id": "asana",
+        "sha256": "40c1c94d476c897f707c2974a3aeedee1d0b8a6eab8b7654819c0effa0f8ffa6",
+        "dialect": "3.0.0",
+        "apiVersion": "1.0",
+        "pathCount": 126,
+        "operationCount": 167,
+        "sourceComponentCounts": {
+          "components.parameters": 45,
+          "components.responses": 11,
+          "components.schemas": 165,
+          "components.securitySchemes": 2
+        },
+        "normalizedComponentCounts": {
+          "parameters": 45,
+          "responses": 11,
+          "schemas": 165,
+          "securitySchemes": 2
+        },
         "unknownKeywordCount": 0
       }
     ],
+    "sourceComponentTotals": {
+      "components.parameters": 107,
+      "components.requestBodies": 69,
+      "components.responses": 95,
+      "components.schemas": 2075,
+      "components.securitySchemes": 12,
+      "definitions": 6,
+      "securityDefinitions": 2
+    },
+    "normalizedComponentTotals": {
+      "parameters": 107,
+      "requestBodies": 69,
+      "responses": 95,
+      "schemas": 2081,
+      "securitySchemes": 14
+    },
+    "standardKeywordCounts": {
+      "$ref": 10755,
+      "additionalProperties": 85,
+      "allOf": 259,
+      "allowEmptyValue": 1,
+      "anyOf": 2,
+      "authorizationCode": 4,
+      "authorizationUrl": 7,
+      "basePath": 1,
+      "collectionFormat": 2,
+      "components": 10,
+      "consumes": 9,
+      "contact": 10,
+      "content": 2836,
+      "default": 219,
+      "definitions": 1,
+      "delete": 214,
+      "deprecated": 395,
+      "description": 23202,
+      "discriminator": 5,
+      "email": 5,
+      "enum": 539,
+      "example": 2903,
+      "examples": 750,
+      "explode": 14,
+      "externalDocs": 10,
+      "flow": 1,
+      "flows": 6,
+      "format": 1341,
+      "get": 730,
+      "head": 1,
+      "headers": 184,
+      "host": 1,
+      "implicit": 2,
+      "in": 3085,
+      "info": 13,
+      "items": 2103,
+      "license": 7,
+      "maxItems": 25,
+      "maxLength": 1073,
+      "maxProperties": 3,
+      "maximum": 154,
+      "minItems": 14,
+      "minLength": 842,
+      "minProperties": 3,
+      "minimum": 237,
+      "name": 3354,
+      "nullable": 1316,
+      "oneOf": 7,
+      "openapi": 12,
+      "operationId": 1569,
+      "parameters": 1695,
+      "patch": 48,
+      "paths": 13,
+      "pattern": 642,
+      "post": 443,
+      "produces": 20,
+      "properties": 3097,
+      "propertyName": 5,
+      "put": 163,
+      "readOnly": 193,
+      "refreshUrl": 1,
+      "requestBodies": 5,
+      "requestBody": 628,
+      "required": 3047,
+      "responses": 1603,
+      "schema": 7169,
+      "schemas": 10,
+      "scheme": 2,
+      "schemes": 1,
+      "scopes": 7,
+      "security": 849,
+      "securityDefinitions": 1,
+      "securitySchemes": 8,
+      "servers": 132,
+      "style": 12,
+      "summary": 1556,
+      "swagger": 1,
+      "tags": 1578,
+      "termsOfService": 8,
+      "title": 430,
+      "tokenUrl": 4,
+      "type": 23492,
+      "uniqueItems": 27,
+      "url": 157,
+      "variables": 1,
+      "version": 13,
+      "wrapped": 4,
+      "xml": 18
+    },
     "extensions": {
+      "x-Description": {
+        "count": 1,
+        "valueShapes": {
+          "string": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "adb6a5c1a116af5226c0886a22717b560072b3c0b554016958d23a1e49021160"
+      },
+      "x-and_or": {
+        "count": 1,
+        "valueShapes": {
+          "string": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+      },
       "x-apiClientRegistration": {
         "count": 1,
-        "distinctValueCount": 1,
         "valueShapes": {
           "object": 1
         },
+        "distinctValueCount": 1,
         "valuesSha256": "30a7ff3bcfa3fc83e71d639257ac5dcb5c8782e42f20638da432603f5877bd4d"
       },
       "x-apisguru-categories": {
-        "count": 6,
-        "distinctValueCount": 6,
+        "count": 10,
         "valueShapes": {
-          "array": 6
+          "array": 10
         },
-        "valuesSha256": "10552e04ed792b3cc3519ecf306012149708b9711aa7c76e9bc19472c775607f"
+        "distinctValueCount": 8,
+        "valuesSha256": "ae3f9ef5316c4de08ea319956f71ea090b02a39dc6c3930f3f129cc0c011b1cb"
       },
       "x-class-extra-annotation": {
         "count": 12,
-        "distinctValueCount": 1,
         "valueShapes": {
           "string": 12
         },
+        "distinctValueCount": 1,
         "valuesSha256": "15aa2cbad0dca4df99174dc9d6d01fc0ca1bd9e4aace64707a9965ccd153b3b7"
+      },
+      "x-desc": {
+        "count": 1,
+        "valueShapes": {
+          "string": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "568f314c44b790b3836b7049e8f76c1acb6e2a3cbbe6e71064ca366a429cfe4f"
+      },
+      "x-displayName": {
+        "count": 13,
+        "valueShapes": {
+          "string": 13
+        },
+        "distinctValueCount": 13,
+        "valuesSha256": "072e8a17b9682a4099010852f6a1bed147f482a13320acac7cb77951110796d3"
+      },
+      "x-docs-overrides": {
+        "count": 31,
+        "valueShapes": {
+          "object": 31
+        },
+        "distinctValueCount": 29,
+        "valuesSha256": "5f3d9c77e17439f02c63dfa6f516c3e7c4e9a91f59486d4656179ea866e33e8d"
+      },
+      "x-docs-schema-whitelist": {
+        "count": 1,
+        "valueShapes": {
+          "array": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "56a7c0176fcbfe6aea68d1852946e2e3a50823e322e39a8ddbd4890e3ffbd49e"
       },
       "x-ds-allow-editing": {
         "count": 1,
-        "distinctValueCount": 1,
         "valueShapes": {
           "boolean": 1
         },
+        "distinctValueCount": 1,
         "valuesSha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
       },
       "x-ds-api-status": {
         "count": 20,
-        "distinctValueCount": 1,
         "valueShapes": {
           "string": 20
         },
+        "distinctValueCount": 1,
         "valuesSha256": "aca89214f1220d4eb23801b3f99abf16be00cd91cfcf5ca4f9ea84cd201ea9d8"
       },
       "x-ds-categories": {
         "count": 1,
-        "distinctValueCount": 1,
         "valueShapes": {
           "array": 1
         },
+        "distinctValueCount": 1,
         "valuesSha256": "343bf01252e3f56c9351a51cb67ca89444cfdf71cc253d8700ad7c08aacc8afa"
       },
       "x-ds-category": {
         "count": 91,
-        "distinctValueCount": 18,
         "valueShapes": {
           "string": 91
         },
+        "distinctValueCount": 18,
         "valuesSha256": "06ec8005d53d3ebc0567c0eacd4b6e333c60a90e5b11a00655fa70c723f0446b"
       },
       "x-ds-definition-name": {
         "count": 563,
-        "distinctValueCount": 474,
         "valueShapes": {
           "string": 563
         },
+        "distinctValueCount": 474,
         "valuesSha256": "a5a33b82c5ef6c9ab98aa9bbb78d8341c129ddba1db92318d6004c0a7421f112"
       },
       "x-ds-examples": {
         "count": 7,
-        "distinctValueCount": 7,
         "valueShapes": {
           "array": 7
         },
+        "distinctValueCount": 7,
         "valuesSha256": "532667f63b32b1ce5115dda153fe0006e16a90878485988e4c2e358a78ca667e"
       },
       "x-ds-in-sdk": {
         "count": 393,
-        "distinctValueCount": 1,
         "valueShapes": {
           "boolean": 393
         },
+        "distinctValueCount": 1,
         "valuesSha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
       },
       "x-ds-method": {
         "count": 393,
-        "distinctValueCount": 161,
         "valueShapes": {
           "string": 393
         },
+        "distinctValueCount": 161,
         "valuesSha256": "dd3b3546c6b84f47c2f9d58d44bdbc55232837277270d0b824be8df404348c78"
       },
       "x-ds-methodname": {
         "count": 393,
-        "distinctValueCount": 331,
         "valueShapes": {
           "string": 393
         },
+        "distinctValueCount": 331,
         "valuesSha256": "08e836ec709f586a709faa49568462bb96571d6fd64b3fa6f71dcf68bb8e6027"
       },
       "x-ds-order": {
         "count": 89,
-        "distinctValueCount": 33,
         "valueShapes": {
           "string": 89
         },
+        "distinctValueCount": 33,
         "valuesSha256": "9e85cb4d028b11458246cb89a240f8db108e0fff7f00f3121fc01cd274f7a2a5"
       },
       "x-ds-service": {
         "count": 393,
-        "distinctValueCount": 18,
         "valueShapes": {
           "string": 393
         },
+        "distinctValueCount": 18,
         "valuesSha256": "7e3d0f5e28b5ebea47943d063e3f6c359d447f857c492bc323597771e2bf2db8"
       },
       "x-enum-elements": {
         "count": 140,
-        "distinctValueCount": 138,
         "valueShapes": {
           "array": 140
         },
+        "distinctValueCount": 138,
         "valuesSha256": "88434f30fe6082ec1e085de2524297c37cac700784ee7862b7cd3bfb6adfda16"
+      },
+      "x-env-variable": {
+        "count": 39,
+        "valueShapes": {
+          "boolean": 4,
+          "string": 35
+        },
+        "distinctValueCount": 29,
+        "valuesSha256": "5f790657ffb3bcc7f0403051ca23c9d9e9504e139f4964c2b08ef37fe0f9723a"
+      },
+      "x-errors": {
+        "count": 1,
+        "valueShapes": {
+          "array": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "8ba0494b9ea645f6a61cbf0cf2cd3ba364b314a65cb1a35e23dba47b7cd7908b"
       },
       "x-example_type": {
         "count": 1,
-        "distinctValueCount": 1,
         "valueShapes": {
           "string": 1
         },
+        "distinctValueCount": 1,
         "valuesSha256": "042f3027da92ca82bce617aa5a914211a892c7e11dc9a9bbeff281c79497226c"
+      },
+      "x-field": {
+        "count": 1,
+        "valueShapes": {
+          "string": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "0272d1c789bd3d816952bd0f7d2f047cd69a6829fa7fa5eb3c2978603644d567"
       },
       "x-field-extra-annotation": {
         "count": 11,
-        "distinctValueCount": 4,
         "valueShapes": {
           "string": 11
         },
+        "distinctValueCount": 4,
         "valuesSha256": "f0b7dc53ec451f8f588e18c4ed5205293cf6d8d5b87b0b9b15405d28e9fb1d1c"
       },
       "x-getter-extra-annotation": {
         "count": 11,
-        "distinctValueCount": 4,
         "valueShapes": {
           "string": 11
         },
+        "distinctValueCount": 4,
         "valuesSha256": "f0b7dc53ec451f8f588e18c4ed5205293cf6d8d5b87b0b9b15405d28e9fb1d1c"
+      },
+      "x-go-name": {
+        "count": 4,
+        "valueShapes": {
+          "string": 4
+        },
+        "distinctValueCount": 4,
+        "valuesSha256": "20d5bf72f3820e455cac303a04acecd1a167c2ed2f3e33b46f7a2276c69feb16"
+      },
+      "x-insert-after": {
+        "count": 3,
+        "valueShapes": {
+          "boolean": 2,
+          "string": 1
+        },
+        "distinctValueCount": 2,
+        "valuesSha256": "a4c0ad8817f458f3ac9b672e29c13415294902b304765a7a9cff912951687da9"
       },
       "x-is-beta": {
         "count": 261,
-        "distinctValueCount": 1,
         "valueShapes": {
           "boolean": 261
         },
+        "distinctValueCount": 1,
         "valuesSha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
       },
       "x-is-deprecated": {
         "count": 191,
-        "distinctValueCount": 1,
         "valueShapes": {
           "boolean": 191
         },
+        "distinctValueCount": 1,
         "valuesSha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
       },
       "x-logo": {
-        "count": 6,
-        "distinctValueCount": 6,
+        "count": 10,
         "valueShapes": {
-          "object": 6
+          "object": 10
         },
-        "valuesSha256": "5b56659f1154eabf6f0566fb6d6d59de0347c2e6280cf7b2bb9b3c9e5a4d47f4"
+        "distinctValueCount": 10,
+        "valuesSha256": "5820a805f960b71fa8ce38ed52d4e9f10a02aa5452e4dc095a5597e1ee4628b9"
       },
       "x-ms-summary": {
         "count": 565,
-        "distinctValueCount": 342,
         "valueShapes": {
           "string": 565
         },
+        "distinctValueCount": 342,
         "valuesSha256": "19429f9bfeaafb6a1d293776ddad3e1d633e50fb24331f4899f3cd584130d02d"
       },
       "x-oauthpermissions": {
         "count": 197,
-        "distinctValueCount": 45,
         "valueShapes": {
           "array": 197
         },
+        "distinctValueCount": 45,
         "valuesSha256": "4468478bd8cb2ab55f8fd1f750cf6990ef61e77a98cd9beab1808226c3a2aafe"
       },
-      "x-origin": {
-        "count": 6,
-        "distinctValueCount": 6,
-        "valueShapes": {
-          "array": 6
-        },
-        "valuesSha256": "a523048601912018390b9ea541a25d63e11e83ceaada9a8629f2678b0eadc752"
-      },
-      "x-providerName": {
-        "count": 6,
-        "distinctValueCount": 6,
-        "valueShapes": {
-          "string": 6
-        },
-        "valuesSha256": "ddf41cb3190de01673cc5babca945d7cf7990d74f56005783107d5a9d1f6f156"
-      },
-      "x-read-only": {
-        "count": 250,
-        "distinctValueCount": 1,
-        "valueShapes": {
-          "boolean": 250
-        },
-        "valuesSha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
-      },
-      "x-release-status": {
-        "count": 1074,
-        "distinctValueCount": 3,
-        "valueShapes": {
-          "string": 1074
-        },
-        "valuesSha256": "f6715e016f656d7e27c95c72abcbe85a9c01f49a9ece330658ca6a5596a951b5"
-      },
-      "x-serviceName": {
+      "x-operator": {
         "count": 1,
-        "distinctValueCount": 1,
         "valueShapes": {
           "string": 1
         },
-        "valuesSha256": "208cd60ef450e63331d859ad19aae17c24f99044d96accbf326ec08db102fb06"
+        "distinctValueCount": 1,
+        "valuesSha256": "25a5461ddfa0b831a8cf82ae6d255e6e88cb02134550251e4d372447323631ad"
+      },
+      "x-origin": {
+        "count": 10,
+        "valueShapes": {
+          "array": 10
+        },
+        "distinctValueCount": 10,
+        "valuesSha256": "bedea2ab1920843a83a0600c4afa727334c2093c70a3dbf17d942b3848773039"
+      },
+      "x-patternProperties": {
+        "count": 1,
+        "valueShapes": {
+          "object": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "c903408894c0e1e89de9895102337babb973cde6b1df160fabb4e0da71b306f0"
+      },
+      "x-providerName": {
+        "count": 10,
+        "valueShapes": {
+          "string": 10
+        },
+        "distinctValueCount": 10,
+        "valuesSha256": "e9532b4980cdaf4b214b2bead4a0480f244269155deb58eb2d8cd95e23b2bd16"
+      },
+      "x-public-description": {
+        "count": 1,
+        "valueShapes": {
+          "string": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "c2086c5bbcd675292e88aa867c67e609a752b8f5cb8d251c9864825381b28dbb"
+      },
+      "x-read-only": {
+        "count": 250,
+        "valueShapes": {
+          "boolean": 250
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+      },
+      "x-readme": {
+        "count": 1,
+        "valueShapes": {
+          "object": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "a85d671bfa2b1bae76577d59eeab645f08bb552ee901623da03006b1011d0424"
+      },
+      "x-release-status": {
+        "count": 1074,
+        "valueShapes": {
+          "string": 1074
+        },
+        "distinctValueCount": 3,
+        "valuesSha256": "f6715e016f656d7e27c95c72abcbe85a9c01f49a9ece330658ca6a5596a951b5"
+      },
+      "x-serviceName": {
+        "count": 3,
+        "valueShapes": {
+          "string": 3
+        },
+        "distinctValueCount": 3,
+        "valuesSha256": "d0f6a0e25df2cf974f3736a440bb948a9e7af48ab19582465034829214f4ebcd"
+      },
+      "x-spotify-docs-category": {
+        "count": 68,
+        "valueShapes": {
+          "string": 68
+        },
+        "distinctValueCount": 16,
+        "valuesSha256": "a045588065e9ba803c2a0771a8535300699f6da77ddcbf2a0235e3df1d39fc5f"
+      },
+      "x-spotify-docs-console-url": {
+        "count": 89,
+        "valueShapes": {
+          "string": 89
+        },
+        "distinctValueCount": 89,
+        "valuesSha256": "6f5fb4b2206e89a8bb7db9500dee191a2fa24c26055c44fb999d7069ade28a41"
+      },
+      "x-spotify-docs-display-name": {
+        "count": 68,
+        "valueShapes": {
+          "string": 68
+        },
+        "distinctValueCount": 68,
+        "valuesSha256": "1b52c79a02b1bfa30953de79a62d9af8f6494b2486da1dd10702b17cb429f96e"
+      },
+      "x-spotify-docs-endpoint-name": {
+        "count": 89,
+        "valueShapes": {
+          "string": 89
+        },
+        "distinctValueCount": 89,
+        "valuesSha256": "1b48f6b45e390f7769bb060ecc5f0248ba4214493bafbcc9bd6ee50d4c7bb0df"
+      },
+      "x-spotify-docs-type": {
+        "count": 106,
+        "valueShapes": {
+          "string": 106
+        },
+        "distinctValueCount": 73,
+        "valuesSha256": "5abe7675db6916496f565d556e022e6d5b09a5c44411d4c37d011388156f04b0"
       },
       "x-sq-sdk-sample-code": {
         "count": 73,
-        "distinctValueCount": 73,
         "valueShapes": {
           "object": 73
         },
+        "distinctValueCount": 73,
         "valuesSha256": "c3c376e2ee383ae6176ac3e325b770bfbb7a89ffb75e6d27d215bd25bf2282d3"
       },
       "x-sq-version": {
         "count": 200,
-        "distinctValueCount": 1,
         "valueShapes": {
           "string": 200
         },
+        "distinctValueCount": 1,
         "valuesSha256": "8dbd285126100f6d65dc1a6f11c62162327042cc6f4c45497362918313e43b97"
       },
       "x-twilio": {
         "count": 190,
-        "distinctValueCount": 106,
         "valueShapes": {
           "object": 190
         },
+        "distinctValueCount": 106,
         "valuesSha256": "5fdbe565ec688fcee851c1cd88b1265cc148b6a89e97e5eab91f89d086ac24a4"
       },
       "x-twitter": {
         "count": 1,
-        "distinctValueCount": 1,
         "valueShapes": {
           "string": 1
         },
+        "distinctValueCount": 1,
         "valuesSha256": "3bb06f30aa9623005ebc400335faba26e187cc37bf5c3b6abb36aa38b4c5a793"
       },
       "x-unofficialSpec": {
-        "count": 1,
-        "distinctValueCount": 1,
+        "count": 2,
         "valueShapes": {
-          "boolean": 1
+          "boolean": 2
         },
+        "distinctValueCount": 1,
         "valuesSha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+      },
+      "x-value": {
+        "count": 1,
+        "valueShapes": {
+          "string": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "edee3138647c92de0f77f569c399249c6faf9b22047b092853860312dc2e66f7"
       },
       "x-visibility": {
         "count": 12,
-        "distinctValueCount": 1,
         "valueShapes": {
           "string": 12
         },
+        "distinctValueCount": 1,
         "valuesSha256": "090a87bd5320b88724d5c84478153510c79331dcaf33cfe13e240cbe3ff13728"
       }
     },
-    "normalizedComponentTotals": {
-      "parameters": 20,
-      "requestBodies": 58,
-      "responses": 3,
-      "schemas": 1600,
-      "securitySchemes": 10
-    },
-    "sourceComponentTotals": {
-      "components.parameters": 20,
-      "components.requestBodies": 58,
-      "components.responses": 3,
-      "components.schemas": 1594,
-      "components.securitySchemes": 8,
-      "definitions": 6,
-      "securityDefinitions": 2
-    },
-    "standardKeywordCounts": {
-      "$ref": 6665,
-      "additionalProperties": 21,
-      "authorizationCode": 2,
-      "authorizationUrl": 5,
-      "basePath": 1,
-      "collectionFormat": 2,
-      "components": 6,
-      "consumes": 9,
-      "contact": 8,
-      "content": 1469,
-      "default": 12,
-      "definitions": 1,
-      "delete": 128,
-      "deprecated": 394,
-      "description": 17669,
-      "email": 5,
-      "enum": 347,
-      "example": 1826,
-      "examples": 317,
-      "explode": 2,
-      "externalDocs": 9,
-      "flow": 1,
-      "flows": 4,
-      "format": 999,
-      "get": 395,
-      "headers": 182,
-      "host": 1,
-      "implicit": 2,
-      "in": 2331,
-      "info": 9,
-      "items": 1395,
-      "license": 6,
-      "maxLength": 980,
-      "maximum": 88,
-      "minLength": 786,
-      "minimum": 156,
-      "name": 2553,
-      "nullable": 1055,
-      "openapi": 8,
-      "operationId": 875,
-      "parameters": 1043,
-      "patch": 5,
-      "paths": 9,
-      "pattern": 618,
-      "post": 255,
-      "produces": 20,
-      "properties": 1719,
-      "put": 121,
-      "readOnly": 26,
-      "requestBodies": 3,
-      "requestBody": 383,
-      "required": 2139,
-      "responses": 905,
-      "schema": 4897,
-      "schemas": 6,
-      "scheme": 1,
-      "schemes": 1,
-      "scopes": 5,
-      "security": 438,
-      "securityDefinitions": 1,
-      "securitySchemes": 5,
-      "servers": 128,
-      "summary": 861,
-      "swagger": 1,
-      "tags": 882,
-      "termsOfService": 6,
-      "title": 132,
-      "tokenUrl": 2,
-      "type": 17357,
-      "url": 148,
-      "version": 9,
-      "wrapped": 4,
-      "xml": 18
-    },
     "unknownKeywords": []
   },
-  "reviewedDispositionSha256": "ced90ab8cb410019114b03b93b4f8d696d73d0a37c9529ed92d579a4e518ca46",
+  "reviewedDispositionSha256": "d39b84d26f40d709e80fb18d5396a5897fe9d515106354935bba43de542ec883",
   "vendorExtensionDispositions": {
+    "x-Description": {
+      "disposition": "map",
+      "evidence": "The SendGrid field is a case-mangled standard schema description and maps to description without changing its text."
+    },
+    "x-and_or": {
+      "disposition": "exclude",
+      "evidence": "The SendGrid sample-generator value duplicates data already carried by the containing standard example."
+    },
     "x-apiClientRegistration": {
       "disposition": "exclude",
       "evidence": "The URL points developers to an external client-registration UI; it does not alter the represented HTTP or schema contract."
     },
     "x-apisguru-categories": {
       "disposition": "exclude",
-      "evidence": "Three catalog category arrays classify providers; they do not affect HTTP, schema, auth, or generated client behavior."
+      "evidence": "Ten catalog category arrays classify providers; they do not affect HTTP, schema, auth, or generated client behavior."
     },
     "x-class-extra-annotation": {
       "disposition": "exclude",
@@ -618,9 +961,33 @@
       "disposition": "exclude",
       "evidence": "Service labels group DocuSign SDK/documentation output but do not alter operation identity, tags, or HTTP behavior."
     },
+    "x-desc": {
+      "disposition": "map",
+      "evidence": "The SendGrid field is an abbreviated standard schema description and maps to description without changing its text."
+    },
+    "x-displayName": {
+      "disposition": "exclude",
+      "evidence": "Docker tag display labels are documentation-navigation metadata; standard tag names and descriptions own the contract surface."
+    },
+    "x-docs-overrides": {
+      "disposition": "preserve",
+      "evidence": "Asana subtype overrides carry concrete resource_type example semantics that differ from the inherited example."
+    },
+    "x-docs-schema-whitelist": {
+      "disposition": "exclude",
+      "evidence": "The Asana schema-name list controls documentation publication and does not alter any schema or wire behavior."
+    },
     "x-enum-elements": {
       "disposition": "preserve",
       "evidence": "The 140 arrays associate every wire enum value with a stable name and description used by generated clients."
+    },
+    "x-env-variable": {
+      "disposition": "exclude",
+      "evidence": "Asana environment-substitution hints configure interactive documentation rather than parameter names, values, or validation."
+    },
+    "x-errors": {
+      "disposition": "preserve",
+      "evidence": "The SendGrid response extension contains concrete client-facing error payload examples not represented by another standard field."
     },
     "x-example_type": {
       "disposition": "exclude",
@@ -630,9 +997,21 @@
       "disposition": "exclude",
       "evidence": "Eleven Twilio Java field annotations are language-specific implementation metadata."
     },
+    "x-field": {
+      "disposition": "exclude",
+      "evidence": "The SendGrid sample-generator value duplicates data already carried by the containing standard example."
+    },
     "x-getter-extra-annotation": {
       "disposition": "exclude",
       "evidence": "Eleven Twilio Java getter annotations mirror field annotations and are not wire semantics."
+    },
+    "x-go-name": {
+      "disposition": "exclude",
+      "evidence": "Docker Go symbol names are language-specific generator hints; standard property and component names own wire identity."
+    },
+    "x-insert-after": {
+      "disposition": "exclude",
+      "evidence": "Asana insertion hints control documentation/property presentation order and do not alter JSON shape."
     },
     "x-is-beta": {
       "disposition": "preserve",
@@ -644,7 +1023,7 @@
     },
     "x-logo": {
       "disposition": "exclude",
-      "evidence": "Three provider logo URLs are catalog presentation metadata."
+      "evidence": "Ten provider logo URLs are catalog presentation metadata."
     },
     "x-ms-summary": {
       "disposition": "map",
@@ -654,13 +1033,25 @@
       "disposition": "map",
       "evidence": "The 197 operation arrays contain OAuth permission names and map to OAuth2 security-requirement scopes."
     },
+    "x-operator": {
+      "disposition": "exclude",
+      "evidence": "The SendGrid sample-generator value duplicates data already carried by the containing standard example."
+    },
     "x-origin": {
       "disposition": "exclude",
-      "evidence": "Three acquisition records identify upstream files and versions; manifest hashes own artifact provenance."
+      "evidence": "Ten acquisition records identify upstream files and versions; manifest hashes own artifact provenance."
     },
     "x-providerName": {
       "disposition": "exclude",
-      "evidence": "Three API catalog provider labels do not affect servers, host projection, or wire behavior."
+      "evidence": "Ten API catalog provider labels do not affect servers, host projection, or wire behavior."
+    },
+    "x-patternProperties": {
+      "disposition": "preserve",
+      "evidence": "The SendGrid extension carries dynamic property-schema semantics that materially affect accepted response values."
+    },
+    "x-public-description": {
+      "disposition": "map",
+      "evidence": "The Asana public description is byte-identical to standard info.description and maps to that field."
     },
     "x-read-only": {
       "disposition": "map",
@@ -669,6 +1060,10 @@
     "x-release-status": {
       "disposition": "preserve",
       "evidence": "The 1,074 PUBLIC/BETA/DEPRECATED values carry lifecycle state beyond the standard deprecated boolean."
+    },
+    "x-readme": {
+      "disposition": "exclude",
+      "evidence": "The Asana ReadMe proxy configuration controls documentation hosting and not the represented API contract."
     },
     "x-serviceName": {
       "disposition": "exclude",
@@ -681,6 +1076,26 @@
     "x-sq-version": {
       "disposition": "preserve",
       "evidence": "All 200 operations pin Square API version 2021-08-18, material to versioned request behavior and generated clients."
+    },
+    "x-spotify-docs-category": {
+      "disposition": "exclude",
+      "evidence": "Spotify documentation categories group path navigation; standard operation tags own client grouping."
+    },
+    "x-spotify-docs-console-url": {
+      "disposition": "exclude",
+      "evidence": "Spotify console URLs link to an external documentation tool and do not alter requests or responses."
+    },
+    "x-spotify-docs-display-name": {
+      "disposition": "exclude",
+      "evidence": "Spotify path display labels are documentation presentation metadata."
+    },
+    "x-spotify-docs-endpoint-name": {
+      "disposition": "exclude",
+      "evidence": "Spotify endpoint labels duplicate standard operation identity and summary concerns for documentation."
+    },
+    "x-spotify-docs-type": {
+      "disposition": "exclude",
+      "evidence": "Spotify documentation type hints duplicate standard type, format, reference, and union schemas."
     },
     "x-twilio": {
       "disposition": "preserve",
@@ -697,6 +1112,10 @@
     "x-visibility": {
       "disposition": "preserve",
       "evidence": "Twelve SDK_ONLY values explicitly alter whether operations and schemas are exposed in a generated client."
+    },
+    "x-value": {
+      "disposition": "exclude",
+      "evidence": "The SendGrid sample-generator value duplicates data already carried by the containing standard example."
     }
   }
 }

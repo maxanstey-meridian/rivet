@@ -153,7 +153,6 @@ public sealed class RequestBodyComponentRoundTripTests
             var first = RunPass(workDirectory.FullName, sourcePath, "first", out var generated);
             Assert.Contains("RivetDocumentRequestBody(0, \"Used/Body\"", generated);
             Assert.Contains("RivetDocumentRequestBody(2, \"Unused~Body\"", generated);
-            Assert.Contains(", \"Used/Body\")]", generated);
             AssertRequestBodyComponents(first);
 
             var secondPath = Path.Combine(workDirectory.FullName, "first.json");
@@ -226,7 +225,8 @@ public sealed class RequestBodyComponentRoundTripTests
                 "application/json"
             ]!["schema"]!;
             Assert.Equal("object", firstSchema["type"]!.GetValue<string>());
-            Assert.Empty(firstSchema["additionalProperties"]!.AsObject());
+            Assert.Empty(firstSchema["properties"]!.AsObject());
+            Assert.Null(firstSchema["additionalProperties"]);
             Assert.Null(firstSchema["x-rivet-csharp-type"]);
 
             var secondPath = Path.Combine(workDirectory.FullName, "first.json");

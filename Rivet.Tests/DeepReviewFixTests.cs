@@ -633,7 +633,7 @@ public sealed class DeepReviewFixTests
         );
 
         var result = CompilationHelper.Import(spec);
-        var content = result.Files.First(f => f.Content.Contains("FlexDto")).Content;
+        var content = result.Files.First(f => f.FileName.EndsWith("FlexDto.cs")).Content;
 
         Assert.Contains("System.Text.Json.Nodes.JsonNode Required", content);
         Assert.Contains("System.Text.Json.Nodes.JsonNode? Optional", content);

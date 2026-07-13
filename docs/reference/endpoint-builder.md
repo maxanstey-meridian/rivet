@@ -1,8 +1,8 @@
 # Route Definition API
 
 Contract endpoints are built with the `Define` factory and a fluent builder. Roslyn
-reads the chain at generation time; the same object provides type-safe `Invoke` at
-runtime.
+reads the chain at generation time; the same object binds transport input and
+constructs contract-owned responses at runtime.
 
 ## Factories
 
@@ -27,8 +27,8 @@ All return the definition for chaining.
 | `.Status(code)` | Override the success status. May only be called once. |
 | `.Returns<T>(status[, description])` | Declare an additional typed response (errors, alternates). Each status may be declared once. |
 | `.Returns(status[, description])` | Same, without a payload type. |
-| `.WithResponseHeader(status, name[, description][, required:])` | Declare a response header on a status (`responses[status].headers`). String-typed; `required` is an explicit opt-in promise. **Spec-only** — Rivet never sets or validates it; emitting the header is handler code. Each (status, name) pair may be declared once. |
-| `.WithResponseHeader(name[, description][, required:])` | Same, targeting the endpoint's success status. |
+| `.WithResponseHeader<T>(status, name[, description][, required:])` | Declare a typed response header on a status (`responses[status].headers`). The non-generic overload declares a string header; `required` is an explicit opt-in promise. **Spec-only** — Rivet never sets or validates it; emitting the header is handler code. Each (status, name) pair may be declared once. |
+| `.WithResponseHeader<T>(name[, description][, required:])` | Same, targeting the endpoint's success status; omit `<T>` for a string header. |
 | `.Secure(scheme)` | Reference a security scheme by name (define it with `--security`). |
 | `.Anonymous()` | No auth required (`security: []`). |
 | `.QueryAuth(name = "token")` | Auth token as a required query parameter — for media players that cannot set headers. Emits `x-rivet-query-auth`. |
@@ -40,24 +40,29 @@ All return the definition for chaining.
 | `.AcceptsContentType(mediaType)` | Declared media type for a non-JSON request body (e.g. `"text/plain"` for a `string` body). The body SCHEMA is unchanged — only the content-type key. **Spec-only.** Mutually exclusive with `.FormEncoded()` / `.AcceptsBinary()`. |
 | `.ProducesContentType(mediaType)` | Declared media type for a non-JSON success response (e.g. `"text/html"`). Schema unchanged; error responses stay `application/json`. **Spec-only.** Mutually exclusive with `.ProducesFile()`. |
 | `.RequestExampleJson(json, ...)` / `.ResponseExampleJson(status, json, ...)` | Attach examples. **Runtime no-ops** — read by Roslyn only. The `...Ref` variants reference component examples. |
-| `.SkipValidation()` | Disable typed-result validation for framework results without a status code (`ChallengeHttpResult`, `SignOutHttpResult`). |
 
-## Invoke
+## Runtime responses
 
-- `RouteDefinition<TInput, TOutput>.Invoke(input, handler)` →
-  `RivetResult<TOutput>` with the declared success status (no runtime checks —
-  compile-time types only).
-- Typed-results overloads (`Invoke<T1..T6>` returning ASP.NET `Results<...>`)
-  validate at request time that the returned status, payload runtime type, body
-  presence, and content type match the declaration, and throw
-  `RivetContractViolationException` otherwise (map it to the structured envelope
-  with `RivetContractViolationHandler`). See
-  [Runtime Validation](/guides/runtime-validation) for the exact scope.
-- `FileRouteDefinition.Invoke<TResult>(handler)` (and the `<TInput>` variant)
-  validates that the success branch carries file content matching the declared
-  content type and that error statuses are declared.
+- Input-bearing definitions use `.Bind(input)` first. It accepts the declared
+  `TInput` and returns a bound endpoint retaining the declared output contract.
+  Definitions without input use the terminal methods directly.
+- `.Success(payload)` constructs the declared success response; void definitions
+  use `.Success()`. The payload must match the declared `TOutput`.
+- `.Error(status, payload)` selects a typed response declared with `.Returns<T>()`;
+  `.Error(status)` selects a declared bodyless response. Undeclared statuses and
+  payload mismatches throw `RivetContractViolationException`.
+- `.File(content, ...)` constructs a declared binary response from `byte[]`,
+  `Stream`, or an absolute physical path. It carries the contract content type and
+  optional download name, range processing, last-modified value, and entity tag.
+- All terminals return `RivetResult`. Use the first-party `.ToActionResult()` for
+  MVC or `.ToResult()` for minimal APIs at the host boundary. Application execution
+  remains ordinary C# outside the contract response API.
+
+See [Runtime Validation](/guides/runtime-validation) for the exact enforcement scope
+and `RivetContractViolationHandler` for the structured failure envelope.
 
 ## Immutability
 
-Definitions are published on first `Invoke`; after that every builder mutator
-throws. Configure the definition fully in its `static readonly` initializer.
+Definitions are published on the first `Bind`, `Success`, `Error`, or `File`; after
+that every builder mutator throws. Configure the definition fully in its
+`static readonly` initializer.

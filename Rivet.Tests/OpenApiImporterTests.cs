@@ -4907,7 +4907,7 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains(".QueryAuth(\"key\")", content);
         // Key param should not appear as an input field
-        Assert.DoesNotContain("Key", content.Split("Define.File")[0]);
+        Assert.DoesNotContain("string Key", content.Split("Define.File")[0]);
     }
 
     [Fact]
@@ -6010,11 +6010,8 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Reserved_Header_Params_Are_Dropped_Loudly() // P2 wave 5
+    public void Reserved_Authorization_And_Accept_Headers_Are_Diagnosed_Without_Markers()
     {
-        // Accept/Content-Type/Authorization are not legal OpenAPI header parameters —
-        // the emitter could never re-emit them (RIV2009), so the importer drops them
-        // with a marker instead of writing an unkeepable [RivetHeader] promise.
         var spec = CompilationHelper.BuildSpec(
             paths: """
             "/api/items": {
@@ -6023,9 +6020,15 @@ public sealed class OpenApiImporterTests
                     "tags": ["Items"],
                     "parameters": [
                         { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } },
+                        { "name": "Accept", "in": "header", "schema": { "type": "string", "enum": ["application/json"] } },
                         { "name": "X-Fine", "in": "header", "schema": { "type": "string" } }
                     ],
-                    "responses": { "204": { "description": "No Content" } }
+                    "responses": {
+                        "200": {
+                            "description": "Items",
+                            "content": { "application/json": { "schema": { "type": "object" } } }
+                        }
+                    }
                 }
             }
             """
@@ -6035,12 +6038,19 @@ public sealed class OpenApiImporterTests
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
         Assert.Contains(
-            "[rivet:unsupported param name=Authorization in=header reason=reserved-header-dropped]",
-            contract
+            "RIV3022: Reserved header parameter dropped: GET /api/items declares 'Authorization'; authentication is represented by security and components.securitySchemes.",
+            result.Warnings
         );
+        Assert.Contains(
+            "RIV3023: Reserved header parameter dropped: GET /api/items declares 'Accept'; response media types are represented by responses[*].content.",
+            result.Warnings
+        );
+        Assert.DoesNotContain("[rivet:unsupported param name=Authorization", contract);
+        Assert.DoesNotContain("[rivet:unsupported param name=Accept", contract);
         var inputRecord = CompilationHelper.FindFile(result, "ListInput.cs");
         Assert.Contains("[property: RivetHeader(\"X-Fine\")]", inputRecord);
         Assert.DoesNotContain("Authorization", inputRecord);
+        Assert.DoesNotContain("Accept", inputRecord);
     }
 
     [Fact]

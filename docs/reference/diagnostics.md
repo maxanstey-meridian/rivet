@@ -11,7 +11,7 @@ error RIV2002: <message>
 IDs are stable across releases — grep, baseline, or suppress by ID, never by
 message text. Most diagnostics are **warnings** and allow processing to continue.
 Diagnostics marked **Error** are fatal and exit `1`; currently this applies to
-`RIV1021`, `RIV1022`, `RIV2002`, and `RIV2011`. Coverage warnings also exit `1` when `--check` is used without
+`RIV1021`, `RIV1022`, `RIV1023`, `RIV2002`, and `RIV2011`. Coverage warnings also exit `1` when `--check` is used without
 `--output`; other warnings do not change the exit code.
 
 The ID ranges follow the pipeline stages:
@@ -55,6 +55,7 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1020` | Warning | The input type on a bodyless method (GET/DELETE/`.AcceptsBinary()`) is a dictionary, collection or scalar — it has no property surface to lower to query params, so the input is dropped (route tokens still emit as untyped path params). | Model the query string as a record with one property per param, or remove the input type. |
 | `RIV1021` | Error | An authored contract declares the same response status more than once, including a `.Returns(...)` collision with the success status. Such a contract fails at runtime and generation therefore aborts. | Declare a `[RivetUnion]` type if the status genuinely returns multiple shapes and return it once; otherwise remove the duplicate (often one `.Returns(...)` is mistyped). |
 | `RIV1022` | Error | `[RivetRequestBody]` names a body type that is not represented independently by the endpoint input type. | Use the importer-generated marker and composite input, or remove the invalid hand-authored override. |
+| `RIV1023` | Error | Imported generated C# changed while raw schema provenance still targets its original typed shape. | Re-import the OpenAPI document, or remove/update the stale raw schema provenance before emitting. |
 
 ### Retired IDs
 
@@ -100,7 +101,7 @@ prefix. The test-suite ratchet categories these map to are listed in the
 |---|---|---|---|
 | `RIV3001` | Warning | Alias schema is part of a `$ref` cycle — replaced with an empty schema; consumers resolve to an untyped object. | Break the cycle in the source spec, or type the affected members after scaffolding. |
 | `RIV3002` | Warning | Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented. | Review the scaffold's `.Secure(...)` calls; multi-scheme semantics are out of scope. |
-| `RIV3003` | Warning | HEAD/OPTIONS/TRACE operation dropped — the HTTP method has no contract representation. | No action; these methods are out of scope for the contract model. |
+| `RIV3003` | Warning | TRACE operation dropped — the HTTP method has no contract representation. | No action; TRACE is out of scope for the contract model. |
 | `RIV3004` | Warning | Named schema declares both `properties` and `additionalProperties` — imported as a record; extra members are not represented. | Pick one side in the scaffolded C# (record vs dictionary) and adjust by hand. |
 | `RIV3005` | Warning | `discriminator` with no reversible polymorphic shape (plain object without `oneOf`, or `oneOf` whose `mapping` is absent/unusable) — imported without dispatch semantics. | Model the polymorphism as a `oneOf` with a complete `discriminator.mapping` whose variants carry the tag property, or accept the non-polymorphic import. |
 | `RIV3006` | Warning | Alias schema references a missing schema — consumers fall back to `JsonElement`. | Fix the dangling `$ref` in the source spec, or type the member after scaffolding. |
@@ -115,6 +116,8 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV3015` | Warning | Named scalar component uses const, composition, heterogeneous leaves, or a non-flat enum outside bounded scalar preservation. | Replace it with one primitive leaf (optionally nullable) or a flat string/Int32 enum; the existing fallback mapping is retained. |
 | `RIV3020` | Warning | Parameter has an empty name, so the invalid parameter is dropped while the operation and its other parameters are preserved. | Give the source parameter a non-empty OpenAPI name. |
 | `RIV3021` | Warning | Imported operation declares `Content-Type` as a header parameter even though OpenAPI represents request media types through `requestBody.content`. | Remove the reserved header parameter and retain the corresponding request-body media type. |
+| `RIV3022` | Warning | Imported operation declares `Authorization` as a header parameter even though OpenAPI represents authentication through security schemes. | Remove the reserved header parameter and retain the corresponding operation or document security requirement. |
+| `RIV3023` | Warning | Imported operation declares `Accept` as a header parameter even though OpenAPI represents response media types through response content. | Remove the reserved header parameter and retain the corresponding response media type. |
 
 ## RIV4xxx — coverage (`--check`)
 

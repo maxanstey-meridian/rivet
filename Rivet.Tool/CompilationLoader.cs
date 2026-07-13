@@ -250,7 +250,11 @@ internal static class CompilationLoader
 
             var source = File.ReadAllText(path);
             syntaxTrees.Add(
-                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest))
+                CSharpSyntaxTree.ParseText(
+                    source,
+                    new CSharpParseOptions(LanguageVersion.Latest),
+                    path
+                )
             );
         }
 

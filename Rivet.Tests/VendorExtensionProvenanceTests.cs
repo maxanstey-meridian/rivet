@@ -40,6 +40,38 @@ public sealed class VendorExtensionProvenanceTests
     }
 
     [Fact]
+    public void Opaque_component_schema_owns_its_preserved_extensions()
+    {
+        var workDirectory = Directory.CreateTempSubdirectory("rivet-opaque-extension-");
+        try
+        {
+            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+            File.WriteAllText(sourcePath, OpaqueSchemaPreservationSpec);
+            var generated = Path.Combine(workDirectory.FullName, "generated");
+            Import(workDirectory.FullName, sourcePath, generated);
+
+            var documentSource = File.ReadAllText(Path.Combine(generated, "RivetDocument.cs"));
+            Assert.Contains("RivetDocumentSchema", documentSource);
+            Assert.DoesNotContain("RivetVendorExtension", documentSource);
+
+            var emitted = Emit(workDirectory.FullName, generated, "output");
+            Assert.True(
+                emitted["components"]!["schemas"]!["Payload"]!["x-is-beta"]!.GetValue<bool>()
+            );
+            Assert.Equal(
+                "standard",
+                emitted["paths"]!["/payload"]!["get"]!["responses"]!["200"]!["content"]![
+                    "application/json"
+                ]!["schema"]!["items"]!["x-twilio"]!["pii"]!["handling"]!.GetValue<string>()
+            );
+        }
+        finally
+        {
+            workDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void Reviewed_map_extensions_are_projected_to_standard_semantics()
     {
         var workDirectory = Directory.CreateTempSubdirectory("rivet-vendor-map-");
@@ -57,6 +89,149 @@ public sealed class VendorExtensionProvenanceTests
             var schema = emitted["components"]!["schemas"]!["Mapped"]!;
             Assert.True(schema["deprecated"]!.GetValue<bool>());
             Assert.True(schema["properties"]!["value"]!["readOnly"]!.GetValue<bool>());
+        }
+        finally
+        {
+            workDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Extension_names_inside_payload_values_are_opaque_data()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Opaque payload", "version": "1" },
+              "paths": {
+                "/payload": {
+                  "post": {
+                    "requestBody": {
+                      "content": {
+                        "application/json": {
+                          "example": {
+                            "x-desc": "payload value",
+                            "x-twilio": { "pii": "payload metadata" }
+                          },
+                          "schema": { "type": "object" }
+                        }
+                      }
+                    },
+                    "responses": { "204": { "description": "Done" } }
+                  }
+                }
+              }
+            }
+            """;
+        var workDirectory = Directory.CreateTempSubdirectory("rivet-vendor-payload-");
+        try
+        {
+            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+            File.WriteAllText(sourcePath, spec);
+            var generated = Path.Combine(workDirectory.FullName, "generated");
+            Import(workDirectory.FullName, sourcePath, generated);
+            var emitted = Emit(workDirectory.FullName, generated, "output");
+            var example = emitted["paths"]!["/payload"]!["post"]!["requestBody"]!["content"]![
+                "application/json"
+            ]!["example"]!;
+
+            Assert.Equal("payload value", example["x-desc"]!.GetValue<string>());
+            Assert.Equal("payload metadata", example["x-twilio"]!["pii"]!.GetValue<string>());
+            Assert.Null(example["description"]);
+        }
+        finally
+        {
+            workDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Named_Example_Object_Extensions_Are_Handled_Without_Inspecting_Their_Value()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Named example", "version": "1" },
+              "paths": {},
+              "components": {
+                "examples": {
+                  "Named": {
+                    "x-desc": "Example description",
+                    "x-twilio": { "owner": true },
+                    "value": {
+                      "x-desc": "payload value",
+                      "x-twilio": { "owner": false }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+        var workDirectory = Directory.CreateTempSubdirectory("rivet-vendor-named-example-");
+        try
+        {
+            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+            File.WriteAllText(sourcePath, spec);
+            var generated = Path.Combine(workDirectory.FullName, "generated");
+            Import(workDirectory.FullName, sourcePath, generated);
+            var emitted = Emit(workDirectory.FullName, generated, "output");
+            var example = emitted["components"]!["examples"]!["Named"]!;
+
+            Assert.Equal("Example description", example["description"]!.GetValue<string>());
+            Assert.True(example["x-twilio"]!["owner"]!.GetValue<bool>());
+            Assert.Equal("payload value", example["value"]!["x-desc"]!.GetValue<string>());
+            Assert.False(example["value"]!["x-twilio"]!["owner"]!.GetValue<bool>());
+            Assert.Null(example["value"]!["description"]);
+        }
+        finally
+        {
+            workDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Swagger_Response_Example_Maps_Are_Opaque_Payloads()
+    {
+        const string spec = """
+            {
+              "swagger": "2.0",
+              "info": { "title": "Swagger payload", "version": "1" },
+              "produces": ["application/json"],
+              "paths": {
+                "/payload": {
+                  "get": {
+                    "responses": {
+                      "200": {
+                        "description": "Payload",
+                        "schema": { "type": "object" },
+                        "examples": {
+                          "application/json": {
+                            "x-desc": "payload value",
+                            "x-twilio": { "pii": "payload metadata" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+        var workDirectory = Directory.CreateTempSubdirectory("rivet-vendor-swagger-example-");
+        try
+        {
+            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+            File.WriteAllText(sourcePath, spec);
+            var generated = Path.Combine(workDirectory.FullName, "generated");
+            Import(workDirectory.FullName, sourcePath, generated);
+            var emitted = Emit(workDirectory.FullName, generated, "output");
+            var example = emitted["paths"]!["/payload"]!["get"]!["responses"]!["200"]!["content"]![
+                "application/json"
+            ]!["example"]!;
+
+            Assert.Equal("payload value", example["x-desc"]!.GetValue<string>());
+            Assert.Equal("payload metadata", example["x-twilio"]!["pii"]!.GetValue<string>());
+            Assert.Null(example["description"]);
         }
         finally
         {
@@ -277,6 +452,10 @@ public sealed class VendorExtensionProvenanceTests
                             "type": "string",
                             "readOnly": true,
                             "x-read-only": true
+                          },
+                          "alias": {
+                            "type": "string",
+                            "x-desc": "Mapped alias"
                           }
                         }
                       }
@@ -306,6 +485,11 @@ public sealed class VendorExtensionProvenanceTests
         document["components"]!["schemas"]!["Mapped"]!["properties"]!["value"]!
             .AsObject()
             .Remove("x-read-only");
+        var alias = document["components"]!["schemas"]!["Mapped"]!["properties"]![
+            "alias"
+        ]!.AsObject();
+        alias["description"] = alias["x-desc"]!.DeepClone();
+        alias.Remove("x-desc");
     }
 
     private static DiffResult RunDiff(JsonObject original, JsonObject reemitted)
@@ -414,6 +598,51 @@ public sealed class VendorExtensionProvenanceTests
                 "properties": {
                   "value": { "type": "string", "x-read-only": true }
                 }
+              }
+            }
+          }
+        }
+        """;
+
+    private const string OpaqueSchemaPreservationSpec = """
+        {
+          "openapi": "3.1.0",
+          "info": { "title": "Opaque extension", "version": "1" },
+          "paths": {
+            "/payload": {
+              "get": {
+                "operationId": "getPayload",
+                "responses": {
+                  "200": {
+                    "description": "Payload",
+                    "content": {
+                      "application/json": {
+                        "schema": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Payload",
+                            "x-twilio": { "pii": { "handling": "standard" } }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "components": {
+            "schemas": {
+              "Payload": {
+                "type": "object",
+                "x-is-beta": true,
+                "properties": {
+                  "child": { "$ref": "#/components/schemas/Child" }
+                }
+              },
+              "Child": {
+                "type": "object",
+                "properties": { "value": { "type": "string" } }
               }
             }
           }

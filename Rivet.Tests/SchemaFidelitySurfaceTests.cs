@@ -313,7 +313,7 @@ public sealed class SchemaFidelitySurfaceTests
     }
 
     [Fact]
-    public void Non_object_additional_properties_is_classified_at_exact_source_pointer()
+    public void Non_object_additional_properties_is_a_silent_no_op()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -331,12 +331,7 @@ public sealed class SchemaFidelitySurfaceTests
 
         var imported = CompilationHelper.Import(spec, "InvalidAdditionalProperties");
 
-        Assert.Contains(
-            imported.Warnings,
-            warning =>
-                warning
-                == "RIV3010: Invalid additionalProperties at '#/components/schemas/connectOAuthConfig/properties/customParameters/additionalProperties': containing schema declares non-object type 'String'. The construct is classified as a source defect and is not reinterpreted."
-        );
+        Assert.Empty(imported.Warnings);
     }
 
     [Fact]

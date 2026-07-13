@@ -51,6 +51,7 @@ public static class Diagnostics
     public const string InputTypeNotParamLowerable = "RIV1020";
     public const string DuplicateResponseStatus = "RIV1021";
     public const string InvalidRequestBodyProvenance = "RIV1022";
+    public const string ImportedSchemaProvenanceConflict = "RIV1023";
 
     // ----- RIV2xxx: emission -----
     public const string TaggedUnionComponentCollision = "RIV2001";
@@ -83,6 +84,8 @@ public static class Diagnostics
     public const string ImportNamedScalarAlgebraUnsupported = "RIV3015";
     public const string ImportEmptyParameterNameDropped = "RIV3020";
     public const string ImportReservedContentTypeHeaderDropped = "RIV3021";
+    public const string ImportReservedAuthorizationHeaderDropped = "RIV3022";
+    public const string ImportReservedAcceptHeaderDropped = "RIV3023";
 
     // ----- RIV4xxx: coverage -----
     public const string CoverageMissingImplementation = "RIV4001";
@@ -137,6 +140,8 @@ public static class Diagnostics
             "An authored contract declares the same response status more than once; generation fails because the contract cannot execute as declared.",
         [InvalidRequestBodyProvenance] =
             "A [RivetRequestBody] type is not represented independently by the endpoint input type.",
+        [ImportedSchemaProvenanceConflict] =
+            "Imported generated C# changed while raw schema provenance still targets its original typed shape — extraction fails instead of emitting stale OpenAPI.",
         [TaggedUnionComponentCollision] =
             "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
         [UndefinedSecurityScheme] =
@@ -191,6 +196,10 @@ public static class Diagnostics
             "Parameter has an empty name — the invalid parameter is dropped while the operation and its other parameters are preserved.",
         [ImportReservedContentTypeHeaderDropped] =
             "Reserved Content-Type header parameter is dropped — request media types are represented by requestBody.content.",
+        [ImportReservedAuthorizationHeaderDropped] =
+            "Reserved Authorization header parameter is dropped — authentication is represented by security and security schemes.",
+        [ImportReservedAcceptHeaderDropped] =
+            "Reserved Accept header parameter is dropped — response media types are represented by response content.",
         [CoverageMissingImplementation] = "Contract endpoint has no matching implementation.",
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",

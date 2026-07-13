@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproduce a physical audit of the retained SIX round-trip artifacts."""
+"""Reproduce a physical audit of the retained verified-corpus round-trip artifacts."""
 
 import argparse
 import collections
@@ -272,16 +272,28 @@ def scan_generated(path, expected_operations, expected_extensions, errors):
         except (OSError, UnicodeError) as error:
             errors.append(f"cannot read generated C# {file}: {error}")
     text = "\n".join(texts)
+    extension_evidence = {
+        name: text.count(name)
+        for name, expected in expected_extensions.items()
+        if expected or name in text
+    }
     evidence = {
         "files": len(files),
         "bytes": sum(len(item.encode("utf-8")) for item in texts),
         "operationProvenance": text.count("[RivetOperationProvenance("),
-        "vendorExtensions": text.count("[assembly: RivetVendorExtension("),
+        "vendorExtensions": sum(extension_evidence.values()),
+        "vendorExtensionEvidence": extension_evidence,
     }
     if not files:
         errors.append(f"{path}: no generated C# files")
     check_equal(errors, f"{path.name} operation provenance", evidence["operationProvenance"], expected_operations)
-    check_equal(errors, f"{path.name} preserved extension evidence", evidence["vendorExtensions"], expected_extensions)
+    for name, expected in sorted(expected_extensions.items()):
+        check_equal(
+            errors,
+            f"{path.name} preserved extension evidence for {name}",
+            extension_evidence.get(name, 0),
+            expected,
+        )
     return evidence
 
 
@@ -438,11 +450,14 @@ def audit_corpus(corpus_id, results_dir, manifest_entry, profile_entry, profile,
                         f"{source_evidence[0]}/{source_evidence[1]}, observed "
                         f"{observed_evidence[0]}/{observed_evidence[1]}"
                     )
-    expected_extension_count = sum(len(extensions["source"].get(name, [])) for name in preserved_names)
+    expected_extensions = {
+        name: len(extensions["source"].get(name, []))
+        for name in preserved_names
+    }
 
     generated = {
-        "first": scan_generated(paths["firstGenerated"], expected_operations, expected_extension_count, errors),
-        "second": scan_generated(paths["secondGenerated"], expected_operations, expected_extension_count, errors),
+        "first": scan_generated(paths["firstGenerated"], expected_operations, expected_extensions, errors),
+        "second": scan_generated(paths["secondGenerated"], expected_operations, expected_extensions, errors),
     }
     expected_component_total = sum(expected_components.values())
     first_summary = check_summary(
@@ -513,9 +528,9 @@ def write_corpus_report(path, audit, results_dir):
         "| Stage | Path | Operations | Components | Physical evidence |",
         "|---|---|---:|---|---|",
         f"| Source | `{relative(audit['paths']['source'], results_dir)}` | {audit['operations']} | {component_text} | sha256 `{audit['sourceHash']}` |",
-        f"| Generated C# (first) | `{relative(audit['paths']['firstGenerated'], results_dir)}` | {audit['generated']['first']['operationProvenance']} provenance attributes | n/a | {audit['generated']['first']['files']} files, {audit['generated']['first']['bytes']} bytes, {audit['generated']['first']['vendorExtensions']} preserved-extension attributes |",
+        f"| Generated C# (first) | `{relative(audit['paths']['firstGenerated'], results_dir)}` | {audit['generated']['first']['operationProvenance']} provenance attributes | n/a | {audit['generated']['first']['files']} files, {audit['generated']['first']['bytes']} bytes, {audit['generated']['first']['vendorExtensions']} preserved-extension provenance occurrences |",
         f"| First OpenAPI | `{relative(audit['paths']['first'], results_dir)}` | {audit['operations']} | {component_text} | parsed JSON |",
-        f"| Generated C# (second) | `{relative(audit['paths']['secondGenerated'], results_dir)}` | {audit['generated']['second']['operationProvenance']} provenance attributes | n/a | {audit['generated']['second']['files']} files, {audit['generated']['second']['bytes']} bytes, {audit['generated']['second']['vendorExtensions']} preserved-extension attributes |",
+        f"| Generated C# (second) | `{relative(audit['paths']['secondGenerated'], results_dir)}` | {audit['generated']['second']['operationProvenance']} provenance attributes | n/a | {audit['generated']['second']['files']} files, {audit['generated']['second']['bytes']} bytes, {audit['generated']['second']['vendorExtensions']} preserved-extension provenance occurrences |",
         f"| Second OpenAPI | `{relative(audit['paths']['second'], results_dir)}` | {audit['operations']} | {component_text} | parsed JSON |",
         "",
         "## Comparator and fixed point",
@@ -548,7 +563,7 @@ def write_corpus_report(path, audit, results_dir):
 def write_aggregate_report(path, audits, profile_errors, results_dir, manifest_path, profile_path):
     passed = not profile_errors and all(audit["passed"] for audit in audits)
     lines = [
-        "# SIX round-trip physical audit",
+        "# Verified-corpus round-trip physical audit",
         "",
         f"**Result:** {'PASS' if passed else 'FAIL'} ({sum(audit['passed'] for audit in audits)}/{len(audits)} corpora)",
         "",
@@ -569,7 +584,7 @@ def write_aggregate_report(path, audits, profile_errors, results_dir, manifest_p
             "## Evidence",
             "",
             f"- Manifest: `{relative(manifest_path, results_dir)}`",
-            f"- SIX profile: `{relative(profile_path, results_dir)}`",
+            f"- Verified profile: `{relative(profile_path, results_dir)}`",
             f"- Operations: {sum(audit['operations'] for audit in audits)}.",
             f"- Normalized components: {sum(sum(audit['components'].values()) for audit in audits)}.",
             f"- Generated C# files: {sum(audit['generated']['first']['files'] for audit in audits)} first pass, {sum(audit['generated']['second']['files'] for audit in audits)} second pass.",

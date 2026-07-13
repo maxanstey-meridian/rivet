@@ -18,13 +18,20 @@ public static class CompilationHelper
     /// Compiles multiple C# source files, each as a separate syntax tree.
     /// Use when sources contain file-scoped namespace declarations.
     /// </summary>
-    public static Compilation CreateCompilationFromMultiple(string[] sources)
+    public static Compilation CreateCompilationFromMultiple(
+        string[] sources,
+        string[]? paths = null
+    )
     {
         var trees = new List<SyntaxTree>();
-        foreach (var source in sources)
+        for (var index = 0; index < sources.Length; index++)
         {
             trees.Add(
-                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest))
+                CSharpSyntaxTree.ParseText(
+                    sources[index],
+                    new CSharpParseOptions(LanguageVersion.Latest),
+                    paths?[index] ?? ""
+                )
             );
         }
 
@@ -302,7 +309,10 @@ public static class CompilationHelper
     }
 
     public static Compilation CompileImportResult(ImportResult result) =>
-        CreateCompilationFromMultiple(result.Files.Select(f => f.Content).ToArray());
+        CreateCompilationFromMultiple(
+            result.Files.Select(f => f.Content).ToArray(),
+            result.Files.Select(f => f.FileName).ToArray()
+        );
 
     public static string BuildSpec(
         string? schemas = null,

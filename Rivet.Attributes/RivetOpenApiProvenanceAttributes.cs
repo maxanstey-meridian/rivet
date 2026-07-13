@@ -121,7 +121,8 @@ public sealed class RivetDocumentRequestBodyContentAttribute(
     string? schemaRef,
     string? openApiSchemaType,
     string? format,
-    bool isFormatSpecified
+    bool isFormatSpecified,
+    string? schemaJson = null
 ) : Attribute
 {
     public int RequestBodyOrder { get; } = requestBodyOrder;
@@ -133,6 +134,7 @@ public sealed class RivetDocumentRequestBodyContentAttribute(
     public string? OpenApiSchemaType { get; } = openApiSchemaType;
     public string? Format { get; } = format;
     public bool IsFormatSpecified { get; } = isFormatSpecified;
+    public string? SchemaJson { get; } = schemaJson;
 }
 
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
@@ -174,6 +176,21 @@ public sealed class RivetDocumentResponseAttribute(int order, string name, strin
 }
 
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+public sealed class RivetDocumentSchemaAttribute(int order, string name, string json) : Attribute
+{
+    public int Order { get; } = order;
+    public string Name { get; } = name;
+    public string Json { get; } = json;
+}
+
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+public sealed class RivetImportedSourceFileAttribute(string path, string fingerprint) : Attribute
+{
+    public string Path { get; } = path;
+    public string Fingerprint { get; } = fingerprint;
+}
+
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
 public sealed class RivetVendorExtensionAttribute(
     string ownerPointer,
     string name,
@@ -195,7 +212,8 @@ public sealed class RivetOperationProvenanceAttribute(
     bool hasServerOverride = false,
     string? rivetContract = null,
     string? rivetEndpoint = null,
-    string? requestBodyComponentId = null
+    string? requestBodyComponentId = null,
+    string? schemasJson = null
 ) : Attribute
 {
     public bool OperationIdPresent { get; } = operationIdPresent;
@@ -207,6 +225,7 @@ public sealed class RivetOperationProvenanceAttribute(
     public string? RivetContract { get; } = rivetContract;
     public string? RivetEndpoint { get; } = rivetEndpoint;
     public string? RequestBodyComponentId { get; } = requestBodyComponentId;
+    public string? SchemasJson { get; } = schemasJson;
 }
 
 [AttributeUsage(AttributeTargets.Field, AllowMultiple = true)]

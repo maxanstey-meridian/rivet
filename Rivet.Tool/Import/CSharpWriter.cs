@@ -214,7 +214,7 @@ internal static class CSharpWriter
                     ? "null"
                     : $"typeof({content.CSharpTypeName})";
                 sb.AppendLine(
-                    $"[assembly: RivetDocumentRequestBodyContent({requestBodyIndex}, {contentIndex}, {StringLiteral(content.MediaType)}, {schemaType}, {content.IsBinary.ToString().ToLowerInvariant()}, {NullableStringLiteral(content.SchemaRef)}, {NullableStringLiteral(content.SchemaType)}, {NullableStringLiteral(content.Format)}, {content.IsFormatSpecified.ToString().ToLowerInvariant()})]"
+                    $"[assembly: RivetDocumentRequestBodyContent({requestBodyIndex}, {contentIndex}, {StringLiteral(content.MediaType)}, {schemaType}, {content.IsBinary.ToString().ToLowerInvariant()}, {NullableStringLiteral(content.SchemaRef)}, {NullableStringLiteral(content.SchemaType)}, {NullableStringLiteral(content.Format)}, {content.IsFormatSpecified.ToString().ToLowerInvariant()}, {NullableStringLiteral(content.SchemaJson)})]"
                 );
             }
             var requestBodyExamples = requestBody.Examples ?? [];
@@ -241,6 +241,19 @@ internal static class CSharpWriter
             var response = document.ComponentResponses![index];
             sb.AppendLine(
                 $"[assembly: RivetDocumentResponse({index}, {StringLiteral(response.Name)}, {StringLiteral(response.Json)})]"
+            );
+        }
+        for (var index = 0; index < (document.ComponentSchemas?.Count ?? 0); index++)
+        {
+            var schema = document.ComponentSchemas![index];
+            sb.AppendLine(
+                $"[assembly: RivetDocumentSchema({index}, {StringLiteral(schema.Name)}, {StringLiteral(schema.Json)})]"
+            );
+        }
+        foreach (var sourceFile in document.ImportedSourceFiles ?? [])
+        {
+            sb.AppendLine(
+                $"[assembly: RivetImportedSourceFile({StringLiteral(sourceFile.Path)}, {StringLiteral(sourceFile.Fingerprint)})]"
             );
         }
         foreach (var extension in document.VendorExtensions ?? [])
@@ -665,8 +678,11 @@ internal static class CSharpWriter
 
         if (field.Provenance is { } provenance)
         {
+            var schemasJson = provenance.Schemas is null
+                ? null
+                : JsonSerializer.Serialize(provenance.Schemas);
             sb.AppendLine(
-                $"    [RivetOperationProvenance({provenance.OperationIdPresent.ToString().ToLowerInvariant()}, {NullableStringLiteral(provenance.OperationId)}, {provenance.Deprecated.ToString().ToLowerInvariant()}, {StringArrayLiteral(provenance.Tags)}, {NullableStringLiteral(provenance.RequestBodyDescription)}, {(provenance.ServerOverride is not null).ToString().ToLowerInvariant()}, {NullableStringLiteral(provenance.RivetIdentity?.Contract)}, {NullableStringLiteral(provenance.RivetIdentity?.Endpoint)}, {NullableStringLiteral(provenance.RequestBodyComponentId)})]"
+                $"    [RivetOperationProvenance({provenance.OperationIdPresent.ToString().ToLowerInvariant()}, {NullableStringLiteral(provenance.OperationId)}, {provenance.Deprecated.ToString().ToLowerInvariant()}, {StringArrayLiteral(provenance.Tags)}, {NullableStringLiteral(provenance.RequestBodyDescription)}, {(provenance.ServerOverride is not null).ToString().ToLowerInvariant()}, {NullableStringLiteral(provenance.RivetIdentity?.Contract)}, {NullableStringLiteral(provenance.RivetIdentity?.Endpoint)}, {NullableStringLiteral(provenance.RequestBodyComponentId)}, {NullableStringLiteral(schemasJson)})]"
             );
             if (provenance.ServerOverride is { } servers)
             {

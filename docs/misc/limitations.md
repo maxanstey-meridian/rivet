@@ -8,14 +8,16 @@ Verified limits of the current tool, so you don't discover them in production.
   (`[Range]`, ...) are enforced by the host framework, not Rivet
   ([recipes](/guides/runtime-validation#enforcing-constraints-at-runtime);
   `[RivetConstraints]` is a `ValidationAttribute` and participates).
-- The typed-results `Invoke` path validates declared statuses, payload CLR types,
-  derived-instance extra-field leakage, and JSON content types. File `Invoke`
-  validates file content types and declared error statuses. The plain
-  `RivetResult` path fixes the success status but performs no runtime payload
-  validation. None of these paths inspect serialized JSON against its schema.
-  Full statement: [Runtime Validation](/guides/runtime-validation).
-- Framework results without a status code (`ChallengeHttpResult`,
-  `SignOutHttpResult`) cannot be validated; use `.SkipValidation()`.
+- Contract-owned `Success`, `Error`, and `File` terminals validate declared
+  statuses, body presence, payload CLR types, derived-instance extra-field
+  leakage, and declared content types before first-party MVC or Minimal API
+  adaptation. They do not inspect serialized JSON against its schema. Full
+  statement: [Runtime Validation](/guides/runtime-validation).
+- Host effects such as authentication challenges, sign-out cookies, and dynamic
+  response headers happen through ordinary ASP.NET APIs before returning a
+  matching bodyless terminal. Rivet preserves an already-started matching
+  response and rejects status conflicts; native framework results never pass
+  through the contract.
 
 ## Generation
 
@@ -42,8 +44,7 @@ Verified limits of the current tool, so you don't discover them in production.
 ## Importer (`--from-openapi`)
 
 A one-shot onboarding scaffold, not a sync tool. Callbacks, webhooks, links,
-response-header schemas beyond `string` (header name/description/`required`
-do import), parameter serialization styles, multi-scheme security, and
+parameter serialization styles, multi-scheme security, and
 security scheme types are out of scope (discriminator dispatch imports as a
 `[JsonPolymorphic]` hierarchy when the `oneOf` mapping is usable, and falls
 back loudly otherwise) — the full

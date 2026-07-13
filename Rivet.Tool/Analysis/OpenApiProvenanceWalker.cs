@@ -138,7 +138,7 @@ internal static class OpenApiProvenanceWalker
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
-                if (args.Length != 9)
+                if (args.Length != 10)
                 {
                     throw new ContractAnalysisException(
                         "Invalid Rivet document request-body content metadata."
@@ -180,7 +180,8 @@ internal static class OpenApiProvenanceWalker
                         StringValue(args[5]),
                         StringValue(args[6]),
                         StringValue(args[7]),
-                        RequiredBool(args[8], "request-body format-presence flag")
+                        RequiredBool(args[8], "request-body format-presence flag"),
+                        StringValue(args[9])
                     )
                 );
             })
@@ -261,6 +262,30 @@ internal static class OpenApiProvenanceWalker
             "response",
             static (name, json) => new OpenApiComponentResponseProvenance(name, json)
         );
+        var componentSchemas = ReadJsonComponents<OpenApiComponentSchemaProvenance>(
+            attributes,
+            "Rivet.RivetDocumentSchemaAttribute",
+            "schema",
+            static (name, json) => new OpenApiComponentSchemaProvenance(name, json)
+        );
+        var importedSourceFiles = attributes
+            .Where(attribute => Is(attribute, "Rivet.RivetImportedSourceFileAttribute"))
+            .Select(attribute =>
+            {
+                var args = attribute.ConstructorArguments;
+                if (args.Length != 2)
+                {
+                    throw new ContractAnalysisException(
+                        "Invalid Rivet imported-source fingerprint metadata."
+                    );
+                }
+                return new OpenApiImportedSourceFileProvenance(
+                    RequiredString(args[0], "imported source path"),
+                    RequiredString(args[1], "imported source fingerprint")
+                );
+            })
+            .ToList();
+        ValidateImportedSourceFiles(compilation, importedSourceFiles);
         var vendorExtensions = attributes
             .Where(attribute => Is(attribute, "Rivet.RivetVendorExtensionAttribute"))
             .Select(attribute =>
@@ -305,9 +330,51 @@ internal static class OpenApiProvenanceWalker
             componentRequestBodies,
             vendorExtensions,
             componentParameters,
-            componentResponses
+            componentResponses,
+            componentSchemas,
+            importedSourceFiles
         );
     }
+
+    private static void ValidateImportedSourceFiles(
+        Compilation compilation,
+        IReadOnlyList<OpenApiImportedSourceFileProvenance> expectedFiles
+    )
+    {
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        foreach (var expected in expectedFiles)
+        {
+            var normalizedPath = expected.Path.Replace('\\', '/');
+            var suffix = "/" + normalizedPath;
+            var matches = compilation
+                .SyntaxTrees.Where(tree =>
+                {
+                    var path = tree.FilePath.Replace('\\', '/');
+                    return path.Equals(normalizedPath, comparison)
+                        || path.EndsWith(suffix, comparison);
+                })
+                .ToList();
+            if (matches.Count != 1)
+            {
+                throw ImportedSourceConflict(
+                    normalizedPath,
+                    matches.Count == 0 ? "source file is missing" : "source path is ambiguous"
+                );
+            }
+            var actual = ImportedSourceFingerprint.Compute(matches[0].GetRoot());
+            if (!actual.Equals(expected.Fingerprint, StringComparison.Ordinal))
+            {
+                throw ImportedSourceConflict(normalizedPath, "source file has changed");
+            }
+        }
+    }
+
+    private static ContractAnalysisException ImportedSourceConflict(string path, string reason) =>
+        new(
+            $"error {Diagnostics.ImportedSchemaProvenanceConflict}: imported schema provenance conflicts with the current C# source because '{path}' {reason}; re-import the OpenAPI document or remove/update its raw schema provenance"
+        );
 
     internal static OpenApiOperationProvenance? ReadOperation(IFieldSymbol field)
     {
@@ -381,7 +448,13 @@ internal static class OpenApiProvenanceWalker
                 })
                 .OrderBy(value => value.Order)
                 .Select(value => value.Reference)
-                .ToList()
+                .ToList(),
+            StringValue(args[9]) is { } schemasJson
+                ? JsonSerializer.Deserialize<OpenApiOperationSchemaProvenance>(
+                    schemasJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                )
+                : null
         );
     }
 

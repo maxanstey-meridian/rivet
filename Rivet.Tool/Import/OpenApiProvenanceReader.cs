@@ -53,6 +53,7 @@ internal static class OpenApiProvenanceReader
             ? ReadSwaggerServers(root, warnings)
             : ReadServersProperty(root) ?? [];
         var componentExamples = ReadComponentExamples(root);
+        var componentRequestBodies = ReadComponentRequestBodies(root);
         var componentParameters = ReadComponents(root, "parameters")
             .Select(component => new OpenApiComponentParameterProvenance(
                 component.Name,
@@ -65,16 +66,30 @@ internal static class OpenApiProvenanceReader
                 component.Json
             ))
             .ToList();
-        var vendorExtensions = ReadVendorExtensions(root, swagger2);
+        var schemaComponents = ReadComponents(root, "schemas");
+        var componentSchemas = schemaComponents
+            .Where(component => NeedsSchemaProvenance(component.Value))
+            .Select(component => new OpenApiComponentSchemaProvenance(
+                component.Name,
+                component.Json
+            ))
+            .ToList();
+        var opaqueSchemaPointers = schemaComponents
+            .Where(component => NeedsSchemaProvenance(component.Value))
+            .Select(component => $"#/components/schemas/{EscapePointerToken(component.Name)}")
+            .ToHashSet(StringComparer.Ordinal);
+        var vendorExtensions = ReadVendorExtensions(root, swagger2, opaqueSchemaPointers);
         var document = new OpenApiDocumentProvenance(
             info,
             tags,
             externalDocs,
             rootServers,
             componentExamples,
+            ComponentRequestBodies: componentRequestBodies,
             VendorExtensions: vendorExtensions,
             ComponentParameters: componentParameters,
-            ComponentResponses: componentResponses
+            ComponentResponses: componentResponses,
+            ComponentSchemas: componentSchemas
         );
         var operations = new Dictionary<(string Path, string Method), OpenApiOperationProvenance>();
 
@@ -137,7 +152,8 @@ internal static class OpenApiProvenanceReader
                     ReadRivetIdentity(operation),
                     ReadRequestBodyComponentId(operation),
                     ReadParameterComponentReferences(root, path.Value, operation),
-                    ReadResponseComponentReferences(operation)
+                    ReadResponseComponentReferences(operation),
+                    ReadOperationSchemas(path.Value, operation)
                 );
             }
         }
@@ -145,7 +161,7 @@ internal static class OpenApiProvenanceReader
         return new ImportedOpenApiProvenance(document, operations);
     }
 
-    private static IReadOnlyList<(string Name, string Json)> ReadComponents(
+    private static IReadOnlyList<(string Name, string Json, JsonElement Value)> ReadComponents(
         JsonElement root,
         string kind
     )
@@ -160,8 +176,216 @@ internal static class OpenApiProvenanceReader
 
         return values
             .EnumerateObject()
-            .Select(value => (value.Name, Json: JsonSerializer.Serialize(value.Value)))
+            .Select(value =>
+                (value.Name, Json: JsonSerializer.Serialize(value.Value), Value: value.Value)
+            )
             .ToList();
+    }
+
+    private static IReadOnlyList<OpenApiComponentRequestBodyProvenance> ReadComponentRequestBodies(
+        JsonElement root
+    )
+    {
+        if (
+            !root.TryGetProperty("components", out var components)
+            || !components.TryGetProperty("requestBodies", out var requestBodies)
+        )
+        {
+            return [];
+        }
+
+        return requestBodies
+            .EnumerateObject()
+            .Select(requestBody => new OpenApiComponentRequestBodyProvenance(
+                requestBody.Name,
+                requestBody.Value.TryGetProperty("description", out var description)
+                    ? description.GetString()
+                    : null,
+                requestBody.Value.TryGetProperty("required", out var required)
+                    && required.ValueKind == JsonValueKind.True,
+                requestBody.Value.TryGetProperty("content", out var content)
+                    ? content
+                        .EnumerateObject()
+                        .Select(media => new OpenApiRequestBodyContentProvenance(
+                            media.Name,
+                            null,
+                            null,
+                            SchemaJson: media.Value.TryGetProperty("schema", out var schema)
+                                ? JsonSerializer.Serialize(schema)
+                                : null
+                        ))
+                        .ToList()
+                    : []
+            ))
+            .ToList();
+    }
+
+    private static bool NeedsSchemaProvenance(JsonElement schema)
+    {
+        if (schema.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+        if (schema.TryGetProperty("$ref", out _))
+        {
+            return true;
+        }
+        if (
+            schema.TryGetProperty("allOf", out _)
+            || schema.TryGetProperty("oneOf", out _)
+            || schema.TryGetProperty("anyOf", out _)
+            || schema.TryGetProperty("discriminator", out _)
+        )
+        {
+            return true;
+        }
+        if (
+            schema.TryGetProperty("enum", out _)
+            && schema.TryGetProperty("type", out var enumType)
+            && enumType.ValueKind == JsonValueKind.String
+            && enumType.GetString() is "number" or "boolean"
+        )
+        {
+            return true;
+        }
+        if (!schema.TryGetProperty("type", out var type))
+        {
+            if (
+                schema.TryGetProperty("items", out _)
+                || schema.TryGetProperty("nullable", out var nullable)
+                    && nullable.ValueKind == JsonValueKind.True
+            )
+            {
+                return true;
+            }
+        }
+        else if (type.ValueKind == JsonValueKind.String && type.GetString() == "array")
+        {
+            return schema.TryGetProperty("items", out var items)
+                && items.ValueKind == JsonValueKind.Object
+                && !items.TryGetProperty("$ref", out _);
+        }
+        else if (
+            type.ValueKind == JsonValueKind.String
+            && type.GetString() == "object"
+            && schema.TryGetProperty("additionalProperties", out _)
+            && !schema.TryGetProperty("properties", out _)
+        )
+        {
+            return true;
+        }
+
+        foreach (var property in schema.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.Object)
+            {
+                if (NeedsSchemaProvenance(property.Value))
+                {
+                    return true;
+                }
+            }
+            else if (property.Value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in property.Value.EnumerateArray())
+                {
+                    if (NeedsSchemaProvenance(item))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static OpenApiOperationSchemaProvenance? ReadOperationSchemas(
+        JsonElement pathItem,
+        JsonElement operation
+    )
+    {
+        var parameters =
+            new Dictionary<(string Name, string Location), OpenApiParameterSchemaProvenance>();
+        AddParameters(pathItem);
+        AddParameters(operation);
+
+        var requests = new List<OpenApiRequestSchemaProvenance>();
+        if (
+            operation.TryGetProperty("requestBody", out var requestBody)
+            && !requestBody.TryGetProperty("$ref", out _)
+            && requestBody.TryGetProperty("content", out var requestContent)
+        )
+        {
+            foreach (var media in requestContent.EnumerateObject())
+            {
+                if (media.Value.TryGetProperty("schema", out var schema))
+                {
+                    requests.Add(
+                        new OpenApiRequestSchemaProvenance(
+                            media.Name,
+                            JsonSerializer.Serialize(schema)
+                        )
+                    );
+                }
+            }
+        }
+
+        var responses = new List<OpenApiResponseSchemaProvenance>();
+        if (operation.TryGetProperty("responses", out var responseValues))
+        {
+            foreach (var response in responseValues.EnumerateObject())
+            {
+                if (
+                    response.Value.TryGetProperty("$ref", out _)
+                    || !response.Value.TryGetProperty("content", out var responseContent)
+                )
+                {
+                    continue;
+                }
+                foreach (var media in responseContent.EnumerateObject())
+                {
+                    if (media.Value.TryGetProperty("schema", out var schema))
+                    {
+                        responses.Add(
+                            new OpenApiResponseSchemaProvenance(
+                                response.Name,
+                                media.Name,
+                                JsonSerializer.Serialize(schema)
+                            )
+                        );
+                    }
+                }
+            }
+        }
+
+        return parameters.Count == 0 && requests.Count == 0 && responses.Count == 0
+            ? null
+            : new OpenApiOperationSchemaProvenance(parameters.Values.ToList(), requests, responses);
+
+        void AddParameters(JsonElement owner)
+        {
+            if (!owner.TryGetProperty("parameters", out var sourceParameters))
+            {
+                return;
+            }
+            foreach (var parameter in sourceParameters.EnumerateArray())
+            {
+                if (
+                    parameter.TryGetProperty("$ref", out _)
+                    || !parameter.TryGetProperty("name", out var name)
+                    || !parameter.TryGetProperty("in", out var location)
+                    || !parameter.TryGetProperty("schema", out var schema)
+                )
+                {
+                    continue;
+                }
+                var key = (name.GetString() ?? "", location.GetString() ?? "");
+                parameters[key] = new OpenApiParameterSchemaProvenance(
+                    key.Item1,
+                    key.Item2,
+                    JsonSerializer.Serialize(schema)
+                );
+            }
+        }
     }
 
     private static IReadOnlyList<OpenApiParameterComponentReference> ReadParameterComponentReferences(
@@ -312,11 +536,19 @@ internal static class OpenApiProvenanceReader
 
     private static IReadOnlyList<OpenApiVendorExtensionProvenance> ReadVendorExtensions(
         JsonElement root,
-        bool swagger2
+        bool swagger2,
+        IReadOnlySet<string> opaqueSchemaPointers
     )
     {
         var result = new List<OpenApiVendorExtensionProvenance>();
-        ReadVendorExtensions(root, "#", swagger2, result);
+        ReadVendorExtensions(
+            root,
+            "#",
+            swagger2,
+            opaqueSchemaPointers,
+            exampleObject: false,
+            result
+        );
         return result;
     }
 
@@ -324,15 +556,28 @@ internal static class OpenApiProvenanceReader
         JsonElement value,
         string pointer,
         bool swagger2,
+        IReadOnlySet<string> opaqueSchemaPointers,
+        bool exampleObject,
         List<OpenApiVendorExtensionProvenance> result
     )
     {
+        if (IsOpaqueProvenanceRoot(pointer, opaqueSchemaPointers))
+        {
+            return;
+        }
         if (value.ValueKind == JsonValueKind.Array)
         {
             var index = 0;
             foreach (var item in value.EnumerateArray())
             {
-                ReadVendorExtensions(item, $"{pointer}/{index++}", swagger2, result);
+                ReadVendorExtensions(
+                    item,
+                    $"{pointer}/{index++}",
+                    swagger2,
+                    opaqueSchemaPointers,
+                    exampleObject: false,
+                    result
+                );
             }
             return;
         }
@@ -353,16 +598,96 @@ internal static class OpenApiProvenanceReader
                     )
                 );
             }
-            else
+            else if (
+                !swagger2
+                && property.Name == "examples"
+                && property.Value.ValueKind == JsonValueKind.Object
+            )
+            {
+                foreach (var example in property.Value.EnumerateObject())
+                {
+                    ReadVendorExtensions(
+                        example.Value,
+                        $"{pointer}/examples/{EscapePointerToken(example.Name)}",
+                        swagger2,
+                        opaqueSchemaPointers,
+                        exampleObject: true,
+                        result
+                    );
+                }
+            }
+            else if (
+                !(exampleObject && property.Name == "value") && !IsOpaqueOpenApiValue(property.Name)
+            )
             {
                 ReadVendorExtensions(
                     property.Value,
                     $"{pointer}/{EscapePointerToken(property.Name)}",
                     swagger2,
+                    opaqueSchemaPointers,
+                    exampleObject: false,
                     result
                 );
             }
         }
+    }
+
+    private static bool IsOpaqueOpenApiValue(string name) =>
+        name is "const" or "default" or "enum" or "example" or "examples"
+        || name.StartsWith("x-", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsOpaqueProvenanceRoot(
+        string pointer,
+        IReadOnlySet<string> opaqueSchemaPointers
+    )
+    {
+        if (opaqueSchemaPointers.Contains(pointer))
+        {
+            return true;
+        }
+        if (!pointer.StartsWith("#/", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var tokens = pointer[2..].Split('/');
+        if (tokens.Length == 3 && tokens[0] == "components")
+        {
+            return tokens[1] is "parameters" or "responses";
+        }
+        if (
+            tokens.Length == 6
+            && tokens[0] == "components"
+            && tokens[1] == "requestBodies"
+            && tokens[3] == "content"
+            && tokens[5] == "schema"
+        )
+        {
+            return true;
+        }
+        if (tokens.Length < 5 || tokens[0] != "paths")
+        {
+            return false;
+        }
+
+        if (tokens[2] == "parameters")
+        {
+            return tokens.Length == 5 && tokens[4] == "schema";
+        }
+        if (!_methods.Contains(tokens[2], StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        return tokens.Length == 6 && tokens[3] == "parameters" && tokens[5] == "schema"
+            || tokens.Length == 7
+                && tokens[3] == "requestBody"
+                && tokens[4] == "content"
+                && tokens[6] == "schema"
+            || tokens.Length == 8
+                && tokens[3] == "responses"
+                && tokens[5] == "content"
+                && tokens[7] == "schema";
     }
 
     private static string NormalizeOwnerPointer(string pointer, bool swagger2)
