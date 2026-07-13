@@ -3,6 +3,7 @@ using System.Text.Json;
 
 namespace Rivet.Tests;
 
+[Trait("Category", "Local")]
 public sealed class OpenApiCorpusManifestTests
 {
     private static readonly HashSet<string> _methods = new(StringComparer.OrdinalIgnoreCase)
