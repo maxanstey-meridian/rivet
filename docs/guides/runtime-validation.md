@@ -17,38 +17,38 @@ These hold whenever you regenerate the spec (`dotnet rivet --project … --outpu
 - `--check` verifies that every contract field has an implementation and that the
   implementation's route and HTTP method match the declaration.
 
-## Runtime guarantees (contract `Invoke`)
+## Runtime guarantees (contract responses)
 
-When controllers execute contracts through `.Invoke()`:
+At the transport boundary, application code binds input-bearing definitions, runs
+normally, and constructs a contract-owned response:
 
-- **Input/output types are compiler-enforced.** The handler's parameter and return
-  types are the contract's generic type arguments; a mismatch is a compile error.
-- **Status codes are validated on the typed-results path.** When the handler returns
-  ASP.NET `Results<...>`, Rivet throws `RivetContractViolationException` at request
-  time if the returned status code is neither the declared success status nor a
-  status declared via `.Returns(...)`. `.SkipValidation()` opts an endpoint out
-  (needed for framework results like `ChallengeHttpResult` that carry no status
-  code).
-- **Payload runtime types are validated on the typed-results path.** The returned
-  payload's C# type must be assignable to the declared type — and, because
+- **Input/output types are compiler-enforced.** `.Bind(input)` accepts the contract's
+  `TInput`, and the bound endpoint's `.Success(payload)` accepts its `TOutput`.
+  Definitions without input call `.Success(...)` directly.
+- **Status codes are contract-owned.** `.Success(...)` selects the declared success
+  status. `.Error(status, ...)` throws `RivetContractViolationException` if the
+  status was not declared via `.Returns(...)` (including matching imported `nXX`
+  and `default` responses).
+- **Payload runtime types are validated.** The supplied payload's C# type must be
+  assignable to the declared type — and, because
   System.Text.Json serializes the **value's runtime type**, a derived instance where
   the contract declares a concrete type is rejected, whether the handler returned
-  `Ok<Derived>` or upcast the instance into `Ok<Declared>`. This closes the
-  extra-field leak: undeclared members on a subtype can no longer reach the wire
-  silently. Declared types that are interfaces, abstract, or `[JsonPolymorphic]`
-  (where the spec declares the hierarchy as `oneOf`) accept their subtypes.
+  a derived value directly or upcast it to the declared type. This closes the
+  extra-field leak: undeclared members on a subtype cannot reach the wire silently.
+  Declared types that are interfaces or abstract accept their subtypes;
+  `[JsonPolymorphic]` types accept subtypes registered with `[JsonDerivedType]`,
+  matching the hierarchy emitted as `oneOf`.
 - **Bodies and content types must match the declaration.** A content-bearing result
-  (`Results.Text`, `Results.Content`, file results) on a status that declares no
-  payload is a violation, as is serving a declared JSON payload with a non-JSON
-  content type (`TypedResults.Json(..., contentType: "text/csv")`).
-- **File endpoints validate via their own opt-in `Invoke`.** The success branch must
-  carry file content whose content type matches the declared one (a JSON result on
-  an `image/jpeg` contract is a violation), and error statuses must be declared.
-  File results write their own status (200, or 206 under range processing), so
-  status is not checked on that branch.
-- **The plain `Invoke` path fixes the status code.** `RivetResult`/`RivetResult<T>`
-  carry the declared success status; the payload type is checked only by the
-  compiler — none of the runtime checks above run on this path.
+  on a status that declares no payload is a violation. Non-JSON textual responses
+  require a `string` payload, and binary responses must use `.File(...)`.
+- **File responses are contract-owned.** `.File(...)` requires a binary/file success
+  response and takes its content type from the declaration. It accepts `byte[]`, a
+  readable `Stream`, or an absolute physical path; range-enabled streams must be
+  seekable. Input-bearing file definitions first use `.Bind(input)`.
+- **Host adapters preserve the result.** The first-party `.ToActionResult()` and
+  `.ToResult()` adapters write body, content type, file metadata, and status through
+  MVC or minimal APIs. If the host response has already started incompatibly or has
+  established a conflicting status, they throw `RivetContractViolationException`.
 
 ### The failure envelope
 
@@ -78,16 +78,14 @@ Do not rely on Rivet for any of the following — none of it happens:
   above), but members your *serializer configuration* adds, renames, or drops on the
   declared type itself (custom converters, `[JsonExtensionData]`, contract
   customization) go to the wire unchecked, and `null` in a required member is not
-  caught. The `RivetResult` bridge path performs no runtime checks at all.
-- **Validation constraints.** Rivet's `Invoke` performs no constraint validation on
-  requests or responses. Enforcement is the host framework's job — see
-  [Enforcing constraints at runtime](#enforcing-constraints-at-runtime) below for
-  the recipes.
-- **`Define.File` handlers that bypass `Invoke`.** The file-endpoint checks only run
-  when the handler executes through `FileRouteDefinition.Invoke`; nothing forces
-  handlers through it (true of every endpoint kind — contract↔route binding is
-  `--check`'s job, not the runtime's). Stream *contents* are never inspected either
-  way.
+  caught.
+- **Validation constraints.** Rivet's response terminals perform no constraint
+  validation on requests or responses. Enforcement is the host framework's job —
+  see [Enforcing constraints at runtime](#enforcing-constraints-at-runtime) below
+  for the recipes.
+- **Handlers that bypass the contract response terminals.** Nothing forces a route
+  to return `.Success(...)`, `.Error(...)`, or `.File(...)`; contract↔route binding
+  is `--check`'s job, not the runtime's. Stream *contents* are never inspected.
 - **Request parsing and binding.** Done by ASP.NET (or whatever host you bridge to),
   not by Rivet.
 - **Examples.** `.RequestExampleJson(...)` / `.ResponseExampleJson(...)` are runtime

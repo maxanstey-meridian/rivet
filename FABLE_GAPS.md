@@ -145,24 +145,23 @@ Emitted specs from samples/ContractApi, TypeShowcase (Roslyn path) and expressiv
 
 ## 4. Runtime enforcement honesty
 
-### 4.1 .NET (`TypedResultValidator`)
+### 4.1 .NET contract terminals
 
-Enforcement is **production-on, unconditional** (no env gates; only per-endpoint `.SkipValidation()`), but only on the typed-results `Invoke<T...>` overloads (`EndpointBuilder.cs:335-575`). It checks exactly two things: declared status code, and CLR payload type via `IValueHttpResult<T>` + `IsAssignableFrom`. It never inspects serialized JSON, content-type, or headers. Failures throw `InvalidOperationException` → **empty-body 500 in production** (no envelope), text/plain stack trace in Development.
+The callback and native-result execution model has been replaced by contract-owned `Bind`, `Success`, `Error`, and `File` terminals plus first-party MVC/Minimal adapters. Enforcement is production-on and unconditional; there is no `SkipValidation` or native-result passthrough.
 
 | Violation | Caught? | Proof |
 |---|---|---|
-| Wrong / undeclared status | ✅ | curl → 500 (`TypedResultValidator.cs:80`) |
-| Wrong payload CLR type, anonymous object, raw `Results.Json` escape | ✅ | curl → 500 (`:112`, `:28`) |
-| JSON body where 204 declared; empty where body declared | ✅ | `:97`, `:105-110` |
-| File where JSON declared | ✅ *by accident* (`FileContentHttpResult` lacks `IStatusCodeHttpResult`) | `:22-26` |
-| **Extra fields via derived type** (even upcast to `Ok<Declared>`) | **✖ — 200 with `secret`/`isAdmin` on the wire** | curl-proved; `IsAssignableFrom` + STJ runtime-type serialization |
-| **Null body / null required fields** (right CLR type) | ✖ — 200 | type-level only |
-| **Wrong content-type** (right type+status, e.g. `text/csv`) | ✖ | no content-type code exists |
-| Body on void contract w/ matching status | ✖ — 200 text/plain leaked | hole between `:93-102`/`:134-139` |
-| **Inbound constraint violations** (`[Range]`, `[MinLength]`, `[RivetConstraints]`) | **✖ — 201 success** | `RivetConstraintsAttribute` is not a `ValidationAttribute` (`RivetConstraintsAttribute.cs:8`); repo's own test admits it (`ValidationIntegrationTests.cs:105-110`) |
-| `RivetResult<T>` plain-`Invoke` path | validator **never runs** — compile-time generics + user-written bridge only | `EndpointBuilder.cs:260-265` |
-| **`Define.File` endpoints** | **zero enforcement** — no `Invoke` exists; JSON served on an image/jpeg contract → 200 | `EndpointBuilder.cs:586-624` |
-| Contract↔route binding | none — route strings duplicated by hand in `MapGet`/controllers; nothing forces handlers through `Invoke` | structural |
+| Wrong / undeclared exact, `nXX`, or default status | ✅ | terminal construction tests |
+| Wrong payload CLR type or anonymous-object escape | ✅ | terminal generic/runtime checks |
+| Derived/upcast extra-field leakage | ✅ | runtime-value type check before adaptation |
+| JSON body where status forbids a body; body on void declaration | ✅ | terminal shape/status checks |
+| Wrong declared content type or ambiguous non-JSON representation | ✅ | immutable response metadata + deterministic selection |
+| File where JSON declared or JSON where file declared | ✅ | dedicated `File` terminal and success-terminal rejection |
+| Null required members inside an otherwise valid payload | ✖ | no serialized JSON Schema validation |
+| Inbound constraint violations | host-owned | ASP.NET validation attributes/model binding; Rivet does not parse requests |
+| Contract↔route binding | ✅ for supported shapes | semantic coverage checker resolves direct/bound terminals across MVC, Minimal APIs, and Azure Functions HTTP triggers |
+
+Violations throw `RivetContractViolationException`; `RivetContractViolationHandler` maps them to the structured 500 envelope. Dynamic headers, cookies, challenge, and sign-out effects remain host code and are preserved by adapters when their established status matches the terminal.
 
 ### 4.2 Hono adapter (`rivet-ts/src/hono.ts`)
 
@@ -185,15 +184,15 @@ Enforcement is **production-on, unconditional** (no env gates; only per-endpoint
 
 | Dimension | .NET | Hono |
 |---|---|---|
-| Outbound status enforcement | ✅ runtime | n/a (fixed by adapter — different but defensible) |
-| Outbound type/shape | CLR type only | **nothing** |
-| Extra-field leakage | **leaks** | **leaks** (the one consistent behavior, and it's the worst one) |
+| Outbound status enforcement | ✅ contract-owned terminal | n/a (fixed by adapter — different but defensible) |
+| Outbound type/shape | declared CLR/runtime type; no serialized schema validation | **nothing** |
+| Extra-field leakage | derived/upcast CLR instances rejected | **leaks** |
 | Inbound constraint enforcement | none | none |
 | Inbound scalar coercion | ASP.NET model binding (400, empty body) | hand-rolled `Number()`/literal-boolean (400, JSON envelope); note `Number("0x10")`→16, `"1e3"`→1000 |
-| Enforcement-failure envelope | **empty-body 500**, no shape | structured `{code,message}` **400** |
-| Wrong-method escape hatches | `RivetResult` path, `.SkipValidation`, `Define.File` | plain `Response` return, `rivetHttpError(anyStatus)` |
+| Enforcement-failure envelope | structured `{code,message}` **500** | structured `{code,message}` **400** |
+| Wrong-method escape hatches | none through the contract API; host effects must terminate with a matching result | plain `Response` return, `rivetHttpError(anyStatus)` |
 
-**Verdict on the core promise:** what's actually guaranteed cross-stack is *status-code conformance on the .NET typed path* and *param presence/scalar shape on Hono inbound*. Body shape, extra fields, content-type, headers, and every declared constraint are unenforced on both sides. The published constraint metadata (which C# faithfully emits to OpenAPI) is **never checked by either server** — consumers can legitimately validate stricter than the producer. Class: **c** across the board, because nothing in the docs scopes the promise this narrowly.
+**Current cross-stack boundary:** .NET enforces contract-owned status/body/type/content/file outcomes before adaptation; Hono still performs no general outbound validation. Neither runtime validates serialized JSON against the emitted schema, and dynamic response-header values remain host-owned. Inbound constraint behavior remains host-specific and must not be generalized across stacks.
 
 (Client-side runtime validation is types-only **by decision** — the v2 client story is openapi-typescript + openapi-fetch, and `docs/guides/runtime-validation.md` already states "Rivet itself does not generate validators". Not a gap; out of scope for this register.)
 
@@ -235,7 +234,7 @@ Near-identical output — single-emitter design pays off. Only two semantic delt
 | "losslessly re-importable" (x-rivet-*) | Mostly holds for the Roslyn happy path; round-trip loses security scheme types, header params, query-param location (non-GET), param defaults |
 | Importer: "nothing is dropped silently" | **False** (params-with-body ×262 on Stripe, HEAD/OPTIONS, secondary media types) |
 | "plugs straight into openapi-typescript / openapi-fetch / openapi-zod-client" | True for C#-authored contracts; **false for TS contracts using brands or multipart** (the recommended tools crash) |
-| Runtime enforcement (implied by TypedResultValidator / typed handlers) | Real but narrow: status + CLR type (.NET typed path only); zero outbound validation on Hono; constraints never enforced anywhere |
+| Runtime enforcement | Contract-owned status/body/type/content/file enforcement on .NET; zero general outbound validation on Hono; no serialized JSON Schema validation |
 
 ---
 

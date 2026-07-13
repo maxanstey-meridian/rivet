@@ -39,8 +39,9 @@ OpenAPI JSON
 
 ### Contract style
 
-Contracts are `[RivetContract] public static class` with `EndpointBuilder<T>` fields — not abstract classes, not
-ASP.NET-coupled. `RivetResult<T>` is framework-agnostic.
+Contracts are `[RivetContract] public static class` declarations with typed route-definition fields — not abstract
+classes. Application execution remains ordinary C#; closed `RivetResult` values are created only by contract-owned
+terminals and adapted to MVC or Minimal APIs at the transport boundary.
 
 ## Code style
 

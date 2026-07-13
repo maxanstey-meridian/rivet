@@ -7,8 +7,9 @@ code — and they serve two roles:
 
 1. **Generation time**: Roslyn reads the `Define` chain and emits the OpenAPI
    operation.
-2. **Runtime**: controllers execute the same definition through `.Invoke()`, so the
-   handler's input/output types are compiler-enforced against the contract.
+2. **Runtime**: controllers use the same definition to bind inputs and construct
+   responses, so input/output types and selected statuses are enforced against the
+   contract.
 
 ## Defining a contract
 
@@ -60,7 +61,9 @@ The full builder surface (`.Status()`, `.Returns()`, `.Secure()`, `.Anonymous()`
 
 ## Implementing a contract
 
-Controllers (or minimal API handlers) execute the contract with `.Invoke()`:
+For an input-bearing endpoint, bind the transport input, execute ordinary
+application code, then construct the response with `.Success(...)`, `.Error(...)`,
+or `.File(...)`:
 
 ```csharp
 [Route("api/members")]
@@ -69,59 +72,51 @@ public sealed class MembersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Invite(
         [FromBody] InviteMemberRequest request, CancellationToken ct)
-        => (await MembersContract.Invite.Invoke(request, async req =>
-        {
-            // req is InviteMemberRequest; must return InviteMemberResponse — compiler enforced
-            return new InviteMemberResponse(Guid.NewGuid());
-        })).ToActionResult();
+    {
+        var endpoint = MembersContract.Invite.Bind(request);
+        var response = await memberService.Invite(request, ct);
+
+        // Must be InviteMemberResponse — compiler enforced
+        return endpoint.Success(response).ToActionResult();
+    }
 }
 ```
 
-`Invoke` returns a framework-agnostic `RivetResult` / `RivetResult<T>` carrying the
-declared success status. You write a small bridge once per project:
+`Bind` is required only for definitions with `TInput`; it returns a bound endpoint
+whose terminal methods retain the contract's output type. Definitions without input
+call the same terminal methods directly. Application services remain ordinary C# —
+Rivet does not own their invocation.
 
-```csharp
-public static class RivetExtensions
-{
-    public static IActionResult ToActionResult<T>(this RivetResult<T> result)
-        => new ObjectResult(result.Data) { StatusCode = result.StatusCode };
-
-    public static IActionResult ToActionResult(this RivetResult result)
-        => new StatusCodeResult(result.StatusCode);
-
-    // Minimal API bridge
-    public static IResult ToResult<T>(this RivetResult<T> result)
-        => Results.Json(result.Data, statusCode: result.StatusCode);
-
-    public static IResult ToResult(this RivetResult result)
-        => Results.StatusCode(result.StatusCode);
-}
-```
+The terminal methods return a framework-agnostic `RivetResult`. Rivet provides the
+host bridges: `.ToActionResult()` for MVC controllers and `.ToResult()` for minimal
+APIs.
 
 Minimal APIs work the same way — `.Route` and `.Method` are available at runtime:
 
 ```csharp
-app.MapGet(MembersContract.Health.Route, async () =>
-    (await MembersContract.Health.Invoke(async () => { })).ToResult());
+app.MapGet(MembersContract.Health.Route, () =>
+    MembersContract.Health.Success().ToResult());
 ```
 
-## Typed results and multiple statuses
+## Success, errors, and files
 
-When an endpoint declares error responses, return ASP.NET `Results<...>` from the
-handler. Rivet validates at request time that the returned status code and payload
-C# type match a declared response, and throws `InvalidOperationException` otherwise.
-Endpoints returning framework results without a status code (e.g.
-`ChallengeHttpResult`) need `.SkipValidation()`.
+`.Success(...)` selects the declared success response. `.Error(status, ...)` selects
+a response declared with `.Returns(...)`; undeclared statuses, missing or unexpected
+payloads, and incompatible payload types throw `RivetContractViolationException`.
+`.File(...)` constructs a binary response for `Define.File` or `.ProducesFile(...)`
+definitions. Each result is adapted to ASP.NET only at the final
+`.ToActionResult()` / `.ToResult()` boundary.
 
 See [Runtime Validation](/guides/runtime-validation) for the precise scope of what
-is and isn't enforced at runtime — in short: status codes and C# payload types on
-the typed-results path, **not** response body shape and **not** constraint
-attributes.
+is and isn't enforced at runtime — in short: declared statuses, C# payload types,
+body presence, and content representations, **not** serialized response shape or
+constraint attributes.
 
 ## Definitions are immutable once used
 
-Contract definitions live in shared static fields. After the first `Invoke`, all
-builder methods throw — configure the definition fully in its field initializer.
+Contract definitions live in shared static fields. The first `Bind`, `Success`,
+`Error`, or `File` publishes the definition; after that all builder methods throw.
+Configure the definition fully in its field initializer.
 
 ## Verifying coverage
 

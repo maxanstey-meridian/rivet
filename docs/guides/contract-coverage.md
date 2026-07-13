@@ -7,13 +7,15 @@ that the implementation matches the declaration:
 dotnet rivet --project path/to/Api.csproj --check
 ```
 
-The checker finds `.Invoke()` call sites for each contract field — in controller
-actions and in minimal API handlers (`MapGet`/`MapPost`/`MapPut`/`MapDelete`/
-`MapPatch` lambdas) — and reports three kinds of warning on stderr:
+The checker finds `.Success(...)`, `.Error(...)`, and `.File(...)` terminal calls for
+each contract field, including terminals reached through `.Bind(input)`, in
+controller actions and minimal API handlers (`MapGet`/`MapPost`/`MapPut`/
+`MapDelete`/`MapPatch` lambdas. It reports four kinds of warning on stderr:
 
 | Warning | Meaning |
 |---|---|
-| `MissingImplementation` | No `.Invoke()` call site found for the contract field. |
+| `MissingImplementation` | No contract response terminal found for the contract field. |
+| `OrphanedBinding` | The contract was bound in a route handler, but no terminal result from that binding is returned. |
 | `HttpMethodMismatch` | The implementing endpoint uses a different HTTP method than the contract declares. |
 | `RouteMismatch` | The implementing endpoint's route does not match the contract's route template. |
 

@@ -186,33 +186,32 @@ public sealed class FileRouteDefinitionTests
         Assert.Same(route, returned);
     }
 
-    // --- R3: builder freeze — mutating a published (first-Invoked) definition throws ---
+    // --- R3: builder freeze — mutating a published definition throws ---
 
     [Fact]
-    public async Task R3_RouteDefinition_MutationAfterInvoke_Throws()
+    public void R3_RouteDefinition_MutationAfterSuccess_Throws()
     {
         // R3: contract definitions live in static readonly fields shared by all requests;
         // a runtime builder call would silently mutate global state. After the first
-        // Invoke the definition is published and must be immutable.
+        // terminal result is created, the definition is published and must be immutable.
         var route = Define.Get<string>("/api/data");
 
-        await route.Invoke(() => Task.FromResult("ok"));
+        route.Success("ok");
 
         var ex = Assert.Throws<InvalidOperationException>(() => route.Summary("too late"));
         Assert.Contains("immutable once published", ex.Message);
     }
 
     [Fact]
-    public async Task R3_AllMutators_ThrowAfterInvoke()
+    public void R3_AllMutators_ThrowAfterSuccess()
     {
         var route = Define.Get<string>("/api/data");
-        await route.Invoke(() => Task.FromResult("ok"));
+        route.Success("ok");
 
         Assert.Throws<InvalidOperationException>(() => route.Summary("x"));
         Assert.Throws<InvalidOperationException>(() => route.Description("x"));
         Assert.Throws<InvalidOperationException>(() => route.Status(202));
         Assert.Throws<InvalidOperationException>(() => route.FormEncoded());
-        Assert.Throws<InvalidOperationException>(() => route.SkipValidation());
         Assert.Throws<InvalidOperationException>(() => route.Returns<string>(404));
         Assert.Throws<InvalidOperationException>(() => route.Returns(404));
         Assert.Throws<InvalidOperationException>(() => route.Anonymous());
@@ -223,41 +222,41 @@ public sealed class FileRouteDefinitionTests
     }
 
     [Fact]
-    public async Task R3_VoidRouteDefinition_MutationAfterInvoke_Throws()
+    public void R3_VoidRouteDefinition_MutationAfterSuccess_Throws()
     {
         var route = Define.Delete("/api/items/{id}");
 
-        await route.Invoke(() => Task.CompletedTask);
+        route.Success();
 
         var ex = Assert.Throws<InvalidOperationException>(() => route.Returns(404));
         Assert.Contains("immutable once published", ex.Message);
     }
 
     [Fact]
-    public async Task R3_InputRouteDefinition_MutationAfterInvoke_Throws()
+    public void R3_InputRouteDefinition_MutationAfterBind_Throws()
     {
         var route = Define.Put("/api/items/{id}").Accepts<FileDownloadInput>();
 
-        await route.Invoke(new FileDownloadInput("1"), _ => Task.CompletedTask);
+        route.Bind(new FileDownloadInput("1"));
 
         Assert.Throws<InvalidOperationException>(() => route.Anonymous());
     }
 
     [Fact]
-    public async Task R3_RepeatedInvoke_StillAllowed()
+    public void R3_RepeatedSuccess_StillAllowed()
     {
-        // Freezing affects builder mutation only — handlers run on every request
+        // Freezing affects builder mutation only — terminal results can be created per request.
         var route = Define.Get<string>("/api/data");
 
-        var first = await route.Invoke(() => Task.FromResult("a"));
-        var second = await route.Invoke(() => Task.FromResult("b"));
+        var first = route.Success("a");
+        var second = route.Success("b");
 
-        Assert.Equal("a", first.Data);
-        Assert.Equal("b", second.Data);
+        Assert.NotNull(first);
+        Assert.NotNull(second);
     }
 
     [Fact]
-    public void R3_BuilderChain_BeforeInvoke_StillMutable()
+    public void R3_BuilderChain_BeforePublication_StillMutable()
     {
         // The generation-time fluent chain is unaffected
         var route = Define.File("/api/stream").ContentType("video/mp4").Summary("ok").QueryAuth();

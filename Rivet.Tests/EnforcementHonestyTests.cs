@@ -1,14 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Rivet.Tests;
 
 /// <summary>
 /// Pins the P1 enforcement-honesty tier: the extra-field leak (derived/upcast
-/// instances), body-on-void, content-type conformance, file-endpoint Invoke,
+/// instances), body-on-void, content-type conformance, file-endpoint terminals,
 /// and the structured contract-violation envelope. Each test is the runtime
 /// counterpart of a "not enforced" row from the FABLE_GAPS §4.1 table.
 /// </summary>
@@ -29,15 +28,11 @@ public sealed class EnforcementHonestyTests
         var route = Define.Get<ItemBase>("/api/items/{id}");
 
         var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            route.Invoke<Ok<ItemWithSecrets>>(() =>
-                Task.FromResult(
-                    TypedResults.Ok(new ItemWithSecrets("1", "Widget", "hunter2", true))
-                )
-            )
+            Task.FromResult(route.Success(new ItemWithSecrets("1", "Widget", "hunter2", true)))
         );
 
         Assert.Contains("ItemWithSecrets", exception.Message);
-        Assert.Contains("runtime type", exception.Message);
+        Assert.Contains("runtime payload type", exception.Message);
     }
 
     [Fact]
@@ -48,10 +43,8 @@ public sealed class EnforcementHonestyTests
         var route = Define.Get<ItemBase>("/api/items/{id}");
 
         var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            route.Invoke<Ok<ItemBase>>(() =>
-                Task.FromResult(
-                    TypedResults.Ok<ItemBase>(new ItemWithSecrets("1", "Widget", "hunter2", true))
-                )
+            Task.FromResult(
+                route.Success((ItemBase)new ItemWithSecrets("1", "Widget", "hunter2", true))
             )
         );
 
@@ -63,11 +56,9 @@ public sealed class EnforcementHonestyTests
     {
         var route = Define.Get<ItemBase>("/api/items/{id}");
 
-        var result = await route.Invoke<Ok<ItemBase>>(() =>
-            Task.FromResult(TypedResults.Ok(new ItemBase("1", "Widget")))
-        );
+        var result = await ExecuteAsync(route.Success(new ItemBase("1", "Widget")));
 
-        Assert.Equal("Widget", Assert.IsType<Ok<ItemBase>>(result).Value!.Name);
+        Assert.Equal("Widget", Deserialize<ItemBase>(result).Name);
     }
 
     [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
@@ -79,6 +70,7 @@ public sealed class EnforcementHonestyTests
     public record Animal(string Name);
 
     [JsonPolymorphic]
+    [JsonDerivedType(typeof(Dog), "dog")]
     public record PolymorphicAnimal(string Name);
 
     public sealed record Dog(string Name, string Breed) : PolymorphicAnimal(Name);
@@ -90,11 +82,9 @@ public sealed class EnforcementHonestyTests
         // serializes the discriminated contract — derived instances ARE the contract.
         var route = Define.Get<PolymorphicAnimal>("/api/animals/{id}");
 
-        var result = await route.Invoke<Ok<PolymorphicAnimal>>(() =>
-            Task.FromResult(TypedResults.Ok<PolymorphicAnimal>(new Dog("Rex", "Lab")))
-        );
+        var result = await ExecuteAsync(route.Success((PolymorphicAnimal)new Dog("Rex", "Lab")));
 
-        Assert.IsType<Dog>(Assert.IsType<Ok<PolymorphicAnimal>>(result).Value);
+        Assert.IsType<Dog>(Deserialize<PolymorphicAnimal>(result));
     }
 
     [Fact]
@@ -103,11 +93,9 @@ public sealed class EnforcementHonestyTests
         // Abstract declared types can only ever be satisfied by a subtype.
         var route = Define.Get<Shape>("/api/shapes/{id}");
 
-        var result = await route.Invoke<Ok<Shape>>(() =>
-            Task.FromResult(TypedResults.Ok<Shape>(new Circle("1", 2.0)))
-        );
+        var result = await ExecuteAsync(route.Success((Shape)new Circle("1", 2.0)));
 
-        Assert.IsType<Circle>(Assert.IsType<Ok<Shape>>(result).Value);
+        Assert.IsType<Circle>(Deserialize<Shape>(result));
     }
 
     [Fact]
@@ -119,10 +107,8 @@ public sealed class EnforcementHonestyTests
             .Returns<Animal>(StatusCodes.Status404NotFound);
 
         var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            route.Invoke<Ok<ItemBase>, NotFound<Animal>>(() =>
-                Task.FromResult<Results<Ok<ItemBase>, NotFound<Animal>>>(
-                    TypedResults.NotFound<Animal>(new LoudAnimal("Rex", "WOOF"))
-                )
+            Task.FromResult(
+                route.Error(StatusCodes.Status404NotFound, (Animal)new LoudAnimal("Rex", "WOOF"))
             )
         );
 
@@ -134,21 +120,15 @@ public sealed class EnforcementHonestyTests
     // ========== Body on void declaration ==========
 
     [Fact]
-    public async Task ContentResult_OnVoidContract_Throws()
+    public void VoidContract_HasNoContentBearingSuccessTerminal()
     {
-        // The :93-102/:134-139 hole: ContentHttpResult is not IValueHttpResult, so a
-        // text/plain body on a void contract sailed through with a matching status.
+        // A void contract exposes only Success(); a content-bearing success cannot be formed.
         var route = Define.Delete("/api/items/{id}").Status(StatusCodes.Status200OK);
 
-        var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            route.Invoke<ContentHttpResult>(() =>
-                Task.FromResult(
-                    TypedResults.Text("leaked body", statusCode: StatusCodes.Status200OK)
-                )
-            )
+        Assert.DoesNotContain(
+            route.GetType().GetMethods(),
+            method => method.Name == nameof(route.Success) && method.GetParameters().Length != 0
         );
-
-        Assert.Contains("content-bearing", exception.Message);
     }
 
     [Fact]
@@ -156,136 +136,110 @@ public sealed class EnforcementHonestyTests
     {
         var route = Define.Delete("/api/items/{id}");
 
-        var result = await route.Invoke<NoContent>(() => Task.FromResult(TypedResults.NoContent()));
+        var result = await ExecuteAsync(route.Success());
 
-        Assert.IsType<NoContent>(result);
+        Assert.Equal(StatusCodes.Status204NoContent, result.StatusCode);
+        Assert.Empty(result.Body);
     }
 
     // ========== Content type on JSON declarations ==========
 
     [Fact]
-    public async Task JsonPayload_WithNonJsonContentType_Throws()
+    public void NonStringPayload_WithTextContentType_Throws()
     {
-        var route = Define.Get<ItemBase>("/api/items/{id}");
+        var route = Define.Get<ItemBase>("/api/items/{id}").ProducesContentType("text/csv");
 
-        var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            route.Invoke<JsonHttpResult<ItemBase>>(() =>
-                Task.FromResult(
-                    TypedResults.Json(
-                        new ItemBase("1", "Widget"),
-                        contentType: "text/csv",
-                        statusCode: StatusCodes.Status200OK
-                    )
-                )
-            )
+        var exception = Assert.Throws<RivetContractViolationException>(() =>
+            route.Success(new ItemBase("1", "Widget"))
         );
 
         Assert.Contains("text/csv", exception.Message);
-        Assert.Contains("JSON payload", exception.Message);
+        Assert.Contains("not string", exception.Message);
     }
 
     [Fact]
     public async Task JsonPayload_WithExplicitJsonContentType_Passes()
     {
-        var route = Define.Get<ItemBase>("/api/items/{id}");
+        var route = Define
+            .Get<ItemBase>("/api/items/{id}")
+            .ProducesContentType("application/json; charset=utf-8");
 
-        var result = await route.Invoke<JsonHttpResult<ItemBase>>(() =>
-            Task.FromResult(
-                TypedResults.Json(
-                    new ItemBase("1", "Widget"),
-                    contentType: "application/json; charset=utf-8",
-                    statusCode: StatusCodes.Status200OK
-                )
-            )
-        );
+        var result = await ExecuteAsync(route.Success(new ItemBase("1", "Widget")));
 
-        Assert.Equal("Widget", Assert.IsType<JsonHttpResult<ItemBase>>(result).Value!.Name);
+        Assert.Equal("Widget", Deserialize<ItemBase>(result).Name);
+        Assert.Equal("application/json; charset=utf-8", result.ContentType);
     }
 
-    // ========== File endpoint Invoke ==========
+    // ========== File endpoint terminals ==========
 
     [Fact]
-    public async Task FileInvoke_MatchingContentType_Passes()
+    public async Task File_MatchingContentType_Passes()
     {
         var route = Define.File("/api/items/{id}/photo").ContentType("image/jpeg");
 
-        var result = await route.Invoke<FileContentHttpResult>(() =>
-            Task.FromResult(TypedResults.File(new byte[] { 0xFF, 0xD8 }, "image/jpeg"))
-        );
+        var result = await ExecuteAsync(route.File(new byte[] { 0xFF, 0xD8 }));
 
-        Assert.Equal("image/jpeg", Assert.IsType<FileContentHttpResult>(result).ContentType);
+        Assert.Equal("image/jpeg", result.ContentType);
     }
 
     [Fact]
-    public async Task FileInvoke_WrongContentType_Throws()
+    public async Task File_ContentTypeIsOwnedByContract()
     {
         var route = Define.File("/api/items/{id}/photo").ContentType("image/jpeg");
 
-        var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            route.Invoke<FileContentHttpResult>(() =>
-                Task.FromResult(TypedResults.File(new byte[] { 0x25 }, "application/pdf"))
-            )
-        );
+        var result = await ExecuteAsync(route.File(new byte[] { 0x25 }));
 
-        Assert.Contains("image/jpeg", exception.Message);
-        Assert.Contains("application/pdf", exception.Message);
+        Assert.Equal("image/jpeg", result.ContentType);
+        Assert.NotEqual("application/pdf", result.ContentType);
     }
 
     [Fact]
-    public async Task FileInvoke_JsonResultOnSuccessStatus_Throws()
+    public void FileRoute_HasNoJsonSuccessTerminal()
     {
-        // The curl-proved hole: JSON served 200 on an image/jpeg contract.
+        // A file route exposes File(), not Success(payload), so JSON cannot be returned.
         var route = Define.File("/api/items/{id}/photo").ContentType("image/jpeg");
 
-        var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            route.Invoke<Ok<ItemBase>>(() =>
-                Task.FromResult(TypedResults.Ok(new ItemBase("1", "Widget")))
-            )
-        );
-
-        Assert.Contains("JSON payload result", exception.Message);
+        Assert.DoesNotContain(route.GetType().GetMethods(), method => method.Name == "Success");
     }
 
     [Fact]
-    public async Task FileInvoke_UndeclaredErrorStatus_Throws()
+    public void File_UndeclaredErrorStatus_Throws()
     {
         var route = Define.File("/api/items/{id}/photo").ContentType("image/jpeg");
 
-        var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            route.Invoke<NotFound>(() => Task.FromResult(TypedResults.NotFound()))
+        var exception = Assert.Throws<RivetContractViolationException>(() =>
+            route.Error(StatusCodes.Status404NotFound)
         );
 
         Assert.Contains("undeclared status code 404", exception.Message);
     }
 
     [Fact]
-    public async Task FileInvoke_DeclaredErrorStatus_WithDeclaredPayload_Passes()
+    public async Task File_DeclaredErrorStatus_WithDeclaredPayload_Passes()
     {
         var route = Define
             .File("/api/items/{id}/photo")
             .ContentType("image/jpeg")
             .Returns<Animal>(StatusCodes.Status404NotFound, "No photo");
 
-        var result = await route.Invoke<NotFound<Animal>>(() =>
-            Task.FromResult(TypedResults.NotFound(new Animal("missing")))
+        var result = await ExecuteAsync(
+            route.Error(StatusCodes.Status404NotFound, new Animal("missing"))
         );
 
-        Assert.IsType<NotFound<Animal>>(result);
+        Assert.Equal(StatusCodes.Status404NotFound, result.StatusCode);
+        Assert.Equal("missing", Deserialize<Animal>(result).Name);
     }
 
     [Fact]
-    public async Task FileInvoke_WithInput_ValidatesLikeParameterless()
+    public async Task BoundFile_WithInput_UsesDeclaredContentType()
     {
         var route = Define.File<PhotoRequest>("/api/photos").ContentType("image/png");
 
-        var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            route.Invoke<FileContentHttpResult>(
-                new PhotoRequest("p1"),
-                request => Task.FromResult(TypedResults.File(new byte[] { 0x00 }, "image/jpeg"))
-            )
+        var result = await ExecuteAsync(
+            route.Bind(new PhotoRequest("p1")).File(new byte[] { 0x00 })
         );
 
-        Assert.Contains("image/png", exception.Message);
+        Assert.Equal("image/png", result.ContentType);
     }
 
     public sealed record PhotoRequest(string Id);
@@ -335,11 +289,7 @@ public sealed class EnforcementHonestyTests
         var route = Define.Get<ItemBase>("/api/items/{id}");
 
         await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            route.Invoke<Ok<ItemBase>>(() =>
-                Task.FromResult(
-                    TypedResults.Ok<ItemBase>(new ItemWithSecrets("1", "W", "s", false))
-                )
-            )
+            Task.FromResult(route.Success((ItemBase)new ItemWithSecrets("1", "W", "s", false)))
         );
 
         Assert.True(
@@ -348,4 +298,27 @@ public sealed class EnforcementHonestyTests
             )
         );
     }
+
+    private static async Task<HttpObservation> ExecuteAsync(RivetResult result)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions();
+        await using var provider = services.BuildServiceProvider();
+
+        var context = new DefaultHttpContext { RequestServices = provider };
+        context.Response.Body = new MemoryStream();
+        await result.ToResult().ExecuteAsync(context);
+
+        return new HttpObservation(
+            context.Response.StatusCode,
+            ((MemoryStream)context.Response.Body).ToArray(),
+            context.Response.ContentType
+        );
+    }
+
+    private static T Deserialize<T>(HttpObservation observation) =>
+        JsonSerializer.Deserialize<T>(observation.Body, JsonSerializerOptions.Web)!;
+
+    private sealed record HttpObservation(int StatusCode, byte[] Body, string? ContentType);
 }

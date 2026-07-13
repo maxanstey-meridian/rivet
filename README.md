@@ -64,18 +64,20 @@ public static class MembersContract
 }
 ```
 
-Handlers execute the contract, so the compiler enforces that your implementation
-matches the declaration — input type, output type, and (at runtime, on the
-typed-results path) status codes:
+At the transport boundary, bind the declared input, run ordinary application code,
+then construct the response through the contract. The compiler enforces the input
+and output types; Rivet validates the selected response at runtime:
 
 ```csharp
 [HttpPost]
 public async Task<IActionResult> Invite([FromBody] InviteMemberRequest request, CancellationToken ct)
-    => (await MembersContract.Invite.Invoke(request, async req =>
-    {
-        // req is InviteMemberRequest; must return InviteMemberResponse — compiler-enforced
-        return new InviteMemberResponse(Guid.NewGuid());
-    })).ToActionResult();
+{
+    var endpoint = MembersContract.Invite.Bind(request);
+    var response = await memberService.Invite(request, ct);
+
+    // Must be InviteMemberResponse — compiler-enforced
+    return endpoint.Success(response).ToActionResult();
+}
 ```
 
 Either way — annotated endpoints, contracts, or a mix — the spec comes out the same.

@@ -23,6 +23,55 @@ public sealed class CliPipelineTests
         IReadOnlyList<string> args
     ) => CliRunner.RunCli(workingDirectory, args);
 
+    [Fact]
+    public void Cli_check_reports_orphaned_binding_without_crashing()
+    {
+        var workDir = Directory.CreateTempSubdirectory("rivet-orphaned-binding-");
+        try
+        {
+            var sourcePath = Path.Combine(workDir.FullName, "Endpoint.cs");
+            File.WriteAllText(
+                sourcePath,
+                """
+                using Microsoft.AspNetCore.Mvc;
+                using Rivet;
+
+                [RivetContract]
+                public static class Contract
+                {
+                    public static readonly RouteDefinition<Input, Output> Create =
+                        Define.Post<Input, Output>("/items");
+                }
+
+                public sealed record Input(string Value);
+                public sealed record Output(string Value);
+
+                [ApiController]
+                [Route("/items")]
+                public sealed class Controller : ControllerBase
+                {
+                    [HttpPost]
+                    public IActionResult Create(Input input)
+                    {
+                        _ = Contract.Create.Bind(input);
+                        return NoContent();
+                    }
+                }
+                """
+            );
+
+            var result = RunCli(workDir.FullName, [sourcePath, "--check"]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("warning RIV4004: [OrphanedBinding]", result.StdErr);
+            Assert.DoesNotContain("Unmapped coverage warning kind", result.StdErr);
+        }
+        finally
+        {
+            workDir.Delete(recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("notion")]
     [InlineData("github")]

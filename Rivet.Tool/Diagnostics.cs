@@ -91,6 +91,7 @@ public static class Diagnostics
     public const string CoverageMissingImplementation = "RIV4001";
     public const string CoverageHttpMethodMismatch = "RIV4002";
     public const string CoverageRouteMismatch = "RIV4003";
+    public const string CoverageOrphanedBinding = "RIV4004";
 
     /// <summary>
     /// Registry of every diagnostic ID with a one-line trigger description.
@@ -203,6 +204,8 @@ public static class Diagnostics
         [CoverageMissingImplementation] = "Contract endpoint has no matching implementation.",
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",
+        [CoverageOrphanedBinding] =
+            "Contract endpoint is bound in a route handler but no terminal result from that binding is returned.",
     };
 
     /// <summary>

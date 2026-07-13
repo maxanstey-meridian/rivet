@@ -1,7 +1,6 @@
 namespace Rivet;
 
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Net.Http.Headers;
 
 /// <summary>
 /// Describes an additional (non-success) response declared via .Returns&lt;T&gt;().
@@ -63,12 +62,16 @@ public abstract class RouteDefinitionBase<TSelf>
     private string? _queryAuthParameterName;
     private List<RouteErrorResponse>? _errorResponses;
     private List<RouteResponseHeader>? _responseHeaders;
-    private bool _skipValidation;
+    private List<RouteResponseContent>? _responseContents;
+    private string? _successStatusKey;
+    private bool _suppressImplicitResponse;
 
     // R3: contract definitions are stored in shared static readonly fields; once a
-    // definition has been published (first Invoke) any builder mutation would silently
-    // change global state for all requests. Frozen definitions throw instead.
+    // definition has been published by a terminal any builder mutation would silently
+    // change global state for all requests. Published definitions throw instead.
     private bool _published;
+    private readonly object _publicationLock = new();
+    private EndpointContract? _publishedContract;
 
     /// <summary>The HTTP method (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS).</summary>
     public string Method { get; }
@@ -90,12 +93,11 @@ public abstract class RouteDefinitionBase<TSelf>
     public string? QueryAuthParameterName => _queryAuthParameterName;
     public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses => _errorResponses;
     public IReadOnlyList<RouteResponseHeader>? ResponseHeaders => _responseHeaders;
-    public bool ShouldSkipValidation => _skipValidation;
 
     /// <summary>The resolved success status code for this endpoint.</summary>
     public int SuccessStatusCode => _successStatus;
 
-    /// <summary>The resolved success status code (for use in Invoke).</summary>
+    /// <summary>The resolved success status code used during publication.</summary>
     protected int SuccessStatus => _successStatus;
 
     protected RouteDefinitionBase(string method, string route, int defaultStatus)
@@ -112,6 +114,7 @@ public abstract class RouteDefinitionBase<TSelf>
     protected void CopyStateTo<TOther>(RouteDefinitionBase<TOther> target)
         where TOther : RouteDefinitionBase<TOther>
     {
+        using var mutation = target.BeginMutation();
         target._summary = _summary;
         target._description = _description;
         target._anonymous = _anonymous;
@@ -125,56 +128,241 @@ public abstract class RouteDefinitionBase<TSelf>
         target._queryAuthParameterName = _queryAuthParameterName;
         target._errorResponses = _errorResponses?.ToList();
         target._responseHeaders = _responseHeaders?.ToList();
-        target._skipValidation = _skipValidation;
+        target._responseContents = _responseContents?.ToList();
+        target._successStatusKey = _successStatusKey;
+        target._suppressImplicitResponse = _suppressImplicitResponse;
         target._statusSet = _statusSet;
     }
 
-    /// <summary>
-    /// R3: marks this definition as published. Called by every Invoke overload —
-    /// after this, all builder mutators throw.
-    /// </summary>
-    protected void MarkPublished()
+    internal EndpointContract Publish(Type? successPayloadType)
     {
-        if (_errorResponses?.Any(response => response.StatusCode == _successStatus) is true)
+        lock (_publicationLock)
+        {
+            if (_publishedContract is not null)
+            {
+                return _publishedContract;
+            }
+
+            if (_successStatus is < 100 or > 599)
+            {
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: success status {_successStatus} is not a valid HTTP status code."
+                );
+            }
+
+            if (
+                _errorResponses?.Any(response => GetExactStatus(response) == _successStatus) is true
+            )
+            {
+                throw new InvalidOperationException(
+                    $"Status {_successStatus} is declared as both the success status and via .Returns() — "
+                        + "success and error responses cannot share a status."
+                );
+            }
+
+            var success = _suppressImplicitResponse
+                ? null
+                : BuildResponse(
+                    _successStatusKey ?? _successStatus.ToString(),
+                    _successStatus,
+                    successPayloadType,
+                    isSuccess: true
+                );
+            var exact = new Dictionary<int, ResponseContract>();
+            var ranges = new Dictionary<int, ResponseContract>();
+            ResponseContract? fallback = null;
+
+            foreach (var response in _errorResponses ?? [])
+            {
+                var statusKey = response.EffectiveStatusKey;
+                var exactStatus = GetExactStatus(response);
+                if (exactStatus is not null)
+                {
+                    exact.Add(
+                        exactStatus.Value,
+                        BuildResponse(
+                            statusKey,
+                            exactStatus.Value,
+                            response.ResponseType,
+                            isSuccess: false
+                        )
+                    );
+                    continue;
+                }
+
+                if (statusKey.Equals("default", StringComparison.OrdinalIgnoreCase))
+                {
+                    fallback = BuildResponse(
+                        statusKey,
+                        null,
+                        response.ResponseType,
+                        isSuccess: false
+                    );
+                    continue;
+                }
+
+                if (
+                    statusKey.Length == 3
+                    && statusKey[0] is >= '1' and <= '5'
+                    && statusKey[1..].Equals("XX", StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    ranges.Add(
+                        statusKey[0] - '0',
+                        BuildResponse(statusKey, null, response.ResponseType, isSuccess: false)
+                    );
+                    continue;
+                }
+
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: response status key '{statusKey}' is not an exact status, nXX range, or default."
+                );
+            }
+
+            _publishedContract = new EndpointContract(
+                Method,
+                Route,
+                success,
+                new ResponseSet(exact, ranges, fallback)
+            );
+            _published = true;
+            return _publishedContract;
+        }
+    }
+
+    private ResponseContract BuildResponse(
+        string statusKey,
+        int? statusCode,
+        Type? payloadType,
+        bool isSuccess
+    )
+    {
+        var matchingContents = (_responseContents ?? [])
+            .Where(content =>
+                content.StatusKey.Equals(statusKey, StringComparison.OrdinalIgnoreCase)
+            )
+            .ToArray();
+        var representations = matchingContents
+            .GroupBy(content => content.MediaType, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => new ResponseRepresentation(group.Key, group.Last().IsBinary),
+                StringComparer.OrdinalIgnoreCase
+            );
+
+        if (_fileContentType is not null && isSuccess)
+        {
+            representations[_fileContentType] = new ResponseRepresentation(_fileContentType, true);
+        }
+        else if (_responseContentType is not null && isSuccess)
+        {
+            representations[_responseContentType] = new ResponseRepresentation(
+                _responseContentType,
+                false
+            );
+        }
+        else if (payloadType is not null && representations.Count == 0)
+        {
+            var mediaType =
+                isSuccess && _responseContentType is not null
+                    ? _responseContentType
+                    : "application/json";
+            representations[mediaType] = new ResponseRepresentation(mediaType, false);
+        }
+
+        var contentPayloadTypes = matchingContents
+            .Where(content => content.PayloadType is not null)
+            .Select(content => content.PayloadType!)
+            .Distinct()
+            .ToArray();
+        if (contentPayloadTypes.Length > 1)
         {
             throw new InvalidOperationException(
-                $"Status {_successStatus} is declared as both the success status and via .Returns() — "
-                    + "success and error responses cannot share a status."
+                $"{Method} {Route}: response status '{statusKey}' declares multiple content payload types: "
+                    + $"{string.Join(", ", contentPayloadTypes.Select(type => $"'{type.FullName}'"))}."
             );
         }
 
-        _published = true;
-    }
-
-    private void EnsureMutable()
-    {
-        if (_published)
+        if (
+            payloadType is not null
+            && contentPayloadTypes is [var declaredContentType]
+            && declaredContentType != payloadType
+        )
         {
             throw new InvalidOperationException(
+                $"{Method} {Route}: response status '{statusKey}' declares payload type "
+                    + $"'{payloadType.FullName}', but its content declares '{declaredContentType.FullName}'."
+            );
+        }
+
+        if (payloadType is null && contentPayloadTypes is [var contentPayloadType])
+        {
+            payloadType = contentPayloadType;
+        }
+
+        return new ResponseContract(
+            statusKey,
+            statusCode,
+            payloadType,
+            isSuccess ? _responseContentType : null,
+            representations
+        );
+    }
+
+    protected IDisposable BeginMutation()
+    {
+        Monitor.Enter(_publicationLock);
+        if (_published)
+        {
+            Monitor.Exit(_publicationLock);
+            throw new InvalidOperationException(
                 $"{Method} {Route}: contract definitions are immutable once published — "
-                    + "builder methods cannot be called after the endpoint has been invoked. "
+                    + "builder methods cannot be called after a terminal publishes the endpoint. "
                     + "Configure the definition fully in its static readonly initializer."
             );
+        }
+
+        return new MutationLease(_publicationLock);
+    }
+
+    private sealed class MutationLease(object syncRoot) : IDisposable
+    {
+        private object? _syncRoot = syncRoot;
+
+        public void Dispose()
+        {
+            var syncRoot = Interlocked.Exchange(ref _syncRoot, null);
+            if (syncRoot is not null)
+            {
+                Monitor.Exit(syncRoot);
+            }
         }
     }
 
     public TSelf Summary(string summary)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _summary = summary;
         return (TSelf)this;
     }
 
     public TSelf Description(string description)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _description = description;
         return (TSelf)this;
     }
 
     public TSelf Status(int statusCode)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
+        if (statusCode is < 100 or > 599)
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: success status {statusCode} is not a valid HTTP status code."
+            );
+        }
+
         if (_statusSet)
         {
             throw new InvalidOperationException(
@@ -182,7 +370,7 @@ public abstract class RouteDefinitionBase<TSelf>
             );
         }
 
-        if (_errorResponses?.Any(response => response.StatusCode == statusCode) is true)
+        if (_errorResponses?.Any(response => GetExactStatus(response) == statusCode) is true)
         {
             throw new InvalidOperationException(
                 $"Status {statusCode} is already declared via .Returns() — success and error responses cannot share a status."
@@ -200,8 +388,8 @@ public abstract class RouteDefinitionBase<TSelf>
     /// </summary>
     public TSelf StatusKey(string statusKey, string? description = null)
     {
-        EnsureMutable();
-        _ = statusKey;
+        using var mutation = BeginMutation();
+        _successStatusKey = statusKey;
         _ = description;
         return (TSelf)this;
     }
@@ -212,13 +400,14 @@ public abstract class RouteDefinitionBase<TSelf>
     /// </summary>
     public TSelf SuppressImplicitResponse()
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
+        _suppressImplicitResponse = true;
         return (TSelf)this;
     }
 
     public TSelf FormEncoded()
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         if (_binaryRequestContentType is not null)
         {
             throw new InvalidOperationException(
@@ -239,7 +428,7 @@ public abstract class RouteDefinitionBase<TSelf>
     /// </summary>
     public TSelf AcceptsContentType(string contentType)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         if (_formEncoded || _binaryRequestContentType is not null)
         {
             throw new InvalidOperationException(
@@ -260,7 +449,7 @@ public abstract class RouteDefinitionBase<TSelf>
     /// </summary>
     public TSelf ProducesContentType(string contentType)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         if (_fileContentType is not null)
         {
             throw new InvalidOperationException(
@@ -270,18 +459,6 @@ public abstract class RouteDefinitionBase<TSelf>
         }
 
         _responseContentType = contentType;
-        return (TSelf)this;
-    }
-
-    /// <summary>
-    /// Skip typed-result validation for endpoints that return framework result types
-    /// (e.g. ChallengeHttpResult, SignOutHttpResult) which do not implement
-    /// IStatusCodeHttpResult and therefore cannot be validated by Rivet's validator.
-    /// </summary>
-    public TSelf SkipValidation()
-    {
-        EnsureMutable();
-        _skipValidation = true;
         return (TSelf)this;
     }
 
@@ -303,28 +480,51 @@ public abstract class RouteDefinitionBase<TSelf>
 
     private TSelf AddErrorResponse(RouteErrorResponse response)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _errorResponses ??= [];
+        var exactStatus = GetExactStatus(response);
 
-        if (_statusSet && response.StatusCode == _successStatus)
+        if (
+            response.StatusKey is { } statusKey
+            && exactStatus is null
+            && !statusKey.Equals("default", StringComparison.OrdinalIgnoreCase)
+            && !IsRangeStatusKey(statusKey)
+        )
         {
             throw new InvalidOperationException(
-                $"Status {response.StatusCode} is already declared as the success status — success and error responses cannot share a status."
+                $"{Method} {Route}: response status key '{statusKey}' is not an exact status, nXX range, or default."
+            );
+        }
+
+        if (exactStatus is < 100 or > 599)
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: response status {exactStatus} is not a valid HTTP status code."
+            );
+        }
+
+        if (_statusSet && exactStatus == _successStatus)
+        {
+            throw new InvalidOperationException(
+                $"Status {exactStatus} is already declared as the success status — success and error responses cannot share a status."
             );
         }
 
         if (
             _errorResponses.Any(existing =>
-                string.Equals(
-                    existing.EffectiveStatusKey,
-                    response.EffectiveStatusKey,
-                    StringComparison.OrdinalIgnoreCase
-                )
+                exactStatus is not null
+                    ? GetExactStatus(existing) == exactStatus
+                    : GetExactStatus(existing) is null
+                        && string.Equals(
+                            existing.EffectiveStatusKey,
+                            response.EffectiveStatusKey,
+                            StringComparison.OrdinalIgnoreCase
+                        )
             )
         )
         {
             throw new InvalidOperationException(
-                $"Status {response.StatusCode} is already declared via .Returns() — a status carries a single response shape. "
+                $"Status {response.EffectiveStatusKey} is already declared via .Returns() — a status carries a single response shape. "
                     + "For multiple shapes at one status, declare a [RivetUnion] type and return it once."
             );
         }
@@ -332,6 +532,21 @@ public abstract class RouteDefinitionBase<TSelf>
         _errorResponses.Add(response);
         return (TSelf)this;
     }
+
+    private static int? GetExactStatus(RouteErrorResponse response)
+    {
+        if (response.StatusKey is null)
+        {
+            return response.StatusCode;
+        }
+
+        return response.StatusKey is [>= '1' and <= '5', >= '0' and <= '9', >= '0' and <= '9']
+            ? int.Parse(response.StatusKey)
+            : null;
+    }
+
+    private static bool IsRangeStatusKey(string statusKey) =>
+        statusKey is [>= '1' and <= '5', 'X' or 'x', 'X' or 'x'];
 
     /// <summary>
     /// Declares a response header on the given status code (contract concept).
@@ -496,7 +711,7 @@ public abstract class RouteDefinitionBase<TSelf>
 
     private TSelf AddResponseHeader(RouteResponseHeader header)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _responseHeaders ??= [];
 
         if (
@@ -527,6 +742,7 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
+        using var mutation = BeginMutation();
         // Example metadata is consumed by the Roslyn analyzer, not at runtime.
         _ = json;
         _ = name;
@@ -543,6 +759,7 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
+        using var mutation = BeginMutation();
         _ = componentExampleId;
         _ = resolvedJson;
         _ = name;
@@ -559,6 +776,7 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
+        using var mutation = BeginMutation();
         _ = statusCode;
         _ = json;
         _ = name;
@@ -575,6 +793,7 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
+        using var mutation = BeginMutation();
         _ = statusKey;
         _ = json;
         _ = name;
@@ -592,6 +811,7 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
+        using var mutation = BeginMutation();
         _ = statusCode;
         _ = componentExampleId;
         _ = resolvedJson;
@@ -610,6 +830,7 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
+        using var mutation = BeginMutation();
         _ = statusKey;
         _ = componentExampleId;
         _ = resolvedJson;
@@ -621,34 +842,34 @@ public abstract class RouteDefinitionBase<TSelf>
 
     public TSelf Anonymous()
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _anonymous = true;
         return (TSelf)this;
     }
 
     public TSelf Secure(string scheme)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _securityScheme = scheme;
         return (TSelf)this;
     }
 
     public TSelf SecurityRequirements()
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         return (TSelf)this;
     }
 
     public TSelf SecurityRequirement(int requirementOrder)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _ = requirementOrder;
         return (TSelf)this;
     }
 
     public TSelf SecurityRequirement(int requirementOrder, string scheme, string? scope = null)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _ = requirementOrder;
         _ = scheme;
         _ = scope;
@@ -662,7 +883,7 @@ public abstract class RouteDefinitionBase<TSelf>
         string? format = null
     )
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _ = mediaType;
         _ = schemaRef;
         _ = schemaType;
@@ -672,28 +893,28 @@ public abstract class RouteDefinitionBase<TSelf>
 
     public TSelf RequestContent(string mediaType)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _ = mediaType;
         return (TSelf)this;
     }
 
     public TSelf RequestBinaryContent(string mediaType)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _ = mediaType;
         return (TSelf)this;
     }
 
     public TSelf RequestBodyRequired(bool required)
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _ = required;
         return (TSelf)this;
     }
 
     public TSelf RequestBody()
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         return (TSelf)this;
     }
 
@@ -707,7 +928,7 @@ public abstract class RouteDefinitionBase<TSelf>
         string? schemaRef = null
     )
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _ = name;
         _ = location;
         _ = required;
@@ -727,9 +948,8 @@ public abstract class RouteDefinitionBase<TSelf>
         string? schemaDescription = null
     )
     {
-        EnsureMutable();
-        _ = statusCode;
-        _ = mediaType;
+        using var mutation = BeginMutation();
+        AddResponseContent(statusCode.ToString(), mediaType, typeof(T), isBinary: false);
         _ = schemaRef;
         _ = schemaType;
         _ = format;
@@ -746,9 +966,8 @@ public abstract class RouteDefinitionBase<TSelf>
         string? schemaDescription = null
     )
     {
-        EnsureMutable();
-        _ = statusKey;
-        _ = mediaType;
+        using var mutation = BeginMutation();
+        AddResponseContent(statusKey, mediaType, typeof(T), isBinary: false);
         _ = schemaRef;
         _ = schemaType;
         _ = format;
@@ -758,34 +977,43 @@ public abstract class RouteDefinitionBase<TSelf>
 
     public TSelf ResponseContent(int statusCode, string mediaType)
     {
-        EnsureMutable();
-        _ = statusCode;
-        _ = mediaType;
+        using var mutation = BeginMutation();
+        AddResponseContent(statusCode.ToString(), mediaType, null, isBinary: false);
         return (TSelf)this;
     }
 
     public TSelf ResponseContent(string statusKey, string mediaType)
     {
-        EnsureMutable();
-        _ = statusKey;
-        _ = mediaType;
+        using var mutation = BeginMutation();
+        AddResponseContent(statusKey, mediaType, null, isBinary: false);
         return (TSelf)this;
     }
 
     public TSelf ResponseBinaryContent(int statusCode, string mediaType)
     {
-        EnsureMutable();
-        _ = statusCode;
-        _ = mediaType;
+        using var mutation = BeginMutation();
+        AddResponseContent(statusCode.ToString(), mediaType, null, isBinary: true);
         return (TSelf)this;
     }
 
     public TSelf ResponseBinaryContent(string statusKey, string mediaType)
     {
-        EnsureMutable();
-        _ = statusKey;
-        _ = mediaType;
+        using var mutation = BeginMutation();
+        AddResponseContent(statusKey, mediaType, null, isBinary: true);
         return (TSelf)this;
+    }
+
+    private void AddResponseContent(
+        string statusKey,
+        string mediaType,
+        Type? payloadType,
+        bool isBinary
+    )
+    {
+        _responseContents ??= [];
+        _responseContents.Add(
+            new RouteResponseContent(statusKey, mediaType, payloadType, isBinary)
+        );
     }
 
     /// <summary>
@@ -795,7 +1023,7 @@ public abstract class RouteDefinitionBase<TSelf>
     /// </summary>
     public TSelf QueryAuth(string parameterName = "token")
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         _queryAuthParameterName = parameterName;
         return (TSelf)this;
     }
@@ -806,7 +1034,17 @@ public abstract class RouteDefinitionBase<TSelf>
     /// </summary>
     public TSelf ProducesFile(string contentType = "application/octet-stream")
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
+        if (
+            string.IsNullOrWhiteSpace(contentType)
+            || !MediaTypeHeaderValue.TryParse(contentType, out _)
+        )
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: .ProducesFile() requires a valid content type."
+            );
+        }
+
         _fileContentType = contentType;
         return (TSelf)this;
     }
@@ -817,7 +1055,7 @@ public abstract class RouteDefinitionBase<TSelf>
     /// </summary>
     public TSelf AcceptsFile()
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         if (_binaryRequestContentType is not null)
         {
             throw new InvalidOperationException(
@@ -839,7 +1077,7 @@ public abstract class RouteDefinitionBase<TSelf>
     /// </summary>
     public TSelf AcceptsBinary(string contentType = "application/octet-stream")
     {
-        EnsureMutable();
+        using var mutation = BeginMutation();
         if (_acceptsFile)
         {
             throw new InvalidOperationException(
@@ -863,7 +1101,7 @@ public abstract class RouteDefinitionBase<TSelf>
 
 /// <summary>
 /// Route definition for endpoints with both input and output types.
-/// Roslyn reads the chain at generation time. Invoke provides type-safe runtime execution.
+/// Roslyn reads the chain at generation time. Bind publishes the contract for terminal use.
 /// </summary>
 public sealed class RouteDefinition<TInput, TOutput>
     : RouteDefinitionBase<RouteDefinition<TInput, TOutput>>
@@ -871,82 +1109,10 @@ public sealed class RouteDefinition<TInput, TOutput>
     internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
 
-    /// <summary>
-    /// Execute the endpoint handler with type-safe input and output.
-    /// </summary>
-    public async Task<RivetResult<TOutput>> Invoke(
-        TInput input,
-        Func<TInput, Task<TOutput>> handler
-    )
+    public BoundRouteDefinition<TOutput> Bind(TInput input)
     {
-        MarkPublished();
-        var result = await handler(input);
-        return new RivetResult<TOutput>(SuccessStatus, result);
-    }
-
-    public async Task<Results<T1, T2>> Invoke<T1, T2>(
-        TInput input,
-        Func<TInput, Task<Results<T1, T2>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult => await InvokeTypedResult(input, typeof(TOutput), handler);
-
-    public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(
-        TInput input,
-        Func<TInput, Task<Results<T1, T2, T3>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult => await InvokeTypedResult(input, typeof(TOutput), handler);
-
-    public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(
-        TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult => await InvokeTypedResult(input, typeof(TOutput), handler);
-
-    public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(
-        TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4, T5>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult
-        where T5 : IResult => await InvokeTypedResult(input, typeof(TOutput), handler);
-
-    public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(
-        TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4, T5, T6>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult
-        where T5 : IResult
-        where T6 : IResult => await InvokeTypedResult(input, typeof(TOutput), handler);
-
-    private async Task<TResult> InvokeTypedResult<TResult>(
-        TInput input,
-        Type successResponseType,
-        Func<TInput, Task<TResult>> handler
-    )
-        where TResult : IResult
-    {
-        MarkPublished();
-        var result = await handler(input);
-        TypedResultValidator.Validate(
-            Route,
-            SuccessStatus,
-            successResponseType,
-            RouteErrorResponses,
-            result,
-            ShouldSkipValidation
-        );
-        return result;
+        ArgumentNullException.ThrowIfNull(input);
+        return new BoundRouteDefinition<TOutput>(Publish(typeof(TOutput)));
     }
 
     public static implicit operator Define(RouteDefinition<TInput, TOutput> _) => default!;
@@ -960,75 +1126,62 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
     internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
 
-    /// <summary>
-    /// Execute the endpoint handler with type-safe output.
-    /// </summary>
-    public async Task<RivetResult<TOutput>> Invoke(Func<Task<TOutput>> handler)
-    {
-        MarkPublished();
-        var result = await handler();
-        return new RivetResult<TOutput>(SuccessStatus, result);
-    }
+    public RivetResult Success(TOutput payload) =>
+        RivetTerminal.Success(Publish(typeof(TOutput)), payload);
 
-    public async Task<T1> Invoke<T1>(Func<Task<T1>> handler)
-        where T1 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
+    public RivetResult Error(int statusCode) =>
+        RivetTerminal.Error(Publish(typeof(TOutput)), statusCode);
 
-    public async Task<Results<T1, T2>> Invoke<T1, T2>(Func<Task<Results<T1, T2>>> handler)
-        where T1 : IResult
-        where T2 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
+    public RivetResult Error<TError>(int statusCode, TError payload) =>
+        RivetTerminal.Error(Publish(typeof(TOutput)), statusCode, payload);
 
-    public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(
-        Func<Task<Results<T1, T2, T3>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
-
-    public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(
-        Func<Task<Results<T1, T2, T3, T4>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
-
-    public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(
-        Func<Task<Results<T1, T2, T3, T4, T5>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult
-        where T5 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
-
-    public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(
-        Func<Task<Results<T1, T2, T3, T4, T5, T6>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult
-        where T5 : IResult
-        where T6 : IResult => await InvokeTypedResult(typeof(TOutput), handler);
-
-    private async Task<TResult> InvokeTypedResult<TResult>(
-        Type successResponseType,
-        Func<Task<TResult>> handler
-    )
-        where TResult : IResult
-    {
-        MarkPublished();
-        var result = await handler();
-        TypedResultValidator.Validate(
-            Route,
-            SuccessStatus,
-            successResponseType,
-            RouteErrorResponses,
-            result,
-            ShouldSkipValidation
+    public RivetResult File(
+        byte[] content,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null
+    ) =>
+        RivetTerminal.File(
+            Publish(typeof(TOutput)),
+            content,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag
         );
-        return result;
-    }
+
+    public RivetResult File(
+        Stream content,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null
+    ) =>
+        RivetTerminal.File(
+            Publish(typeof(TOutput)),
+            content,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag
+        );
+
+    public RivetResult File(
+        string physicalPath,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null
+    ) =>
+        RivetTerminal.PhysicalFile(
+            Publish(typeof(TOutput)),
+            physicalPath,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag
+        );
 
     public static implicit operator Define(RouteDefinition<TOutput> _) => default!;
 }
@@ -1042,81 +1195,10 @@ public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRout
     internal InputRouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
 
-    /// <summary>
-    /// Execute the endpoint handler with type-safe input (void output).
-    /// </summary>
-    public async Task<RivetResult> Invoke(TInput input, Func<TInput, Task> handler)
+    public BoundRouteDefinition Bind(TInput input)
     {
-        MarkPublished();
-        await handler(input);
-        return new RivetResult(SuccessStatus);
-    }
-
-    public async Task<T1> Invoke<T1>(TInput input, Func<TInput, Task<T1>> handler)
-        where T1 : IResult => await InvokeTypedResult(input, handler);
-
-    public async Task<Results<T1, T2>> Invoke<T1, T2>(
-        TInput input,
-        Func<TInput, Task<Results<T1, T2>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult => await InvokeTypedResult(input, handler);
-
-    public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(
-        TInput input,
-        Func<TInput, Task<Results<T1, T2, T3>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult => await InvokeTypedResult(input, handler);
-
-    public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(
-        TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult => await InvokeTypedResult(input, handler);
-
-    public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(
-        TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4, T5>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult
-        where T5 : IResult => await InvokeTypedResult(input, handler);
-
-    public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(
-        TInput input,
-        Func<TInput, Task<Results<T1, T2, T3, T4, T5, T6>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult
-        where T5 : IResult
-        where T6 : IResult => await InvokeTypedResult(input, handler);
-
-    private async Task<TResult> InvokeTypedResult<TResult>(
-        TInput input,
-        Func<TInput, Task<TResult>> handler
-    )
-        where TResult : IResult
-    {
-        MarkPublished();
-        var result = await handler(input);
-        TypedResultValidator.Validate(
-            Route,
-            SuccessStatus,
-            null,
-            RouteErrorResponses,
-            result,
-            ShouldSkipValidation
-        );
-        return result;
+        ArgumentNullException.ThrowIfNull(input);
+        return new BoundRouteDefinition(Publish(null));
     }
 
     public static implicit operator Define(InputRouteDefinition<TInput> _) => default!;
@@ -1130,81 +1212,70 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
     internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
 
+    public RivetResult Success() => RivetTerminal.Success(Publish(null));
+
+    public RivetResult Error(int statusCode) => RivetTerminal.Error(Publish(null), statusCode);
+
+    public RivetResult Error<TError>(int statusCode, TError payload) =>
+        RivetTerminal.Error(Publish(null), statusCode, payload);
+
+    public RivetResult File(
+        byte[] content,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null
+    ) =>
+        RivetTerminal.File(
+            Publish(null),
+            content,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag
+        );
+
+    public RivetResult File(
+        Stream content,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null
+    ) =>
+        RivetTerminal.File(
+            Publish(null),
+            content,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag
+        );
+
+    public RivetResult File(
+        string physicalPath,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null
+    ) =>
+        RivetTerminal.PhysicalFile(
+            Publish(null),
+            physicalPath,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag
+        );
+
     /// <summary>
     /// Convert to an input-only endpoint (accepts a body, returns void).
     /// </summary>
     public InputRouteDefinition<TInput> Accepts<TInput>()
     {
+        using var mutation = BeginMutation();
         var def = new InputRouteDefinition<TInput>(Method, Route, SuccessStatus);
         CopyStateTo(def);
         return def;
-    }
-
-    /// <summary>
-    /// Execute the endpoint handler (void — no typed output).
-    /// </summary>
-    public async Task<RivetResult> Invoke(Func<Task> handler)
-    {
-        MarkPublished();
-        await handler();
-        return new RivetResult(SuccessStatus);
-    }
-
-    public async Task<T1> Invoke<T1>(Func<Task<T1>> handler)
-        where T1 : IResult => await InvokeTypedResult(handler);
-
-    public async Task<Results<T1, T2>> Invoke<T1, T2>(Func<Task<Results<T1, T2>>> handler)
-        where T1 : IResult
-        where T2 : IResult => await InvokeTypedResult(handler);
-
-    public async Task<Results<T1, T2, T3>> Invoke<T1, T2, T3>(
-        Func<Task<Results<T1, T2, T3>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult => await InvokeTypedResult(handler);
-
-    public async Task<Results<T1, T2, T3, T4>> Invoke<T1, T2, T3, T4>(
-        Func<Task<Results<T1, T2, T3, T4>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult => await InvokeTypedResult(handler);
-
-    public async Task<Results<T1, T2, T3, T4, T5>> Invoke<T1, T2, T3, T4, T5>(
-        Func<Task<Results<T1, T2, T3, T4, T5>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult
-        where T5 : IResult => await InvokeTypedResult(handler);
-
-    public async Task<Results<T1, T2, T3, T4, T5, T6>> Invoke<T1, T2, T3, T4, T5, T6>(
-        Func<Task<Results<T1, T2, T3, T4, T5, T6>>> handler
-    )
-        where T1 : IResult
-        where T2 : IResult
-        where T3 : IResult
-        where T4 : IResult
-        where T5 : IResult
-        where T6 : IResult => await InvokeTypedResult(handler);
-
-    private async Task<TResult> InvokeTypedResult<TResult>(Func<Task<TResult>> handler)
-        where TResult : IResult
-    {
-        MarkPublished();
-        var result = await handler();
-        TypedResultValidator.Validate(
-            Route,
-            SuccessStatus,
-            null,
-            RouteErrorResponses,
-            result,
-            ShouldSkipValidation
-        );
-        return result;
     }
 
     public static implicit operator Define(RouteDefinition _) => default!;
@@ -1222,33 +1293,64 @@ public sealed class FileRouteDefinition : RouteDefinitionBase<FileRouteDefinitio
         ProducesFile();
     }
 
+    public RivetResult Error(int statusCode) => RivetTerminal.Error(Publish(null), statusCode);
+
+    public RivetResult Error<TError>(int statusCode, TError payload) =>
+        RivetTerminal.Error(Publish(null), statusCode, payload);
+
+    public RivetResult File(
+        byte[] content,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null
+    ) =>
+        RivetTerminal.File(
+            Publish(null),
+            content,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag
+        );
+
+    public RivetResult File(
+        Stream content,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null
+    ) =>
+        RivetTerminal.File(
+            Publish(null),
+            content,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag
+        );
+
+    public RivetResult File(
+        string physicalPath,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null
+    ) =>
+        RivetTerminal.PhysicalFile(
+            Publish(null),
+            physicalPath,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag
+        );
+
     /// <summary>
     /// Sets the response content type for this file endpoint.
     /// Alias for ProducesFile — preferred on FileRouteDefinition for readability.
     /// </summary>
     public FileRouteDefinition ContentType(string mediaType) => ProducesFile(mediaType);
-
-    /// <summary>
-    /// Execute the endpoint handler with runtime contract validation: the success
-    /// branch must carry file content matching the declared content type, error
-    /// statuses must be declared. File results write their own status (200, or 206
-    /// under range processing), so only their content type is checked.
-    /// </summary>
-    public async Task<TResult> Invoke<TResult>(Func<Task<TResult>> handler)
-        where TResult : IResult
-    {
-        MarkPublished();
-        var result = await handler();
-        TypedResultValidator.ValidateFile(
-            Route,
-            SuccessStatus,
-            FileContentType,
-            RouteErrorResponses,
-            result,
-            ShouldSkipValidation
-        );
-        return result;
-    }
 
     public static implicit operator Define(FileRouteDefinition _) => default!;
 }
@@ -1265,33 +1367,17 @@ public sealed class FileRouteDefinition<TInput> : RouteDefinitionBase<FileRouteD
         ProducesFile();
     }
 
+    public BoundFileRouteDefinition Bind(TInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        return new BoundFileRouteDefinition(Publish(null));
+    }
+
     /// <summary>
     /// Sets the response content type for this file endpoint.
     /// Alias for ProducesFile — preferred on FileRouteDefinition for readability.
     /// </summary>
     public FileRouteDefinition<TInput> ContentType(string mediaType) => ProducesFile(mediaType);
-
-    /// <summary>
-    /// Execute the endpoint handler with runtime contract validation: the success
-    /// branch must carry file content matching the declared content type, error
-    /// statuses must be declared. File results write their own status (200, or 206
-    /// under range processing), so only their content type is checked.
-    /// </summary>
-    public async Task<TResult> Invoke<TResult>(TInput input, Func<TInput, Task<TResult>> handler)
-        where TResult : IResult
-    {
-        MarkPublished();
-        var result = await handler(input);
-        TypedResultValidator.ValidateFile(
-            Route,
-            SuccessStatus,
-            FileContentType,
-            RouteErrorResponses,
-            result,
-            ShouldSkipValidation
-        );
-        return result;
-    }
 
     public static implicit operator Define(FileRouteDefinition<TInput> _) => default!;
 }

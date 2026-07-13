@@ -45,7 +45,7 @@ tasks:
     test:
         desc: Run test suite
         cmds:
-            - dotnet test ./Rivet.Tests/Rivet.Tests.csproj
+            - dotnet test ./Rivet.slnx
 
     format:
         desc: Format C# projects

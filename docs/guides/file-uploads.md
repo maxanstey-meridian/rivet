@@ -91,21 +91,23 @@ the same.
 token — for clients (ExoPlayer, HLS.js) that cannot set headers on media segment
 requests.
 
-## Enforcement note
+## Returning files
 
-`Define.File` definitions have an opt-in `Invoke`: the success branch must carry
-file content matching the declared content type (a JSON result on an `image/jpeg`
-contract throws `RivetContractViolationException`), and error statuses must be
-declared via `.Returns(...)`:
+Run the application operation normally, then construct the response with `.File(...)`.
+Rivet takes the content type from the contract and provides overloads for `byte[]`,
+`Stream`, and an absolute physical path. Input-bearing file definitions first use
+`.Bind(input)`. Errors use `.Error(...)` and must be declared via `.Returns(...)`:
 
 ```csharp
 [HttpGet("{id}/avatar")]
-public async Task<IResult> Avatar(Guid id)
-    => await MembersContract.Avatar.Invoke<FileContentHttpResult>(
-        async () => TypedResults.File(await store.Load(id), "image/jpeg"));
+public async Task<IActionResult> Avatar(Guid id)
+{
+    var content = await store.Load(id);
+    return MembersContract.Avatar.File(content, "avatar.jpg").ToActionResult();
+}
 ```
 
-File results write their own status (200, or 206 under range processing), so the
-status of the success branch is not checked. Stream *contents* are never inspected,
-and handlers that bypass `Invoke` are unchecked. See
-[Runtime Validation](/guides/runtime-validation).
+`.ToActionResult()` and `.ToResult()` are the first-party MVC and minimal-API
+bridges. Range processing can produce `206`; stream *contents* are never inspected,
+and handlers that bypass the contract terminals are unchecked. See [Runtime
+Validation](/guides/runtime-validation).

@@ -1,5 +1,5 @@
 using ContractApi.Contracts;
-using ContractApi.Controllers;
+using Rivet;
 
 namespace ContractApi.Endpoints;
 
@@ -10,7 +10,7 @@ public static class MembersEndpoints
         // Minimal API example mapped separately from the controller's /api/health action.
         endpoints.MapGet(
             MembersContract.MinimalRoutePrefix + MembersContract.Health.Route,
-            async () => (await MembersContract.Health.Invoke(async () => { })).ToResult()
+            () => MembersContract.Health.Success().ToResult()
         );
 
         return endpoints;

@@ -2,7 +2,7 @@ namespace Rivet;
 
 /// <summary>
 /// Static factory for defining contract endpoints. Factory methods create typed route definitions
-/// that Roslyn reads at generation time and that provide type-safe Invoke at runtime.
+/// that Roslyn reads at generation time and whose terminals publish type-safe runtime results.
 /// </summary>
 public sealed class Define
 {

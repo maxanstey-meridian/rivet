@@ -15,6 +15,8 @@ public sealed class WellKnownTypes
     public readonly INamedTypeSymbol? HttpPut;
     public readonly INamedTypeSymbol? HttpDelete;
     public readonly INamedTypeSymbol? HttpPatch;
+    public readonly INamedTypeSymbol? HttpHead;
+    public readonly INamedTypeSymbol? HttpOptions;
 
     // Binding attributes
     public readonly INamedTypeSymbol? Route;
@@ -75,6 +77,20 @@ public sealed class WellKnownTypes
     public readonly INamedTypeSymbol? InternalServerErrorOfT;
     public readonly INamedTypeSymbol? JsonHttpResultOfT;
 
+    // Coverage analysis
+    public readonly INamedTypeSymbol? RouteDefinition;
+    public readonly INamedTypeSymbol? RouteDefinitionOfT;
+    public readonly INamedTypeSymbol? RouteDefinitionOfTInputTOutput;
+    public readonly INamedTypeSymbol? InputRouteDefinitionOfT;
+    public readonly INamedTypeSymbol? FileRouteDefinition;
+    public readonly INamedTypeSymbol? FileRouteDefinitionOfT;
+    public readonly INamedTypeSymbol? BoundRouteDefinition;
+    public readonly INamedTypeSymbol? BoundRouteDefinitionOfT;
+    public readonly INamedTypeSymbol? BoundFileRouteDefinition;
+    public readonly INamedTypeSymbol? EndpointRouteBuilderExtensions;
+    public readonly INamedTypeSymbol? Function;
+    public readonly INamedTypeSymbol? HttpTrigger;
+
     /// <summary>
     /// Maps HTTP method attribute symbol → verb string ("GET", "POST", etc.).
     /// </summary>
@@ -101,6 +117,10 @@ public sealed class WellKnownTypes
         );
         HttpPatch = compilation.GetTypeByMetadataName(
             "Microsoft.AspNetCore.Mvc.HttpPatchAttribute"
+        );
+        HttpHead = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.HttpHeadAttribute");
+        HttpOptions = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Mvc.HttpOptionsAttribute"
         );
 
         // Binding attributes
@@ -220,6 +240,30 @@ public sealed class WellKnownTypes
             "Microsoft.AspNetCore.Http.HttpResults.JsonHttpResult`1"
         );
 
+        // Coverage analysis
+        RouteDefinition = compilation.GetTypeByMetadataName("Rivet.RouteDefinition");
+        RouteDefinitionOfT = compilation.GetTypeByMetadataName("Rivet.RouteDefinition`1");
+        RouteDefinitionOfTInputTOutput = compilation.GetTypeByMetadataName(
+            "Rivet.RouteDefinition`2"
+        );
+        InputRouteDefinitionOfT = compilation.GetTypeByMetadataName("Rivet.InputRouteDefinition`1");
+        FileRouteDefinition = compilation.GetTypeByMetadataName("Rivet.FileRouteDefinition");
+        FileRouteDefinitionOfT = compilation.GetTypeByMetadataName("Rivet.FileRouteDefinition`1");
+        BoundRouteDefinition = compilation.GetTypeByMetadataName("Rivet.BoundRouteDefinition");
+        BoundRouteDefinitionOfT = compilation.GetTypeByMetadataName("Rivet.BoundRouteDefinition`1");
+        BoundFileRouteDefinition = compilation.GetTypeByMetadataName(
+            "Rivet.BoundFileRouteDefinition"
+        );
+        EndpointRouteBuilderExtensions = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions"
+        );
+        Function = compilation.GetTypeByMetadataName(
+            "Microsoft.Azure.Functions.Worker.FunctionAttribute"
+        );
+        HttpTrigger = compilation.GetTypeByMetadataName(
+            "Microsoft.Azure.Functions.Worker.HttpTriggerAttribute"
+        );
+
         // Build convenience dictionaries
         HttpMethodAttributes = BuildHttpMethodAttributes();
         TypedResultStatusCodes = BuildTypedResultStatusCodes();
@@ -236,6 +280,8 @@ public sealed class WellKnownTypes
         TryAdd(builder, HttpPut, "PUT");
         TryAdd(builder, HttpDelete, "DELETE");
         TryAdd(builder, HttpPatch, "PATCH");
+        TryAdd(builder, HttpHead, "HEAD");
+        TryAdd(builder, HttpOptions, "OPTIONS");
         return builder.ToImmutable();
     }
 

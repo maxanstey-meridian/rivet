@@ -24,8 +24,9 @@ Pipeline (`Rivet.Tool/`):
   2xxx emission, 3xxx import, 4xxx coverage). Retired IDs are never reused.
 
 `Rivet.Attributes/` is the runtime-facing package: attributes, the
-`Define`/`RouteDefinition` builder, `Invoke` helpers. Runtime enforcement is
-deliberately narrow (status codes + C# payload types on the typed-results path;
+`Define`/`RouteDefinition` builder, contract-owned response terminals, and
+first-party MVC/Minimal adapters. Runtime enforcement covers declared status,
+body presence, payload type, content type, and file metadata at terminal construction;
 `[RivetConstraints]` is a `ValidationAttribute` enforced by validating hosts) —
 `docs/guides/runtime-validation.md` is the scope statement.
 
@@ -40,7 +41,7 @@ corpus fixtures), Taskfile.yml. (The PHP lowerer lives in its own repo,
 ## Build / test
 
 - `task build` / `task test` / `task samples:build` / `task check` (everything,
-  incl. docs build) — or directly: `dotnet test ./Rivet.Tests/Rivet.Tests.csproj`.
+  incl. docs build) — or directly: `dotnet test ./Rivet.slnx`.
 - Single area: `dotnet test --filter <TestClassName>`.
 - Conformance tests shell out to spectral in `Rivet.Tests/js/` (`pnpm --dir
   Rivet.Tests/js install` once, or `task install`).

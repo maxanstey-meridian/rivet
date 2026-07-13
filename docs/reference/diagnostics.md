@@ -126,3 +126,4 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV4001` | Warning | Contract endpoint has no matching implementation. | Implement the endpoint, or remove it from the contract. |
 | `RIV4002` | Warning | Implementation HTTP method differs from the contract's. | Align the implementation's HTTP method with the contract. |
 | `RIV4003` | Warning | Implementation route differs from the contract's. | Align the implementation's route with the contract. |
+| `RIV4004` | Warning | A contract endpoint is bound in a route handler but no terminal result from that binding is returned. | Return a `Success`, `Error`, or `File` terminal through the correct host adapter, or remove the unused `Bind`. |

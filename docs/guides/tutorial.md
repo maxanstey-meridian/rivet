@@ -99,6 +99,6 @@ const { data, error } = await api.GET("/api/tasks/{id}", {
 
 ## Next
 
-- [Contracts guide](/guides/contracts) — `.Invoke()`, error responses, security
+- [Contracts guide](/guides/contracts) — binding, response terminals, security
 - [Runtime Validation](/guides/runtime-validation) — what is and isn't enforced at runtime
 - [CLI Reference](/reference/cli)

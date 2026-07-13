@@ -2,11 +2,12 @@
 
 Demonstrates Rivet's contract-driven endpoint definitions using `[RivetContract]` with typed
 `RouteDefinition<T>` fields. Contracts are pure Rivet (no ASP.NET dependency). Controllers use
-`.Invoke()` for type-safe execution — the compiler enforces input/output types.
+`.Bind()` for input-bearing endpoints, execute ordinary application code, and construct
+contract-owned responses with `.Success()`, `.Error()`, or `.File()`.
 
-Features shown: `[RivetContract]`, `RouteDefinition<T>.Invoke()`, `.Description()`,
+Features shown: `[RivetContract]`, `RouteDefinition<T>.Bind()`, `.Success()`, `.Description()`,
 `.Returns<T>(status, desc)`, `.Status()`, `.Anonymous()`, `.Secure()`, branded value objects,
-and `RivetResult<T>.ToActionResult()` as the framework bridge.
+and the first-party `RivetResult.ToActionResult()` / `.ToResult()` framework bridges.
 
 ## Run
 

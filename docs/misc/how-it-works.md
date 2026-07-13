@@ -28,5 +28,5 @@ Two side doors feed the same emit pipeline:
 
 There is no runtime spec generation and no middleware: the `Rivet.Attributes`
 package contains only the attributes, the `Define`/`RouteDefinition` builder, and
-the `Invoke` helpers whose enforcement scope is described in
+contract-owned `Bind`/terminal APIs with first-party host adapters. Their enforcement scope is described in
 [Runtime Validation](/guides/runtime-validation).

@@ -5,8 +5,8 @@ namespace ContractApi.Contracts;
 
 /// <summary>
 /// Contract-driven endpoint definitions for the Members API.
-/// Pure Rivet — no ASP.NET dependency. Controllers use .Invoke() for
-/// type-safe execution with compiler-enforced input/output types.
+/// Pure Rivet — no ASP.NET dependency. Controllers bind input-bearing definitions
+/// and construct contract-owned responses with compiler-enforced input/output types.
 ///
 /// TS: client/members.ts — list(), invite(), remove(), health()
 /// </summary>

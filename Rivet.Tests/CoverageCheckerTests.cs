@@ -1,11 +1,10 @@
 using Rivet.Tool.Analysis;
-using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
 public sealed class CoverageCheckerTests
 {
-    private const string TasksContract = """
+    private const string Contract = """
         using Rivet;
 
         namespace Test;
@@ -14,70 +13,81 @@ public sealed class CoverageCheckerTests
         public sealed record TaskDto(string Id, string Title);
 
         [RivetType]
-        public sealed record CreateTaskInput(string Title);
-
-        [RivetType]
-        public sealed record UpdateTaskInput(string Id, string Title);
-
-        [RivetType]
-        public sealed record PatchTaskInput(string Title);
+        public sealed record TaskInput(string Title);
 
         [RivetContract]
         public static class TasksContract
         {
             public static readonly RouteDefinition<TaskDto> ListTasks =
-                Define.Get<TaskDto>("/api/tasks");
+                Define.Get<TaskDto>("/api/tasks").Returns(404);
 
-            public static readonly RouteDefinition<CreateTaskInput, TaskDto> CreateTask =
-                Define.Post<CreateTaskInput, TaskDto>("/api/tasks");
-
-            public static readonly RouteDefinition<UpdateTaskInput, TaskDto> UpdateTask =
-                Define.Put<UpdateTaskInput, TaskDto>("/api/tasks/{id}");
-
-            public static readonly RouteDefinition<PatchTaskInput, TaskDto> PatchTask =
-                Define.Patch<PatchTaskInput, TaskDto>("/api/tasks/{id}");
+            public static readonly RouteDefinition<TaskInput, TaskDto> CreateTask =
+                Define.Post<TaskInput, TaskDto>("/api/tasks");
 
             public static readonly RouteDefinition RemoveTask =
                 Define.Delete("/api/tasks/{id}");
+
+            public static readonly RouteDefinition UpdateTask =
+                Define.Put("/api/tasks/{id}");
+
+            public static readonly RouteDefinition PatchTask =
+                Define.Patch("/api/tasks/{id}");
+
+            public static readonly FileRouteDefinition DownloadTask =
+                Define.File("/api/tasks/{id}/download");
+
+            public static readonly RouteDefinition HeadTasks =
+                Define.Head("/api/tasks");
+
+            public static readonly RouteDefinition OptionsTasks =
+                Define.Options("/api/tasks");
         }
         """;
 
-    private const string MembersContract = """
-        using Rivet;
+    private const string AzureAttributes = """
+        using System;
 
-        namespace Test;
+        namespace Microsoft.Azure.Functions.Worker;
 
-        [RivetType]
-        public sealed record MemberDto(string Id, string Name);
-
-        [RivetContract]
-        public static class MembersContract
+        public enum AuthorizationLevel
         {
-            public static readonly RouteDefinition<MemberDto> ListMembers =
-                Define.Get<MemberDto>("/api/members");
+            Anonymous,
+            Function,
+        }
+
+        [AttributeUsage(AttributeTargets.Method)]
+        public sealed class FunctionAttribute(string name) : Attribute
+        {
+            public string Name { get; } = name;
+        }
+
+        [AttributeUsage(AttributeTargets.Parameter)]
+        public sealed class HttpTriggerAttribute : Attribute
+        {
+            public HttpTriggerAttribute(AuthorizationLevel authorizationLevel, params string[] methods)
+            {
+                AuthorizationLevel = authorizationLevel;
+                Methods = methods;
+            }
+
+            public AuthorizationLevel AuthorizationLevel { get; }
+            public string[] Methods { get; }
+            public string? Route { get; set; }
         }
         """;
 
-    private static (
-        IReadOnlyList<TsEndpointDefinition> Endpoints,
-        IReadOnlyList<CoverageWarning> Warnings
-    ) RunCheck(params string[] sources)
+    private static IReadOnlyList<CoverageWarning> RunCheck(params string[] sources)
     {
         var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var warnings = CompilationHelper.CheckCoverage(compilation, endpoints);
-        return (endpoints, warnings);
+        return CompilationHelper.CheckCoverage(compilation, endpoints);
     }
 
-    // --- Controller tests (correct — no warnings) ---
-
     [Fact]
-    public void Controller_Get_Correct_NoWarning()
+    public void Direct_success_is_coverage()
     {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
+        var implementation = """
             using Microsoft.AspNetCore.Mvc;
             using Rivet;
 
@@ -87,132 +97,20 @@ public sealed class CoverageCheckerTests
             public sealed class TasksController : ControllerBase
             {
                 [HttpGet]
-                public async Task<IActionResult> List()
-                {
-                    var result = await TasksContract.ListTasks.Invoke(async () => new TaskDto("1", "Test"));
-                    return null!;
-                }
+                public IActionResult List() =>
+                    TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToActionResult();
             }
             """;
 
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        Assert.DoesNotContain(warnings, w => w.FieldName == "ListTasks");
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "ListTasks");
     }
 
     [Fact]
-    public void Controller_Post_Correct_NoWarning()
+    public void Terminal_result_local_initializer_is_coverage()
     {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
-
-            namespace Test;
-
-            [Route("api/tasks")]
-            public sealed class TasksController : ControllerBase
-            {
-                [HttpPost]
-                public async Task<IActionResult> Create([FromBody] CreateTaskInput input)
-                {
-                    var result = await TasksContract.CreateTask.Invoke(input, async i => new TaskDto("1", i.Title));
-                    return null!;
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        Assert.DoesNotContain(warnings, w => w.FieldName == "CreateTask");
-    }
-
-    [Fact]
-    public void Controller_Put_Correct_NoWarning()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
-
-            namespace Test;
-
-            [Route("api/tasks")]
-            public sealed class TasksController : ControllerBase
-            {
-                [HttpPut("{id}")]
-                public async Task<IActionResult> Update(string id, [FromBody] UpdateTaskInput input)
-                {
-                    var result = await TasksContract.UpdateTask.Invoke(input, async i => new TaskDto(i.Id, i.Title));
-                    return null!;
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        Assert.DoesNotContain(warnings, w => w.FieldName == "UpdateTask");
-    }
-
-    [Fact]
-    public void Controller_Patch_Correct_NoWarning()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
-
-            namespace Test;
-
-            [Route("api/tasks")]
-            public sealed class TasksController : ControllerBase
-            {
-                [HttpPatch("{id}")]
-                public async Task<IActionResult> Patch(string id, [FromBody] PatchTaskInput input)
-                {
-                    var result = await TasksContract.PatchTask.Invoke(input, async i => new TaskDto("1", i.Title));
-                    return null!;
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        Assert.DoesNotContain(warnings, w => w.FieldName == "PatchTask");
-    }
-
-    [Fact]
-    public void Controller_Delete_Correct_NoWarning()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
-
-            namespace Test;
-
-            [Route("api/tasks")]
-            public sealed class TasksController : ControllerBase
-            {
-                [HttpDelete("{id}")]
-                public async Task<IActionResult> Remove(string id)
-                {
-                    var result = await TasksContract.RemoveTask.Invoke(async () => { });
-                    return null!;
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        Assert.DoesNotContain(warnings, w => w.FieldName == "RemoveTask");
-    }
-
-    [Fact]
-    public void Controller_AllEndpoints_AllCorrect_NoWarnings()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
+        var implementation = """
             using Microsoft.AspNetCore.Mvc;
             using Rivet;
 
@@ -222,54 +120,149 @@ public sealed class CoverageCheckerTests
             public sealed class TasksController : ControllerBase
             {
                 [HttpGet]
-                public async Task<IActionResult> List()
+                public IActionResult List()
                 {
-                    var result = await TasksContract.ListTasks.Invoke(async () => new TaskDto("1", "Test"));
-                    return null!;
-                }
-
-                [HttpPost]
-                public async Task<IActionResult> Create([FromBody] CreateTaskInput input)
-                {
-                    var result = await TasksContract.CreateTask.Invoke(input, async i => new TaskDto("1", i.Title));
-                    return null!;
-                }
-
-                [HttpPut("{id}")]
-                public async Task<IActionResult> Update(string id, [FromBody] UpdateTaskInput input)
-                {
-                    var result = await TasksContract.UpdateTask.Invoke(input, async i => new TaskDto(i.Id, i.Title));
-                    return null!;
-                }
-
-                [HttpPatch("{id}")]
-                public async Task<IActionResult> Patch(string id, [FromBody] PatchTaskInput input)
-                {
-                    var result = await TasksContract.PatchTask.Invoke(input, async i => new TaskDto("1", i.Title));
-                    return null!;
-                }
-
-                [HttpDelete("{id}")]
-                public async Task<IActionResult> Remove(string id)
-                {
-                    var result = await TasksContract.RemoveTask.Invoke(async () => { });
-                    return null!;
+                    var result = TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+                    return result.ToActionResult();
                 }
             }
             """;
 
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        Assert.Empty(warnings);
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "ListTasks");
     }
 
-    // --- Controller tests (mismatches — warnings) ---
+    [Fact]
+    public void Terminal_result_single_assignment_in_same_block_is_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    RivetResult result;
+                    result = TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+                    return result.ToActionResult();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "ListTasks");
+    }
 
     [Fact]
-    public void Controller_WrongHttpMethod_Warning()
+    public void Switch_expression_terminal_arms_are_coverage()
     {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List(bool found)
+                {
+                    return found switch
+                    {
+                        true => TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToActionResult(),
+                        false => TasksContract.ListTasks.Error(404).ToActionResult(),
+                    };
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Conditional_terminal_branches_are_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List(bool found) =>
+                    found
+                        ? TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToActionResult()
+                        : TasksContract.ListTasks.Error(404).ToActionResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Direct_error_is_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List() => TasksContract.ListTasks.Error(404).ToActionResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Direct_file_is_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet("{id}/download")]
+                public IActionResult Download() =>
+                    TasksContract.DownloadTask.File(new byte[] { 1, 2, 3 }).ToActionResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "DownloadTask");
+    }
+
+    [Fact]
+    public void Inline_bound_terminal_is_coverage()
+    {
+        var implementation = """
             using Microsoft.AspNetCore.Mvc;
             using Rivet;
 
@@ -279,130 +272,1074 @@ public sealed class CoverageCheckerTests
             public sealed class TasksController : ControllerBase
             {
                 [HttpPost]
-                public async Task<IActionResult> List()
+                public IActionResult Create(TaskInput input) =>
+                    TasksContract.CreateTask.Bind(input)
+                        .Success(new TaskDto("1", input.Title))
+                        .ToActionResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "CreateTask");
+    }
+
+    [Fact]
+    public void Bound_local_initializer_is_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpPost]
+                public IActionResult Create(TaskInput input)
                 {
-                    var result = await TasksContract.ListTasks.Invoke(async () => new TaskDto("1", "Test"));
-                    return null!;
+                    var endpoint = TasksContract.CreateTask.Bind(input);
+                    return endpoint.Success(new TaskDto("1", input.Title)).ToActionResult();
                 }
             }
             """;
 
-        var (_, warnings) = RunCheck(TasksContract, impl);
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "CreateTask");
+    }
+
+    [Fact]
+    public void Direct_field_local_initializer_is_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    var endpoint = TasksContract.ListTasks;
+                    return endpoint.Success(new TaskDto("1", "Test")).ToActionResult();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Reassigned_local_does_not_establish_provenance()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class OtherContract
+            {
+                public static readonly RouteDefinition<TaskDto> ListTasks =
+                    Define.Get<TaskDto>("/api/other");
+            }
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    var endpoint = TasksContract.ListTasks;
+                    endpoint = OtherContract.ListTasks;
+                    return endpoint.Success(new TaskDto("1", "Test")).ToActionResult();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        Assert.Contains(
+            warnings,
+            warning =>
+                warning.Kind == CoverageWarningKind.MissingImplementation
+                && warning.ContractName == "TasksContract"
+                && warning.FieldName == "ListTasks"
+        );
+    }
+
+    [Fact]
+    public void Declaration_then_single_assignment_in_same_block_is_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    RouteDefinition<TaskDto> endpoint;
+                    endpoint = TasksContract.ListTasks;
+                    return endpoint.Success(new TaskDto("1", "Test")).ToActionResult();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Assignment_in_branch_does_not_establish_provenance()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    RouteDefinition<TaskDto> endpoint;
+                    if (true)
+                    {
+                        endpoint = TasksContract.ListTasks;
+                    }
+
+                    return endpoint.Success(new TaskDto("1", "Test")).ToActionResult();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Multiple_assignments_do_not_establish_provenance()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    RouteDefinition<TaskDto> endpoint;
+                    endpoint = TasksContract.ListTasks;
+                    endpoint = TasksContract.ListTasks;
+                    return endpoint.Success(new TaskDto("1", "Test")).ToActionResult();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Ref_use_does_not_establish_provenance()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    RouteDefinition<TaskDto> endpoint;
+                    endpoint = TasksContract.ListTasks;
+                    Touch(ref endpoint);
+                    return endpoint.Success(new TaskDto("1", "Test")).ToActionResult();
+                }
+
+                private static void Touch(ref RouteDefinition<TaskDto> endpoint) { }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Helper_terminal_called_by_endpoint_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List() => BuildResult().ToActionResult();
+
+                private static RivetResult BuildResult() =>
+                    TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Discarded_terminal_expression_in_endpoint_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+                    return Ok();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Unreachable_returned_terminal_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    if (false)
+                    {
+                        return TasksContract.ListTasks
+                            .Success(new TaskDto("1", "Test"))
+                            .ToActionResult();
+                    }
+
+                    return Ok();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Expression_bodied_void_endpoint_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public void List() =>
+                    TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Unused_terminal_local_in_endpoint_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    var result = TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+                    return Ok();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Reassigned_terminal_result_local_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    var result = TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+                    result = TasksContract.ListTasks.Error(404);
+                    return result.ToActionResult();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Branched_terminal_result_assignment_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List(bool useError)
+                {
+                    RivetResult result;
+                    if (useError)
+                    {
+                        result = TasksContract.ListTasks.Error(404);
+                    }
+                    else
+                    {
+                        result = TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+                    }
+
+                    return result.ToActionResult();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Ref_terminal_result_local_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    var result = TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+                    Touch(ref result);
+                    return result.ToActionResult();
+                }
+
+                private static void Touch(ref RivetResult result) { }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Out_terminal_result_local_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List()
+                {
+                    var result = TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+                    Replace(out result);
+                    return result.ToActionResult();
+                }
+
+                private static void Replace(out RivetResult result)
+                {
+                    result = null!;
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Mvc_raw_terminal_return_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public RivetResult List() =>
+                    TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Mvc_ok_wrapped_terminal_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List() =>
+                    Ok(TasksContract.ListTasks.Success(new TaskDto("1", "Test")));
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Mvc_ok_wrapped_adapter_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List() =>
+                    Ok(TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToActionResult());
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Minimal_object_wrapped_adapter_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TasksEndpoints
+            {
+                public static void MapTasks(this IEndpointRouteBuilder app) =>
+                    app.MapGet(TasksContract.ListTasks.Route, () => new
+                    {
+                        Result = TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToResult()
+                    });
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Mvc_terminal_using_minimal_adapter_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public object List() =>
+                    TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Lookalike_action_result_adapter_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public static class LookalikeAdapters
+            {
+                public static IActionResult ToActionResult(this RivetResult result) =>
+                    new OkResult();
+            }
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List() =>
+                    TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToActionResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Returned_terminal_in_non_route_method_is_not_coverage()
+    {
+        var implementation = """
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskService
+            {
+                public static RivetResult List() =>
+                    TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Bind_without_terminal_reports_orphan_and_missing_implementation()
+    {
+        var implementation = """
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Create(TaskInput input)
+                {
+                    _ = TasksContract.CreateTask.Bind(input);
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "CreateTask");
+        var orphan = Assert.Single(
+            warnings,
+            warning =>
+                warning.Kind == CoverageWarningKind.OrphanedBinding
+                && warning.FieldName == "CreateTask"
+        );
+        Assert.Equal(
+            implementation.IndexOf(
+                "TasksContract.CreateTask.Bind(input)",
+                StringComparison.Ordinal
+            ),
+            orphan.Location!.SourceSpan.Start
+        );
+        Assert.Equal(
+            "TasksContract.CreateTask.Bind(input)".Length,
+            orphan.Location.SourceSpan.Length
+        );
+    }
+
+    [Fact]
+    public void Returned_adapted_bind_is_consumed()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpPost]
+                public IActionResult Create(TaskInput input)
+                {
+                    var endpoint = TasksContract.CreateTask.Bind(input);
+                    return endpoint.Success(new TaskDto("1", input.Title)).ToActionResult();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "CreateTask");
+    }
+
+    [Fact]
+    public void Orphan_bind_is_reported_when_same_field_has_valid_bind()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpPost]
+                public IActionResult Create(TaskInput input)
+                {
+                    _ = TasksContract.CreateTask.Bind(input);
+                    return TasksContract.CreateTask.Bind(input)
+                        .Success(new TaskDto("1", input.Title))
+                        .ToActionResult();
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "CreateTask");
+        var orphan = Assert.Single(
+            warnings,
+            warning =>
+                warning.Kind == CoverageWarningKind.OrphanedBinding
+                && warning.FieldName == "CreateTask"
+        );
+        Assert.Equal(
+            implementation.IndexOf(
+                "TasksContract.CreateTask.Bind(input)",
+                StringComparison.Ordinal
+            ),
+            orphan.Location!.SourceSpan.Start
+        );
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(".ToResult()")]
+    public void Bind_with_wrong_or_missing_adapter_reports_orphan_and_missing_implementation(
+        string adapter
+    )
+    {
+        var implementation = $$"""
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpPost]
+                public object Create(TaskInput input) =>
+                    TasksContract.CreateTask.Bind(input)
+                        .Success(new TaskDto("1", input.Title)){{adapter}};
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "CreateTask");
+        Assert.Contains(
+            warnings,
+            warning =>
+                warning.Kind == CoverageWarningKind.OrphanedBinding
+                && warning.FieldName == "CreateTask"
+        );
+    }
+
+    [Fact]
+    public void Unrelated_terminal_names_are_ignored()
+    {
+        var implementation = """
+            namespace Test;
+
+            public sealed class Lookalike
+            {
+                public object Success(object value) => value;
+                public object Error(int statusCode) => statusCode;
+                public object File(byte[] value) => value;
+            }
+
+            public static class TaskEndpoints
+            {
+                public static object List() => new Lookalike().Success(TasksContract.ListTasks);
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        Assert.Contains(
+            warnings,
+            warning =>
+                warning.Kind == CoverageWarningKind.MissingImplementation
+                && warning.FieldName == "ListTasks"
+        );
+    }
+
+    [Theory]
+    [InlineData(
+        "HttpGet",
+        "ListTasks",
+        "TasksContract.ListTasks.Success(new TaskDto(\"1\", \"Test\"))"
+    )]
+    [InlineData(
+        "HttpPost",
+        "CreateTask",
+        "TasksContract.CreateTask.Bind(new TaskInput(\"Test\")).Success(new TaskDto(\"1\", \"Test\"))"
+    )]
+    [InlineData("HttpDelete(\"{id}\")", "RemoveTask", "TasksContract.RemoveTask.Success()")]
+    [InlineData("HttpHead", "HeadTasks", "TasksContract.HeadTasks.Success()")]
+    [InlineData("HttpOptions", "OptionsTasks", "TasksContract.OptionsTasks.Success()")]
+    public void Mvc_endpoint_context_is_recognized(
+        string attribute,
+        string fieldName,
+        string terminal
+    )
+    {
+        var implementation = $$"""
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [{{attribute}}]
+                public IActionResult Handle() => {{terminal}}.ToActionResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == fieldName);
+    }
+
+    [Theory]
+    [InlineData(
+        "MapGet",
+        "ListTasks",
+        "TasksContract.ListTasks.Success(new TaskDto(\"1\", \"Test\"))"
+    )]
+    [InlineData(
+        "MapPost",
+        "CreateTask",
+        "TasksContract.CreateTask.Bind(new TaskInput(\"Test\")).Success(new TaskDto(\"1\", \"Test\"))"
+    )]
+    [InlineData("MapPut", "UpdateTask", "TasksContract.UpdateTask.Success()")]
+    [InlineData("MapPatch", "PatchTask", "TasksContract.PatchTask.Success()")]
+    [InlineData("MapDelete", "RemoveTask", "TasksContract.RemoveTask.Success()")]
+    public void Minimal_endpoint_context_is_recognized(
+        string mapMethod,
+        string fieldName,
+        string terminal
+    )
+    {
+        var route = fieldName is "RemoveTask" or "UpdateTask" or "PatchTask"
+            ? "/api/tasks/{id}"
+            : "/api/tasks";
+        var implementation = $$"""
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.{{mapMethod}}("{{route}}", () => {{terminal}}.ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, fieldName);
+    }
+
+    [Theory]
+    [InlineData("HEAD", "HeadTasks", "TasksContract.HeadTasks.Success()")]
+    [InlineData("OPTIONS", "OptionsTasks", "TasksContract.OptionsTasks.Success()")]
+    public void Minimal_MapMethods_head_and_options_are_recognized(
+        string method,
+        string fieldName,
+        string terminal
+    )
+    {
+        var implementation = $$"""
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapMethods("/api/tasks", new[] { "{{method}}" }, () => {{terminal}}.ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == fieldName);
+    }
+
+    [Fact]
+    public void Minimal_block_lambda_return_is_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGet("/api/tasks", () =>
+                    {
+                        return TasksContract.ListTasks
+                            .Success(new TaskDto("1", "Test"))
+                            .ToResult();
+                    });
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Minimal_discarded_terminal_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGet("/api/tasks", () =>
+                    {
+                        TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
+                        return Results.Ok();
+                    });
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Minimal_raw_terminal_return_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGet("/api/tasks", () =>
+                        TasksContract.ListTasks.Success(new TaskDto("1", "Test")));
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Minimal_terminal_using_mvc_adapter_is_not_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGet("/api/tasks", () =>
+                        TasksContract.ListTasks
+                            .Success(new TaskDto("1", "Test"))
+                            .ToActionResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Minimal_method_mismatch_is_reported()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapPost("/api/tasks", () =>
+                        TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
         var warning = Assert.Single(
             warnings,
-            w => w.Kind == CoverageWarningKind.HttpMethodMismatch
+            warning =>
+                warning.FieldName == "ListTasks"
+                && warning.Kind == CoverageWarningKind.HttpMethodMismatch
         );
+
         Assert.Equal("GET", warning.Expected);
         Assert.Equal("POST", warning.Actual);
-        Assert.Equal("ListTasks", warning.FieldName);
-        Assert.Equal("TasksContract", warning.ContractName);
-        Assert.NotNull(warning.Location);
     }
 
     [Fact]
-    public void Controller_WrongRoute_Warning()
+    public void Minimal_route_mismatch_is_reported()
     {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
-
-            namespace Test;
-
-            [Route("api/items")]
-            public sealed class TasksController : ControllerBase
-            {
-                [HttpGet]
-                public async Task<IActionResult> List()
-                {
-                    var result = await TasksContract.ListTasks.Invoke(async () => new TaskDto("1", "Test"));
-                    return null!;
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        var warning = Assert.Single(warnings, w => w.Kind == CoverageWarningKind.RouteMismatch);
-        Assert.Equal("/api/tasks", warning.Expected);
-        Assert.Equal("/api/items", warning.Actual);
-        Assert.Equal("ListTasks", warning.FieldName);
-        Assert.Equal("TasksContract", warning.ContractName);
-        Assert.NotNull(warning.Location);
-    }
-
-    [Fact]
-    public void Controller_MissingImplementation_Warning()
-    {
-        // No implementation at all — no .Invoke() calls
-        var impl = """
-            namespace Test;
-
-            public sealed class Dummy { }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        var missing = warnings
-            .Where(w => w.Kind == CoverageWarningKind.MissingImplementation)
-            .ToList();
-        Assert.Equal(5, missing.Count); // All 5 fields missing
-
-        // MissingImplementation should populate Expected with method+route and Actual with "(none)"
-        var listWarning = missing.Single(w => w.FieldName == "ListTasks");
-        Assert.Equal("GET /api/tasks", listWarning.Expected);
-        Assert.Equal("(none)", listWarning.Actual);
-        Assert.Equal("TasksContract", listWarning.ContractName);
-        Assert.NotNull(listWarning.Location);
-
-        var removeWarning = missing.Single(w => w.FieldName == "RemoveTask");
-        Assert.Equal("DELETE /api/tasks/{id}", removeWarning.Expected);
-        Assert.Equal("(none)", removeWarning.Actual);
-        Assert.Equal("TasksContract", removeWarning.ContractName);
-    }
-
-    [Fact]
-    public void Controller_RouteWithConstraints_Normalized()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
-
-            namespace Test;
-
-            [Route("api/tasks")]
-            public sealed class TasksController : ControllerBase
-            {
-                [HttpDelete("{id:guid}")]
-                public async Task<IActionResult> Remove(string id)
-                {
-                    var result = await TasksContract.RemoveTask.Invoke(async () => { });
-                    return null!;
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        // RemoveTask should match — constraints stripped
-        Assert.DoesNotContain(
-            warnings,
-            w => w.FieldName == "RemoveTask" && w.Kind == CoverageWarningKind.RouteMismatch
-        );
-        Assert.DoesNotContain(
-            warnings,
-            w => w.FieldName == "RemoveTask" && w.Kind == CoverageWarningKind.HttpMethodMismatch
-        );
-    }
-
-    // --- Minimal API tests (correct — no warnings) ---
-
-    [Fact]
-    public void MinimalApi_MapGet_Correct_NoWarning()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
+        var implementation = """
             using Microsoft.AspNetCore.Builder;
             using Microsoft.AspNetCore.Routing;
             using Rivet;
@@ -413,313 +1350,50 @@ public sealed class CoverageCheckerTests
             {
                 public static void Map(IEndpointRouteBuilder app)
                 {
-                    app.MapGet("/api/tasks", async () =>
-                    {
-                        var result = await TasksContract.ListTasks.Invoke(async () => new TaskDto("1", "Test"));
-                        return result;
-                    });
+                    app.MapGet("/api/items", () =>
+                        TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToResult());
                 }
             }
             """;
 
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        Assert.DoesNotContain(warnings, w => w.FieldName == "ListTasks");
-    }
-
-    [Fact]
-    public void MinimalApi_MapPost_Correct_NoWarning()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Builder;
-            using Microsoft.AspNetCore.Routing;
-            using Rivet;
-
-            namespace Test;
-
-            public static class TaskEndpoints
-            {
-                public static void Map(IEndpointRouteBuilder app)
-                {
-                    app.MapPost("/api/tasks", async (CreateTaskInput input) =>
-                    {
-                        var result = await TasksContract.CreateTask.Invoke(input, async i => new TaskDto("1", i.Title));
-                        return result;
-                    });
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        Assert.DoesNotContain(warnings, w => w.FieldName == "CreateTask");
-    }
-
-    [Fact]
-    public void MinimalApi_MapPut_Correct_NoWarning()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Builder;
-            using Microsoft.AspNetCore.Routing;
-            using Rivet;
-
-            namespace Test;
-
-            public static class TaskEndpoints
-            {
-                public static void Map(IEndpointRouteBuilder app)
-                {
-                    app.MapPut("/api/tasks/{id}", async (string id, UpdateTaskInput input) =>
-                    {
-                        var result = await TasksContract.UpdateTask.Invoke(input, async i => new TaskDto(i.Id, i.Title));
-                        return result;
-                    });
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        Assert.DoesNotContain(warnings, w => w.FieldName == "UpdateTask");
-    }
-
-    [Fact]
-    public void MinimalApi_MapPatch_Correct_NoWarning()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Builder;
-            using Microsoft.AspNetCore.Routing;
-            using Rivet;
-
-            namespace Test;
-
-            public static class TaskEndpoints
-            {
-                public static void Map(IEndpointRouteBuilder app)
-                {
-                    app.MapPatch("/api/tasks/{id}", async (string id, PatchTaskInput input) =>
-                    {
-                        var result = await TasksContract.PatchTask.Invoke(input, async i => new TaskDto("1", i.Title));
-                        return result;
-                    });
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        Assert.DoesNotContain(warnings, w => w.FieldName == "PatchTask");
-    }
-
-    [Fact]
-    public void MinimalApi_MapDelete_Correct_NoWarning()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Builder;
-            using Microsoft.AspNetCore.Routing;
-            using Rivet;
-
-            namespace Test;
-
-            public static class TaskEndpoints
-            {
-                public static void Map(IEndpointRouteBuilder app)
-                {
-                    app.MapDelete("/api/tasks/{id}", async (string id) =>
-                    {
-                        var result = await TasksContract.RemoveTask.Invoke(async () => { });
-                        return result;
-                    });
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        Assert.DoesNotContain(warnings, w => w.FieldName == "RemoveTask");
-    }
-
-    // --- Minimal API tests (mismatches — warnings) ---
-
-    [Fact]
-    public void MinimalApi_WrongMethod_Warning()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Builder;
-            using Microsoft.AspNetCore.Routing;
-            using Rivet;
-
-            namespace Test;
-
-            public static class TaskEndpoints
-            {
-                public static void Map(IEndpointRouteBuilder app)
-                {
-                    app.MapPost("/api/tasks", async () =>
-                    {
-                        var result = await TasksContract.ListTasks.Invoke(async () => new TaskDto("1", "Test"));
-                        return result;
-                    });
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
+        var warnings = RunCheck(Contract, implementation);
         var warning = Assert.Single(
             warnings,
-            w => w.FieldName == "ListTasks" && w.Kind == CoverageWarningKind.HttpMethodMismatch
+            warning =>
+                warning.FieldName == "ListTasks"
+                && warning.Kind == CoverageWarningKind.RouteMismatch
         );
-        Assert.Equal("GET", warning.Expected);
-        Assert.Equal("POST", warning.Actual);
-        Assert.Equal("TasksContract", warning.ContractName);
-        Assert.NotNull(warning.Location);
-    }
 
-    [Fact]
-    public void MinimalApi_WrongRoute_Warning()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Builder;
-            using Microsoft.AspNetCore.Routing;
-            using Rivet;
-
-            namespace Test;
-
-            public static class TaskEndpoints
-            {
-                public static void Map(IEndpointRouteBuilder app)
-                {
-                    app.MapGet("/api/items", async () =>
-                    {
-                        var result = await TasksContract.ListTasks.Invoke(async () => new TaskDto("1", "Test"));
-                        return result;
-                    });
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        var warning = Assert.Single(
-            warnings,
-            w => w.FieldName == "ListTasks" && w.Kind == CoverageWarningKind.RouteMismatch
-        );
         Assert.Equal("/api/tasks", warning.Expected);
         Assert.Equal("/api/items", warning.Actual);
-        Assert.Equal("TasksContract", warning.ContractName);
-        Assert.NotNull(warning.Location);
     }
 
-    // --- Multi-endpoint / edge cases ---
-
     [Fact]
-    public void MultipleContracts_PartialCoverage()
+    public void Isolated_function_route_and_method_are_recognized()
     {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
+        var implementation = """
             using Microsoft.AspNetCore.Mvc;
+            using Microsoft.Azure.Functions.Worker;
             using Rivet;
 
             namespace Test;
 
-            [Route("api/tasks")]
-            public sealed class TasksController : ControllerBase
+            public sealed class TaskFunctions
             {
-                [HttpGet]
-                public async Task<IActionResult> List()
-                {
-                    var result = await TasksContract.ListTasks.Invoke(async () => new TaskDto("1", "Test"));
-                    return null!;
-                }
+                [Function("list-tasks")]
+                public IActionResult Run(
+                    [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "tasks")] object request
+                ) => TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToActionResult();
             }
             """;
 
-        var (_, warnings) = RunCheck(TasksContract, MembersContract, impl);
+        var warnings = RunCheck(Contract, AzureAttributes, implementation);
 
-        // TasksContract: ListTasks covered, rest missing (4)
-        // MembersContract: ListMembers missing (1)
-        var missing = warnings
-            .Where(w => w.Kind == CoverageWarningKind.MissingImplementation)
-            .ToList();
-        Assert.Equal(5, missing.Count);
-        Assert.Contains(
-            missing,
-            w => w.ContractName == "MembersContract" && w.FieldName == "ListMembers"
-        );
-        Assert.Equal(4, missing.Count(w => w.ContractName == "TasksContract"));
-        Assert.Contains(
-            missing,
-            w => w.ContractName == "TasksContract" && w.FieldName == "CreateTask"
-        );
-        Assert.Contains(
-            missing,
-            w => w.ContractName == "TasksContract" && w.FieldName == "UpdateTask"
-        );
-        Assert.Contains(
-            missing,
-            w => w.ContractName == "TasksContract" && w.FieldName == "PatchTask"
-        );
-        Assert.Contains(
-            missing,
-            w => w.ContractName == "TasksContract" && w.FieldName == "RemoveTask"
-        );
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "ListTasks");
     }
 
     [Fact]
-    public void SingleContract_OnlySomeImplemented()
-    {
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
-
-            namespace Test;
-
-            [Route("api/tasks")]
-            public sealed class TasksController : ControllerBase
-            {
-                [HttpGet]
-                public async Task<IActionResult> List()
-                {
-                    var result = await TasksContract.ListTasks.Invoke(async () => new TaskDto("1", "Test"));
-                    return null!;
-                }
-
-                [HttpPost]
-                public async Task<IActionResult> Create([FromBody] CreateTaskInput input)
-                {
-                    var result = await TasksContract.CreateTask.Invoke(input, async i => new TaskDto("1", i.Title));
-                    return null!;
-                }
-
-                [HttpDelete("{id}")]
-                public async Task<IActionResult> Remove(string id)
-                {
-                    var result = await TasksContract.RemoveTask.Invoke(async () => { });
-                    return null!;
-                }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(TasksContract, impl);
-        var missing = warnings
-            .Where(w => w.Kind == CoverageWarningKind.MissingImplementation)
-            .ToList();
-        Assert.Equal(2, missing.Count); // UpdateTask and PatchTask missing
-        Assert.Contains(missing, w => w.FieldName == "UpdateTask");
-        Assert.Contains(missing, w => w.FieldName == "PatchTask");
-    }
-
-    [Fact]
-    public void VoidEndpoint_Covered()
+    public void Isolated_function_uses_function_name_and_default_api_prefix()
     {
         var contract = """
             using Rivet;
@@ -727,125 +1401,113 @@ public sealed class CoverageCheckerTests
             namespace Test;
 
             [RivetContract]
-            public static class ActionsContract
+            public static class HealthContract
             {
-                public static readonly RouteDefinition RunAction =
-                    Define.Post("/api/actions/run");
+                public static readonly RouteDefinition Health = Define.Get("/api/health");
             }
             """;
-
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
+        var implementation = """
             using Microsoft.AspNetCore.Mvc;
+            using Microsoft.Azure.Functions.Worker;
             using Rivet;
 
             namespace Test;
 
-            [Route("api/actions")]
-            public sealed class ActionsController : ControllerBase
+            public sealed class HealthFunction
             {
-                [HttpPost("run")]
-                public async Task<IActionResult> Run()
-                {
-                    var result = await ActionsContract.RunAction.Invoke(async () => { });
-                    return null!;
-                }
+                [Function("health")]
+                public IActionResult Run(
+                    [HttpTrigger(AuthorizationLevel.Anonymous, "get")] object request
+                ) => HealthContract.Health.Success().ToActionResult();
             }
             """;
 
-        var (_, warnings) = RunCheck(contract, impl);
+        var warnings = RunCheck(contract, AzureAttributes, implementation);
+
         Assert.Empty(warnings);
     }
 
     [Fact]
-    public void InputOutputEndpoint_Covered()
+    public void Http_trigger_without_function_attribute_is_not_coverage()
     {
-        var contract = """
-            using Rivet;
-
-            namespace Test;
-
-            [RivetType]
-            public sealed record MyInput(string Name);
-
-            [RivetType]
-            public sealed record MyOutput(string Id);
-
-            [RivetContract]
-            public static class ItemsContract
-            {
-                public static readonly RouteDefinition<MyInput, MyOutput> CreateItem =
-                    Define.Post<MyInput, MyOutput>("/api/items");
-            }
-            """;
-
-        var impl = """
-            using System;
-            using System.Threading.Tasks;
+        var implementation = """
             using Microsoft.AspNetCore.Mvc;
+            using Microsoft.Azure.Functions.Worker;
             using Rivet;
 
             namespace Test;
 
-            [Route("api/items")]
-            public sealed class ItemsController : ControllerBase
+            public sealed class TaskFunctions
             {
-                [HttpPost]
-                public async Task<IActionResult> Create([FromBody] MyInput input)
-                {
-                    var result = await ItemsContract.CreateItem.Invoke(input, async i => new MyOutput("1"));
-                    return null!;
-                }
+                public IActionResult Run(
+                    [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "tasks")] object request
+                ) => TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToActionResult();
             }
             """;
 
-        var (_, warnings) = RunCheck(contract, impl);
-        Assert.Empty(warnings);
+        var warnings = RunCheck(Contract, AzureAttributes, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
     }
 
     [Fact]
-    public void InvokeOnNonContractField_Ignored()
+    public void Isolated_function_raw_terminal_return_is_not_coverage()
     {
-        var source = """
-            using System;
-            using System.Threading.Tasks;
+        var implementation = """
+            using Microsoft.Azure.Functions.Worker;
             using Rivet;
 
             namespace Test;
 
-            public static class NotAContract
+            public sealed class TaskFunctions
             {
-                public static readonly RouteDefinition<string> SomeField =
-                    Define.Get<string>("/api/whatever");
-            }
-
-            public sealed class SomeService
-            {
-                public async Task DoStuff()
-                {
-                    var result = await NotAContract.SomeField.Invoke(async () => "hi");
-                }
+                [Function("list-tasks")]
+                public RivetResult Run(
+                    [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "tasks")] object request
+                ) => TasksContract.ListTasks.Success(new TaskDto("1", "Test"));
             }
             """;
 
-        var (_, warnings) = RunCheck(source);
-        Assert.Empty(warnings);
+        var warnings = RunCheck(Contract, AzureAttributes, implementation);
+
+        AssertMissingWarning(warnings, "ListTasks");
     }
 
     [Fact]
-    public void NoContracts_NoWarnings()
+    public void Missing_terminal_reports_expected_endpoint()
     {
-        var source = """
-            namespace Test;
+        var warnings = RunCheck(Contract);
+        var warning = Assert.Single(
+            warnings,
+            warning =>
+                warning.Kind == CoverageWarningKind.MissingImplementation
+                && warning.FieldName == "ListTasks"
+        );
 
-            public sealed class Dummy
-            {
-                public void DoNothing() { }
-            }
-            """;
-
-        var (_, warnings) = RunCheck(source);
-        Assert.Empty(warnings);
+        Assert.Equal("GET /api/tasks", warning.Expected);
+        Assert.Equal("(none)", warning.Actual);
+        Assert.NotNull(warning.Location);
     }
+
+    private static void AssertNoMissingWarning(
+        IReadOnlyList<CoverageWarning> warnings,
+        string fieldName
+    ) =>
+        Assert.DoesNotContain(
+            warnings,
+            warning =>
+                warning.Kind == CoverageWarningKind.MissingImplementation
+                && warning.FieldName == fieldName
+        );
+
+    private static void AssertMissingWarning(
+        IReadOnlyList<CoverageWarning> warnings,
+        string fieldName
+    ) =>
+        Assert.Contains(
+            warnings,
+            warning =>
+                warning.Kind == CoverageWarningKind.MissingImplementation
+                && warning.FieldName == fieldName
+        );
 }

@@ -88,6 +88,7 @@ static async Task<int> Run(string[] args)
                     Diagnostics.CoverageMissingImplementation,
                 CoverageWarningKind.HttpMethodMismatch => Diagnostics.CoverageHttpMethodMismatch,
                 CoverageWarningKind.RouteMismatch => Diagnostics.CoverageRouteMismatch,
+                CoverageWarningKind.OrphanedBinding => Diagnostics.CoverageOrphanedBinding,
                 _ => throw new InvalidOperationException(
                     $"Unmapped coverage warning kind: {w.Kind}"
                 ),
@@ -103,7 +104,10 @@ static async Task<int> Run(string[] args)
             w.Kind == CoverageWarningKind.MissingImplementation
         );
         var coveredCount = totalFields - missingCount;
-        var mismatchCount = coverageWarnings.Count - missingCount;
+        var orphanedCount = coverageWarnings.Count(w =>
+            w.Kind == CoverageWarningKind.OrphanedBinding
+        );
+        var mismatchCount = coverageWarnings.Count - missingCount - orphanedCount;
 
         if (coverageWarnings.Count == 0)
         {
@@ -114,7 +118,7 @@ static async Task<int> Run(string[] args)
         else
         {
             Console.Error.WriteLine(
-                $"Coverage: {coveredCount}/{totalFields} endpoints covered, {mismatchCount} mismatch(es), {missingCount} missing."
+                $"Coverage: {coveredCount}/{totalFields} endpoints covered, {mismatchCount} mismatch(es), {orphanedCount} orphaned binding(s), {missingCount} missing."
             );
         }
 

@@ -847,7 +847,7 @@ public static class ContractWalker
         }
 
         // byte[] or (byte[], string) as TOutput → file endpoint
-        // The runtime contract keeps the original type for .Invoke(), but the TS client gets Blob
+        // The runtime contract keeps the original type for response validation, but the TS client gets Blob
         if (tOutput is IArrayTypeSymbol { ElementType.SpecialType: SpecialType.System_Byte })
         {
             fileContentType ??= "application/octet-stream";
