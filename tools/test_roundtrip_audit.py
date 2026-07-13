@@ -73,5 +73,67 @@ class ExtensionEvidenceTests(unittest.TestCase):
         self.assertNotEqual(AUDIT.occurrence_digest(first), AUDIT.occurrence_digest(mutated))
 
 
+class ComponentMetricTests(unittest.TestCase):
+    def test_required_component_namespaces_are_counted(self):
+        document = {
+            "components": {
+                "schemas": {"schema": {}},
+                "requestBodies": {"body": {}},
+                "parameters": {"parameter": {}},
+                "responses": {"response": {}},
+                "securitySchemes": {"security": {}},
+            }
+        }
+
+        self.assertEqual(
+            {
+                "parameters": 1,
+                "requestBodies": 1,
+                "responses": 1,
+                "schemas": 1,
+                "securitySchemes": 1,
+            },
+            AUDIT.component_counts(document),
+        )
+
+    def test_result_requires_every_gate_component_namespace(self):
+        result = {
+            "corpusId": "okta",
+            "passed": True,
+            "categories": {
+                name: {"count": 0, "findings": []}
+                for name in AUDIT.RESULT_CATEGORIES
+            },
+            "metrics": {
+                "operations": {
+                    "source": 1,
+                    "reemitted": 1,
+                    "shared": 1,
+                    "missing": 0,
+                    "invented": 0,
+                    "withFindings": 0,
+                },
+                "components": {
+                    name: {
+                        "source": 0,
+                        "reemitted": 0,
+                        "matched": 0,
+                        "missing": 0,
+                        "invented": 0,
+                    }
+                    for name in ("schemas", "requestBodies", "securitySchemes")
+                },
+                "sourceDefects": 0,
+                "comparatorIntegrityFindings": 0,
+            },
+        }
+        errors = []
+
+        AUDIT.check_result(result, "okta", 1, {}, [], errors)
+
+        self.assertTrue(any("result parameters source" in error for error in errors))
+        self.assertTrue(any("result responses source" in error for error in errors))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -194,11 +194,11 @@ internal sealed class RecordSynthesizer(
                 string? example = null;
                 if (propSchema.Examples is { Count: > 0 } && propSchema.Examples[0] is not null)
                 {
-                    example = propSchema.Examples[0]!.ToJsonString();
+                    example = OpenApiJsonNodeSerializer.Serialize(propSchema.Examples[0]!);
                 }
                 else if (propSchema.Example is not null)
                 {
-                    example = propSchema.Example.ToJsonString();
+                    example = OpenApiJsonNodeSerializer.Serialize(propSchema.Example);
                 }
 
                 var isReadOnly = propSchema.ReadOnly;

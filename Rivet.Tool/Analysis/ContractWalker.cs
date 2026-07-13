@@ -638,7 +638,8 @@ public static class ContractWalker
                             ),
                             SchemaType: schemaType,
                             Format: format == "" ? null : format,
-                            IsFormatSpecified: format is not null
+                            IsFormatSpecified: format is not null,
+                            SchemaDescription: call.GetStringArg("schemaDescription")
                         )
                     )
                 );
@@ -695,7 +696,8 @@ public static class ContractWalker
                             ),
                             SchemaType: schemaType,
                             Format: format == "" ? null : format,
-                            IsFormatSpecified: format is not null
+                            IsFormatSpecified: format is not null,
+                            SchemaDescription: call.GetStringArg("schemaDescription")
                         )
                     )
                 );

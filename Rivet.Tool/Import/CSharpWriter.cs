@@ -27,10 +27,15 @@ internal static class CSharpWriter
             var format = schema.Format is null ? "null" : $"\"{EscapeString(schema.Format)}\"";
             var metadata = JsonSerializer.Serialize(schema.Metadata, options);
             var schemaRef = schema.SchemaRef is null
-                ? ""
+                ? schema.IsArray
+                    ? ", null"
+                    : ""
                 : $", \"{EscapeString(schema.SchemaRef)}\"";
+            var arrayArguments = schema.IsArray
+                ? $", true, \"{EscapeString(schema.ItemSchemaRef!)}\""
+                : "";
             sb.AppendLine(
-                $"[assembly: RivetGeneratedSchema(\"{EscapeString(schema.Name)}\", \"{EscapeString(schema.ComponentId)}\", {schemaType}, {format}, {schema.IsNullable.ToString().ToLowerInvariant()}, \"{EscapeString(metadata)}\", {schema.IsEnum.ToString().ToLowerInvariant()}{schemaRef})]"
+                $"[assembly: RivetGeneratedSchema(\"{EscapeString(schema.Name)}\", \"{EscapeString(schema.ComponentId)}\", {schemaType}, {format}, {schema.IsNullable.ToString().ToLowerInvariant()}, \"{EscapeString(metadata)}\", {schema.IsEnum.ToString().ToLowerInvariant()}{schemaRef}{arrayArguments})]"
             );
         }
 
@@ -223,6 +228,20 @@ internal static class CSharpWriter
                     $"[assembly: RivetDocumentRequestBodyExample({requestBodyIndex}, {exampleIndex}, {StringLiteral(example.MediaType)}, {NullableStringLiteral(example.Name)}, {NullableStringLiteral(example.Json)}, {NullableStringLiteral(example.ComponentExampleId)}, {NullableStringLiteral(example.ResolvedJson)}, {NullableStringLiteral(referencedComponentsJson)})]"
                 );
             }
+        }
+        for (var index = 0; index < (document.ComponentParameters?.Count ?? 0); index++)
+        {
+            var parameter = document.ComponentParameters![index];
+            sb.AppendLine(
+                $"[assembly: RivetDocumentParameter({index}, {StringLiteral(parameter.Name)}, {StringLiteral(parameter.Json)})]"
+            );
+        }
+        for (var index = 0; index < (document.ComponentResponses?.Count ?? 0); index++)
+        {
+            var response = document.ComponentResponses![index];
+            sb.AppendLine(
+                $"[assembly: RivetDocumentResponse({index}, {StringLiteral(response.Name)}, {StringLiteral(response.Json)})]"
+            );
         }
         foreach (var extension in document.VendorExtensions ?? [])
         {
@@ -670,6 +689,28 @@ internal static class CSharpWriter
                     }
                 }
             }
+            for (
+                var index = 0;
+                index < (provenance.ParameterComponentReferences?.Count ?? 0);
+                index++
+            )
+            {
+                var reference = provenance.ParameterComponentReferences![index];
+                sb.AppendLine(
+                    $"    [RivetOperationParameterComponent({index}, {StringLiteral(reference.Name)}, {StringLiteral(reference.Location)}, {StringLiteral(reference.ComponentId)})]"
+                );
+            }
+            for (
+                var index = 0;
+                index < (provenance.ResponseComponentReferences?.Count ?? 0);
+                index++
+            )
+            {
+                var reference = provenance.ResponseComponentReferences![index];
+                sb.AppendLine(
+                    $"    [RivetOperationResponseComponent({index}, {StringLiteral(reference.StatusKey)}, {StringLiteral(reference.ComponentId)})]"
+                );
+            }
         }
 
         if (field.RequestBodyType is not null)
@@ -1038,12 +1079,15 @@ internal static class CSharpWriter
             var leaf = content.SchemaType is null
                 ? ""
                 : $", schemaType: \"{EscapeString(content.SchemaType)}\", format: \"{EscapeString(content.Format ?? "")}\"";
+            var schemaDescription = content.SchemaDescription is null
+                ? ""
+                : $", schemaDescription: \"{EscapeString(content.SchemaDescription)}\"";
             calls.Add(
                 content.IsBinary
                     ? $".ResponseBinaryContent({statusArgument}, \"{EscapeString(content.MediaType)}\")"
                 : content.TypeName is null
                     ? $".ResponseContent({statusArgument}, \"{EscapeString(content.MediaType)}\")"
-                : $".ResponseContent<{content.TypeName}>({statusArgument}, \"{EscapeString(content.MediaType)}\"{schemaRef}{leaf})"
+                : $".ResponseContent<{content.TypeName}>({statusArgument}, \"{EscapeString(content.MediaType)}\"{schemaRef}{leaf}{schemaDescription})"
             );
         }
 

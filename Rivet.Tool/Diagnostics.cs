@@ -81,6 +81,8 @@ public static class Diagnostics
     public const string ImportDeclaredPropertiesDropped = "RIV3013";
     public const string ImportDictionaryKeyDropped = "RIV3014";
     public const string ImportNamedScalarAlgebraUnsupported = "RIV3015";
+    public const string ImportEmptyParameterNameDropped = "RIV3020";
+    public const string ImportReservedContentTypeHeaderDropped = "RIV3021";
 
     // ----- RIV4xxx: coverage -----
     public const string CoverageMissingImplementation = "RIV4001";
@@ -185,6 +187,10 @@ public static class Diagnostics
             "Dictionary 'propertyNames' schema has no C# dictionary-key representation — imported with string keys.",
         [ImportNamedScalarAlgebraUnsupported] =
             "Named scalar uses schema algebra outside primitive/flat-enum preservation — existing fallback mapping retained.",
+        [ImportEmptyParameterNameDropped] =
+            "Parameter has an empty name — the invalid parameter is dropped while the operation and its other parameters are preserved.",
+        [ImportReservedContentTypeHeaderDropped] =
+            "Reserved Content-Type header parameter is dropped — request media types are represented by requestBody.content.",
         [CoverageMissingImplementation] = "Contract endpoint has no matching implementation.",
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",

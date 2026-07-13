@@ -68,6 +68,56 @@ public sealed class RoundTripDiffTests
         Assert.Equal(1, FindingCount(result.DocumentFindings, "info"));
     }
 
+    [Fact]
+    public void Contact_Presentation_Extensions_Are_Excluded_From_Standard_Info_Comparison()
+    {
+        var original = LoadFixture();
+        AddDocumentMetadata(original);
+        original["info"]!["contact"]!["x-twitter"] = "firebase";
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["info"]!["contact"]!.AsObject().Remove("x-twitter");
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(0, FindingCount(result.DocumentFindings, "info"));
+        Assert.Equal(0, FindingCount(result.DocumentFindings, "vendor-extension-preserve"));
+    }
+
+    [Theory]
+    [InlineData("name")]
+    [InlineData("url")]
+    [InlineData("email")]
+    public void Standard_Contact_Mutations_Remain_Drift(string field)
+    {
+        var original = LoadFixture();
+        AddDocumentMetadata(original);
+        original["info"]!["contact"]!["url"] = "https://example.test/support";
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["info"]!["contact"]![field] = "changed";
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(1, FindingCount(result.DocumentFindings, "info"));
+    }
+
+    [Fact]
+    public void Reviewed_Contact_Extensions_Remain_Compared_By_Extension_Mechanism()
+    {
+        var original = LoadFixture();
+        AddDocumentMetadata(original);
+        original["info"]!["contact"]!["x-twilio"] = "authored";
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["info"]!["contact"]!["x-twilio"] = "changed";
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(0, FindingCount(result.DocumentFindings, "info"));
+        Assert.Equal(1, FindingCount(result.DocumentFindings, "vendor-extension-preserve"));
+    }
+
     [Theory]
     [InlineData("servers", "servers")]
     [InlineData("tags", "tags")]
@@ -655,6 +705,124 @@ public sealed class RoundTripDiffTests
 
         Assert.Equal(1, changedResult.ExitCode);
         Assert.Equal(1, FindingCount(changedResult.SchemaFindings, "schema-type"));
+    }
+
+    [Fact]
+    public void Empty_Parameter_Name_Is_A_Source_Defect_And_Not_Parameter_Drift()
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["paths"]!["/surface"]!["post"]!["parameters"]!
+            .AsArray()
+            .Add(JsonNode.Parse("""{"name":"","in":"header","schema":{"type":"string"}}"""));
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(1, result.Summary.GetProperty("sourceDefects").GetInt32());
+        var defect = Assert.Single(result.Details.GetProperty("sourceDefects").EnumerateArray());
+        Assert.Equal(
+            "#/paths/~1surface/post/parameters/2/name",
+            defect.GetProperty("path").GetString()
+        );
+        Assert.Equal(
+            "parameter name is empty and therefore invalid",
+            defect.GetProperty("reason").GetString()
+        );
+        Assert.Equal(0, FindingCount(result.OperationFindings, "parameter-missing"));
+    }
+
+    [Fact]
+    public void Valid_Missing_Parameter_Remains_Drift()
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["paths"]!["/surface"]!["post"]!["parameters"]!
+            .AsArray()
+            .Add(JsonNode.Parse("""{"name":"valid","in":"header","schema":{"type":"string"}}"""));
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
+        Assert.Equal(1, FindingCount(result.OperationFindings, "parameter-missing"));
+    }
+
+    [Fact]
+    public void Represented_Content_Type_Header_Is_A_Source_Defect_And_Not_Parameter_Drift()
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["paths"]!["/surface"]!["post"]!["parameters"]!
+            .AsArray()
+            .Add(
+                JsonNode.Parse(
+                    """{"name":"Content-Type","in":"header","required":true,"schema":{"type":"string","enum":["application/json"]}}"""
+                )
+            );
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(1, result.Summary.GetProperty("sourceDefects").GetInt32());
+        var defect = Assert.Single(result.Details.GetProperty("sourceDefects").EnumerateArray());
+        Assert.Equal(
+            "#/paths/~1surface/post/parameters/2/name",
+            defect.GetProperty("path").GetString()
+        );
+        Assert.Equal(
+            "reserved Content-Type header parameter is represented by requestBody content type 'application/json'",
+            defect.GetProperty("reason").GetString()
+        );
+        Assert.Equal(0, FindingCount(result.OperationFindings, "parameter-missing"));
+    }
+
+    [Fact]
+    public void Represented_Content_Type_Header_Is_Omitted_From_Both_Comparison_Sides()
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["paths"]!["/surface"]!["post"]!["parameters"]!
+            .AsArray()
+            .Add(
+                JsonNode.Parse(
+                    """{"name":"Content-Type","in":"header","schema":{"type":"string","enum":["application/json"]}}"""
+                )
+            );
+
+        var result = RunDiff(original, original.DeepClone().AsObject());
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(1, result.Summary.GetProperty("sourceDefects").GetInt32());
+        Assert.Equal(0, FindingCount(result.OperationFindings, "parameter-invented"));
+    }
+
+    [Theory]
+    [InlineData("Content-Type", "application/xml")]
+    [InlineData("Accept", "application/json")]
+    public void Unrepresented_Reserved_Header_Remains_Parameter_Drift(
+        string headerName,
+        string mediaType
+    )
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["paths"]!["/surface"]!["post"]!["parameters"]!
+            .AsArray()
+            .Add(
+                JsonNode.Parse(
+                    $"{{\"name\":\"{headerName}\",\"in\":\"header\",\"schema\":{{\"type\":\"string\",\"enum\":[\"{mediaType}\"]}}}}"
+                )
+            );
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
+
+        var result = RunDiff(original, reemitted);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
+        Assert.Equal(1, FindingCount(result.OperationFindings, "parameter-missing"));
     }
 
     [Fact]

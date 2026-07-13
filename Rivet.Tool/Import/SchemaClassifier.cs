@@ -685,10 +685,21 @@ internal static class SchemaClassifier
         Append("title", schema.Title);
         Append("description", schema.Description);
         Append("default", schema.Default?.ToJsonString());
-        Append("example", schema.Example?.ToJsonString());
+        Append(
+            "example",
+            schema.Example is null ? null : OpenApiJsonNodeSerializer.Serialize(schema.Example)
+        );
         if (schema.Examples is { Count: > 0 })
         {
-            Append("examples", string.Join("|", schema.Examples.Select(x => x?.ToJsonString())));
+            Append(
+                "examples",
+                string.Join(
+                    "|",
+                    schema.Examples.Select(example =>
+                        example is null ? null : OpenApiJsonNodeSerializer.Serialize(example)
+                    )
+                )
+            );
         }
         Append("deprecated", schema.Deprecated ? true : null);
         Append("readOnly", schema.ReadOnly ? true : null);

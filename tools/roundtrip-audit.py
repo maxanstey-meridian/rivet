@@ -9,14 +9,6 @@ import pathlib
 import sys
 
 
-CORPUS_IDS = (
-    "okta",
-    "petstore-v2",
-    "petstore-v3",
-    "twilio",
-    "square",
-    "docusign",
-)
 METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
 COMPONENT_NAMESPACES = (
     "schemas",
@@ -29,6 +21,13 @@ COMPONENT_NAMESPACES = (
     "links",
     "callbacks",
     "pathItems",
+)
+GATE_COMPONENT_NAMESPACES = (
+    "schemas",
+    "requestBodies",
+    "parameters",
+    "responses",
+    "securitySchemes",
 )
 OPAQUE_KEYS = {"const", "default", "enum", "example", "examples"}
 SUMMARY_FINDING_KEYS = (
@@ -89,7 +88,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-dir", type=pathlib.Path, default=root / "TestResults" / "roundtrip")
     parser.add_argument("--manifest", type=pathlib.Path, default=root / "corpus" / "openapi-manifest.json")
-    parser.add_argument("--profile", type=pathlib.Path, default=root / "corpus" / "six-profile.json")
+    parser.add_argument("--profile", type=pathlib.Path, default=root / "corpus" / "verified-profile.json")
     return parser.parse_args()
 
 
@@ -300,7 +299,24 @@ def check_summary(path, expected_operations, expected_components, expected_sourc
     return summary
 
 
-def check_result(result, corpus_id, expected_operations, expected_components, errors):
+def check_details(path, expected_source_defects, errors):
+    details = load_json(path)
+    expected = [
+        {"path": defect["pointer"], "reason": defect["reason"]}
+        for defect in expected_source_defects
+        for _ in range(defect["cardinality"])
+    ]
+    check_equal(errors, f"{path.name} source defects", details.get("sourceDefects"), expected)
+
+
+def check_result(
+    result,
+    corpus_id,
+    expected_operations,
+    expected_components,
+    expected_source_defects,
+    errors,
+):
     check_equal(errors, "result corpusId", result.get("corpusId"), corpus_id)
     check_equal(errors, "result passed", result.get("passed"), True)
     categories = result.get("categories")
@@ -317,13 +333,20 @@ def check_result(result, corpus_id, expected_operations, expected_components, er
             errors.append(f"result category {name}: findings must be an array")
             continue
         check_equal(errors, f"result category {name} count", category.get("count"), len(findings))
-        expected = 1 if corpus_id == "docusign" and name == "sourceDefects" else 0
+        expected = sum(defect["cardinality"] for defect in expected_source_defects) if name == "sourceDefects" else 0
         check_equal(errors, f"result category {name}", len(findings), expected)
-    if corpus_id == "docusign":
-        source_findings = categories.get("sourceDefects", {}).get("findings", [])
-        message = canonical(source_findings)
-        if "RIV3010" not in message or "connectOAuthConfig/properties/customParameters/additionalProperties" not in message:
-            errors.append("result source defect does not identify the SIX section 12 DocuSign defect")
+    source_findings = categories.get("sourceDefects", {}).get("findings", [])
+    expected_diagnostics = [
+        f"first import: {defect['diagnostic']}"
+        for defect in expected_source_defects
+        for _ in range(defect["cardinality"])
+    ]
+    check_equal(
+        errors,
+        "result source-defect diagnostics",
+        [finding.get("message") for finding in source_findings],
+        expected_diagnostics,
+    )
 
     metrics = result.get("metrics", {})
     operations = metrics.get("operations", {})
@@ -332,14 +355,19 @@ def check_result(result, corpus_id, expected_operations, expected_components, er
     for key in ("missing", "invented", "withFindings"):
         check_equal(errors, f"result operations {key}", operations.get(key), 0)
     result_components = metrics.get("components", {})
-    for namespace in ("schemas", "requestBodies", "securitySchemes"):
+    for namespace in GATE_COMPONENT_NAMESPACES:
         expected = expected_components.get(namespace, 0)
         values = result_components.get(namespace, {})
         for key in ("source", "reemitted", "matched"):
             check_equal(errors, f"result {namespace} {key}", values.get(key), expected)
         for key in ("missing", "invented"):
             check_equal(errors, f"result {namespace} {key}", values.get(key), 0)
-    check_equal(errors, "result source defects metric", metrics.get("sourceDefects"), 1 if corpus_id == "docusign" else 0)
+    check_equal(
+        errors,
+        "result source defects metric",
+        metrics.get("sourceDefects"),
+        sum(defect["cardinality"] for defect in expected_source_defects),
+    )
     check_equal(errors, "result comparator integrity metric", metrics.get("comparatorIntegrityFindings"), 0)
 
 
@@ -369,6 +397,14 @@ def audit_corpus(corpus_id, results_dir, manifest_entry, profile_entry, profile,
     documents = {"source": source, "first": first, "second": second}
     expected_operations = profile_entry.get("operationCount")
     expected_components = profile_entry.get("normalizedComponentCounts", {})
+    expected_source_defects = [
+        defect
+        for defect in profile.get("sourceDefects", [])
+        if defect.get("corpusId") == corpus_id and defect.get("sourceSha256") == expected_hash
+    ]
+    expected_source_defect_count = sum(
+        defect["cardinality"] for defect in expected_source_defects
+    )
     check_equal(errors, "manifest operation count", manifest_entry.get("operationCount"), expected_operations)
     check_equal(errors, "manifest path count", manifest_entry.get("pathCount"), profile_entry.get("pathCount"))
     check_equal(errors, "manifest API version", manifest_entry.get("apiVersion"), profile_entry.get("apiVersion"))
@@ -413,9 +449,10 @@ def audit_corpus(corpus_id, results_dir, manifest_entry, profile_entry, profile,
         artifacts / "first-summary.json",
         expected_operations,
         expected_component_total,
-        1 if corpus_id == "docusign" else 0,
+        expected_source_defect_count,
         errors,
     )
+    check_details(artifacts / "first-details.json", expected_source_defects, errors)
     fixed_summary = check_summary(
         artifacts / "fixed-point-summary.json",
         expected_operations,
@@ -423,8 +460,16 @@ def audit_corpus(corpus_id, results_dir, manifest_entry, profile_entry, profile,
         0,
         errors,
     )
+    check_details(artifacts / "fixed-point-details.json", [], errors)
     result = load_json(corpus_dir / "result.json")
-    check_result(result, corpus_id, expected_operations, expected_components, errors)
+    check_result(
+        result,
+        corpus_id,
+        expected_operations,
+        expected_components,
+        expected_source_defects,
+        errors,
+    )
 
     differences = structural_differences(first, second)
     allowed, rejected = classify_fixed_point(corpus_id, differences)
@@ -505,7 +550,7 @@ def write_aggregate_report(path, audits, profile_errors, results_dir, manifest_p
     lines = [
         "# SIX round-trip physical audit",
         "",
-        f"**Result:** {'PASS' if passed else 'FAIL'} ({sum(audit['passed'] for audit in audits)}/{len(CORPUS_IDS)} corpora)",
+        f"**Result:** {'PASS' if passed else 'FAIL'} ({sum(audit['passed'] for audit in audits)}/{len(audits)} corpora)",
         "",
         "| Corpus | Result | Operations | Components | C# first/second | Raw deltas | Classified | Findings |",
         "|---|---|---:|---:|---:|---:|---:|---:|",
@@ -548,16 +593,40 @@ def main():
     try:
         manifest = load_json(args.manifest)
         profile = load_json(args.profile)
+        corpus_ids = profile.get("verifiedCorpusIds")
+        if not isinstance(corpus_ids, list) or not corpus_ids or any(
+            not isinstance(corpus_id, str) for corpus_id in corpus_ids
+        ):
+            raise ValueError("profile verifiedCorpusIds must be a non-empty string array")
         manifest_entries = {entry.get("id"): entry for entry in manifest.get("corpora", [])}
         profile_entries = {entry.get("id"): entry for entry in profile.get("facts", {}).get("corpora", [])}
-        missing = [corpus_id for corpus_id in CORPUS_IDS if corpus_id not in manifest_entries or corpus_id not in profile_entries]
+        missing = [corpus_id for corpus_id in corpus_ids if corpus_id not in manifest_entries or corpus_id not in profile_entries]
         if missing:
-            raise ValueError(f"manifest/profile missing SIX corpora: {', '.join(missing)}")
+            raise ValueError(f"manifest/profile missing verified corpora: {', '.join(missing)}")
         dispositions = profile.get("vendorExtensionDispositions", {})
         expected_disposition_hash = profile.get("reviewedDispositionSha256")
         actual_disposition_hash = sha256_bytes(canonical(dispositions).encode())
         profile_errors = []
         check_equal(profile_errors, "reviewed disposition hash", actual_disposition_hash, expected_disposition_hash)
+        check_equal(
+            profile_errors,
+            "verified roster/profile facts",
+            corpus_ids,
+            list(profile_entries),
+        )
+        check_equal(
+            profile_errors,
+            "manifest corpus denominator",
+            len(manifest_entries),
+            profile.get("manifestCorpusCount"),
+        )
+        source_defects = profile.get("sourceDefects", [])
+        check_equal(
+            profile_errors,
+            "reviewed source-defect policy hash",
+            sha256_bytes(canonical(source_defects).encode()),
+            profile.get("reviewedSourceDefectsSha256"),
+        )
         aggregate_extensions = collections.defaultdict(list)
         audits = [
             audit_corpus(
@@ -568,7 +637,7 @@ def main():
                 profile,
                 aggregate_extensions,
             )
-            for corpus_id in CORPUS_IDS
+            for corpus_id in corpus_ids
         ]
         expected_extension_facts = profile.get("facts", {}).get("extensions", {})
         for name, expected in sorted(expected_extension_facts.items()):
@@ -584,7 +653,10 @@ def main():
     except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
         print(f"roundtrip-audit: {error}", file=sys.stderr)
         return 2
-    print(f"roundtrip-audit: {'PASS' if passed else 'FAIL'} ({sum(audit['passed'] for audit in audits)}/6 corpora)")
+    print(
+        f"roundtrip-audit: {'PASS' if passed else 'FAIL'} "
+        f"({sum(audit['passed'] for audit in audits)}/{len(audits)} corpora)"
+    )
     if profile_errors:
         for error in profile_errors:
             print(f"profile: {error}", file=sys.stderr)

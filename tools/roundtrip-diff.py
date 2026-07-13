@@ -125,6 +125,12 @@ def canonical_json(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
+def contact_projection(value):
+    if not isinstance(value, dict):
+        return value
+    return {key: value[key] for key in ("name", "url", "email") if key in value}
+
+
 def json_value(value):
     if isinstance(value, tuple):
         return [json_value(item) for item in value]
@@ -496,6 +502,7 @@ class Comparator:
         self.invented_components = sorted(self.reemitted_components - self.original_components)
         self.source_defects = []
         self.collect_source_defects(self.original, "#")
+        self.collect_reserved_content_type_source_defects()
 
     @staticmethod
     def schemas(document):
@@ -553,12 +560,71 @@ class Comparator:
                         "reason": "additionalProperties is an object-only keyword on a non-object schema",
                     }
                 )
+            if value.get("name") == "" and value.get("in") in (
+                "query",
+                "header",
+                "path",
+                "cookie",
+                "body",
+                "formData",
+            ):
+                self.source_defects.append(
+                    {
+                        "path": f"{path}/name",
+                        "reason": "parameter name is empty and therefore invalid",
+                    }
+                )
             for key, child in value.items():
                 escaped = key.replace("~", "~0").replace("/", "~1")
                 self.collect_source_defects(child, f"{path}/{escaped}")
         elif isinstance(value, list):
             for index, child in enumerate(value):
                 self.collect_source_defects(child, f"{path}/{index}")
+
+    @staticmethod
+    def represented_content_types(document, operation, raw_parameter):
+        parameter = resolve_once(document, raw_parameter)
+        if (
+            not isinstance(parameter, dict)
+            or parameter.get("in") != "header"
+            or str(parameter.get("name", "")).lower() != "content-type"
+        ):
+            return ()
+        schema = resolve_once(document, parameter.get("schema", {}))
+        media_types = schema.get("enum") if isinstance(schema, dict) else None
+        if not isinstance(media_types, list) or not media_types:
+            return ()
+        if not all(isinstance(media_type, str) for media_type in media_types):
+            return ()
+        request_body = resolve_once(document, operation.get("requestBody", {}))
+        content = request_body.get("content", {}) if isinstance(request_body, dict) else {}
+        represented = {media_type.lower() for media_type in content}
+        return tuple(media_types) if all(media_type.lower() in represented for media_type in media_types) else ()
+
+    def collect_reserved_content_type_source_defects(self):
+        for route, path_item in self.original.get("paths", {}).items():
+            if not isinstance(path_item, dict):
+                continue
+            for method in METHODS:
+                operation = path_item.get(method)
+                if not isinstance(operation, dict):
+                    continue
+                for index, raw_parameter in enumerate(operation.get("parameters", [])):
+                    media_types = self.represented_content_types(
+                        self.original, operation, raw_parameter
+                    )
+                    if not media_types:
+                        continue
+                    rendered_media_types = ", ".join(
+                        f"'{media_type}'" for media_type in media_types
+                    )
+                    self.source_defects.append(
+                        {
+                            "path": f"#/paths/{pointer_token(route)}/{method}/parameters/{index}/name",
+                            "reason": "reserved Content-Type header parameter is represented by "
+                            f"requestBody content type {rendered_media_types}",
+                        }
+                    )
 
     def compare_value(self, scope, category, path, original, reemitted, normalize=None):
         if normalize:
@@ -578,7 +644,13 @@ class Comparator:
             "contact",
             "license",
         ):
-            normalize = text_projection if field == "description" else None
+            normalize = (
+                text_projection
+                if field == "description"
+                else contact_projection
+                if field == "contact"
+                else None
+            )
             self.compare_value(
                 "document",
                 "info",
@@ -735,11 +807,18 @@ class Comparator:
             self.compare_request_body(key, original, reemitted)
             self.compare_responses(key, original, reemitted)
 
-    def parameter_map(self, document, operation):
+    def parameter_map(self, document, operation, omit_represented_content_type=False):
         result = {}
         for raw_parameter in operation.get("parameters", []):
             parameter = resolve_once(document, raw_parameter)
-            if isinstance(parameter, dict):
+            if (
+                isinstance(parameter, dict)
+                and parameter.get("name") != ""
+                and not (
+                    omit_represented_content_type
+                    and self.represented_content_types(document, operation, raw_parameter)
+                )
+            ):
                 result[(parameter.get("name"), parameter.get("in"))] = parameter
         return result
 
@@ -767,8 +846,13 @@ class Comparator:
         }
 
     def compare_parameters(self, key, original, reemitted):
-        original_parameters = self.parameter_map(self.original, original)
+        all_original_parameters = self.parameter_map(self.original, original)
+        original_parameters = self.parameter_map(
+            self.original, original, omit_represented_content_type=True
+        )
         reemitted_parameters = self.parameter_map(self.reemitted, reemitted)
+        for identity in set(all_original_parameters) - set(original_parameters):
+            reemitted_parameters.pop(identity, None)
         path = f"#/paths/{key[0]}/{key[1]}/parameters"
         original_keys = set(original_parameters)
         reemitted_keys = set(reemitted_parameters)

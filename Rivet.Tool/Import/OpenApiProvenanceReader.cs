@@ -53,6 +53,18 @@ internal static class OpenApiProvenanceReader
             ? ReadSwaggerServers(root, warnings)
             : ReadServersProperty(root) ?? [];
         var componentExamples = ReadComponentExamples(root);
+        var componentParameters = ReadComponents(root, "parameters")
+            .Select(component => new OpenApiComponentParameterProvenance(
+                component.Name,
+                component.Json
+            ))
+            .ToList();
+        var componentResponses = ReadComponents(root, "responses")
+            .Select(component => new OpenApiComponentResponseProvenance(
+                component.Name,
+                component.Json
+            ))
+            .ToList();
         var vendorExtensions = ReadVendorExtensions(root, swagger2);
         var document = new OpenApiDocumentProvenance(
             info,
@@ -60,7 +72,9 @@ internal static class OpenApiProvenanceReader
             externalDocs,
             rootServers,
             componentExamples,
-            VendorExtensions: vendorExtensions
+            VendorExtensions: vendorExtensions,
+            ComponentParameters: componentParameters,
+            ComponentResponses: componentResponses
         );
         var operations = new Dictionary<(string Path, string Method), OpenApiOperationProvenance>();
 
@@ -121,12 +135,179 @@ internal static class OpenApiProvenanceReader
                     serverOverride,
                     requestBodyDescription,
                     ReadRivetIdentity(operation),
-                    ReadRequestBodyComponentId(operation)
+                    ReadRequestBodyComponentId(operation),
+                    ReadParameterComponentReferences(root, path.Value, operation),
+                    ReadResponseComponentReferences(operation)
                 );
             }
         }
 
         return new ImportedOpenApiProvenance(document, operations);
+    }
+
+    private static IReadOnlyList<(string Name, string Json)> ReadComponents(
+        JsonElement root,
+        string kind
+    )
+    {
+        if (
+            !root.TryGetProperty("components", out var components)
+            || !components.TryGetProperty(kind, out var values)
+        )
+        {
+            return [];
+        }
+
+        return values
+            .EnumerateObject()
+            .Select(value => (value.Name, Json: JsonSerializer.Serialize(value.Value)))
+            .ToList();
+    }
+
+    private static IReadOnlyList<OpenApiParameterComponentReference> ReadParameterComponentReferences(
+        JsonElement root,
+        JsonElement pathItem,
+        JsonElement operation
+    )
+    {
+        var merged =
+            new Dictionary<(string Name, string Location), OpenApiParameterComponentReference>();
+        Add(pathItem);
+        Add(operation);
+        return merged.Values.ToList();
+
+        void Add(JsonElement owner)
+        {
+            if (!owner.TryGetProperty("parameters", out var parameters))
+            {
+                return;
+            }
+            foreach (var parameter in parameters.EnumerateArray())
+            {
+                var hasComponentReference = TryReadComponentReference(
+                    parameter,
+                    "parameters",
+                    out var componentId
+                );
+                if (hasComponentReference)
+                {
+                    if (
+                        !TryResolveCanonicalParameterDefinition(
+                            root,
+                            componentId!,
+                            out var definition
+                        ) || !TryReadParameterIdentity(definition, out var name, out var location)
+                    )
+                    {
+                        continue;
+                    }
+
+                    merged[(name, location)] = new OpenApiParameterComponentReference(
+                        name,
+                        location,
+                        componentId!
+                    );
+                }
+                else if (TryReadParameterIdentity(parameter, out var name, out var location))
+                {
+                    merged.Remove((name, location));
+                }
+            }
+        }
+    }
+
+    private static bool TryResolveCanonicalParameterDefinition(
+        JsonElement root,
+        string componentId,
+        out JsonElement definition
+    )
+    {
+        definition = default;
+        if (
+            !root.TryGetProperty("components", out var components)
+            || !components.TryGetProperty("parameters", out var parameters)
+        )
+        {
+            return false;
+        }
+
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var currentId = componentId;
+        while (visited.Add(currentId) && parameters.TryGetProperty(currentId, out var current))
+        {
+            if (!TryReadComponentReference(current, "parameters", out var targetId))
+            {
+                definition = current;
+                return true;
+            }
+            currentId = targetId!;
+        }
+        return false;
+    }
+
+    private static bool TryReadParameterIdentity(
+        JsonElement parameter,
+        out string name,
+        out string location
+    )
+    {
+        name = "";
+        location = "";
+        if (
+            parameter.ValueKind != JsonValueKind.Object
+            || !parameter.TryGetProperty("name", out var nameValue)
+            || nameValue.ValueKind != JsonValueKind.String
+            || !parameter.TryGetProperty("in", out var locationValue)
+            || locationValue.ValueKind != JsonValueKind.String
+        )
+        {
+            return false;
+        }
+
+        name = nameValue.GetString()!;
+        location = locationValue.GetString()!;
+        return true;
+    }
+
+    private static IReadOnlyList<OpenApiResponseComponentReference> ReadResponseComponentReferences(
+        JsonElement operation
+    )
+    {
+        if (!operation.TryGetProperty("responses", out var responses))
+        {
+            return [];
+        }
+        return responses
+            .EnumerateObject()
+            .Where(response => TryReadComponentReference(response.Value, "responses", out _))
+            .Select(response =>
+            {
+                TryReadComponentReference(response.Value, "responses", out var componentId);
+                return new OpenApiResponseComponentReference(response.Name, componentId!);
+            })
+            .ToList();
+    }
+
+    private static bool TryReadComponentReference(
+        JsonElement value,
+        string kind,
+        out string? componentId
+    )
+    {
+        componentId = null;
+        if (
+            !value.TryGetProperty("$ref", out var referenceValue)
+            || referenceValue.ValueKind != JsonValueKind.String
+            || referenceValue.GetString() is not { } reference
+            || !reference.StartsWith($"#/components/{kind}/", StringComparison.Ordinal)
+        )
+        {
+            return false;
+        }
+        componentId = Uri.UnescapeDataString(reference[$"#/components/{kind}/".Length..])
+            .Replace("~1", "/", StringComparison.Ordinal)
+            .Replace("~0", "~", StringComparison.Ordinal);
+        return true;
     }
 
     private static IReadOnlyList<OpenApiVendorExtensionProvenance> ReadVendorExtensions(

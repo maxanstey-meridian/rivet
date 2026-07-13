@@ -708,6 +708,120 @@ public sealed class OpenApiReferenceNormalizationTests
         Assert.Contains("missing", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Schema_Ref_Use_Site_Descriptions_Remain_Independent_From_Component_Description()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Reference API", "version": "1.0.0" },
+              "paths": {
+                "/accounts": {
+                  "get": {
+                    "operationId": "accounts_get",
+                    "tags": ["Accounts"],
+                    "responses": {
+                      "200": {
+                        "description": "OK",
+                        "content": {
+                          "application/json": {
+                            "schema": {
+                              "$ref": "#/components/schemas/Account",
+                              "description": "Response account"
+                            }
+                          }
+                        }
+                      },
+                      "default": {
+                        "description": "Fallback",
+                        "content": {
+                          "application/json": {
+                            "schema": {
+                              "$ref": "#/components/schemas/Owner",
+                              "description": "Fallback owner"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "components": {
+                "schemas": {
+                  "Account": {
+                    "type": "object",
+                    "description": "Canonical account",
+                    "properties": {
+                      "owner": {
+                        "$ref": "#/components/schemas/Owner",
+                        "description": "Account owner"
+                      }
+                    }
+                  },
+                  "Owner": {
+                    "type": "object",
+                    "description": "Canonical owner",
+                    "properties": { "name": { "type": "string" } }
+                  }
+                }
+              }
+            }
+            """;
+
+        using var emitted = ImportCompileWalkAndEmit(spec);
+        var root = emitted.RootElement;
+        var schemas = root.GetProperty("components").GetProperty("schemas");
+
+        Assert.Equal(
+            "Canonical owner",
+            schemas.GetProperty("Owner").GetProperty("description").GetString()
+        );
+        Assert.Equal(
+            "Account owner",
+            schemas
+                .GetProperty("Account")
+                .GetProperty("properties")
+                .GetProperty("owner")
+                .GetProperty("description")
+                .GetString()
+        );
+        Assert.Equal(
+            "Response account",
+            root.GetProperty("paths")
+                .GetProperty("/accounts")
+                .GetProperty("get")
+                .GetProperty("responses")
+                .GetProperty("200")
+                .GetProperty("content")
+                .GetProperty("application/json")
+                .GetProperty("schema")
+                .GetProperty("description")
+                .GetString()
+        );
+        Assert.Equal(
+            "Canonical account",
+            schemas.GetProperty("Account").GetProperty("description").GetString()
+        );
+        var fallbackResponse = root.GetProperty("paths")
+            .GetProperty("/accounts")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("default");
+        Assert.True(
+            fallbackResponse.TryGetProperty("content", out var fallbackContent),
+            fallbackResponse.ToString()
+        );
+        Assert.Equal(
+            "Fallback owner",
+            fallbackContent
+                .GetProperty("application/json")
+                .GetProperty("schema")
+                .GetProperty("description")
+                .GetString()
+        );
+    }
+
     private static JsonDocument ImportCompileWalkAndEmit(string spec)
     {
         var result = CompilationHelper.Import(spec, "ReferenceNormalization");

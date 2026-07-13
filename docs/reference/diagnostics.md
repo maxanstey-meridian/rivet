@@ -112,6 +112,9 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV3012` | Warning | Enum constraint that cannot become a C# enum (single-value, mixed/float, out-of-int32-range) — degraded to a primitive. | Accept the primitive, or hand-model the constraint in the scaffolded C#. |
 | `RIV3013` | Warning | Inline schema declares both `properties` and `additionalProperties` — imported as a dictionary; the declared properties are not represented. | Pick one side in the scaffolded C# (dictionary vs record) and adjust by hand. |
 | `RIV3014` | Warning | Dictionary `propertyNames` schema has no C# dictionary-key representation — imported with `string` keys. | Reference a string enum / string-backed brand or use a string key schema in the source spec, or type the dictionary key by hand after scaffolding. |
+| `RIV3015` | Warning | Named scalar component uses const, composition, heterogeneous leaves, or a non-flat enum outside bounded scalar preservation. | Replace it with one primitive leaf (optionally nullable) or a flat string/Int32 enum; the existing fallback mapping is retained. |
+| `RIV3020` | Warning | Parameter has an empty name, so the invalid parameter is dropped while the operation and its other parameters are preserved. | Give the source parameter a non-empty OpenAPI name. |
+| `RIV3021` | Warning | Imported operation declares `Content-Type` as a header parameter even though OpenAPI represents request media types through `requestBody.content`. | Remove the reserved header parameter and retain the corresponding request-body media type. |
 
 ## RIV4xxx — coverage (`--check`)
 

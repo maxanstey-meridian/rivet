@@ -24,6 +24,7 @@ internal sealed class SchemaMapper
     private readonly HashSet<string> _skippedComponentTypes = new(StringComparer.Ordinal);
     private IDictionary<string, IOpenApiSchema>? _componentSchemas;
     private readonly HashSet<string> _unsupportedNamedScalarsWarned = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _requiredComponentSchemas = new(StringComparer.Ordinal);
 
     // P2 wave 4: oneOf + discriminator + usable mapping reverses to an abstract
     // [JsonPolymorphic] base record with [JsonDerivedType] registrations. Bases are
@@ -267,7 +268,10 @@ internal sealed class SchemaMapper
     /// <summary>
     /// Walk #/components/schemas and return C# type representations.
     /// </summary>
-    public SchemaMapResult MapSchemas(IDictionary<string, IOpenApiSchema> schemas)
+    public SchemaMapResult MapSchemas(
+        IDictionary<string, IOpenApiSchema> schemas,
+        IReadOnlySet<string>? requiredComponentSchemas = null
+    )
     {
         var records = new List<GeneratedRecord>();
         var enums = new List<GeneratedEnum>();
@@ -281,6 +285,10 @@ internal sealed class SchemaMapper
         // I1: resolve alias chains first, using raw reference ids only (never proxied
         // members — a cyclic alias would overflow the stack inside the library's proxy)
         _componentSchemas = schemas;
+        if (requiredComponentSchemas is not null)
+        {
+            _requiredComponentSchemas.UnionWith(requiredComponentSchemas);
+        }
         ResolveAliasTargets(schemas);
         foreach (var (componentId, schema) in schemas)
         {
@@ -426,6 +434,12 @@ internal sealed class SchemaMapper
             // Skip monomorphised schemas handled by generic templates
             if (handledByGeneric.Contains(key))
             {
+                continue;
+            }
+
+            if (TryMapNamedArray(name, key, schema, out var arraySchema))
+            {
+                scalarSchemas.Add(arraySchema);
                 continue;
             }
 
@@ -697,6 +711,43 @@ internal sealed class SchemaMapper
             }
         }
 
+        var representedComponentIds = records
+            .Select(record => record.ComponentId)
+            .Concat(enums.Select(value => value.ComponentId))
+            .Concat(brands.Select(value => value.ComponentId))
+            .Concat(scalarSchemas.Select(value => value.ComponentId))
+            .Where(componentId => componentId is not null)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var componentId in _requiredComponentSchemas.Order(StringComparer.Ordinal))
+        {
+            if (
+                representedComponentIds.Contains(componentId)
+                || !schemas.TryGetValue(componentId, out var schema)
+                || schema is OpenApiSchemaReference
+                || !_ctx.SchemaNameMap.TryGetValue(componentId, out var name)
+            )
+            {
+                continue;
+            }
+
+            _ctx.Warnings.Add(
+                Diagnostics.Prefix(
+                    Diagnostics.ImportUnsupportedSchemaType,
+                    $"Named schema component '{componentId}' is required by preserved component identity but has no reversible C# representation — preserving its identity as an untyped fallback component."
+                )
+            );
+            scalarSchemas.Add(
+                new GeneratedScalarSchema(
+                    name,
+                    componentId,
+                    SchemaType: null,
+                    Format: null,
+                    IsNullable: false,
+                    Metadata: BuildScalarMetadata(schema, isNullable: false)
+                )
+            );
+        }
+
         foreach (var record in records)
         {
             _ctx.MappedComponentRecords[record.Name] = record;
@@ -793,6 +844,55 @@ internal sealed class SchemaMapper
         return true;
     }
 
+    private bool TryMapNamedArray(
+        string name,
+        string componentId,
+        IOpenApiSchema schema,
+        out GeneratedScalarSchema array
+    )
+    {
+        array = null!;
+        if (
+            (schema.Type & ~JsonSchemaType.Null) != JsonSchemaType.Array
+            || schema.Items is not OpenApiSchemaReference { Reference.Id: { } itemId }
+            || schema.AllOf is { Count: > 0 }
+            || schema.OneOf is { Count: > 0 }
+            || schema.AnyOf is { Count: > 0 }
+            || schema.Const is not null
+            || schema.Properties is { Count: > 0 }
+            || schema.AdditionalProperties is not null
+            || schema.Enum is { Count: > 0 }
+        )
+        {
+            return false;
+        }
+
+        var itemComponentId = DecodeComponentId(itemId);
+        if (
+            itemComponentId is null
+            || !_ctx.SchemaNameMap.TryGetValue(itemComponentId, out var itemSchemaRef)
+        )
+        {
+            return false;
+        }
+        _requiredComponentSchemas.Add(itemComponentId);
+
+        array = new GeneratedScalarSchema(
+            name,
+            componentId,
+            SchemaType: "array",
+            Format: schema.Format,
+            IsNullable: schema.Type?.HasFlag(JsonSchemaType.Null) == true,
+            Metadata: BuildScalarMetadata(
+                schema,
+                schema.Type?.HasFlag(JsonSchemaType.Null) == true
+            ),
+            IsArray: true,
+            ItemSchemaRef: itemSchemaRef
+        );
+        return true;
+    }
+
     private static bool TryMapNamedUntyped(
         string name,
         string componentId,
@@ -831,10 +931,16 @@ internal sealed class SchemaMapper
         new(
             Description: schema.Description,
             DefaultValue: schema.Default?.ToJsonString(),
-            Example: schema.Example?.ToJsonString(),
+            Example: schema.Example is null
+                ? null
+                : OpenApiJsonNodeSerializer.Serialize(schema.Example),
             Examples: schema.Examples is { Count: > 0 }
                 ? new JsonArray(
-                    schema.Examples.Select(example => example?.DeepClone()).ToArray()
+                    schema
+                        .Examples.Select(example =>
+                            example is null ? null : OpenApiJsonNodeSerializer.Clone(example)
+                        )
+                        .ToArray()
                 ).ToJsonString()
                 : null,
             IsDeprecated: schema.Deprecated,
@@ -956,7 +1062,11 @@ internal sealed class SchemaMapper
         if (
             componentId is null
             || _componentSchemas is null
-            || !TryGetScalarAliasTarget(componentId, _componentSchemas, out _, out _)
+            || !_componentSchemas.TryGetValue(componentId, out var target)
+            || (
+                !TryGetScalarAliasTarget(componentId, _componentSchemas, out _, out _)
+                && !TryMapNamedArray("_", componentId, target, out _)
+            )
         )
         {
             return null;
@@ -1483,6 +1593,12 @@ internal sealed class SchemaMapper
         if (SchemaClassifier.TryGetGenericExtension(effective, out var genericInfo))
         {
             result = SchemaClassifier.BuildGenericTypeString(genericInfo!);
+            return true;
+        }
+
+        if (effectiveId is not null && TryMapNamedArray("_", effectiveId, effective, out _))
+        {
+            result = ResolveCSharpType(effective, context);
             return true;
         }
 

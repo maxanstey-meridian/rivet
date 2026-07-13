@@ -7,8 +7,14 @@ public sealed record OpenApiDocumentProvenance(
     IReadOnlyList<OpenApiServerProvenance> Servers,
     IReadOnlyList<OpenApiComponentExampleProvenance> ComponentExamples,
     IReadOnlyList<OpenApiComponentRequestBodyProvenance>? ComponentRequestBodies = null,
-    IReadOnlyList<OpenApiVendorExtensionProvenance>? VendorExtensions = null
+    IReadOnlyList<OpenApiVendorExtensionProvenance>? VendorExtensions = null,
+    IReadOnlyList<OpenApiComponentParameterProvenance>? ComponentParameters = null,
+    IReadOnlyList<OpenApiComponentResponseProvenance>? ComponentResponses = null
 );
+
+public sealed record OpenApiComponentParameterProvenance(string Name, string Json);
+
+public sealed record OpenApiComponentResponseProvenance(string Name, string Json);
 
 public sealed record OpenApiVendorExtensionProvenance(
     string OwnerPointer,
@@ -112,7 +118,17 @@ public sealed record OpenApiOperationProvenance(
     IReadOnlyList<OpenApiServerProvenance>? ServerOverride,
     string? RequestBodyDescription,
     OpenApiRivetIdentityProvenance? RivetIdentity,
-    string? RequestBodyComponentId = null
+    string? RequestBodyComponentId = null,
+    IReadOnlyList<OpenApiParameterComponentReference>? ParameterComponentReferences = null,
+    IReadOnlyList<OpenApiResponseComponentReference>? ResponseComponentReferences = null
 );
+
+public sealed record OpenApiParameterComponentReference(
+    string Name,
+    string Location,
+    string ComponentId
+);
+
+public sealed record OpenApiResponseComponentReference(string StatusKey, string ComponentId);
 
 public sealed record OpenApiRivetIdentityProvenance(string? Contract, string? Endpoint);

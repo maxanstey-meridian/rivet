@@ -237,6 +237,61 @@ public sealed class CliPipelineTests
         }
     }
 
+    [Fact]
+    public void Cli_Import_Diagnoses_Reserved_Content_Type_Without_Emitting_Unsupported_Source()
+    {
+        var workDir = Directory.CreateTempSubdirectory("rivet-reserved-content-type-");
+        try
+        {
+            var sourcePath = Path.Combine(workDir.FullName, "source.json");
+            File.WriteAllText(
+                sourcePath,
+                """
+                {
+                  "openapi":"3.1.0","info":{"title":"Reserved header","version":"1"},
+                  "paths":{"/projects/{project}/ssh-key":{"post":{
+                    "operationId":"addSshKey","parameters":[
+                      {"name":"project","in":"path","required":true,"schema":{"type":"string"}},
+                      {"name":"Content-Type","in":"header","required":true,"schema":{"type":"string","enum":["application/json"]}},
+                      {"name":"X-Trace","in":"header","schema":{"type":"string"}},
+                      {"name":"notify","in":"query","schema":{"type":"boolean"}}
+                    ],
+                    "requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","properties":{"hostname":{"type":"string"}}}}}},
+                    "responses":{"204":{"description":"No Content"}}
+                  }}}
+                }
+                """
+            );
+            var sourceDirectory = Path.Combine(workDir.FullName, "src");
+
+            var import = RunCli(
+                workDir.FullName,
+                ["--from-openapi", sourcePath, "--output", sourceDirectory]
+            );
+
+            Assert.Equal(0, import.ExitCode);
+            Assert.Contains(
+                "warning RIV3021: Reserved header parameter dropped: POST /projects/{project}/ssh-key declares 'Content-Type'; request media types are represented by requestBody.content.",
+                import.StdErr
+            );
+            var generatedSource = string.Join(
+                "\n",
+                Directory
+                    .GetFiles(sourceDirectory, "*.cs", SearchOption.AllDirectories)
+                    .Select(File.ReadAllText)
+            );
+            Assert.DoesNotContain("[rivet:unsupported param name=Content-Type", generatedSource);
+            Assert.Contains(".RequestContent<", generatedSource);
+            Assert.Contains(".Parameter<string>(\"project\", \"path\", true", generatedSource);
+            Assert.Contains(".Parameter<string>(\"X-Trace\", \"header\", false", generatedSource);
+            Assert.Contains(".Parameter<bool>(\"notify\", \"query\", false", generatedSource);
+        }
+        finally
+        {
+            workDir.Delete(recursive: true);
+        }
+    }
+
     private static string ToCliSecuritySpec(
         string name,
         IReadOnlyDictionary<string, JsonElement> sourceSchemes,

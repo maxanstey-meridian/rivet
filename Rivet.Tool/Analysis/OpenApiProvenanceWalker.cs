@@ -249,6 +249,18 @@ internal static class OpenApiProvenanceWalker
             .OrderBy(value => value.Order)
             .Select(value => value.RequestBody)
             .ToList();
+        var componentParameters = ReadJsonComponents<OpenApiComponentParameterProvenance>(
+            attributes,
+            "Rivet.RivetDocumentParameterAttribute",
+            "parameter",
+            static (name, json) => new OpenApiComponentParameterProvenance(name, json)
+        );
+        var componentResponses = ReadJsonComponents<OpenApiComponentResponseProvenance>(
+            attributes,
+            "Rivet.RivetDocumentResponseAttribute",
+            "response",
+            static (name, json) => new OpenApiComponentResponseProvenance(name, json)
+        );
         var vendorExtensions = attributes
             .Where(attribute => Is(attribute, "Rivet.RivetVendorExtensionAttribute"))
             .Select(attribute =>
@@ -291,7 +303,9 @@ internal static class OpenApiProvenanceWalker
             servers,
             componentExamples,
             componentRequestBodies,
-            vendorExtensions
+            vendorExtensions,
+            componentParameters,
+            componentResponses
         );
     }
 
@@ -332,9 +346,78 @@ internal static class OpenApiProvenanceWalker
             rivetContract is not null || rivetEndpoint is not null
                 ? new OpenApiRivetIdentityProvenance(rivetContract, rivetEndpoint)
                 : null,
-            StringValue(args[8])
+            StringValue(args[8]),
+            attributes
+                .Where(attribute =>
+                    Is(attribute, "Rivet.RivetOperationParameterComponentAttribute")
+                )
+                .Select(attribute =>
+                {
+                    var values = attribute.ConstructorArguments;
+                    return (
+                        Order: RequiredInt(values[0], "operation parameter component order"),
+                        Reference: new OpenApiParameterComponentReference(
+                            RequiredString(values[1], "operation parameter component name"),
+                            RequiredString(values[2], "operation parameter component location"),
+                            RequiredString(values[3], "operation parameter component ID")
+                        )
+                    );
+                })
+                .OrderBy(value => value.Order)
+                .Select(value => value.Reference)
+                .ToList(),
+            attributes
+                .Where(attribute => Is(attribute, "Rivet.RivetOperationResponseComponentAttribute"))
+                .Select(attribute =>
+                {
+                    var values = attribute.ConstructorArguments;
+                    return (
+                        Order: RequiredInt(values[0], "operation response component order"),
+                        Reference: new OpenApiResponseComponentReference(
+                            RequiredString(values[1], "operation response component status"),
+                            RequiredString(values[2], "operation response component ID")
+                        )
+                    );
+                })
+                .OrderBy(value => value.Order)
+                .Select(value => value.Reference)
+                .ToList()
         );
     }
+
+    private static IReadOnlyList<T> ReadJsonComponents<T>(
+        IReadOnlyList<AttributeData> attributes,
+        string attributeName,
+        string kind,
+        Func<string, string, T> create
+    ) =>
+        attributes
+            .Where(attribute => Is(attribute, attributeName))
+            .Select(attribute =>
+            {
+                var args = attribute.ConstructorArguments;
+                var order = RequiredInt(args[0], $"document component {kind} order");
+                var name = RequiredString(args[1], $"document component {kind} name");
+                var json = RequiredString(args[2], $"document component {kind} JSON");
+                try
+                {
+                    using var document = JsonDocument.Parse(json);
+                    if (document.RootElement.ValueKind != JsonValueKind.Object)
+                    {
+                        throw new JsonException("root value is not an object");
+                    }
+                }
+                catch (JsonException exception)
+                {
+                    throw new ContractAnalysisException(
+                        $"Invalid Rivet document component {kind} JSON for '{name}': {exception.Message}"
+                    );
+                }
+                return (Order: order, Component: create(name, json));
+            })
+            .OrderBy(value => value.Order)
+            .Select(value => value.Component)
+            .ToList();
 
     private static TsType ApplySchemaLeafMetadata(TsType type, string? schemaType, string? format)
     {

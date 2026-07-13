@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace Rivet.Tests;
@@ -9,23 +10,18 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class RoundTripCorpusGateTests
 {
-    internal const string DocusignSha256 =
-        "bcdba766a39b7760e00c7822946879192a63db1f440f91f2d57335c9b78ffaef";
-    internal const string DocusignSourceDefectPointer =
-        "#/components/schemas/connectOAuthConfig/properties/customParameters/additionalProperties";
-    internal const string DocusignSourceDefectReason =
-        "additionalProperties is an object-only keyword on a non-object schema";
-    internal const string DocusignSourceDefectDiagnostic =
-        "warning RIV3010: Invalid additionalProperties at '#/components/schemas/connectOAuthConfig/properties/customParameters/additionalProperties': containing schema declares non-object type 'String'. The construct is classified as a source defect and is not reinterpreted.";
+    private static readonly Lazy<VerifiedProfile> _profile = new(
+        () => LoadVerifiedProfile(),
+        LazyThreadSafetyMode.ExecutionAndPublication
+    );
 
-    private static readonly string[] _sixCorpusIds =
+    private static readonly string[] _componentNamespaces =
     [
-        "okta",
-        "petstore-v2",
-        "petstore-v3",
-        "twilio",
-        "square",
-        "docusign",
+        "schemas",
+        "requestBodies",
+        "parameters",
+        "responses",
+        "securitySchemes",
     ];
 
     internal static readonly string[] RequiredArtifactFiles =
@@ -71,12 +67,13 @@ public sealed class RoundTripCorpusGateTests
 
     public static IEnumerable<object[]> Corpora()
     {
+        var profile = _profile.Value;
         var manifest = JsonSerializer.Deserialize<Manifest>(
             File.ReadAllText(CliRunner.RepoPath("corpus", "openapi-manifest.json")),
             _jsonOptions
         )!;
 
-        foreach (var corpusId in _sixCorpusIds)
+        foreach (var corpusId in profile.VerifiedCorpusIds)
         {
             var corpus = manifest.Corpora.SingleOrDefault(candidate => candidate.Id == corpusId);
             if (corpus is null)
@@ -409,6 +406,7 @@ public sealed class RoundTripCorpusGateTests
             if (
                 allowSourceDefect
                 && IsSourceDefectDiagnostic(
+                    _profile.Value,
                     report.CorpusId,
                     report.SourceSha256,
                     line,
@@ -426,19 +424,24 @@ public sealed class RoundTripCorpusGateTests
     }
 
     internal static bool IsSourceDefectDiagnostic(
+        VerifiedProfile profile,
         string corpusId,
         string sourceSha256,
         string line,
         int existingSourceDefectCount
-    ) =>
-        corpusId == "docusign"
-        && sourceSha256 == DocusignSha256
-        && existingSourceDefectCount == 0
-        && line == DocusignSourceDefectDiagnostic;
+    )
+    {
+        var expected = ExpectedSourceDefects(profile, corpusId, sourceSha256)
+            .SelectMany(defect => Enumerable.Repeat(defect.Diagnostic, defect.Cardinality))
+            .ToArray();
+        return existingSourceDefectCount < expected.Length
+            && line == expected[existingSourceDefectCount];
+    }
 
     private static void ValidateSourceDefectDiagnosticCount(GateReport report)
     {
-        var expected = report.HasPinnedDocusignSource ? 1 : 0;
+        var expected = ExpectedSourceDefects(_profile.Value, report.CorpusId, report.SourceSha256)
+            .Sum(defect => defect.Cardinality);
         if (report.SourceDefectCount != expected)
         {
             report.Add(
@@ -457,6 +460,7 @@ public sealed class RoundTripCorpusGateTests
 
         if (
             !IsAllowedComparatorSourceDefects(
+                _profile.Value,
                 report.CorpusId,
                 report.SourceSha256,
                 diff.Details.SourceDefects
@@ -471,18 +475,19 @@ public sealed class RoundTripCorpusGateTests
     }
 
     internal static bool IsAllowedComparatorSourceDefects(
+        VerifiedProfile profile,
         string corpusId,
         string sourceSha256,
         IReadOnlyList<SourceDefect> sourceDefects
     )
     {
-        var expected =
-            corpusId == "docusign" && sourceSha256 == DocusignSha256
-                ? new[]
-                {
-                    new SourceDefect(DocusignSourceDefectPointer, DocusignSourceDefectReason),
-                }
-                : [];
+        var expected = ExpectedSourceDefects(profile, corpusId, sourceSha256)
+            .SelectMany(defect =>
+                Enumerable.Repeat(
+                    new SourceDefect(defect.Pointer, defect.Reason),
+                    defect.Cardinality
+                )
+            );
         return sourceDefects.SequenceEqual(expected);
     }
 
@@ -744,6 +749,146 @@ public sealed class RoundTripCorpusGateTests
         return findings;
     }
 
+    internal static VerifiedProfile LoadVerifiedProfile(
+        string? profilePath = null,
+        string? manifestPath = null
+    )
+    {
+        profilePath ??= CliRunner.RepoPath("corpus", "verified-profile.json");
+        manifestPath ??= CliRunner.RepoPath("corpus", "openapi-manifest.json");
+        var profileJson = File.ReadAllText(profilePath);
+        var profile =
+            JsonSerializer.Deserialize<VerifiedProfile>(profileJson, _jsonOptions)
+            ?? throw new InvalidDataException("Verified profile is empty.");
+        var manifest =
+            JsonSerializer.Deserialize<Manifest>(File.ReadAllText(manifestPath), _jsonOptions)
+            ?? throw new InvalidDataException("OpenAPI manifest is empty.");
+
+        if (profile.ManifestCorpusCount != manifest.Corpora.Length)
+        {
+            throw new InvalidDataException(
+                $"Manifest corpus denominator changed: expected {profile.ManifestCorpusCount}, actual {manifest.Corpora.Length}."
+            );
+        }
+
+        var factIds = profile.Facts.Corpora.Select(corpus => corpus.Id).ToArray();
+        if (
+            profile.VerifiedCorpusIds.Length != profile.VerifiedCorpusIds.Distinct().Count()
+            || !profile.VerifiedCorpusIds.SequenceEqual(factIds)
+        )
+        {
+            throw new InvalidDataException("Verified roster does not match profile facts.");
+        }
+
+        foreach (var fact in profile.Facts.Corpora)
+        {
+            var manifestEntry = manifest.Corpora.SingleOrDefault(corpus => corpus.Id == fact.Id);
+            if (manifestEntry is null || manifestEntry.Sha256 != fact.Sha256)
+            {
+                throw new InvalidDataException(
+                    $"Manifest/profile hash mismatch for verified corpus '{fact.Id}'."
+                );
+            }
+        }
+
+        using var document = JsonDocument.Parse(profileJson);
+        var sourceDefectJson = CanonicalJson(document.RootElement.GetProperty("sourceDefects"));
+        var sourceDefectSha256 = Convert.ToHexStringLower(SHA256.HashData(sourceDefectJson));
+        if (sourceDefectSha256 != profile.ReviewedSourceDefectsSha256)
+        {
+            throw new InvalidDataException("Reviewed source-defect policy changed.");
+        }
+
+        foreach (var defect in profile.SourceDefects)
+        {
+            var fact = profile.Facts.Corpora.SingleOrDefault(corpus =>
+                corpus.Id == defect.CorpusId
+            );
+            if (
+                fact is null
+                || fact.Sha256 != defect.SourceSha256
+                || defect.Cardinality < 1
+                || string.IsNullOrEmpty(defect.Pointer)
+                || string.IsNullOrEmpty(defect.Reason)
+                || string.IsNullOrEmpty(defect.Diagnostic)
+            )
+            {
+                throw new InvalidDataException("Source-defect policy entry is invalid.");
+            }
+        }
+
+        return profile;
+    }
+
+    private static byte[] CanonicalJson(JsonElement element)
+    {
+        using var stream = new MemoryStream();
+        using (
+            var writer = new Utf8JsonWriter(
+                stream,
+                new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }
+            )
+        )
+        {
+            WriteCanonicalJson(writer, element);
+        }
+        return stream.ToArray();
+    }
+
+    private static void WriteCanonicalJson(Utf8JsonWriter writer, JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (
+                    var property in element
+                        .EnumerateObject()
+                        .OrderBy(property => property.Name, StringComparer.Ordinal)
+                )
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteCanonicalJson(writer, property.Value);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in element.EnumerateArray())
+                {
+                    WriteCanonicalJson(writer, item);
+                }
+                writer.WriteEndArray();
+                break;
+            case JsonValueKind.String:
+                writer.WriteStringValue(element.GetString());
+                break;
+            case JsonValueKind.Number:
+                writer.WriteRawValue(element.GetRawText());
+                break;
+            case JsonValueKind.True:
+                writer.WriteBooleanValue(true);
+                break;
+            case JsonValueKind.False:
+                writer.WriteBooleanValue(false);
+                break;
+            case JsonValueKind.Null:
+                writer.WriteNullValue();
+                break;
+            default:
+                throw new InvalidDataException("Profile contains an unsupported JSON token.");
+        }
+    }
+
+    private static IEnumerable<SourceDefectPolicy> ExpectedSourceDefects(
+        VerifiedProfile profile,
+        string corpusId,
+        string sourceSha256
+    ) =>
+        profile.SourceDefects.Where(defect =>
+            defect.CorpusId == corpusId && defect.SourceSha256 == sourceSha256
+        );
+
     private static void CopyFileIfPresent(string sourcePath, string destinationPath)
     {
         if (File.Exists(sourcePath))
@@ -752,14 +897,14 @@ public sealed class RoundTripCorpusGateTests
         }
     }
 
-    private static Dictionary<string, ComponentMetric> CompareComponents(
+    internal static Dictionary<string, ComponentMetric> CompareComponents(
         string sourcePath,
         string reemittedPath
     )
     {
         var source = ReadComponentIdentities(sourcePath);
         var reemitted = ReadComponentIdentities(reemittedPath);
-        return new[] { "schemas", "requestBodies", "securitySchemes" }.ToDictionary(
+        return _componentNamespaces.ToDictionary(
             namespaceName => namespaceName,
             namespaceName =>
             {
@@ -781,7 +926,7 @@ public sealed class RoundTripCorpusGateTests
     {
         using var document = JsonDocument.Parse(File.ReadAllText(path));
         var root = document.RootElement;
-        var result = new[] { "schemas", "requestBodies", "securitySchemes" }.ToDictionary(
+        var result = _componentNamespaces.ToDictionary(
             name => name,
             _ => new HashSet<string>(StringComparer.Ordinal),
             StringComparer.Ordinal
@@ -864,9 +1009,6 @@ public sealed class RoundTripCorpusGateTests
         public string CorpusId { get; } = corpusId;
 
         public string SourceSha256 { get; } = sourceSha256;
-
-        public bool HasPinnedDocusignSource =>
-            CorpusId == "docusign" && SourceSha256 == DocusignSha256;
 
         public int SourceDefectCount => _findings["sourceDefects"].Sum(finding => finding.Count);
 
@@ -954,6 +1096,28 @@ public sealed class RoundTripCorpusGateTests
     }
 
     internal sealed record SourceDefect(string Path, string Reason);
+
+    internal sealed record SourceDefectPolicy(
+        string CorpusId,
+        string SourceSha256,
+        string Pointer,
+        string Reason,
+        string Diagnostic,
+        int Cardinality
+    );
+
+    internal sealed record VerifiedProfile(
+        int SchemaVersion,
+        int ManifestCorpusCount,
+        string[] VerifiedCorpusIds,
+        string ReviewedSourceDefectsSha256,
+        SourceDefectPolicy[] SourceDefects,
+        ProfileFacts Facts
+    );
+
+    internal sealed record ProfileFacts(ProfileCorpus[] Corpora);
+
+    internal sealed record ProfileCorpus(string Id, string Sha256);
 
     internal sealed record OperationMetric(
         int Source,

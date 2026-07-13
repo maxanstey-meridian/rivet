@@ -23,7 +23,9 @@ internal sealed record GeneratedScalarSchema(
     bool IsNullable,
     TsScalarMetadata Metadata,
     bool IsEnum = false,
-    string? SchemaRef = null
+    string? SchemaRef = null,
+    bool IsArray = false,
+    string? ItemSchemaRef = null
 );
 
 internal sealed record GeneratedRecord(
@@ -180,7 +182,8 @@ internal sealed record GeneratedResponseMediaTypeContent(
     string? SchemaRef = null,
     string? SchemaType = null,
     string? Format = null,
-    bool IsFormatSpecified = false
+    bool IsFormatSpecified = false,
+    string? SchemaDescription = null
 );
 
 internal sealed record GeneratedErrorResponse(

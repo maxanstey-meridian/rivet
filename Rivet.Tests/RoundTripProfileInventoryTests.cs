@@ -6,7 +6,7 @@ namespace Rivet.Tests;
 public sealed class RoundTripProfileInventoryTests
 {
     [Fact]
-    public void Pinned_Six_Profile_Matches_The_Artifacts()
+    public void Verified_Profile_Matches_The_Artifacts()
     {
         var result = RunInventory();
 
@@ -14,9 +14,27 @@ public sealed class RoundTripProfileInventoryTests
         using var output = JsonDocument.Parse(result.StdOut);
         Assert.True(output.RootElement.GetProperty("passed").GetBoolean());
         var facts = output.RootElement.GetProperty("facts");
+        Assert.Equal(
+            [
+                "okta",
+                "petstore-v2",
+                "petstore-v3",
+                "twilio",
+                "square",
+                "docusign",
+                "notion",
+                "circleci",
+                "firebase",
+            ],
+            facts
+                .GetProperty("corpora")
+                .EnumerateArray()
+                .Select(corpus => corpus.GetProperty("id").GetString()!)
+                .ToArray()
+        );
         Assert.Empty(facts.GetProperty("unknownKeywords").EnumerateArray());
         Assert.Equal(
-            1532,
+            1600,
             facts.GetProperty("normalizedComponentTotals").GetProperty("schemas").GetInt32()
         );
         Assert.Equal(
@@ -24,15 +42,23 @@ public sealed class RoundTripProfileInventoryTests
             facts.GetProperty("normalizedComponentTotals").GetProperty("requestBodies").GetInt32()
         );
         Assert.Equal(
-            5,
+            8,
             facts
                 .GetProperty("sourceComponentTotals")
                 .GetProperty("components.securitySchemes")
                 .GetInt32()
         );
         Assert.Equal(
-            7,
+            10,
             facts.GetProperty("normalizedComponentTotals").GetProperty("securitySchemes").GetInt32()
+        );
+        Assert.Equal(
+            20,
+            facts.GetProperty("normalizedComponentTotals").GetProperty("parameters").GetInt32()
+        );
+        Assert.Equal(
+            3,
+            facts.GetProperty("normalizedComponentTotals").GetProperty("responses").GetInt32()
         );
     }
 
@@ -62,7 +88,7 @@ public sealed class RoundTripProfileInventoryTests
     public void Changed_Reviewed_Disposition_Fails_The_Inventory()
     {
         var profile = JsonNode
-            .Parse(File.ReadAllText(CliRunner.RepoPath("corpus", "six-profile.json")))!
+            .Parse(File.ReadAllText(CliRunner.RepoPath("corpus", "verified-profile.json")))!
             .AsObject();
         profile["vendorExtensionDispositions"]!["x-logo"]!["disposition"] = "preserve";
         using var mutation = TemporaryJson.Write(profile);
@@ -77,7 +103,7 @@ public sealed class RoundTripProfileInventoryTests
     public void Changed_Profile_Fact_Fails_The_Inventory()
     {
         var profile = JsonNode
-            .Parse(File.ReadAllText(CliRunner.RepoPath("corpus", "six-profile.json")))!
+            .Parse(File.ReadAllText(CliRunner.RepoPath("corpus", "verified-profile.json")))!
             .AsObject();
         profile["facts"]!["corpora"]![0]!["operationCount"] = 18;
         using var mutation = TemporaryJson.Write(profile);
@@ -87,6 +113,44 @@ public sealed class RoundTripProfileInventoryTests
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("profile facts changed", Errors(result.StdOut));
     }
+
+    [Fact]
+    public void Roster_Mismatch_Fails_The_Inventory()
+    {
+        var profile = ReadProfile();
+        profile["verifiedCorpusIds"]!.AsArray().Add("asana");
+        using var mutation = TemporaryJson.Write(profile);
+
+        var result = RunInventory("--profile", mutation.Path);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("verified roster does not match profile facts", Errors(result.StdOut));
+    }
+
+    [Theory]
+    [InlineData("docusign")]
+    [InlineData("notion")]
+    [InlineData("circleci")]
+    public void Source_Defect_Policy_Broadening_Fails_The_Inventory(string corpusId)
+    {
+        var profile = ReadProfile();
+        var sourceDefects = profile["sourceDefects"]!.AsArray();
+        var defect = sourceDefects.Single(item =>
+            item!["corpusId"]!.GetValue<string>() == corpusId
+        );
+        sourceDefects.Add(defect!.DeepClone());
+        using var mutation = TemporaryJson.Write(profile);
+
+        var result = RunInventory("--profile", mutation.Path);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("reviewed source-defect policy changed", Errors(result.StdOut));
+    }
+
+    private static JsonObject ReadProfile() =>
+        JsonNode
+            .Parse(File.ReadAllText(CliRunner.RepoPath("corpus", "verified-profile.json")))!
+            .AsObject();
 
     private static TemporaryJson MutateOkta(Action<JsonObject> mutate)
     {

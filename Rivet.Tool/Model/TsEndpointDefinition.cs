@@ -84,7 +84,9 @@ public sealed record TsMediaTypeContent(
         string? SchemaType = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Format = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        bool IsFormatSpecified = false
+        bool IsFormatSpecified = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? SchemaDescription = null
 );
 
 /// <summary>

@@ -723,7 +723,8 @@ public abstract class RouteDefinitionBase<TSelf>
         string mediaType,
         string? schemaRef = null,
         string? schemaType = null,
-        string? format = null
+        string? format = null,
+        string? schemaDescription = null
     )
     {
         EnsureMutable();
@@ -732,6 +733,7 @@ public abstract class RouteDefinitionBase<TSelf>
         _ = schemaRef;
         _ = schemaType;
         _ = format;
+        _ = schemaDescription;
         return (TSelf)this;
     }
 
@@ -740,7 +742,8 @@ public abstract class RouteDefinitionBase<TSelf>
         string mediaType,
         string? schemaRef = null,
         string? schemaType = null,
-        string? format = null
+        string? format = null,
+        string? schemaDescription = null
     )
     {
         EnsureMutable();
@@ -749,6 +752,7 @@ public abstract class RouteDefinitionBase<TSelf>
         _ = schemaRef;
         _ = schemaType;
         _ = format;
+        _ = schemaDescription;
         return (TSelf)this;
     }
 

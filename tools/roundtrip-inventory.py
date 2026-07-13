@@ -14,14 +14,6 @@ import pathlib
 import sys
 
 
-CORPUS_IDS = (
-    "okta",
-    "petstore-v2",
-    "petstore-v3",
-    "twilio",
-    "square",
-    "docusign",
-)
 METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
 COMPONENT_NAMESPACES = {
     "callbacks",
@@ -71,7 +63,7 @@ MAP_KEYS = {
 def parse_args():
     root = pathlib.Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", type=pathlib.Path, default=root / "corpus" / "six-profile.json")
+    parser.add_argument("--profile", type=pathlib.Path, default=root / "corpus" / "verified-profile.json")
     parser.add_argument("--manifest", type=pathlib.Path, default=root / "corpus" / "openapi-manifest.json")
     parser.add_argument("--corpus-dir", type=pathlib.Path, default=root / "openapi")
     parser.add_argument(
@@ -182,11 +174,11 @@ def load_json(path):
     return value
 
 
-def parse_overrides(values):
+def parse_overrides(values, corpus_ids):
     overrides = {}
     for value in values:
         corpus_id, separator, path = value.partition("=")
-        if not separator or corpus_id not in CORPUS_IDS or corpus_id in overrides:
+        if not separator or corpus_id not in corpus_ids or corpus_id in overrides:
             raise ValueError(f"invalid --document value: {value}")
         overrides[corpus_id] = pathlib.Path(path)
     return overrides
@@ -222,7 +214,7 @@ def operation_count(document):
     return total
 
 
-def inventory(manifest_path, corpus_dir, overrides):
+def inventory(manifest_path, corpus_dir, overrides, corpus_ids):
     manifest = load_json(manifest_path)
     entries = {item["id"]: item for item in manifest.get("corpora", [])}
     walker = Walker()
@@ -230,7 +222,7 @@ def inventory(manifest_path, corpus_dir, overrides):
     normalized_totals = collections.Counter()
     source_totals = collections.Counter()
 
-    for corpus_id in CORPUS_IDS:
+    for corpus_id in corpus_ids:
         if corpus_id not in entries:
             raise ValueError(f"manifest is missing SIX corpus '{corpus_id}'")
         entry = entries[corpus_id]
@@ -278,19 +270,66 @@ def inventory(manifest_path, corpus_dir, overrides):
     }
 
 
+def validate_profile(profile, manifest):
+    errors = []
+    roster = profile.get("verifiedCorpusIds")
+    if not isinstance(roster, list) or not roster or any(not isinstance(item, str) for item in roster):
+        raise ValueError("profile verifiedCorpusIds must be a non-empty string array")
+    if len(roster) != len(set(roster)):
+        errors.append("verified roster contains duplicate corpus IDs")
+
+    facts = profile.get("facts", {})
+    fact_corpora = facts.get("corpora", []) if isinstance(facts, dict) else []
+    fact_ids = [item.get("id") for item in fact_corpora if isinstance(item, dict)]
+    if roster != fact_ids:
+        errors.append("verified roster does not match profile facts")
+
+    manifest_corpora = manifest.get("corpora", [])
+    if profile.get("manifestCorpusCount") != len(manifest_corpora):
+        errors.append(
+            f"manifest corpus denominator changed: expected {profile.get('manifestCorpusCount')}, "
+            f"observed {len(manifest_corpora)}"
+        )
+
+    source_defects = profile.get("sourceDefects", [])
+    if not isinstance(source_defects, list):
+        raise ValueError("profile sourceDefects must be an array")
+    source_defect_sha256 = hashlib.sha256(canonical(source_defects).encode()).hexdigest()
+    if profile.get("reviewedSourceDefectsSha256") != source_defect_sha256:
+        errors.append("reviewed source-defect policy changed")
+    required_keys = {
+        "corpusId", "sourceSha256", "pointer", "reason", "diagnostic", "cardinality"
+    }
+    for defect in source_defects:
+        if not isinstance(defect, dict) or set(defect) != required_keys:
+            errors.append("source-defect policy entry has an invalid shape")
+            continue
+        if not isinstance(defect["cardinality"], int) or defect["cardinality"] < 1:
+            errors.append("source-defect policy cardinality must be a positive integer")
+
+    return roster, errors
+
+
 def main():
     args = parse_args()
     try:
-        observed = inventory(args.manifest, args.corpus_dir, parse_overrides(args.document))
+        profile = load_json(args.profile)
+        manifest = load_json(args.manifest)
+        corpus_ids, profile_errors = validate_profile(profile, manifest)
+        observed = inventory(
+            args.manifest,
+            args.corpus_dir,
+            parse_overrides(args.document, set(corpus_ids)),
+            corpus_ids,
+        )
         if args.observed:
             print(json.dumps(observed, indent=2, sort_keys=True))
             return 0
-        profile = load_json(args.profile)
     except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
         print(f"roundtrip-inventory: {error}", file=sys.stderr)
         return 2
 
-    errors = []
+    errors = list(profile_errors)
     if observed["unknownKeywords"]:
         errors.extend(f"unknown keyword: {pointer}" for pointer in observed["unknownKeywords"])
     dispositions = profile.get("vendorExtensionDispositions", {})

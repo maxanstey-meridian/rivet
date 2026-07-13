@@ -189,6 +189,13 @@ public sealed class TypeWalker
                 attribute.ConstructorArguments.Length > 7
                     ? attribute.ConstructorArguments[7].Value as string
                     : null;
+            var isArray =
+                attribute.ConstructorArguments.Length > 8
+                && attribute.ConstructorArguments[8].Value is true;
+            var itemSchemaRef =
+                attribute.ConstructorArguments.Length > 9
+                    ? attribute.ConstructorArguments[9].Value as string
+                    : null;
             if (!_generatedSchemaNames.Add(name))
             {
                 throw new InvalidOperationException(
@@ -202,12 +209,18 @@ public sealed class TypeWalker
                 continue;
             }
 
-            TsType leaf = schemaRef is null
-                ? schemaType is null
-                    ? new TsType.Primitive("unknown", CSharpType: "object")
-                    : new TsType.Primitive(schemaType, format)
-                : new TsType.TypeRef(schemaRef);
-            if (nullable && schemaRef is null && schemaType is not null)
+            TsType leaf = isArray
+                ? itemSchemaRef is null
+                    ? throw new InvalidOperationException(
+                        $"Generated array schema '{name}' has no item schema reference."
+                    )
+                    : new TsType.Array(new TsType.TypeRef(itemSchemaRef))
+                : schemaRef is null
+                    ? schemaType is null
+                        ? new TsType.Primitive("unknown", CSharpType: "object")
+                        : new TsType.Primitive(schemaType, format)
+                    : new TsType.TypeRef(schemaRef);
+            if (nullable && (isArray || schemaRef is null && schemaType is not null))
             {
                 leaf = new TsType.Nullable(leaf);
             }

@@ -80,6 +80,76 @@ public sealed class FormatRoundTripTests
         return (endpoints, walker);
     }
 
+    [Fact]
+    public void String_With_Int64_Format_Remains_String_While_Clr_Long_Remains_Integer()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Formats", "version": "1" },
+              "paths": {
+                "/values": {
+                  "get": {
+                    "operationId": "values_get",
+                    "responses": {
+                      "200": {
+                        "description": "OK",
+                        "content": {
+                          "application/json": {
+                            "schema": { "$ref": "#/components/schemas/Values" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "components": {
+                "schemas": {
+                  "Values": {
+                    "type": "object",
+                    "properties": {
+                      "stringId": { "type": "string", "format": "int64" },
+                      "numericId": { "type": "integer", "format": "int64" }
+                    },
+                    "required": ["stringId", "numericId"]
+                  }
+                }
+              }
+            }
+            """;
+
+        var imported = OpenApiImporter.Import(spec, new ImportOptions("RoundTrip"));
+        var generated = CompilationHelper.FindFile(imported, "Values.cs");
+        Assert.Contains("RivetFormat(\"int64\")", generated);
+        Assert.Contains("RivetSchemaType(\"string\")", generated);
+        Assert.Contains("string StringId", generated);
+        Assert.Contains("long NumericId", generated);
+
+        var compilation = CompilationHelper.CompileImportResult(imported);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        using var emitted = JsonDocument.Parse(
+            OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null)
+        );
+        var properties = emitted
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Values")
+            .GetProperty("properties");
+
+        Assert.Equal("string", properties.GetProperty("stringId").GetProperty("type").GetString());
+        Assert.Equal("int64", properties.GetProperty("stringId").GetProperty("format").GetString());
+        Assert.Equal(
+            "integer",
+            properties.GetProperty("numericId").GetProperty("type").GetString()
+        );
+        Assert.Equal(
+            "int64",
+            properties.GetProperty("numericId").GetProperty("format").GetString()
+        );
+    }
+
     // ─── Forward: C# → OpenAPI schema format ───────────────────
 
     [Fact]

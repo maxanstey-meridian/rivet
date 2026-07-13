@@ -124,12 +124,18 @@ public static class OpenApiEmitter
     )
     {
         var requestBodyComponents = documentInfo.Provenance?.ComponentRequestBodies ?? [];
+        var parameterComponents = documentInfo.Provenance?.ComponentParameters ?? [];
+        var responseComponents = documentInfo.Provenance?.ComponentResponses ?? [];
         var paths = BuildPaths(
             endpoints,
             definitions,
             requestBodyComponents
                 .Select(component => component.Name)
-                .ToHashSet(StringComparer.Ordinal)
+                .ToHashSet(StringComparer.Ordinal),
+            parameterComponents
+                .Select(component => component.Name)
+                .ToHashSet(StringComparer.Ordinal),
+            responseComponents.Select(component => component.Name).ToHashSet(StringComparer.Ordinal)
         );
         var schemas = BuildSchemas(endpoints, definitions, brands, enums);
         var examples = BuildComponentExamples(
@@ -243,6 +249,16 @@ public static class OpenApiEmitter
         {
             components["requestBodies"] = requestBodies;
         }
+        AddJsonComponents(
+            components,
+            "parameters",
+            parameterComponents.Select(value => (value.Name, value.Json))
+        );
+        AddJsonComponents(
+            components,
+            "responses",
+            responseComponents.Select(value => (value.Name, value.Json))
+        );
 
         var securitySchemes = new Dictionary<string, object>();
 
@@ -302,6 +318,12 @@ public static class OpenApiEmitter
             components["securitySchemes"] = securitySchemes;
         }
 
+        EnsureReferencedSchemaComponents(paths, components, schemas);
+        if (schemas.Count > 0)
+        {
+            components["schemas"] = schemas;
+        }
+
         if (components.Count > 0)
         {
             doc["components"] = components;
@@ -312,6 +334,98 @@ public static class OpenApiEmitter
         AttachVendorExtensions(doc, vendorExtensions);
 
         return JsonSerializer.Serialize(doc, _jsonOptions);
+    }
+
+    private static void EnsureReferencedSchemaComponents(
+        Dictionary<string, object> paths,
+        Dictionary<string, object> components,
+        Dictionary<string, object> schemas
+    )
+    {
+        var referenced = new HashSet<string>(StringComparer.Ordinal);
+        CollectSchemaReferences(paths, referenced);
+        CollectSchemaReferences(components, referenced);
+        foreach (var componentId in referenced.Order(StringComparer.Ordinal))
+        {
+            if (schemas.ContainsKey(componentId))
+            {
+                continue;
+            }
+
+            Diagnostics.Warn(
+                Diagnostics.UnknownTypeUntypedSchema,
+                $"schema component '{componentId}' is referenced by emitted OpenAPI but has no recovered definition — emitting an untyped fallback component"
+            );
+            schemas[componentId] = new Dictionary<string, object>();
+        }
+    }
+
+    private static void CollectSchemaReferences(object value, HashSet<string> referenced)
+    {
+        switch (value)
+        {
+            case Dictionary<string, object> dictionary:
+                foreach (var (name, child) in dictionary)
+                {
+                    if (name == "$ref" && child is string reference)
+                    {
+                        AddSchemaReference(reference, referenced);
+                    }
+                    else
+                    {
+                        CollectSchemaReferences(child, referenced);
+                    }
+                }
+                break;
+            case IEnumerable<object> sequence:
+                foreach (var child in sequence)
+                {
+                    CollectSchemaReferences(child, referenced);
+                }
+                break;
+            case JsonElement { ValueKind: JsonValueKind.Object } element:
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (
+                        property.NameEquals("$ref")
+                        && property.Value.ValueKind == JsonValueKind.String
+                    )
+                    {
+                        AddSchemaReference(property.Value.GetString()!, referenced);
+                    }
+                    else
+                    {
+                        CollectSchemaReferences(property.Value, referenced);
+                    }
+                }
+                break;
+            case JsonElement { ValueKind: JsonValueKind.Array } element:
+                foreach (var child in element.EnumerateArray())
+                {
+                    CollectSchemaReferences(child, referenced);
+                }
+                break;
+        }
+    }
+
+    private static void AddSchemaReference(string reference, HashSet<string> referenced)
+    {
+        const string prefix = "#/components/schemas/";
+        if (!reference.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var token = reference[prefix.Length..];
+        if (token.Contains('/', StringComparison.Ordinal))
+        {
+            return;
+        }
+        referenced.Add(
+            Uri.UnescapeDataString(token)
+                .Replace("~1", "/", StringComparison.Ordinal)
+                .Replace("~0", "~", StringComparison.Ordinal)
+        );
     }
 
     private static void RetainVendorExtensionPathItemOwners(
@@ -563,7 +677,9 @@ public static class OpenApiEmitter
     private static Dictionary<string, object> BuildPaths(
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
-        IReadOnlySet<string> requestBodyComponentIds
+        IReadOnlySet<string> requestBodyComponentIds,
+        IReadOnlySet<string> parameterComponentIds,
+        IReadOnlySet<string> responseComponentIds
     )
     {
         var paths = new Dictionary<string, object>();
@@ -587,7 +703,13 @@ public static class OpenApiEmitter
                     $"duplicate endpoint {ep.HttpMethod} {pathKey} — later definition wins"
                 );
             }
-            var operation = BuildOperation(ep, definitions, requestBodyComponentIds);
+            var operation = BuildOperation(
+                ep,
+                definitions,
+                requestBodyComponentIds,
+                parameterComponentIds,
+                responseComponentIds
+            );
             pathItem[methodKey] = operation;
         }
 
@@ -597,7 +719,9 @@ public static class OpenApiEmitter
     private static Dictionary<string, object> BuildOperation(
         TsEndpointDefinition ep,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
-        IReadOnlySet<string> requestBodyComponentIds
+        IReadOnlySet<string> requestBodyComponentIds,
+        IReadOnlySet<string> parameterComponentIds,
+        IReadOnlySet<string> responseComponentIds
     )
     {
         var operation = new Dictionary<string, object>();
@@ -745,6 +869,23 @@ public static class OpenApiEmitter
 
         if (parameters.Count > 0)
         {
+            foreach (var reference in ep.Provenance?.ParameterComponentReferences ?? [])
+            {
+                if (!parameterComponentIds.Contains(reference.ComponentId))
+                {
+                    continue;
+                }
+                var index = parameters.FindIndex(value =>
+                {
+                    var parameter = (Dictionary<string, object>)value;
+                    return parameter.GetValueOrDefault("name") as string == reference.Name
+                        && parameter.GetValueOrDefault("in") as string == reference.Location;
+                });
+                if (index >= 0)
+                {
+                    parameters[index] = ComponentReference("parameters", reference.ComponentId);
+                }
+            }
             operation["parameters"] = parameters;
         }
 
@@ -1075,13 +1216,18 @@ public static class OpenApiEmitter
                     }
                     else if (entry.Schema is not null)
                     {
-                        media["schema"] = BuildSchemaWithLeafProvenance(
+                        var responseSchema = BuildSchemaWithLeafProvenance(
                             entry.Schema,
                             entry.SchemaType,
                             entry.Format,
                             entry.IsFormatSpecified,
                             $"response {resp.StatusCode} content '{entry.MediaType}' on endpoint '{ep.ControllerName}.{ep.Name}'"
                         );
+                        if (entry.SchemaDescription is not null)
+                        {
+                            responseSchema["description"] = entry.SchemaDescription;
+                        }
+                        media["schema"] = responseSchema;
                     }
 
                     content[entry.MediaType] = media;
@@ -1136,6 +1282,20 @@ public static class OpenApiEmitter
             }
 
             responses[resp.EffectiveStatusKey] = respObj;
+        }
+
+        foreach (var reference in ep.Provenance?.ResponseComponentReferences ?? [])
+        {
+            if (
+                responseComponentIds.Contains(reference.ComponentId)
+                && responses.ContainsKey(reference.StatusKey)
+            )
+            {
+                responses[reference.StatusKey] = ComponentReference(
+                    "responses",
+                    reference.ComponentId
+                );
+            }
         }
 
         operation["responses"] = responses;
@@ -1599,6 +1759,29 @@ public static class OpenApiEmitter
         return result;
     }
 
+    private static void AddJsonComponents(
+        Dictionary<string, object> components,
+        string kind,
+        IEnumerable<(string Name, string Json)> values
+    )
+    {
+        var result = new Dictionary<string, object>(StringComparer.Ordinal);
+        foreach (var (name, json) in values)
+        {
+            result.Add(
+                name,
+                JsonSerializer.Deserialize<Dictionary<string, object>>(json)
+                    ?? throw new OpenApiEmissionException(
+                        $"Preserved component {kind} '{name}' is not a JSON object."
+                    )
+            );
+        }
+        if (result.Count > 0)
+        {
+            components[kind] = result;
+        }
+    }
+
     private static Dictionary<string, object> BuildComponentExample(
         OpenApiComponentExampleProvenance example
     )
@@ -1881,6 +2064,9 @@ public static class OpenApiEmitter
     private static Dictionary<string, object> ComponentReference(string componentId) =>
         new() { ["$ref"] = $"#/components/schemas/{EscapeJsonPointerToken(componentId)}" };
 
+    private static Dictionary<string, object> ComponentReference(string kind, string componentId) =>
+        new() { ["$ref"] = $"#/components/{kind}/{EscapeJsonPointerToken(componentId)}" };
+
     private static string EscapeJsonPointerToken(string value) =>
         value
             .Replace("~", "~0", StringComparison.Ordinal)
@@ -2094,18 +2280,21 @@ public static class OpenApiEmitter
             };
         }
 
-        // OpenAPI uses "integer" for all integer formats, not "number"
-        var type = p.Format
-            is "int32"
-                or "int64"
-                or "int16"
-                or "uint16"
-                or "int8"
-                or "uint8"
-                or "uint32"
-                or "uint64"
-            ? "integer"
-            : p.Name;
+        // CLR integer primitives are represented internally as number + format.
+        // An imported schema can legitimately use an integer-looking format on a string.
+        var type =
+            p.Name == "number"
+            && p.Format
+                is "int32"
+                    or "int64"
+                    or "int16"
+                    or "uint16"
+                    or "int8"
+                    or "uint8"
+                    or "uint32"
+                    or "uint64"
+                ? "integer"
+                : p.Name;
 
         var schema = new Dictionary<string, object> { ["type"] = type };
 
@@ -2754,10 +2943,9 @@ public static class OpenApiEmitter
         EnrichScalarSchema(items, a.ElementMetadata);
         var schema = new Dictionary<string, object> { ["type"] = "array", ["items"] = items };
 
-        // Propagate CSharpType from inner unknown (JsonArray) to parent schema.
-        // "object" elements are excluded: their untyped emission is deliberate and
-        // carries no sidecar — stamping the parent would re-type the whole array.
-        if (a.Element is TsType.Primitive { Name: "unknown", CSharpType: not (null or "object") } p)
+        // JsonArray is represented internally as an array of unknown values.
+        // Other element-side CLR tags describe the item, not its parent.
+        if (a.Element is TsType.Primitive { Name: "unknown", CSharpType: "JsonArray" } p)
         {
             schema["x-rivet-csharp-type"] = p.CSharpType;
         }
@@ -2787,10 +2975,9 @@ public static class OpenApiEmitter
             schema["propertyNames"] = BuildDictionaryKeySchema(d.Key, context);
         }
 
-        // Propagate CSharpType from inner unknown (JsonObject) to parent schema.
-        // "object" values are excluded: their untyped emission is deliberate and
-        // carries no sidecar — stamping the parent would re-type the whole dictionary.
-        if (d.Value is TsType.Primitive { Name: "unknown", CSharpType: not (null or "object") } p)
+        // JsonObject is represented internally as a dictionary of unknown values.
+        // Other value-side CLR tags describe the dictionary element, not its parent.
+        if (d.Value is TsType.Primitive { Name: "unknown", CSharpType: "JsonObject" } p)
         {
             schema["x-rivet-csharp-type"] = p.CSharpType;
         }

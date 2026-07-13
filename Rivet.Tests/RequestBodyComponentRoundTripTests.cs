@@ -190,6 +190,120 @@ public sealed class RequestBodyComponentRoundTripTests
         }
     }
 
+    [Fact]
+    public void Empty_Object_Request_Body_Reaches_A_Public_Pipeline_Fixed_Point()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Empty object request", "version": "1.0.0" },
+              "paths": {
+                "/empty": {
+                  "post": {
+                    "operationId": "postEmpty",
+                    "requestBody": {
+                      "content": {
+                        "application/json": {
+                          "schema": { "type": "object", "properties": {} }
+                        }
+                      }
+                    },
+                    "responses": { "204": { "description": "Accepted" } }
+                  }
+                }
+              }
+            }
+            """;
+
+        var workDirectory = Directory.CreateTempSubdirectory("rivet-empty-object-request-");
+        try
+        {
+            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+            File.WriteAllText(sourcePath, spec);
+
+            var first = RunPass(workDirectory.FullName, sourcePath, "first", out _);
+            var firstSchema = first["paths"]!["/empty"]!["post"]!["requestBody"]!["content"]![
+                "application/json"
+            ]!["schema"]!;
+            Assert.Equal("object", firstSchema["type"]!.GetValue<string>());
+            Assert.Empty(firstSchema["additionalProperties"]!.AsObject());
+            Assert.Null(firstSchema["x-rivet-csharp-type"]);
+
+            var secondPath = Path.Combine(workDirectory.FullName, "first.json");
+            File.WriteAllText(secondPath, first.ToJsonString());
+            var second = RunPass(workDirectory.FullName, secondPath, "second", out _);
+            var secondSchema = second["paths"]!["/empty"]!["post"]!["requestBody"]!["content"]![
+                "application/json"
+            ]!["schema"]!;
+
+            Assert.True(
+                JsonNode.DeepEquals(firstSchema, secondSchema),
+                $"Request schema did not reach a fixed point.\nFirst: {firstSchema}\nSecond: {secondSchema}"
+            );
+        }
+        finally
+        {
+            workDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Unconstrained_Array_Request_Body_Reaches_A_Public_Pipeline_Fixed_Point()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Unconstrained array request", "version": "1.0.0" },
+              "paths": {
+                "/array": {
+                  "post": {
+                    "operationId": "postArray",
+                    "requestBody": {
+                      "content": {
+                        "application/json": {
+                          "schema": { "type": "array", "items": {} }
+                        }
+                      }
+                    },
+                    "responses": { "204": { "description": "Accepted" } }
+                  }
+                }
+              }
+            }
+            """;
+
+        var workDirectory = Directory.CreateTempSubdirectory("rivet-unconstrained-array-request-");
+        try
+        {
+            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+            File.WriteAllText(sourcePath, spec);
+
+            var first = RunPass(workDirectory.FullName, sourcePath, "first", out _);
+            var firstSchema = first["paths"]!["/array"]!["post"]!["requestBody"]!["content"]![
+                "application/json"
+            ]!["schema"]!;
+            Assert.Equal("array", firstSchema["type"]!.GetValue<string>());
+            Assert.Empty(firstSchema["items"]!.AsObject());
+            Assert.Null(firstSchema["x-rivet-csharp-type"]);
+
+            var secondPath = Path.Combine(workDirectory.FullName, "first.json");
+            File.WriteAllText(secondPath, first.ToJsonString());
+            var second = RunPass(workDirectory.FullName, secondPath, "second", out _);
+            var secondSchema = second["paths"]!["/array"]!["post"]!["requestBody"]!["content"]![
+                "application/json"
+            ]!["schema"]!;
+
+            Assert.True(
+                JsonNode.DeepEquals(firstSchema, secondSchema),
+                $"Request schema did not reach a fixed point.\nFirst: {firstSchema}\nSecond: {secondSchema}"
+            );
+        }
+        finally
+        {
+            workDirectory.Delete(recursive: true);
+        }
+    }
+
     private static JsonObject RunPass(
         string workingDirectory,
         string sourcePath,

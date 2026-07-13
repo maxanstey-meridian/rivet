@@ -75,6 +75,7 @@ internal static class ContractBuilder
                     tag,
                     globalSecurityScheme,
                     mapper,
+                    warnings,
                     operationProvenance is not null
                     && operationProvenance.TryGetValue((route, httpMethod), out var provenance)
                         ? provenance
@@ -110,6 +111,7 @@ internal static class ContractBuilder
         string tag,
         string? globalSecurityScheme,
         SchemaMapper mapper,
+        List<string> warnings,
         OpenApiOperationProvenance? provenance
     )
     {
@@ -147,7 +149,10 @@ internal static class ContractBuilder
             mapper,
             fieldName,
             unsupported,
-            queryAuthParameterName
+            queryAuthParameterName,
+            warnings,
+            httpMethod,
+            route
         );
 
         var explicitParameters = BuildExplicitParameters(
@@ -458,7 +463,10 @@ internal static class ContractBuilder
                         SchemaRef: schemaRef,
                         SchemaType: leaf?.SchemaType,
                         Format: leaf?.Format,
-                        IsFormatSpecified: leaf is not null
+                        IsFormatSpecified: leaf is not null,
+                        SchemaDescription: media.Schema is OpenApiSchemaReference
+                            ? null
+                            : media.Schema.Description
                     )
                 );
             }
@@ -592,7 +600,9 @@ internal static class ContractBuilder
                         header.Description,
                         header.Required,
                         SchemaExamplesJson: BuildSchemaExamplesNode(schema)?.ToJsonString(),
-                        ExampleJson: header.Example?.ToJsonString(),
+                        ExampleJson: header.Example is null
+                            ? null
+                            : OpenApiJsonNodeSerializer.Serialize(header.Example),
                         ExamplesJson: BuildExamplesNode(header.Examples)?.ToJsonString(),
                         Deprecated: header.Deprecated,
                         Style: header.Style is { } style && style != ParameterStyle.Simple
@@ -748,7 +758,10 @@ internal static class ContractBuilder
         SchemaMapper mapper,
         string fieldName,
         List<string> unsupported,
-        string? queryAuthParameterName = null
+        string? queryAuthParameterName,
+        List<string> warnings,
+        string httpMethod,
+        string route
     )
     {
         if (sourceParameters.Count == 0)
@@ -773,9 +786,40 @@ internal static class ContractBuilder
                 continue;
             }
 
-            // Empty names occur in the wild (Notion declares a nameless header param) —
-            // they cannot become a C# property.
-            if (param.Schema is null || string.IsNullOrEmpty(param.Name))
+            var location = param.In switch
+            {
+                ParameterLocation.Path => "path",
+                ParameterLocation.Query => "query",
+                ParameterLocation.Header => "header",
+                _ => "cookie",
+            };
+
+            if (string.IsNullOrEmpty(param.Name))
+            {
+                warnings.Add(
+                    Diagnostics.Prefix(
+                        Diagnostics.ImportEmptyParameterNameDropped,
+                        $"Parameter dropped: {httpMethod.ToUpperInvariant()} {route} has an empty name (in={location}); OpenAPI parameters require a non-empty name."
+                    )
+                );
+                continue;
+            }
+
+            if (
+                param.In is ParameterLocation.Header
+                && param.Name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                warnings.Add(
+                    Diagnostics.Prefix(
+                        Diagnostics.ImportReservedContentTypeHeaderDropped,
+                        $"Reserved header parameter dropped: {httpMethod.ToUpperInvariant()} {route} declares '{param.Name}'; request media types are represented by requestBody.content."
+                    )
+                );
+                continue;
+            }
+
+            if (param.Schema is null)
             {
                 continue;
             }
@@ -794,18 +838,8 @@ internal static class ContractBuilder
                 continue;
             }
 
-            var location = param.In switch
-            {
-                ParameterLocation.Path => "path",
-                ParameterLocation.Query => "query",
-                ParameterLocation.Header => "header",
-                _ => "cookie",
-            };
-
-            // Accept/Content-Type/Authorization are not legal OpenAPI header params —
-            // the emitter would refuse to re-emit them (RIV2009), so importing them
-            // would break the round-trip promise. Dropped loudly instead (mirrors
-            // OpenApiEmitter.IsReservedHeaderName).
+            // Accept and Authorization are not legal OpenAPI header params. Keep their
+            // existing loud fallback until their semantics have a dedicated source diagnosis.
             if (param.In is ParameterLocation.Header && IsReservedHeaderName(param.Name))
             {
                 unsupported.Add(
@@ -987,7 +1021,7 @@ internal static class ContractBuilder
         }
         if (parameter.Example is not null)
         {
-            metadata["example"] = JsonNode.Parse(parameter.Example.ToJsonString());
+            metadata["example"] = OpenApiJsonNodeSerializer.Clone(parameter.Example);
         }
         if (BuildExamplesNode(parameter.Examples) is { } examples)
         {
@@ -1032,7 +1066,7 @@ internal static class ContractBuilder
             return new JsonArray(
                 schema
                     .Examples.Select(example =>
-                        example is null ? null : JsonNode.Parse(example.ToJsonString())
+                        example is null ? null : OpenApiJsonNodeSerializer.Clone(example)
                     )
                     .ToArray()
             );
@@ -1040,7 +1074,7 @@ internal static class ContractBuilder
 
         return schema?.Example is null
             ? null
-            : new JsonArray(JsonNode.Parse(schema.Example.ToJsonString()));
+            : new JsonArray(OpenApiJsonNodeSerializer.Clone(schema.Example));
     }
 
     private static JsonObject? BuildExamplesNode(
@@ -1071,7 +1105,7 @@ internal static class ContractBuilder
             }
             if (concrete.Value is not null)
             {
-                value["value"] = JsonNode.Parse(concrete.Value.ToJsonString());
+                value["value"] = OpenApiJsonNodeSerializer.Clone(concrete.Value);
             }
             if (concrete.ExternalValue is not null)
             {
@@ -1366,7 +1400,7 @@ internal static class ContractBuilder
             if (media.Example is not null)
             {
                 var resolved = PreserveEmbeddedExampleRefs(
-                    media.Example.ToJsonString(),
+                    OpenApiJsonNodeSerializer.Serialize(media.Example),
                     componentExamples,
                     unsupported,
                     markerPrefix,
@@ -1487,15 +1521,6 @@ internal static class ContractBuilder
     /// value at import time, while the source components are still in hand.
     /// Unresolvable or cyclic refs degrade LOUDLY to null + marker.
     /// </summary>
-    /// <summary>
-    /// Microsoft.OpenApi cannot hold a JSON null in its JsonNode-based example
-    /// model — the library substitutes this sentinel string (a fixed constant,
-    /// verified against 2.7.0). Leaking it emitted a GUID string everywhere
-    /// the spec said <c>null</c> (FABLE_ROUNDTRIP #9, 45 corpus occurrences).
-    /// </summary>
-    private const string OpenApiNullSentinel =
-        "\"openapi-json-null-sentinel-value-2BF93600-0FE4-4250-987A-E5DDB203E464\"";
-
     private static (
         string Json,
         IReadOnlyDictionary<string, string>? ReferencedComponents
@@ -1508,7 +1533,6 @@ internal static class ContractBuilder
         string? name
     )
     {
-        json = json.Replace(OpenApiNullSentinel, "null", StringComparison.Ordinal);
         if (!json.Contains("#/components/examples/", StringComparison.Ordinal))
         {
             return (json, null);
@@ -1578,11 +1602,6 @@ internal static class ContractBuilder
                         return false;
                     }
 
-                    componentJson = componentJson.Replace(
-                        OpenApiNullSentinel,
-                        "null",
-                        StringComparison.Ordinal
-                    );
                     referenced.TryAdd(componentName, componentJson);
                     JsonNode? componentNode;
                     try
@@ -1637,8 +1656,6 @@ internal static class ContractBuilder
         string? name
     )
     {
-        json = json.Replace(OpenApiNullSentinel, "null", StringComparison.Ordinal);
-
         if (!json.Contains("#/components/examples/", StringComparison.Ordinal))
         {
             return json;
@@ -1801,15 +1818,15 @@ internal static class ContractBuilder
     {
         if (example.Value is not null)
         {
-            return example.Value.ToJsonString();
+            return OpenApiJsonNodeSerializer.Serialize(example.Value);
         }
 
         return example switch
         {
             OpenApiExampleReference { RecursiveTarget.Value: not null } exampleReference =>
-                exampleReference.RecursiveTarget.Value.ToJsonString(),
+                OpenApiJsonNodeSerializer.Serialize(exampleReference.RecursiveTarget.Value),
             OpenApiExampleReference { Target.Value: not null } exampleReference =>
-                exampleReference.Target.Value.ToJsonString(),
+                OpenApiJsonNodeSerializer.Serialize(exampleReference.Target.Value),
             _ => null,
         };
     }

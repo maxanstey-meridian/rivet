@@ -158,6 +158,22 @@ public sealed class RivetDocumentRequestBodyExampleAttribute(
 }
 
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+public sealed class RivetDocumentParameterAttribute(int order, string name, string json) : Attribute
+{
+    public int Order { get; } = order;
+    public string Name { get; } = name;
+    public string Json { get; } = json;
+}
+
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+public sealed class RivetDocumentResponseAttribute(int order, string name, string json) : Attribute
+{
+    public int Order { get; } = order;
+    public string Name { get; } = name;
+    public string Json { get; } = json;
+}
+
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
 public sealed class RivetVendorExtensionAttribute(
     string ownerPointer,
     string name,
@@ -191,6 +207,32 @@ public sealed class RivetOperationProvenanceAttribute(
     public string? RivetContract { get; } = rivetContract;
     public string? RivetEndpoint { get; } = rivetEndpoint;
     public string? RequestBodyComponentId { get; } = requestBodyComponentId;
+}
+
+[AttributeUsage(AttributeTargets.Field, AllowMultiple = true)]
+public sealed class RivetOperationParameterComponentAttribute(
+    int order,
+    string name,
+    string location,
+    string componentId
+) : Attribute
+{
+    public int Order { get; } = order;
+    public string Name { get; } = name;
+    public string Location { get; } = location;
+    public string ComponentId { get; } = componentId;
+}
+
+[AttributeUsage(AttributeTargets.Field, AllowMultiple = true)]
+public sealed class RivetOperationResponseComponentAttribute(
+    int order,
+    string statusKey,
+    string componentId
+) : Attribute
+{
+    public int Order { get; } = order;
+    public string StatusKey { get; } = statusKey;
+    public string ComponentId { get; } = componentId;
 }
 
 [AttributeUsage(AttributeTargets.Field, AllowMultiple = true)]

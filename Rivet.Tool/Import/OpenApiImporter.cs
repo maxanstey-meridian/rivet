@@ -40,6 +40,7 @@ public static class OpenApiImporter
         json = NormalizeLocalPathReferences(json);
         json = NormalizeSchemaReferenceMetadataSiblings(json);
         var swaggerSchemaLessResponses = ReadSwaggerSchemaLessResponses(json);
+        json = OpenApiJsonNodeSerializer.EscapeLiteralSentinels(json);
 
         var readResult = OpenApiDocument.Parse(json, "json");
         var doc =
@@ -53,7 +54,7 @@ public static class OpenApiImporter
         var schemas = doc.Components?.Schemas;
 
         var schemaResult = schemas is { Count: > 0 }
-            ? mapper.MapSchemas(schemas)
+            ? mapper.MapSchemas(schemas, ReadPreservedSchemaReferences(provenance.Document))
             : new SchemaMapResult([], [], [], []);
 
         if (schemaResult.ScalarSchemas.Count > 0)
@@ -163,6 +164,62 @@ public static class OpenApiImporter
         return new ImportResult(files, warnings);
     }
 
+    private static IReadOnlySet<string> ReadPreservedSchemaReferences(
+        OpenApiDocumentProvenance provenance
+    )
+    {
+        const string prefix = "#/components/schemas/";
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (
+            var json in (provenance.ComponentParameters ?? [])
+                .Select(component => component.Json)
+                .Concat((provenance.ComponentResponses ?? []).Select(component => component.Json))
+        )
+        {
+            using var document = JsonDocument.Parse(json);
+            Collect(document.RootElement);
+        }
+        return result;
+
+        void Collect(JsonElement value)
+        {
+            if (value.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var property in value.EnumerateObject())
+                {
+                    if (
+                        property.NameEquals("$ref")
+                        && property.Value.ValueKind == JsonValueKind.String
+                        && property.Value.GetString() is { } reference
+                        && reference.StartsWith(prefix, StringComparison.Ordinal)
+                    )
+                    {
+                        var token = reference[prefix.Length..];
+                        if (!token.Contains('/', StringComparison.Ordinal))
+                        {
+                            result.Add(
+                                Uri.UnescapeDataString(token)
+                                    .Replace("~1", "/", StringComparison.Ordinal)
+                                    .Replace("~0", "~", StringComparison.Ordinal)
+                            );
+                        }
+                    }
+                    else
+                    {
+                        Collect(property.Value);
+                    }
+                }
+            }
+            else if (value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in value.EnumerateArray())
+                {
+                    Collect(item);
+                }
+            }
+        }
+    }
+
     private static string NormalizeSchemaReferenceMetadataSiblings(string json)
     {
         var root = JsonNode.Parse(json)!;
@@ -265,6 +322,7 @@ public static class OpenApiImporter
     private static readonly string[] _schemaReferenceMetadataKeywords =
     [
         "title",
+        "description",
         "default",
         "example",
         "examples",

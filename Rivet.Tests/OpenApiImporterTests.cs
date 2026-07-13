@@ -6044,6 +6044,50 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Reserved_Content_Type_Header_Is_Diagnosed_Without_Degrading_Request_Content()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/projects/{project}/ssh-key": {
+                "post": {
+                    "operationId": "projects_addSshKey",
+                    "tags": ["Projects"],
+                    "parameters": [
+                        { "name": "project", "in": "path", "required": true, "schema": { "type": "string" } },
+                        { "name": "Content-Type", "in": "header", "required": true, "schema": { "type": "string", "enum": ["application/json"] } },
+                        { "name": "X-Trace", "in": "header", "schema": { "type": "string" } },
+                        { "name": "notify", "in": "query", "schema": { "type": "boolean" } }
+                    ],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "schema": { "type": "object", "properties": { "hostname": { "type": "string" } } }
+                            }
+                        }
+                    },
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+
+        Assert.Contains(
+            "RIV3021: Reserved header parameter dropped: POST /projects/{project}/ssh-key declares 'Content-Type'; request media types are represented by requestBody.content.",
+            result.Warnings
+        );
+        var contract = CompilationHelper.FindFile(result, "ProjectsContract.cs");
+        Assert.DoesNotContain("[rivet:unsupported param name=Content-Type", contract);
+        Assert.Contains(".RequestContent<", contract);
+        Assert.Contains("\"application/json\"", contract);
+        Assert.Contains(".Parameter<string>(\"project\", \"path\", true", contract);
+        Assert.Contains(".Parameter<string>(\"X-Trace\", \"header\", false", contract);
+        Assert.Contains(".Parameter<bool>(\"notify\", \"query\", false", contract);
+    }
+
+    [Fact]
     public void Param_Metadata_Is_Preserved_Explicitly()
     {
         // Parameter metadata is endpoint provenance, independent of the synthesized input.
@@ -6472,5 +6516,49 @@ public sealed class OpenApiImporterTests
                     StringComparison.Ordinal
                 )
         );
+    }
+
+    [Fact]
+    public void Empty_parameter_name_is_dropped_with_diagnostic_while_valid_parameters_remain()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/items": {
+                "get": {
+                    "operationId": "listItems",
+                    "parameters": [
+                        {
+                            "name": "",
+                            "in": "header",
+                            "schema": { "type": "string" }
+                        },
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "schema": { "type": "integer" }
+                        }
+                    ],
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        Assert.Contains(
+            "RIV3020: Parameter dropped: GET /items has an empty name (in=header); OpenAPI parameters require a non-empty name.",
+            result.Warnings
+        );
+
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emitted = JsonNode.Parse(
+            OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null)
+        )!;
+        var parameters = emitted["paths"]!["/items"]!["get"]!["parameters"]!.AsArray();
+
+        var parameter = Assert.Single(parameters);
+        Assert.Equal("limit", parameter!["name"]!.GetValue<string>());
     }
 }

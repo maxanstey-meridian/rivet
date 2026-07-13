@@ -1,42 +1,49 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Rivet.Tests;
 
 public sealed class RoundTripGateHardeningTests
 {
     [Fact]
-    public void Only_The_Exact_Pinned_Docusign_Defect_Is_Exempt()
+    public void Only_The_Exact_Profiled_Source_Defect_Is_Exempt()
     {
+        var profile = RoundTripCorpusGateTests.LoadVerifiedProfile();
+        var policy = profile.SourceDefects.Single(defect => defect.CorpusId == "docusign");
         Assert.True(
             RoundTripCorpusGateTests.IsSourceDefectDiagnostic(
-                "docusign",
-                RoundTripCorpusGateTests.DocusignSha256,
-                RoundTripCorpusGateTests.DocusignSourceDefectDiagnostic,
+                profile,
+                policy.CorpusId,
+                policy.SourceSha256,
+                policy.Diagnostic,
                 existingSourceDefectCount: 0
             )
         );
 
         Assert.False(
             RoundTripCorpusGateTests.IsSourceDefectDiagnostic(
+                profile,
                 "square",
-                RoundTripCorpusGateTests.DocusignSha256,
-                RoundTripCorpusGateTests.DocusignSourceDefectDiagnostic,
+                policy.SourceSha256,
+                policy.Diagnostic,
                 existingSourceDefectCount: 0
             )
         );
         Assert.False(
             RoundTripCorpusGateTests.IsSourceDefectDiagnostic(
-                "docusign",
+                profile,
+                policy.CorpusId,
                 new string('0', 64),
-                RoundTripCorpusGateTests.DocusignSourceDefectDiagnostic,
+                policy.Diagnostic,
                 existingSourceDefectCount: 0
             )
         );
         Assert.False(
             RoundTripCorpusGateTests.IsSourceDefectDiagnostic(
-                "docusign",
-                RoundTripCorpusGateTests.DocusignSha256,
-                RoundTripCorpusGateTests.DocusignSourceDefectDiagnostic.Replace(
+                profile,
+                policy.CorpusId,
+                policy.SourceSha256,
+                policy.Diagnostic.Replace(
                     "customParameters",
                     "otherParameters",
                     StringComparison.Ordinal
@@ -46,52 +53,127 @@ public sealed class RoundTripGateHardeningTests
         );
         Assert.False(
             RoundTripCorpusGateTests.IsSourceDefectDiagnostic(
-                "docusign",
-                RoundTripCorpusGateTests.DocusignSha256,
-                RoundTripCorpusGateTests.DocusignSourceDefectDiagnostic,
+                profile,
+                policy.CorpusId,
+                policy.SourceSha256,
+                policy.Diagnostic,
                 existingSourceDefectCount: 1
             )
         );
 
-        var exactDefect = new RoundTripCorpusGateTests.SourceDefect(
-            RoundTripCorpusGateTests.DocusignSourceDefectPointer,
-            RoundTripCorpusGateTests.DocusignSourceDefectReason
-        );
+        var exactDefect = new RoundTripCorpusGateTests.SourceDefect(policy.Pointer, policy.Reason);
         Assert.True(
             RoundTripCorpusGateTests.IsAllowedComparatorSourceDefects(
-                "docusign",
-                RoundTripCorpusGateTests.DocusignSha256,
+                profile,
+                policy.CorpusId,
+                policy.SourceSha256,
                 [exactDefect]
             )
         );
         Assert.False(
             RoundTripCorpusGateTests.IsAllowedComparatorSourceDefects(
-                "docusign",
-                RoundTripCorpusGateTests.DocusignSha256,
+                profile,
+                policy.CorpusId,
+                policy.SourceSha256,
                 [exactDefect, exactDefect]
             )
         );
         Assert.False(
             RoundTripCorpusGateTests.IsAllowedComparatorSourceDefects(
-                "docusign",
-                RoundTripCorpusGateTests.DocusignSha256,
+                profile,
+                policy.CorpusId,
+                policy.SourceSha256,
                 [exactDefect with { Path = "#/changed" }]
             )
         );
         Assert.False(
             RoundTripCorpusGateTests.IsAllowedComparatorSourceDefects(
-                "docusign",
-                RoundTripCorpusGateTests.DocusignSha256,
+                profile,
+                policy.CorpusId,
+                policy.SourceSha256,
                 [exactDefect with { Reason = "changed reason" }]
             )
         );
         Assert.False(
             RoundTripCorpusGateTests.IsAllowedComparatorSourceDefects(
-                "docusign",
+                profile,
+                policy.CorpusId,
                 new string('0', 64),
                 [exactDefect]
             )
         );
+    }
+
+    [Fact]
+    public void Profile_Roster_Rejects_Manifest_Auto_Admission_And_Roster_Drift()
+    {
+        var profile = RoundTripCorpusGateTests.LoadVerifiedProfile();
+        Assert.Equal(
+            [
+                "okta",
+                "petstore-v2",
+                "petstore-v3",
+                "twilio",
+                "square",
+                "docusign",
+                "notion",
+                "circleci",
+                "firebase",
+            ],
+            profile.VerifiedCorpusIds
+        );
+        Assert.Equal(25, profile.ManifestCorpusCount);
+
+        var profileNode = JsonNode
+            .Parse(File.ReadAllText(CliRunner.RepoPath("corpus", "verified-profile.json")))!
+            .AsObject();
+        profileNode["verifiedCorpusIds"]!.AsArray().Add("asana");
+        using var mutation = TemporaryJson.Write(profileNode);
+
+        Assert.Throws<InvalidDataException>(() =>
+            RoundTripCorpusGateTests.LoadVerifiedProfile(mutation.Path)
+        );
+    }
+
+    [Theory]
+    [InlineData("docusign")]
+    [InlineData("notion")]
+    [InlineData("circleci")]
+    public void Profile_Rejects_Source_Defect_Policy_Broadening(string corpusId)
+    {
+        var profileNode = JsonNode
+            .Parse(File.ReadAllText(CliRunner.RepoPath("corpus", "verified-profile.json")))!
+            .AsObject();
+        var sourceDefects = profileNode["sourceDefects"]!.AsArray();
+        var defect = sourceDefects.Single(item =>
+            item!["corpusId"]!.GetValue<string>() == corpusId
+        );
+        sourceDefects.Add(defect!.DeepClone());
+        using var mutation = TemporaryJson.Write(profileNode);
+
+        Assert.Throws<InvalidDataException>(() =>
+            RoundTripCorpusGateTests.LoadVerifiedProfile(mutation.Path)
+        );
+    }
+
+    [Fact]
+    public void Component_Metrics_Include_Parameters_And_Responses()
+    {
+        using var source = TemporaryJson.Write(
+            JsonNode.Parse("""{"components":{"parameters":{"p":{}},"responses":{"r":{}}}}""")!
+        );
+        using var reemitted = TemporaryJson.Write(
+            JsonNode.Parse("""{"components":{"parameters":{"p":{}},"responses":{"r":{}}}}""")!
+        );
+
+        var metrics = RoundTripCorpusGateTests.CompareComponents(source.Path, reemitted.Path);
+
+        Assert.Equal(
+            ["parameters", "requestBodies", "responses", "schemas", "securitySchemes"],
+            metrics.Keys.Order(StringComparer.Ordinal).ToArray()
+        );
+        Assert.Equal(1, metrics["parameters"].Matched);
+        Assert.Equal(1, metrics["responses"].Matched);
     }
 
     [Fact]
@@ -157,7 +239,10 @@ public sealed class RoundTripGateHardeningTests
     {
         var report = new RoundTripCorpusGateTests.GateReport(
             "docusign",
-            RoundTripCorpusGateTests.DocusignSha256
+            RoundTripCorpusGateTests
+                .LoadVerifiedProfile()
+                .SourceDefects.Single(defect => defect.CorpusId == "docusign")
+                .SourceSha256
         );
         report.Add("sourceDefects", "pinned defect");
         var summary = JsonSerializer.Deserialize<RoundTripCorpusGateTests.Summary>(
@@ -181,6 +266,8 @@ public sealed class RoundTripGateHardeningTests
             {
                 ["schemas"] = new(565, 565, 565, 0, 0),
                 ["requestBodies"] = new(52, 52, 52, 0, 0),
+                ["parameters"] = new(0, 0, 0, 0, 0),
+                ["responses"] = new(0, 0, 0, 0, 0),
                 ["securitySchemes"] = new(0, 0, 0, 0, 0),
             }
         );
@@ -207,6 +294,23 @@ public sealed class RoundTripGateHardeningTests
         Assert.True(metrics.GetProperty("components").TryGetProperty("securitySchemes", out _));
         Assert.Equal(1, metrics.GetProperty("sourceDefects").GetInt32());
         Assert.Equal(3, metrics.GetProperty("comparatorIntegrityFindings").GetInt32());
+    }
+
+    private sealed class TemporaryJson(string path) : IDisposable
+    {
+        public string Path { get; } = path;
+
+        public static TemporaryJson Write(JsonNode value)
+        {
+            var path = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                $"rivet-gate-profile-{Guid.NewGuid():N}.json"
+            );
+            File.WriteAllText(path, value.ToJsonString());
+            return new TemporaryJson(path);
+        }
+
+        public void Dispose() => File.Delete(Path);
     }
 
     private sealed class TemporaryDirectory(string path) : IDisposable
