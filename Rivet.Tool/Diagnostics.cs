@@ -53,6 +53,9 @@ public static class Diagnostics
     public const string InvalidRequestBodyProvenance = "RIV1022";
     public const string ImportedSchemaProvenanceConflict = "RIV1023";
 
+    // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
+    // rivet/php sibling runtime. Native Rivet diagnostics must not use them.
+
     // ----- RIV2xxx: emission -----
     public const string TaggedUnionComponentCollision = "RIV2001";
     public const string UndefinedSecurityScheme = "RIV2002";

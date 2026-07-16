@@ -62,6 +62,20 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
+    public void Native_Rivet_Does_Not_Allocate_The_Php_Sibling_Runtime_Block()
+    {
+        var allocations = DeclaredIds()
+            .Where(x => int.TryParse(x.Id.AsSpan(3), out var number) && number is >= 1024 and <= 1099)
+            .Select(x => $"{x.FieldName} = {x.Id}")
+            .ToList();
+
+        Assert.True(
+            allocations.Count == 0,
+            $"RIV1024-RIV1099 are reserved for rivet/php: {string.Join(", ", allocations)}"
+        );
+    }
+
+    [Fact]
     public void Registry_And_Declared_Ids_Match_Exactly()
     {
         var declared = DeclaredIds().Select(x => x.Id).ToHashSet(StringComparer.Ordinal);

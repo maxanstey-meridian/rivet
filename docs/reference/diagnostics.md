@@ -23,6 +23,9 @@ The ID ranges follow the pipeline stages:
 | `RIV3xxx` | Import (`--from-openapi` scaffold) |
 | `RIV4xxx` | Coverage (`--check`) |
 
+Within the extraction range, `RIV1024`-`RIV1099` are reserved for the
+`rivet/php` sibling runtime. Native Rivet diagnostics must not use that block.
+
 **Markers are not diagnostics.** The `// [rivet:unsupported …]` marker comments
 that `--from-openapi` writes into scaffolded source are part of the generated
 code, not stderr diagnostics — they have their own grammar and carry no RIV ID.
@@ -56,6 +59,10 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1021` | Error | An authored contract declares the same response status more than once, including a `.Returns(...)` collision with the success status. Such a contract fails at runtime and generation therefore aborts. | Declare a `[RivetUnion]` type if the status genuinely returns multiple shapes and return it once; otherwise remove the duplicate (often one `.Returns(...)` is mistyped). |
 | `RIV1022` | Error | `[RivetRequestBody]` names a body type that is not represented independently by the endpoint input type. | Use the importer-generated marker and composite input, or remove the invalid hand-authored override. |
 | `RIV1023` | Error | Imported generated C# changed while raw schema provenance still targets its original typed shape. | Re-import the OpenAPI document, or remove/update the stale raw schema provenance before emitting. |
+
+`RIV1024`-`RIV1099` are documented by `rivet/php`; this repository reserves the
+block but does not register those sibling-runtime diagnostics as native Rivet
+diagnostics.
 
 ### Retired IDs
 
