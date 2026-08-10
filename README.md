@@ -141,4 +141,4 @@ Docs via any OpenAPI renderer; runtime validators via
 
 ## License
 
-MIT
+[MIT](LICENSE)
