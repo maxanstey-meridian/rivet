@@ -14,9 +14,6 @@ Solution1/
 # Test results
 TestResults/
 
-# Test specs
-openapi/
-
 # Test JS deps
 Rivet.Tests/js/node_modules/
 
