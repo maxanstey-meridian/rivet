@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 namespace Rivet.Tests;
 
 [Trait("Category", "Local")]
+[Collection("Repository builds")]
 public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
 {
     private readonly PublishFixture _fixture;

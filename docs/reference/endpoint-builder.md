@@ -51,6 +51,9 @@ All return the definition for chaining.
 - `.Error(status, payload)` selects a typed response declared with `.Returns<T>()`;
   `.Error(status)` selects a declared bodyless response. Undeclared statuses and
   payload mismatches throw `RivetContractViolationException`.
+- `.File(content, ..., contentType: "image/jpeg")` selects a declared binary
+  representation. Omit `contentType` only when the success representation is
+  unambiguous.
 - `.File(content, ...)` constructs a declared binary response from `byte[]`,
   `Stream`, or an absolute physical path. It carries the contract content type and
   optional download name, range processing, last-modified value, and entity tag.

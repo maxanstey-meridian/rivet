@@ -65,7 +65,9 @@ public sealed class DiagnosticsTests
     public void Native_Rivet_Does_Not_Allocate_The_Php_Sibling_Runtime_Block()
     {
         var allocations = DeclaredIds()
-            .Where(x => int.TryParse(x.Id.AsSpan(3), out var number) && number is >= 1024 and <= 1099)
+            .Where(x =>
+                int.TryParse(x.Id.AsSpan(3), out var number) && number is >= 1024 and <= 1099
+            )
             .Select(x => $"{x.FieldName} = {x.Id}")
             .ToList();
 

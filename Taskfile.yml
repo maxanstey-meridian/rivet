@@ -5,29 +5,29 @@ tasks:
         desc: Start docs dev server
         dir: docs
         cmds:
-            - pnpm docs:dev
+            - corepack pnpm docs:dev
 
     docs:dev:
         desc: Start docs dev server
         dir: docs
         cmds:
-            - pnpm docs:dev
+            - corepack pnpm docs:dev
 
     docs:build:
         desc: Build docs
         dir: docs
         cmds:
-            - pnpm docs:build
+            - corepack pnpm docs:build
 
     analyze:
         desc: Refresh GitNexus code intelligence index
         cmds:
-            - pnpm analyze
+            - corepack pnpm analyze
 
     gitnexus:status:
         desc: Show GitNexus index status
         cmds:
-            - pnpm exec gitnexus status
+            - corepack pnpm exec gitnexus status
 
     build:
         desc: Build solution
@@ -41,6 +41,18 @@ tasks:
             - dotnet build ./samples/AnnotationApi/AnnotationApi.csproj
             - dotnet build ./samples/TypeShowcase/TypeShowcase.csproj
             - dotnet build ./samples/ImportDemo/ImportDemo.csproj
+            - dotnet build ./samples/FunctionsApi/FunctionsApi.csproj
+
+    test:functions:
+        desc: Run real Azure Functions host and contract checks (Core Tools v4 required)
+        cmds:
+            - python3 -m unittest tools/test_functions_host.py -v
+
+    ci:
+        desc: Run standard checks plus the real Functions host gate
+        cmds:
+            - task: check
+            - task: test:functions
 
     test:
         desc: Run test suite
@@ -78,6 +90,6 @@ tasks:
         desc: Install JavaScript dependencies
         cmds:
             - dotnet tool restore
-            - pnpm install
-            - pnpm --dir docs install
-            - pnpm --dir Rivet.Tests/js install
+            - corepack pnpm install --frozen-lockfile
+            - corepack pnpm --dir docs install --frozen-lockfile
+            - corepack pnpm --dir Rivet.Tests/js install --frozen-lockfile

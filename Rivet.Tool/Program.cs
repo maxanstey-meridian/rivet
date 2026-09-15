@@ -79,7 +79,24 @@ static async Task<int> Run(string[] args)
 
     if (options.Check)
     {
-        var coverageWarnings = CoverageChecker.Check(compilation, wkt, contractEndpoints);
+        string functionsRoutePrefix;
+        try
+        {
+            functionsRoutePrefix = wkt.HttpTrigger is null
+                ? "api"
+                : FunctionsHostConfiguration.LoadRoutePrefix(projectPath);
+        }
+        catch (ContractAnalysisException exception)
+        {
+            Console.Error.WriteLine(exception.Message);
+            return 1;
+        }
+        var coverageWarnings = CoverageChecker.Check(
+            compilation,
+            wkt,
+            contractEndpoints,
+            functionsRoutePrefix
+        );
         foreach (var w in coverageWarnings)
         {
             var id = w.Kind switch

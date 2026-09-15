@@ -111,3 +111,27 @@ public async Task<IActionResult> Avatar(Guid id)
 bridges. Range processing can produce `206`; stream *contents* are never inspected,
 and handlers that bypass the contract terminals are unchecked. See [Runtime
 Validation](/guides/runtime-validation).
+
+## Choosing a binary response MIME type
+
+When an endpoint can return different file formats, declare each representation:
+
+```csharp
+public static readonly FileRouteDefinition Image = Define.File("/images/{id}")
+    .ContentType("image/png")
+    .ResponseBinaryContent(200, "image/jpeg");
+```
+
+Select the actual representation per response:
+
+```csharp
+return Image.File(bytes, contentType: "image/jpeg").ToActionResult();
+```
+
+The selector works with byte arrays, streams, physical paths, and bound file
+routes. It must match a declared binary success representation (case-insensitive
+comparison of the complete media-type string). It does not negotiate `Accept`
+or inspect file bytes. Omit it only when exactly one representation is declared;
+ambiguous and undeclared selections throw `RivetContractViolationException`.
+Existing positional download-name calls and binary signatures remain supported.
+This selector requires the updated source revision; it is not in NuGet 0.41.0.

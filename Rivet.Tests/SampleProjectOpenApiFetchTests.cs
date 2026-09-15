@@ -20,6 +20,7 @@ namespace Rivet.Tests;
 /// for this suite); runs offline after one `pnpm install` there.
 /// </summary>
 [Trait("Category", "Local")]
+[Collection("Repository builds")]
 public sealed class SampleProjectOpenApiFetchTests : IDisposable
 {
     private static readonly string _repoRoot = FindRepoRoot();

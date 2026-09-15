@@ -39,6 +39,13 @@ public static class CoverageChecker
         Compilation compilation,
         WellKnownTypes wkt,
         IReadOnlyList<TsEndpointDefinition> contractEndpoints
+    ) => Check(compilation, wkt, contractEndpoints, "api");
+
+    public static IReadOnlyList<CoverageWarning> Check(
+        Compilation compilation,
+        WellKnownTypes wkt,
+        IReadOnlyList<TsEndpointDefinition> contractEndpoints,
+        string functionsRoutePrefix
     )
     {
         var fieldMap = BuildContractFieldMap(compilation, contractEndpoints);
@@ -85,7 +92,13 @@ public static class CoverageChecker
                     continue;
                 }
 
-                var context = ResolveImplementation(wkt, adapterType, invocation, semanticModel);
+                var context = ResolveImplementation(
+                    wkt,
+                    adapterType,
+                    invocation,
+                    semanticModel,
+                    functionsRoutePrefix
+                );
                 if (!context.IsEndpoint)
                 {
                     continue;
@@ -431,8 +444,11 @@ public static class CoverageChecker
                 }
 
                 if (
-                    implementation.Context.Route is not null
-                    && !RoutesMatch(endpoint.RouteTemplate, implementation.Context.Route)
+                    implementation.Context.RouteError is not null
+                    || (
+                        implementation.Context.Route is not null
+                        && !RoutesMatch(endpoint.RouteTemplate, implementation.Context.Route)
+                    )
                 )
                 {
                     warnings.Add(
@@ -441,7 +457,8 @@ public static class CoverageChecker
                             field.ContainingType.Name,
                             field.Name,
                             Expected: endpoint.RouteTemplate,
-                            Actual: implementation.Context.Route,
+                            Actual: implementation.Context.RouteError
+                                ?? implementation.Context.Route,
                             Location: implementation.Invocation.GetLocation()
                         )
                     );
@@ -475,7 +492,8 @@ public static class CoverageChecker
         WellKnownTypes wkt,
         INamedTypeSymbol? adapterType,
         InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel
+        SemanticModel semanticModel,
+        string functionsRoutePrefix
     )
     {
         if (adapterType is null)
@@ -489,7 +507,13 @@ public static class CoverageChecker
             return controller;
         }
 
-        var function = TryResolveFunction(wkt, adapterType, invocation, semanticModel);
+        var function = TryResolveFunction(
+            wkt,
+            adapterType,
+            invocation,
+            semanticModel,
+            functionsRoutePrefix
+        );
         if (function.IsEndpoint)
         {
             return function;
@@ -611,7 +635,8 @@ public static class CoverageChecker
         WellKnownTypes wkt,
         INamedTypeSymbol adapterType,
         InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel
+        SemanticModel semanticModel,
+        string functionsRoutePrefix
     )
     {
         var method = invocation.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
@@ -660,7 +685,14 @@ public static class CoverageChecker
                 function.ConstructorArguments.FirstOrDefault().Value as string ?? methodSymbol.Name;
         }
 
-        return new EndpointContext(true, methods, NormalizeRoute($"api/{route.Trim('/')}"));
+        return new EndpointContext(
+            true,
+            methods,
+            NormalizeRoute($"{functionsRoutePrefix.Trim('/')}/{route.Trim('/')}"),
+            route.StartsWith('/')
+                ? $"Invalid Functions trigger route '{route}': remove the leading slash"
+                : null
+        );
     }
 
     private static bool IsReturnedThroughAdapter(
@@ -958,7 +990,8 @@ public static class CoverageChecker
     private sealed record EndpointContext(
         bool IsEndpoint,
         IReadOnlyList<string> HttpMethods,
-        string? Route
+        string? Route,
+        string? RouteError = null
     )
     {
         public static readonly EndpointContext None = new(false, [], null);

@@ -33,6 +33,7 @@ export default defineConfig({
           { text: "Tutorial", link: "/guides/tutorial" },
           { text: "Contracts", link: "/guides/contracts" },
           { text: "Contract Coverage", link: "/guides/contract-coverage" },
+          { text: "Azure Functions", link: "/guides/azure-functions" },
           { text: "Error Handling", link: "/guides/error-handling" },
           { text: "File Uploads & Downloads", link: "/guides/file-uploads" },
           { text: "OpenAPI Emission", link: "/guides/openapi-emission" },

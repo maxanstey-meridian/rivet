@@ -5,6 +5,7 @@ namespace Rivet.Tests;
 /// invocation shape the rivet-ts vite plugin and rivet-php use. Post-Phase-3 the
 /// pipeline's only output is the OpenAPI 3.1 spec.
 /// </summary>
+[Collection("Repository builds")]
 public sealed class FromContractTests
 {
     [Fact]

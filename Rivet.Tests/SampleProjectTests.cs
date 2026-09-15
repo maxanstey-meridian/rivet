@@ -11,6 +11,7 @@ namespace Rivet.Tests;
 /// and verify the generated TypeScript client works with mocked fetch.
 /// </summary>
 [Trait("Category", "Local")]
+[Collection("Repository builds")]
 public sealed class SampleProjectTests : IDisposable
 {
     private static readonly string _repoRoot = FindRepoRoot();

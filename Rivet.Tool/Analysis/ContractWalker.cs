@@ -950,6 +950,33 @@ public static class ContractWalker
             successStatusKey,
             name
         );
+        // Explicit additional representations must not erase the file factory's
+        // success representation: runtime always includes the configured file format.
+        var fileSuccessKey =
+            successStatusKey
+            ?? (
+                successStatusOverride
+                ?? DefaultSuccessCode(httpMethod, hasOutput: returnType is not null)
+            ).ToString();
+        if (
+            fileContentType is not null
+            && !suppressImplicitResponse
+            && responseContents.Any(item => item.StatusKey == fileSuccessKey)
+            && !responseContents.Any(item =>
+                item.StatusKey == fileSuccessKey
+                && string.Equals(
+                    item.Content.MediaType,
+                    fileContentType,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        )
+        {
+            responseContents.Insert(
+                0,
+                (fileSuccessKey, new TsMediaTypeContent(fileContentType, null, IsBinary: true))
+            );
+        }
         ApplyResponseContents(responses, responseContents);
 
         var requestExamples =

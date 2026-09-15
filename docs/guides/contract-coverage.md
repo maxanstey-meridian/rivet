@@ -9,8 +9,12 @@ dotnet rivet --project path/to/Api.csproj --check
 
 The checker finds `.Success(...)`, `.Error(...)`, and `.File(...)` terminal calls for
 each contract field, including terminals reached through `.Bind(input)`, in
-controller actions and minimal API handlers (`MapGet`/`MapPost`/`MapPut`/
-`MapDelete`/`MapPatch` lambdas. It reports four kinds of warning on stderr:
+controller actions, minimal API handlers (`MapGet`/`MapPost`/`MapPut`/
+`MapDelete`/`MapPatch` lambdas), and isolated Azure Functions using
+`[Function]`, `[HttpTrigger]`, and `.ToActionResult()`. Functions coverage reads
+the project's `host.json` HTTP prefix (default `api`) and honors the host
+environment override. See [Azure Functions](./azure-functions) for conventions
+and a real-host test. It reports four kinds of warning on stderr:
 
 | Warning | Meaning |
 |---|---|

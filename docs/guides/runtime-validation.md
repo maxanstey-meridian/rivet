@@ -42,7 +42,9 @@ normally, and constructs a contract-owned response:
   on a status that declares no payload is a violation. Non-JSON textual responses
   require a `string` payload, and binary responses must use `.File(...)`.
 - **File responses are contract-owned.** `.File(...)` requires a binary/file success
-  response and takes its content type from the declaration. It accepts `byte[]`, a
+  response and takes its content type from the declaration. With multiple binary
+  representations, pass `contentType:` to select one explicitly; undeclared
+  selections fail. It accepts `byte[]`, a
   readable `Stream`, or an absolute physical path; range-enabled streams must be
   seekable. Input-bearing file definitions first use `.Bind(input)`.
 - **Host adapters preserve the result.** The first-party `.ToActionResult()` and
