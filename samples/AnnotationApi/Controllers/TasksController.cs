@@ -45,6 +45,9 @@ public sealed record AddCommentRequest(string Body);
 public sealed record AttachmentResultDto(Guid Id, string FileName, long Size);
 
 [RivetType]
+public sealed record SearchTasksRequest(string Term, int MinPriority, string? Tag);
+
+[RivetType]
 public sealed record NotFoundDto(string Message);
 
 [ApiController]
@@ -145,5 +148,45 @@ public sealed class TasksController(CreateTaskUseCase createTask) : ControllerBa
             StatusCodes.Status201Created,
             new AttachmentResultDto(Guid.NewGuid(), file.FileName, file.Length)
         );
+    }
+
+    // Default MVC inference exercised on the real host: the defaulted scalar binds
+    // from the query string and the unattributed complex type binds from the body —
+    // [FromQuery(Name=)] renames the wire surface to match the actual request.
+    [RivetEndpoint]
+    [HttpPost("search")]
+    [ProducesResponseType(typeof(PagedResult<TaskListItemDto>), StatusCodes.Status200OK)]
+    public IActionResult Search(
+        [FromQuery(Name = "q")] string term,
+        [FromQuery] int limit,
+        SearchTasksRequest request
+    )
+    {
+        _ = term;
+        _ = request;
+        return Ok(new PagedResult<TaskListItemDto>([], 0, 1, limit));
+    }
+
+    // Plain-string action returning the string directly: MVC's string formatter
+    // writes 200 text/plain (Ok(string) would JSON-serialize it instead) — the
+    // emitted contract must agree on both status AND media type. The request side
+    // accepts the JSON string form: MVC registers no text/plain input formatter by
+    // default, so [Consumes("text/plain")] would 415 the JSON string body.
+    [RivetEndpoint]
+    [HttpPost("echo")]
+    public string Echo([FromBody] string message)
+    {
+        return message;
+    }
+
+    // Plain DTO action with no response metadata: MVC's JSON formatter returns
+    // 200 application/json — the extraction default must describe exactly that.
+    // The DTO return type is statically knowable, so the emitted contract's
+    // application/json content is provable, not assumed.
+    [RivetEndpoint]
+    [HttpPost("labels")]
+    public CommentDto AddLabel([FromBody] AddCommentRequest request)
+    {
+        return new CommentDto(Guid.NewGuid(), request.Body, "system", DateTime.UtcNow);
     }
 }

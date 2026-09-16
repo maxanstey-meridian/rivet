@@ -30,6 +30,7 @@ public sealed class WellKnownTypes
     // Response metadata
     public readonly INamedTypeSymbol? ProducesResponseType;
     public readonly INamedTypeSymbol? ProducesResponseTypeOfT;
+    public readonly INamedTypeSymbol? Produces;
     public readonly INamedTypeSymbol? RivetRequestExample;
     public readonly INamedTypeSymbol? RivetResponseExample;
 
@@ -148,6 +149,9 @@ public sealed class WellKnownTypes
         ProducesResponseTypeOfT = compilation.GetTypeByMetadataName(
             "Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute`1"
         );
+        // [Produces("content/type")] — explicit success content type on an action or
+        // controller; wins over the statically-knowable formatter defaults.
+        Produces = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ProducesAttribute");
         RivetRequestExample = compilation.GetTypeByMetadataName(
             "Rivet.RivetRequestExampleAttribute"
         );

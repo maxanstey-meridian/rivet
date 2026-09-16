@@ -70,10 +70,29 @@ public abstract record TsType
         string? Description = null
     ) : TsType;
 
+    /// <summary>
+    /// The wire surface an inline-object field participates in. Polymorphic variants are
+    /// the shared wire shape for both directions; a derived property System.Text.Json only
+    /// serializes (or only deserializes) keeps its variant presence with the asymmetry
+    /// expressed as readOnly/writeOnly on emission
+    /// (planner-constraint:tagged-union-variant-surface).
+    /// </summary>
+    public enum InlineObjectFieldSurface
+    {
+        Both,
+        RequestOnly,
+        ResponseOnly,
+    }
+
     /// <summary>Inline object: { key: string; value?: number }. Used for tuples and union variants.</summary>
     public sealed record InlineObject(IReadOnlyList<InlineObjectField> Fields) : TsType;
 
-    public sealed record InlineObjectField(string Name, TsType Type, bool Optional = false)
+    public sealed record InlineObjectField(
+        string Name,
+        TsType Type,
+        bool Optional = false,
+        InlineObjectFieldSurface Surface = InlineObjectFieldSurface.Both
+    )
     {
         // Keep concise tuple syntax without conflating a nullable value with an absent field.
         public static implicit operator InlineObjectField((string Name, TsType Type) field) =>
@@ -166,7 +185,8 @@ public abstract record TsType
                 obj.Fields.Select(f => new InlineObjectField(
                         f.Name,
                         ResolveTypeParams(f.Type, map),
-                        f.Optional
+                        f.Optional,
+                        f.Surface
                     ))
                     .ToList()
             ),

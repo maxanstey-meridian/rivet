@@ -1,9 +1,36 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
+
+/// <summary>
+/// The HTTP surface a wire schema describes: request (what the host accepts) or
+/// response (what the host sends). Property accessibility/ignore semantics differ
+/// between them (planner-constraint:json-surface-position-aware).
+/// </summary>
+public enum JsonSurfaceDirection
+{
+    Request,
+    Response,
+}
+
+/// <summary>
+/// The serializer-supported wire surface of a property, per direction.
+/// Both = present in request and response schemas; RequestOnly = deserializable but
+/// never serialized; ResponseOnly = serialized but not deserializable; Excluded =
+/// absent from both (reported loudly when the shape was otherwise visible).
+/// </summary>
+public enum JsonPropertySurface
+{
+    Both,
+    RequestOnly,
+    ResponseOnly,
+    Excluded,
+}
 
 /// <summary>
 /// Walks Roslyn symbols from [RivetType]-attributed records and produces
@@ -46,6 +73,11 @@ public sealed class TypeWalker
     private readonly INamedTypeSymbol? _jsonIgnoreType;
     private readonly INamedTypeSymbol? _jsonExtensionDataType;
     private readonly INamedTypeSymbol? _obsoleteType;
+
+    // STJ visibility attributes: [JsonInclude] opts non-public members into the wire
+    // surface; [JsonConstructor] marks the deserialization constructor.
+    private readonly INamedTypeSymbol? _jsonIncludeType;
+    private readonly INamedTypeSymbol? _jsonConstructorType;
 
     // STJ polymorphism attributes (P2 wave 4): [JsonPolymorphic]/[JsonDerivedType]
     // base types lower to a TaggedUnion alias instead of silently flattening.
@@ -144,6 +176,12 @@ public sealed class TypeWalker
         );
         _jsonExtensionDataType = compilation.GetTypeByMetadataName(
             "System.Text.Json.Serialization.JsonExtensionDataAttribute"
+        );
+        _jsonIncludeType = compilation.GetTypeByMetadataName(
+            "System.Text.Json.Serialization.JsonIncludeAttribute"
+        );
+        _jsonConstructorType = compilation.GetTypeByMetadataName(
+            "System.Text.Json.Serialization.JsonConstructorAttribute"
         );
         _obsoleteType = compilation.GetTypeByMetadataName("System.ObsoleteAttribute");
         _jsonPolymorphicType = compilation.GetTypeByMetadataName(
@@ -330,33 +368,304 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// Returns true if the property is not a named JSON member.
+    /// Returns true when the property is never a named JSON member: [JsonExtensionData]
+    /// always, and [JsonIgnore] Always (or the parameterless form). The condition forms
+    /// Never/WhenWritingNull/WhenWritingDefault do not remove the property from either
+    /// schema — WhenWritingNull/WhenWritingDefault only allow omission on the response
+    /// wire, handled by requiredness (CanOmitOnWire). Direction does not change this
+    /// answer; presence asymmetry lives in GetJsonPropertySurface.
     /// </summary>
-    public bool IsJsonIgnored(IPropertySymbol prop)
+    public bool IsJsonIgnored(IPropertySymbol prop) => IsJsonIgnoredMember(prop);
+
+    /// <summary>
+    /// Wire-member overload: [JsonExtensionData]/[JsonIgnore] are property attributes,
+    /// so a field is never ignored by them (fields carrying them are surfaced through
+    /// GetJsonFieldSurface's include gate).
+    /// </summary>
+    public bool IsJsonIgnored(ISymbol member) =>
+        member switch
+        {
+            IPropertySymbol prop => IsJsonIgnoredMember(prop),
+            _ => false,
+        };
+
+    private bool IsJsonIgnoredMember(IPropertySymbol prop)
     {
-        return prop.GetAttributes()
-            .Any(attribute =>
+        foreach (var attribute in prop.GetAttributes())
+        {
+            if (
                 _jsonExtensionDataType is not null
-                    && SymbolEqualityComparer.Default.Equals(
-                        attribute.AttributeClass,
-                        _jsonExtensionDataType
-                    )
-                || _jsonIgnoreType is not null
-                    && SymbolEqualityComparer.Default.Equals(
-                        attribute.AttributeClass,
-                        _jsonIgnoreType
-                    )
-            );
+                && SymbolEqualityComparer.Default.Equals(
+                    attribute.AttributeClass,
+                    _jsonExtensionDataType
+                )
+            )
+            {
+                return true;
+            }
+
+            if (
+                _jsonIgnoreType is not null
+                && SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, _jsonIgnoreType)
+            )
+            {
+                var condition = ReadJsonIgnoreCondition(attribute);
+                return condition switch
+                {
+                    JsonIgnoreCondition.WhenWritingNull => false,
+                    JsonIgnoreCondition.WhenWritingDefault => false,
+                    JsonIgnoreCondition.Never => false,
+                    // No condition or Always: excluded from both surfaces.
+                    _ => true,
+                };
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
-    /// A3: flattens the property surface of a type across its BaseType chain
+    /// Reads the [JsonIgnore(Condition = …)] named argument. Null (and any non-enum
+    /// value) means the attribute's parameterless form, i.e. Always.
+    /// </summary>
+    private static JsonIgnoreCondition? ReadJsonIgnoreCondition(AttributeData attribute)
+    {
+        var named = attribute.NamedArguments.FirstOrDefault(kv => kv.Key == "Condition");
+        return named.Value.Value is int raw ? (JsonIgnoreCondition?)raw
+            : attribute.ConstructorArguments.Length > 0
+            && attribute.ConstructorArguments[0].Value is int positional
+                ? (JsonIgnoreCondition?)positional
+            : null;
+    }
+
+    /// <summary>
+    /// Whether the property is serialized/deserialized under default System.Text.Json
+    /// web options for the queried direction, per observed serializer behavior:
+    /// public get+set properties surface in both directions; get-only properties
+    /// serialize on the response and deserialize only when bound by a matching
+    /// constructor parameter (records — planner-constraint:stj-constructor-truth);
+    /// set-only properties deserialize only (request); non-public members are absent
+    /// unless [JsonInclude] (fields likewise). Unsupported shapes are reported and
+    /// excluded rather than guessed.
+    /// </summary>
+    public JsonPropertySurface GetJsonPropertySurface(IPropertySymbol prop)
+    {
+        var hasInclude = HasJsonInclude(prop);
+
+        // Non-public members surface only through [JsonInclude].
+        var getterPublic = prop.GetMethod?.DeclaredAccessibility is Accessibility.Public;
+        var setterPublic = prop.SetMethod?.DeclaredAccessibility is Accessibility.Public;
+
+        if (prop.Type.Kind == SymbolKind.DynamicType)
+        {
+            // Dynamic members keep parity with the established object handling:
+            // the untyped-schema representation, never silent disappearance
+            // (planner-constraint:object-dynamic-parity).
+            return JsonPropertySurface.Both;
+        }
+
+        if (!getterPublic && !setterPublic)
+        {
+            // Fully non-public (both accessors non-public): [JsonInclude] pulls the
+            // member into the wire surface in both directions (STJ touches the member
+            // directly). Without the include it is invisible to the serializer.
+            return hasInclude ? JsonPropertySurface.Both : JsonPropertySurface.Excluded;
+        }
+
+        if (prop.GetMethod is null)
+        {
+            // Set-only property: STJ cannot serialize it — request surface only.
+            return setterPublic || hasInclude
+                ? JsonPropertySurface.RequestOnly
+                : JsonPropertySurface.Excluded;
+        }
+
+        if (prop.SetMethod is null)
+        {
+            // Get-only property. STJ deserializes it only via a matching constructor
+            // parameter (records) or a public parameterized constructor — response
+            // surface otherwise (planner-constraint:stj-constructor-truth).
+            if (getterPublic || hasInclude)
+            {
+                return IsDeserializableViaConstructor(prop)
+                    ? JsonPropertySurface.Both
+                    : JsonPropertySurface.ResponseOnly;
+            }
+
+            return JsonPropertySurface.Excluded;
+        }
+
+        if (getterPublic && setterPublic)
+        {
+            return JsonPropertySurface.Both;
+        }
+
+        // Mixed accessibility (e.g. public get + private set): STJ uses the public
+        // accessor for its direction. [JsonInclude] on the property pulls the
+        // non-public side in too — STJ serializes via the public accessor and
+        // deserializes via the included non-public accessor, so the property
+        // surfaces in both directions (planner-constraint:mixed-accessor-include-truth).
+        if (hasInclude)
+        {
+            return JsonPropertySurface.Both;
+        }
+
+        return getterPublic ? JsonPropertySurface.ResponseOnly : JsonPropertySurface.RequestOnly;
+    }
+
+    private bool HasJsonInclude(IPropertySymbol prop) =>
+        _jsonIncludeType is not null
+        && prop.GetAttributes()
+            .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIncludeType));
+
+    /// <summary>
+    /// The wire surface of a FIELD member under default System.Text.Json web options.
+    /// Fields have no accessors: STJ touches the member directly, so [JsonInclude]
+    /// means both-surface (serialized and deserialized) regardless of accessibility;
+    /// without the include a field is invisible to the serializer
+    /// (planner-constraint:jsoninclude-fields-represented).
+    /// </summary>
+    public JsonPropertySurface GetJsonFieldSurface(IFieldSymbol field)
+    {
+        if (field.Type.Kind == SymbolKind.DynamicType)
+        {
+            // Dynamic members keep parity with the established object handling:
+            // untyped-schema representation, never silent disappearance
+            // (planner-constraint:object-dynamic-parity).
+            return JsonPropertySurface.Both;
+        }
+
+        var hasInclude =
+            _jsonIncludeType is not null
+            && field
+                .GetAttributes()
+                .Any(a =>
+                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIncludeType)
+                );
+
+        return hasInclude ? JsonPropertySurface.Both : JsonPropertySurface.Excluded;
+    }
+
+    /// <summary>
+    /// True when System.Text.Json can deserialize into the property through a
+    /// constructor parameter with a matching name (case-insensitive), i.e. a record
+    /// positional parameter or a [JsonConstructor]-attributed constructor.
+    /// </summary>
+    private bool IsDeserializableViaConstructor(IPropertySymbol prop)
+    {
+        var containingType = prop.ContainingType;
+        if (containingType is not INamedTypeSymbol named)
+        {
+            return false;
+        }
+
+        // Records: primary constructor parameters bind properties by name.
+        var constructors = named
+            .Constructors.Where(constructor => !constructor.IsImplicitlyDeclared)
+            .ToList();
+
+        foreach (var constructor in constructors)
+        {
+            var hasJsonConstructor =
+                _jsonConstructorType is not null
+                && constructor
+                    .GetAttributes()
+                    .Any(attr =>
+                        SymbolEqualityComparer.Default.Equals(
+                            attr.AttributeClass,
+                            _jsonConstructorType
+                        )
+                    );
+
+            foreach (var parameter in constructor.Parameters)
+            {
+                if (
+                    string.Equals(parameter.Name, prop.Name, StringComparison.OrdinalIgnoreCase)
+                    && (hasJsonConstructor || IsRecordPrimaryConstructor(named, constructor))
+                )
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsRecordPrimaryConstructor(INamedTypeSymbol type, IMethodSymbol constructor)
+    {
+        // A record's primary constructor shares the record's parameter list: its
+        // parameters generate the properties. Any other constructor (copies included)
+        // is not the primary one. Roslyn marks the primary constructor as the one
+        // whose declaring syntax is the record declaration's parameter list.
+        if (constructor.IsImplicitlyDeclared)
+        {
+            return false;
+        }
+
+        foreach (var syntaxReference in constructor.DeclaringSyntaxReferences)
+        {
+            var node = syntaxReference.GetSyntax().Parent;
+            if (node is ParameterListSyntax parameterList && parameterList.Parent is not null)
+            {
+                foreach (var typeSyntaxReference in type.DeclaringSyntaxReferences)
+                {
+                    if (typeSyntaxReference.GetSyntax() == parameterList.Parent)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the property can be omitted on the wire for the queried direction:
+    /// WhenWritingNull omits null values; WhenWritingDefault omits CLR defaults;
+    /// nullable-annotated or [RivetOptional] properties can be omitted by the host.
+    /// </summary>
+    public bool CanOmitOnWire(IPropertySymbol prop)
+    {
+        var condition = ReadJsonIgnoreConditionFrom(prop);
+        if (condition is JsonIgnoreCondition.WhenWritingNull)
+        {
+            return true;
+        }
+
+        if (condition is JsonIgnoreCondition.WhenWritingDefault)
+        {
+            return true;
+        }
+
+        return IsOptionalProperty(prop);
+    }
+
+    private static JsonIgnoreCondition? ReadJsonIgnoreConditionFrom(IPropertySymbol prop)
+    {
+        var attribute = prop.GetAttributes()
+            .FirstOrDefault(a =>
+                a.AttributeClass is not null && a.AttributeClass.Name == "JsonIgnoreAttribute"
+            );
+        if (attribute is null)
+        {
+            return null;
+        }
+
+        return ReadJsonIgnoreCondition(attribute);
+    }
+
+    /// <summary>
+    /// A3: flattens the wire-member surface of a type across its BaseType chain
     /// (base-most first; derived declarations win on name collision — overrides and
     /// shadowing both resolve to the most-derived declaration). Stops at object/ValueType
     /// and at base types outside the walkable assemblies. Skips static/indexer/implicitly
-    /// declared members and records' synthesized EqualityContract.
+    /// declared members and records' synthesized EqualityContract. Properties are the
+    /// primary surface; [JsonInclude] fields join them (properties win on a name
+    /// collision, since an auto-property already represents its backing field).
     /// </summary>
-    public IReadOnlyList<IPropertySymbol> GetEffectiveProperties(ITypeSymbol type)
+    public IReadOnlyList<ISymbol> GetEffectiveProperties(ITypeSymbol type)
     {
         var chain = new List<ITypeSymbol>();
         var current = type;
@@ -379,21 +688,50 @@ public sealed class TypeWalker
 
         chain.Reverse(); // base-most first, matching rivet-ts's X5 flatten semantics
 
-        var ordered = new List<IPropertySymbol>();
+        var ordered = new List<ISymbol>();
         var indexByName = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var link in chain)
         {
-            foreach (var member in link.GetMembers().OfType<IPropertySymbol>())
+            foreach (var member in link.GetMembers())
             {
-                if (member.IsStatic || member.IsIndexer || member.IsImplicitlyDeclared)
+                if (member.IsImplicitlyDeclared)
                 {
                     continue;
                 }
 
-                // Records synthesize EqualityContract; guard by name in case a compiler
-                // version stops marking it implicitly declared.
-                if (member.Name == "EqualityContract")
+                if (member is IPropertySymbol property)
+                {
+                    if (property.IsStatic || property.IsIndexer)
+                    {
+                        continue;
+                    }
+
+                    // Records synthesize EqualityContract; guard by name in case a compiler
+                    // version stops marking it implicitly declared.
+                    if (property.Name == "EqualityContract")
+                    {
+                        continue;
+                    }
+                }
+                else if (member is IFieldSymbol field)
+                {
+                    // [JsonInclude] public fields are statically visible wire surface
+                    // (serialized and deserialized under default web options);
+                    // non-included fields stay absent (planner-constraint:jsoninclude-fields-represented).
+                    // Auto-property backing fields are compiler detail — the property
+                    // represents them; properties win on a name collision.
+                    if (field.IsStatic || field.IsConst || field.AssociatedSymbol is not null)
+                    {
+                        continue;
+                    }
+
+                    if (GetJsonFieldSurface(field) == JsonPropertySurface.Excluded)
+                    {
+                        continue;
+                    }
+                }
+                else
                 {
                     continue;
                 }
@@ -439,6 +777,39 @@ public sealed class TypeWalker
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// [JsonPropertyName] for either wire member kind: [JsonPropertyName] is valid on
+    /// fields in System.Text.Json, so an included field's wire name must honor it too.
+    /// </summary>
+    public string? GetJsonMemberName(ISymbol member) =>
+        member switch
+        {
+            IPropertySymbol prop => GetJsonPropertyName(prop),
+            IFieldSymbol field => GetJsonFieldName(field),
+            _ => null,
+        };
+
+    private string? GetJsonFieldName(IFieldSymbol field)
+    {
+        if (_jsonPropertyNameType is null)
+        {
+            return null;
+        }
+
+        var attr = field
+            .GetAttributes()
+            .FirstOrDefault(a =>
+                SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonPropertyNameType)
+            );
+
+        return
+            attr is not null
+            && attr.ConstructorArguments.Length == 1
+            && attr.ConstructorArguments[0].Value is string name
+            ? name
+            : null;
     }
 
     /// <summary>
@@ -512,9 +883,24 @@ public sealed class TypeWalker
 
         var properties = new List<TsPropertyDefinition>();
 
-        // A3: include inherited properties by flattening the BaseType chain
+        // A3: include inherited members by flattening the BaseType chain. The shared
+        // per-type component schema represents accessibility-derived asymmetry via
+        // readOnly/writeOnly (planner-constraint:component-schema-directionality);
+        // explicit [RivetReadOnly]/[RivetWriteOnly] take precedence over the derived
+        // marker below.
         foreach (var member in GetEffectiveProperties(definition))
         {
+            var memberSurface = member switch
+            {
+                IPropertySymbol propSymbol => GetJsonPropertySurface(propSymbol),
+                IFieldSymbol fieldSymbol => GetJsonFieldSurface(fieldSymbol),
+                _ => JsonPropertySurface.Excluded,
+            };
+            if (memberSurface == JsonPropertySurface.Excluded)
+            {
+                continue;
+            }
+
             if (IsJsonIgnored(member))
             {
                 continue;
@@ -523,7 +909,7 @@ public sealed class TypeWalker
             // P2 wave 5: [RivetHeader] properties are request header params, never part
             // of a JSON schema — ContractWalker/EndpointWalker surface them as
             // ParamSource.Header params instead.
-            if (GetHeaderName(member) is not null)
+            if (member is IPropertySymbol headerCheck && GetHeaderName(headerCheck) is not null)
             {
                 continue;
             }
@@ -551,8 +937,8 @@ public sealed class TypeWalker
             }
 
             var tsName = jsonPropertyName ?? Naming.ToCamelCase(member.Name);
-            var tsType = MapTypeCore(member.Type, $"{name}.{member.Name}");
-            var isOptional = IsOptionalProperty(member);
+            var tsType = MapTypeCore(GetMemberType(member), $"{name}.{member.Name}");
+            var isOptional = MemberIsOptional(member);
             var isDeprecated =
                 _obsoleteType is not null
                 && member
@@ -638,6 +1024,19 @@ public sealed class TypeWalker
                 {
                     isWriteOnly = true;
                 }
+            }
+
+            // Accessibility-derived asymmetry becomes readOnly/writeOnly on the shared
+            // component schema (planner-constraint:component-schema-directionality);
+            // explicit [RivetReadOnly]/[RivetWriteOnly] attributes take precedence
+            // (their assignment above wins because the derived marker only fills false).
+            if (!isReadOnly && memberSurface == JsonPropertySurface.ResponseOnly)
+            {
+                isReadOnly = true;
+            }
+            else if (!isWriteOnly && memberSurface == JsonPropertySurface.RequestOnly)
+            {
+                isWriteOnly = true;
             }
 
             // DA format is a fallback — explicit [RivetFormat] takes precedence.
@@ -954,7 +1353,7 @@ public sealed class TypeWalker
         var variants = new List<TsType>();
         foreach (var member in GetEffectiveProperties(definition))
         {
-            var mapped = MapTypeCore(member.Type, $"{name}.{member.Name}");
+            var mapped = MapTypeCore(GetMemberType(member), $"{name}.{member.Name}");
             variants.Add(mapped is TsType.Nullable nullable ? nullable.Inner : mapped);
         }
 
@@ -1083,11 +1482,41 @@ public sealed class TypeWalker
                     continue;
                 }
 
-                var fieldName = GetJsonPropertyName(member) ?? Naming.ToCamelCase(member.Name);
-                var fieldType = MapTypeCore(member.Type, $"{name}.{tag}.{member.Name}");
+                // Variants are the shared wire shape for both directions
+                // (planner-constraint:tagged-union-variant-surface): keep every
+                // non-Excluded member and represent RequestOnly/ResponseOnly
+                // asymmetry via the field surface marker (emitted as
+                // writeOnly/readOnly), never Both-only filtering.
+                var memberSurface = member switch
+                {
+                    IPropertySymbol propSymbol => GetJsonPropertySurface(propSymbol),
+                    IFieldSymbol fieldSymbol => GetJsonFieldSurface(fieldSymbol),
+                    _ => JsonPropertySurface.Excluded,
+                };
+                if (memberSurface == JsonPropertySurface.Excluded)
+                {
+                    continue;
+                }
+
+                var fieldName = GetJsonMemberName(member) ?? Naming.ToCamelCase(member.Name);
+                var fieldType = MapTypeCore(GetMemberType(member), $"{name}.{tag}.{member.Name}");
 
                 fields.Add(
-                    new TsType.InlineObjectField(fieldName, fieldType, IsOptionalProperty(member))
+                    new TsType.InlineObjectField(
+                        fieldName,
+                        fieldType,
+                        MemberIsOptional(member),
+                        memberSurface switch
+                        {
+                            JsonPropertySurface.RequestOnly => TsType
+                                .InlineObjectFieldSurface
+                                .RequestOnly,
+                            JsonPropertySurface.ResponseOnly => TsType
+                                .InlineObjectFieldSurface
+                                .ResponseOnly,
+                            _ => TsType.InlineObjectFieldSurface.Both,
+                        }
+                    )
                 );
             }
 
@@ -1653,6 +2082,66 @@ public sealed class TypeWalker
         return true;
     }
 
+    /// <summary>
+    /// True when the type binds to the query string under MVC's default inference for
+    /// an ApiController: primitives, string, enums, supported scalar wrappers
+    /// (Guid/DateTime/…), Nullable&lt;scalar&gt; and scalar collections. The scalar
+    /// classification is the same surface MapType lowers to primitives — one shared
+    /// source so the binding boundary cannot drift from the emitted schema.
+    /// </summary>
+    public bool IsScalarQueryType(ITypeSymbol type)
+    {
+        // Nullable<int> / string? → unwrap before classifying
+        if (
+            type is INamedTypeSymbol
+            {
+                OriginalDefinition.SpecialType: SpecialType.System_Nullable_T
+            } nullable
+        )
+        {
+            return IsScalarQueryType(nullable.TypeArguments[0]);
+        }
+
+        if (type.TypeKind == TypeKind.Enum)
+        {
+            return true;
+        }
+
+        // System.Object is NOT a scalar query type (planner-constraint:object-dynamic-parity):
+        // MVC binds an unattributed object parameter from the request body, so it must
+        // fall through to the Body classification with the established untyped-schema
+        // representation — never an invented query param.
+        if (type.SpecialType == SpecialType.System_Object)
+        {
+            return false;
+        }
+
+        if (type.SpecialType is not SpecialType.None)
+        {
+            return true; // string, int, bool, …
+        }
+
+        if (type is IArrayTypeSymbol arrayType)
+        {
+            return IsScalarQueryType(arrayType.ElementType);
+        }
+
+        if (type is INamedTypeSymbol named)
+        {
+            if (_scalarTypes.ContainsKey(named))
+            {
+                return true;
+            }
+
+            if (IsCollectionType(named) && named.TypeArguments.Length == 1)
+            {
+                return IsScalarQueryType(named.TypeArguments[0]);
+            }
+        }
+
+        return false;
+    }
+
     private bool IsCollectionType(INamedTypeSymbol symbol) =>
         _collectionTypes.Contains(symbol.OriginalDefinition);
 
@@ -1883,6 +2372,50 @@ public sealed class TypeWalker
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Requiredness for either wire member kind: properties use the full
+    /// [RivetOptional]/[Required]/required/nullable rule PLUS the [JsonIgnore]
+    /// WhenWritingNull/WhenWritingDefault omission — a property the serializer can
+    /// leave off the wire cannot be required on the emitted schema
+    /// (acceptance:json-property-surface); fields use the nullability/attributes
+    /// without the property-only `required` keyword.
+    /// </summary>
+    private bool MemberIsOptional(ISymbol member) =>
+        member switch
+        {
+            IPropertySymbol prop => CanOmitOnWire(prop),
+            IFieldSymbol field => MemberFieldIsOptional(field),
+            _ => false,
+        };
+
+    /// <summary>The declared type of a wire member (property or field).</summary>
+    public static ITypeSymbol GetMemberType(ISymbol member) =>
+        member switch
+        {
+            IPropertySymbol prop => prop.Type,
+            IFieldSymbol field => field.Type,
+            _ => throw new InvalidOperationException(
+                $"Wire member '{member.Name}' is neither a property nor a field."
+            ),
+        };
+
+    private static bool MemberFieldIsOptional(IFieldSymbol field)
+    {
+        var attributes = field.GetAttributes();
+
+        if (attributes.Any(a => a.AttributeClass?.Name is "RivetOptionalAttribute"))
+        {
+            return true;
+        }
+
+        if (attributes.Any(a => a.AttributeClass?.Name is "RequiredAttribute"))
+        {
+            return false;
+        }
+
+        return field.Type.NullableAnnotation == NullableAnnotation.Annotated;
     }
 
     /// <summary>

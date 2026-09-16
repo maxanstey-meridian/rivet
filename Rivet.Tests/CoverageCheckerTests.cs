@@ -1510,4 +1510,327 @@ public sealed class CoverageCheckerTests
                 warning.Kind == CoverageWarningKind.MissingImplementation
                 && warning.FieldName == fieldName
         );
+
+    // ---------------------------------------------------------------
+    // MapGroup receiver chains, unresolved routes/methods, and MVC
+    // [controller]/[action] token agreement with extraction
+    // (outcome:route-coverage).
+    // ---------------------------------------------------------------
+
+    private const string GroupedTasksContract = """
+        using Rivet;
+
+        namespace Test;
+
+        [RivetType]
+        public sealed record GroupedTaskDto(string Id);
+
+        [RivetContract]
+        public static class GroupedTasksContract
+        {
+            public static readonly RouteDefinition<GroupedTaskDto> ListItems =
+                Define.Get<GroupedTaskDto>("/v2/items");
+        }
+        """;
+
+    private const string NestedItemsContract = """
+        using Rivet;
+
+        namespace Test;
+
+        [RivetType]
+        public sealed record NestedItemDto(string Id);
+
+        [RivetContract]
+        public static class NestedItemsContract
+        {
+            public static readonly RouteDefinition<NestedItemDto> ListItems =
+                Define.Get<NestedItemDto>("/v2/inner/items");
+        }
+        """;
+
+    [Fact]
+    public void Constant_MapGroup_receiver_prefix_is_prepended()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class GroupedEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    var group = app.MapGroup("/v2");
+                    group.MapGet("/items", () =>
+                        GroupedTasksContract.ListItems
+                            .Success(new GroupedTaskDto("1"))
+                            .ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(GroupedTasksContract, implementation);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "ListItems");
+    }
+
+    [Fact]
+    public void Grouped_Handler_Fails_Against_A_Contract_For_The_Ungrouped_Route()
+    {
+        // A grouped /v2/tasks handler must not verify a contract declaring /api/tasks —
+        // the resolved grouped route has to disagree with the ungrouped contract.
+        var ungroupedContract = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id, string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> ListTasks =
+                    Define.Get<TaskDto>("/api/tasks");
+            }
+            """;
+
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class GroupedEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    var group = app.MapGroup("/v2");
+                    group.MapGet("/tasks", () =>
+                        TasksContract.ListTasks
+                            .Success(new TaskDto("1", "Test"))
+                            .ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(ungroupedContract, implementation);
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListTasks" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        Assert.Equal("/api/tasks", warning.Expected);
+        Assert.Equal("/v2/tasks", warning.Actual);
+    }
+
+    [Fact]
+    public void Nested_MapGroup_Chains_Accumulate_Prefixes()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class NestedEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    var group = app.MapGroup("/v2").MapGroup("/inner");
+                    group.MapGet("/items", () =>
+                        NestedItemsContract.ListItems
+                            .Success(new NestedItemDto("1"))
+                            .ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(NestedItemsContract, implementation);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "ListItems");
+    }
+
+    [Fact]
+    public void Nested_Group_Prefix_Applies_To_The_Resolved_Route()
+    {
+        // Same nested host against the un-nested contract proves the accumulated
+        // prefix is actually applied, not silently dropped.
+        var flatContract = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record NestedItemDto(string Id);
+
+            [RivetContract]
+            public static class NestedItemsContract
+            {
+                public static readonly RouteDefinition<NestedItemDto> ListItems =
+                    Define.Get<NestedItemDto>("/items");
+            }
+            """;
+
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class NestedEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    var group = app.MapGroup("/v2").MapGroup("/inner");
+                    group.MapGet("/items", () =>
+                        NestedItemsContract.ListItems
+                            .Success(new NestedItemDto("1"))
+                            .ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(flatContract, implementation);
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListItems" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        Assert.Equal("/items", warning.Expected);
+        Assert.Equal("/v2/inner/items", warning.Actual);
+    }
+
+    [Fact]
+    public void Nonconstant_Route_Argument_Is_Reported_Unresolved()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    var route = "/api/tasks";
+                    app.MapGet(route, () =>
+                        TasksContract.ListTasks
+                            .Success(new TaskDto("1", "Test"))
+                            .ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListTasks" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        // Unresolved, known-mismatched and verified states remain distinguishable:
+        // the Actual text states the unresolved cause instead of a resolved route.
+        Assert.Contains("unresolved route", warning.Actual);
+    }
+
+    [Fact]
+    public void Nonconstant_MapMethods_Methods_Are_Reported_Unresolved()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    var methods = new[] { "GET" };
+                    app.MapMethods("/api/tasks", methods, () =>
+                        TasksContract.ListTasks
+                            .Success(new TaskDto("1", "Test"))
+                            .ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListTasks" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        Assert.Contains("unresolved HTTP method", warning.Actual);
+    }
+
+    [Fact]
+    public void Controller_Route_Tokens_Match_Extraction()
+    {
+        // [controller]/[action] tokens must resolve identically in extraction and
+        // coverage: a [Route("api/[controller]")] controller named TasksController
+        // implements the contract route /api/tasks and verifies without a mismatch.
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [ApiController]
+            [Route("api/[controller]")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List() =>
+                    TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToActionResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "ListTasks");
+    }
+
+    [Fact]
+    public void Unsubstituted_Controller_Tokens_Are_Not_Silently_Verified()
+    {
+        // Guards the token substitution: a WidgetsController under
+        // [Route("api/[controller]")] resolves to /api/widgets and must NOT verify
+        // the /api/tasks contract.
+        var mismatchingController = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [ApiController]
+            [Route("api/[controller]")]
+            public sealed class WidgetsController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List() =>
+                    TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToActionResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, mismatchingController);
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListTasks" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        Assert.Equal("/api/tasks", warning.Expected);
+        // SubstituteRouteTokens preserves the class name's casing ("WidgetsController"
+        // → "Widgets"), identically in extraction and coverage.
+        Assert.Equal("/api/Widgets", warning.Actual);
+    }
 }

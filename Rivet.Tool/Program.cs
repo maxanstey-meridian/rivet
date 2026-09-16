@@ -139,14 +139,26 @@ static async Task<int> Run(string[] args)
             );
         }
 
-        if (coverageWarnings.Count > 0 && outputDir is null)
+        if (coverageWarnings.Count > 0)
         {
             return 1;
         }
     }
 
-    // Merge: contract endpoints win on (ControllerName, Name) collision
-    var merged = EndpointMerger.Merge(contractEndpoints, endpoints);
+    // Merge on transport identity (HTTP method + normalized route). Same-named
+    // overloads at distinct routes survive; contradictory declarations of the same
+    // transport identity are a hard conflict — routed through the established
+    // stderr + exit-1 pattern so --routes cannot print and return success.
+    IReadOnlyList<TsEndpointDefinition> merged;
+    try
+    {
+        merged = EndpointMerger.Merge(contractEndpoints, endpoints);
+    }
+    catch (EndpointMerger.TransportConflictException exception)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 1;
+    }
     endpoints = merged;
 
     if (options.Routes)

@@ -557,10 +557,24 @@ public static class CoverageChecker
             methodSymbol.ContainingType
         );
         var fullRoute = EndpointWalker.CombineRoutes(controllerRoute, methodRoute);
+        if (fullRoute is null)
+        {
+            return new EndpointContext(true, [httpMethod], null);
+        }
+
+        // A6: substitute [controller]/[action] tokens exactly like extraction
+        // (EndpointWalker.BuildEndpoint) so extraction and coverage agree on the
+        // same declared transport route.
+        fullRoute = EndpointWalker.SubstituteRouteTokens(
+            fullRoute,
+            methodSymbol.ContainingType,
+            methodSymbol
+        );
+
         return new EndpointContext(
             true,
             [httpMethod],
-            fullRoute is null ? null : RouteParser.StripRouteConstraints(fullRoute)
+            RouteParser.StripRouteConstraints(fullRoute)
         );
     }
 
@@ -611,24 +625,149 @@ public static class CoverageChecker
         }
         else if (memberAccess.Name.Identifier.ValueText == "MapMethods")
         {
-            methods =
+            // Constraint: only the MapMethods nonconstant branch may leave the method
+            // axis unresolved — Functions triggers legitimately declare no methods
+            // (any-method), so they must not produce an unresolved-method state.
+            var constantMethods =
                 parentInvocation.ArgumentList.Arguments.Count > 1
                     ? ExtractConstantStrings(
                         parentInvocation.ArgumentList.Arguments[1].Expression,
                         semanticModel
                     )
                     : [];
+            if (constantMethods.Count == 0)
+            {
+                return new EndpointContext(
+                    true,
+                    [],
+                    null,
+                    RouteError: "unresolved HTTP method(s): MapMethods arguments are not compile-time constants"
+                );
+            }
+
+            methods = constantMethods;
         }
         else
         {
             return EndpointContext.None;
         }
 
+        var route = ExtractMinimalRoute(parentInvocation, semanticModel, out var routeError);
+        if (route is null && routeError is null)
+        {
+            // An unresolvable receiver or nonconstant route stays unresolved rather
+            // than inventing a prefix.
+            routeError = "unresolved route: route template is not a compile-time constant";
+        }
+        else if (route is not null)
+        {
+            // Constant MapGroup receiver chains: prepend accumulated group prefixes
+            // (nested groups accumulate). Unresolvable receivers keep the route
+            // unresolved rather than inventing a prefix.
+            var groupPrefix = ResolveMapGroupPrefix(
+                ((MemberAccessExpressionSyntax)parentInvocation.Expression).Expression,
+                semanticModel
+            );
+            if (groupPrefix.Unresolved)
+            {
+                routeError =
+                    "unresolved route: receiver chain does not resolve to constant MapGroup prefixes";
+                route = null;
+            }
+            else if (groupPrefix.Prefix.Length > 0)
+            {
+                route = NormalizeRoute($"{groupPrefix.Prefix.Trim('/')}/{route.Trim('/')}");
+            }
+        }
+
         return new EndpointContext(
             true,
             methods.Select(value => value.ToUpperInvariant()).ToArray(),
-            ExtractMinimalRoute(parentInvocation, semanticModel)
+            route,
+            routeError
         );
+    }
+
+    /// <summary>
+    /// Accumulated constant MapGroup prefixes for a minimal-API receiver, or an
+    /// unresolved marker when the receiver chain cannot be resolved statically.
+    /// Only compile-time-constant prefixes are supported (mirroring the extractor's
+    /// constant-string policy); receivers that do not resolve keep the route
+    /// unresolved instead of inventing a prefix.
+    /// </summary>
+    private readonly record struct MapGroupPrefix(string Prefix, bool Unresolved);
+
+    private static MapGroupPrefix ResolveMapGroupPrefix(
+        ExpressionSyntax receiver,
+        SemanticModel semanticModel
+    ) =>
+        ResolveMapGroupPrefix(
+            receiver,
+            semanticModel,
+            new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default)
+        );
+
+    private static MapGroupPrefix ResolveMapGroupPrefix(
+        ExpressionSyntax receiver,
+        SemanticModel semanticModel,
+        HashSet<ILocalSymbol> visitedLocals
+    )
+    {
+        receiver = Unwrap(receiver);
+
+        // A local provenance hop: var group = ...; group.MapGet(...)
+        if (semanticModel.GetSymbolInfo(receiver).Symbol is ILocalSymbol local)
+        {
+            if (
+                !visitedLocals.Add(local)
+                || !TryGetProvenanceValue(local, receiver, semanticModel, out var value)
+            )
+            {
+                return new MapGroupPrefix(Prefix: "", Unresolved: true);
+            }
+
+            return ResolveMapGroupPrefix(value, semanticModel, visitedLocals);
+        }
+
+        // Direct chained group: inner.MapGroup("/v3") — recurse into its receiver.
+        if (
+            receiver
+                is InvocationExpressionSyntax
+                {
+                    Expression: MemberAccessExpressionSyntax groupAccess,
+                    ArgumentList: { Arguments: [var patternArgument, ..] },
+                } groupInvocation
+            && groupAccess.Name.Identifier.ValueText == "MapGroup"
+            && semanticModel.GetSymbolInfo(receiver).Symbol is IMethodSymbol groupMethod
+            && SymbolEqualityComparer.Default.Equals(
+                (groupMethod.ReducedFrom ?? groupMethod).ContainingType,
+                semanticModel.Compilation.GetTypeByMetadataName(
+                    "Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions"
+                )
+            )
+        )
+        {
+            var ownPrefix = semanticModel.GetConstantValue(patternArgument.Expression);
+            if (ownPrefix is not { HasValue: true, Value: string prefixText })
+            {
+                return new MapGroupPrefix(Prefix: "", Unresolved: true);
+            }
+
+            var outer = ResolveMapGroupPrefix(groupAccess.Expression, semanticModel, visitedLocals);
+            if (outer.Unresolved)
+            {
+                return outer;
+            }
+
+            return new MapGroupPrefix(
+                Prefix: NormalizeRoute($"{outer.Prefix.Trim('/')}/{prefixText.Trim('/')}"),
+                Unresolved: false
+            );
+        }
+
+        // Root receiver (app / IEndpointRouteBuilder variable, or any other base) —
+        // no prefix contribution; treat the chain as resolved at this point.
+        return new MapGroupPrefix(Prefix: "", Unresolved: false);
     }
 
     private static EndpointContext TryResolveFunction(
@@ -923,16 +1062,25 @@ public static class CoverageChecker
 
     private static string? ExtractMinimalRoute(
         InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel
+        SemanticModel semanticModel,
+        out string? routeError
     )
     {
+        routeError = null;
         if (invocation.ArgumentList.Arguments.Count == 0)
         {
+            routeError = "unresolved route: Map* call has no route argument";
             return null;
         }
 
         var route = semanticModel.GetConstantValue(invocation.ArgumentList.Arguments[0].Expression);
-        return route is { HasValue: true, Value: string value } ? NormalizeRoute(value) : null;
+        if (route is { HasValue: true, Value: string value })
+        {
+            return NormalizeRoute(value);
+        }
+
+        routeError = "unresolved route: route template is not a compile-time constant";
+        return null;
     }
 
     private static bool IsOneOf(INamedTypeSymbol actual, params INamedTypeSymbol?[] candidates) =>

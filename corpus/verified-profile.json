@@ -19,7 +19,7 @@
     "kubernetes",
     "zoom"
   ],
-  "reviewedSourceDefectsSha256": "630b952965158a83a97394f06c6a844458fe12bf8a952120f7342fc492e629f1",
+  "reviewedSourceDefectsSha256": "103632c6beaa1ed7b2b5b1a629c7949a7ebabc711f8c7a0ba173b7095524f99b",
   "sourceDefects": [
     {
       "corpusId": "notion",
@@ -46,6 +46,118 @@
       "cardinality": 1
     },
     {
+      "corpusId": "docker",
+      "sourceSha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+      "pointer": "#/paths/~1containers~1{id}~1logs/get/responses/101/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: GET /containers/{id}/logs (ContainerLogs) authors content on body-forbidden status 101; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "docker",
+      "sourceSha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+      "pointer": "#/paths/~1containers~1{id}~1logs/get/responses/101/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: GET /containers/{id}/logs (ContainerLogs) authors an example on body-forbidden status 101; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "docker",
+      "sourceSha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+      "pointer": "#/paths/~1containers~1{id}~1start/post/responses/304/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: POST /containers/{id}/start (ContainerStart) authors content on body-forbidden status 304; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "docker",
+      "sourceSha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+      "pointer": "#/paths/~1containers~1{id}~1start/post/responses/304/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: POST /containers/{id}/start (ContainerStart) authors an example on body-forbidden status 304; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "docker",
+      "sourceSha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+      "pointer": "#/paths/~1containers~1{id}~1stop/post/responses/304/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: POST /containers/{id}/stop (ContainerStop) authors content on body-forbidden status 304; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "docker",
+      "sourceSha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+      "pointer": "#/paths/~1containers~1{id}~1stop/post/responses/304/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: POST /containers/{id}/stop (ContainerStop) authors an example on body-forbidden status 304; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "docker",
+      "sourceSha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+      "pointer": "#/paths/~1services~1{id}~1logs/get/responses/101/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: GET /services/{id}/logs (ServiceLogs) authors content on body-forbidden status 101; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "docker",
+      "sourceSha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+      "pointer": "#/paths/~1services~1{id}~1logs/get/responses/101/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: GET /services/{id}/logs (ServiceLogs) authors an example on body-forbidden status 101; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "docker",
+      "sourceSha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+      "pointer": "#/paths/~1tasks~1{id}~1logs/get/responses/101/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: GET /tasks/{id}/logs (TaskLogs) authors content on body-forbidden status 101; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "docker",
+      "sourceSha256": "8c997693ce1e507b72b001bcac1603f36d8542e16017e120fa847dfabded2acc",
+      "pointer": "#/paths/~1tasks~1{id}~1logs/get/responses/101/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: GET /tasks/{id}/logs (TaskLogs) authors an example on body-forbidden status 101; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1access_settings~1whitelist/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /access_settings/whitelist (DELETEAccessSettingsWhitelist) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1access_settings~1whitelist/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /access_settings/whitelist (DELETEAccessSettingsWhitelist) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1access_settings~1whitelist~1{rule_id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /access_settings/whitelist/{rule_id} (DELETEAccessSettingsWhitelistRuleId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1access_settings~1whitelist~1{rule_id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /access_settings/whitelist/{rule_id} (DELETEAccessSettingsWhitelistRuleId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
       "corpusId": "sendgrid",
       "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
       "pointer": "#/paths/~1alerts/get/parameters/0/name",
@@ -64,9 +176,265 @@
     {
       "corpusId": "sendgrid",
       "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1alerts~1{alert_id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /alerts/{alert_id} (DELETEAlertsAlertId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1alerts~1{alert_id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /alerts/{alert_id} (DELETEAlertsAlertId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
       "pointer": "#/paths/~1alerts~1{alert_id}/get/parameters/0/name",
       "reason": "reserved Authorization header parameter is ignored by OpenAPI; authentication is represented by security schemes",
       "diagnostic": "warning RIV3022: Reserved header parameter dropped: GET /alerts/{alert_id} declares 'Authorization'; authentication is represented by security and components.securitySchemes.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1asm~1groups~1{group_id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /asm/groups/{group_id} (DELETEAsmGroupsGroupId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1asm~1groups~1{group_id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /asm/groups/{group_id} (DELETEAsmGroupsGroupId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1asm~1groups~1{group_id}~1suppressions~1{email}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /asm/groups/{group_id}/suppressions/{email} (DELETEAsmGroupsGroupIdSuppressionsEmail) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1asm~1groups~1{group_id}~1suppressions~1{email}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /asm/groups/{group_id}/suppressions/{email} (DELETEAsmGroupsGroupIdSuppressionsEmail) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1asm~1suppressions~1global~1{email}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /asm/suppressions/global/{email} (DELETEAsmSuppressionsGlobalEmail) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1asm~1suppressions~1global~1{email}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /asm/suppressions/global/{email} (DELETEAsmSuppressionsGlobalEmail) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1campaigns~1{campaign_id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /campaigns/{campaign_id} (DELETECampaignsCampaignId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1campaigns~1{campaign_id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /campaigns/{campaign_id} (DELETECampaignsCampaignId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1campaigns~1{campaign_id}~1schedules/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /campaigns/{campaign_id}/schedules (DELETECampaignsCampaignIdSchedules) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1campaigns~1{campaign_id}~1schedules/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /campaigns/{campaign_id}/schedules (DELETECampaignsCampaignIdSchedules) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1campaigns~1{campaign_id}~1schedules~1test/post/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: POST /campaigns/{campaign_id}/schedules/test (POSTCampaignsCampaignIdSchedulesTest) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1campaigns~1{campaign_id}~1schedules~1test/post/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: POST /campaigns/{campaign_id}/schedules/test (POSTCampaignsCampaignIdSchedulesTest) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1contactdb~1lists/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /contactdb/lists (DELETEContactdbLists) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1contactdb~1lists/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /contactdb/lists (DELETEContactdbLists) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1contactdb~1lists~1{list_id}~1recipients~1{recipient_id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /contactdb/lists/{list_id}/recipients/{recipient_id} (DELETEContactdbListsListIdRecipientsRecipientId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1contactdb~1lists~1{list_id}~1recipients~1{recipient_id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /contactdb/lists/{list_id}/recipients/{recipient_id} (DELETEContactdbListsListIdRecipientsRecipientId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1contactdb~1recipients~1{recipient_id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /contactdb/recipients/{recipient_id} (DELETEContactdbRecipientsRecipientId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1contactdb~1recipients~1{recipient_id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /contactdb/recipients/{recipient_id} (DELETEContactdbRecipientsRecipientId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1contactdb~1segments~1{segment_id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /contactdb/segments/{segment_id} (DELETEContactdbSegmentsSegmentId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1contactdb~1segments~1{segment_id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /contactdb/segments/{segment_id} (DELETEContactdbSegmentsSegmentId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1designs~1{id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /designs/{id} (DELETEDesign) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1designs~1{id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /designs/{id} (DELETEDesign) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1ips~1pools~1{pool_name}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /ips/pools/{pool_name} (DELETEIpsPoolsPoolName) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1ips~1pools~1{pool_name}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /ips/pools/{pool_name} (DELETEIpsPoolsPoolName) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1ips~1pools~1{pool_name}~1ips~1{ip}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /ips/pools/{pool_name}/ips/{ip} (DELETEIpsPoolsPoolNameIpsIp) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1ips~1pools~1{pool_name}~1ips~1{ip}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /ips/pools/{pool_name}/ips/{ip} (DELETEIpsPoolsPoolNameIpsIp) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1ips~1warmup~1{ip_address}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /ips/warmup/{ip_address} (DELETEIpsWarmupIpAddress) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1ips~1warmup~1{ip_address}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /ips/warmup/{ip_address} (DELETEIpsWarmupIpAddress) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1marketing~1lists~1{id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /marketing/lists/{id} (DELETEListsId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1marketing~1lists~1{id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /marketing/lists/{id} (DELETEListsId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
       "cardinality": 1
     },
     {
@@ -104,9 +472,1593 @@
     {
       "corpusId": "sendgrid",
       "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1senders~1{sender_id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /senders/{sender_id} (DELETEV3SendersSenderId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1senders~1{sender_id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /senders/{sender_id} (DELETEV3SendersSenderId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1senders~1{sender_id}~1resend_verification/post/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: POST /senders/{sender_id}/resend_verification (POSTV3SendersSenderIdResendVerification) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1senders~1{sender_id}~1resend_verification/post/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: POST /senders/{sender_id}/resend_verification (POSTV3SendersSenderIdResendVerification) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1subusers~1{subuser_name}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /subusers/{subuser_name} (DELETESubusersSubuserName) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1subusers~1{subuser_name}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /subusers/{subuser_name} (DELETESubusersSubuserName) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1subusers~1{subuser_name}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /subusers/{subuser_name} (PATCHSubusersSubuserName) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1subusers~1{subuser_name}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /subusers/{subuser_name} (PATCHSubusersSubuserName) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1subusers~1{subuser_name}~1monitor/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /subusers/{subuser_name}/monitor (DELETESubusersSubuserNameMonitor) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1subusers~1{subuser_name}~1monitor/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /subusers/{subuser_name}/monitor (DELETESubusersSubuserNameMonitor) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1blocks/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /suppression/blocks (DELETESuppressionBlocks) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1blocks/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /suppression/blocks (DELETESuppressionBlocks) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1blocks~1{email}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /suppression/blocks/{email} (DELETESuppressionBlocksEmail) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1blocks~1{email}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /suppression/blocks/{email} (DELETESuppressionBlocksEmail) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1bounces/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /suppression/bounces (DELETESuppressionBounces) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1bounces/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /suppression/bounces (DELETESuppressionBounces) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
       "pointer": "#/paths/~1suppression~1bounces/get/parameters/2/name",
       "reason": "reserved Accept header parameter is ignored by OpenAPI; response media types are represented by responses content",
       "diagnostic": "warning RIV3023: Reserved header parameter dropped: GET /suppression/bounces declares 'Accept'; response media types are represented by responses[*].content.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1bounces~1{email}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /suppression/bounces/{email} (DELETESuppressionBouncesEmail) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1bounces~1{email}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /suppression/bounces/{email} (DELETESuppressionBouncesEmail) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1invalid_emails/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /suppression/invalid_emails (DELETESuppressionInvalidEmails) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1invalid_emails/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /suppression/invalid_emails (DELETESuppressionInvalidEmails) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1invalid_emails~1{email}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /suppression/invalid_emails/{email} (DELETESuppressionInvalidEmailsEmail) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1invalid_emails~1{email}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /suppression/invalid_emails/{email} (DELETESuppressionInvalidEmailsEmail) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1spam_reports/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /suppression/spam_reports (DELETESuppressionSpamReports) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1spam_reports/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /suppression/spam_reports (DELETESuppressionSpamReports) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1spam_reports~1{email}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /suppression/spam_reports/{email} (DELETESuppressionSpamReportsEmail) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1suppression~1spam_reports~1{email}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /suppression/spam_reports/{email} (DELETESuppressionSpamReportsEmail) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1teammates~1{username}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /teammates/{username} (DELETEV3TeammatesUsername) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1teammates~1{username}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /teammates/{username} (DELETEV3TeammatesUsername) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1templates~1{template_id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /templates/{template_id} (DELETETemplatesTemplateId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1templates~1{template_id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /templates/{template_id} (DELETETemplatesTemplateId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1user~1scheduled_sends~1{batch_id}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /user/scheduled_sends/{batch_id} (PATCHUserScheduledSendsBatchId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1user~1scheduled_sends~1{batch_id}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /user/scheduled_sends/{batch_id} (PATCHUserScheduledSendsBatchId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1user~1webhooks~1parse~1settings~1{hostname}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /user/webhooks/parse/settings/{hostname} (DELETEUserWebhooksParseSettingsHostname) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1user~1webhooks~1parse~1settings~1{hostname}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /user/webhooks/parse/settings/{hostname} (DELETEUserWebhooksParseSettingsHostname) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1verified_senders~1resend~1{id}/post/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: POST /verified_senders/resend/{id} (POSTVerifiedSendersResendId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1verified_senders~1resend~1{id}/post/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: POST /verified_senders/resend/{id} (POSTVerifiedSendersResendId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1verified_senders~1{id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /verified_senders/{id} (DELETEVerifiedSendersId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1verified_senders~1{id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /verified_senders/{id} (DELETEVerifiedSendersId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1whitelabel~1domains~1subuser/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /whitelabel/domains/subuser (DELETEWhitelabelDomainsSubuser) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1whitelabel~1domains~1subuser/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /whitelabel/domains/subuser (DELETEWhitelabelDomainsSubuser) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1whitelabel~1domains~1{domain_id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /whitelabel/domains/{domain_id} (DELETEWhitelabelDomainsDomainId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1whitelabel~1domains~1{domain_id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /whitelabel/domains/{domain_id} (DELETEWhitelabelDomainsDomainId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1whitelabel~1ips~1{id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /whitelabel/ips/{id} (DELETEWhitelabelIpsId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1whitelabel~1ips~1{id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /whitelabel/ips/{id} (DELETEWhitelabelIpsId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1whitelabel~1links~1subuser/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /whitelabel/links/subuser (DELETEWhitelabelLinksSubuser) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1whitelabel~1links~1subuser/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /whitelabel/links/subuser (DELETEWhitelabelLinksSubuser) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1whitelabel~1links~1{id}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /whitelabel/links/{id} (DELETEWhitelabelLinksId) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "sendgrid",
+      "sourceSha256": "80aaf7926007ffa486bf9d2d5d8b1337ec8a361d465a0f17dbe784258f8b2a1f",
+      "pointer": "#/paths/~1whitelabel~1links~1{id}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /whitelabel/links/{id} (DELETEWhitelabelLinksId) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "asana",
+      "sourceSha256": "40c1c94d476c897f707c2974a3aeedee1d0b8a6eab8b7654819c0effa0f8ffa6",
+      "pointer": "#/paths/~1teams~1{team_gid}~1removeUser/post/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: POST /teams/{team_gid}/removeUser (RemoveUserForTeam) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "asana",
+      "sourceSha256": "40c1c94d476c897f707c2974a3aeedee1d0b8a6eab8b7654819c0effa0f8ffa6",
+      "pointer": "#/paths/~1teams~1{team_gid}~1removeUser/post/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: POST /teams/{team_gid}/removeUser (RemoveUserForTeam) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "asana",
+      "sourceSha256": "40c1c94d476c897f707c2974a3aeedee1d0b8a6eab8b7654819c0effa0f8ffa6",
+      "pointer": "#/paths/~1workspaces~1{workspace_gid}~1removeUser/post/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: POST /workspaces/{workspace_gid}/removeUser (RemoveUserForWorkspace) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "asana",
+      "sourceSha256": "40c1c94d476c897f707c2974a3aeedee1d0b8a6eab8b7654819c0effa0f8ffa6",
+      "pointer": "#/paths/~1workspaces~1{workspace_gid}~1removeUser/post/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: POST /workspaces/{workspace_gid}/removeUser (RemoveUserForWorkspace) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1lock_settings/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /accounts/{accountId}/lock_settings (UpdateAccountLockSettings) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1lock_settings/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /accounts/{accountId}/lock_settings (UpdateAccountLockSettings) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1options/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /accounts/{accountId}/options (AccountOptionsUpdate) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1options/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /accounts/{accountId}/options (AccountOptionsUpdate) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1owner/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /accounts/{accountId}/owner (UpdateAccountOwner) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1owner/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /accounts/{accountId}/owner (UpdateAccountOwner) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1phone~1settings/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /accounts/{accountId}/phone/settings (UpdatePhoneSettings) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1phone~1settings/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /accounts/{accountId}/phone/settings (UpdatePhoneSettings) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1phone~1sip_trunk~1trunks~1{sipTrunkId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /accounts/{accountId}/phone/sip_trunk/trunks/{sipTrunkId} (UpdatePhoneSIPTrunk) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1phone~1sip_trunk~1trunks~1{sipTrunkId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /accounts/{accountId}/phone/sip_trunk/trunks/{sipTrunkId} (UpdatePhoneSIPTrunk) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1plans~1addons~1status/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /accounts/{accountId}/plans/addons/status (AccountPlanAddonCancel) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1plans~1addons~1status/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /accounts/{accountId}/plans/addons/status (AccountPlanAddonCancel) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1plans~1base~1status/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /accounts/{accountId}/plans/base/status (AccountPlanBaseDelete) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1plans~1base~1status/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /accounts/{accountId}/plans/base/status (AccountPlanBaseDelete) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1sip_trunk~1callout_countries~1{countryId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /accounts/{accountId}/sip_trunk/callout_countries/{countryId} (DeleteInternalCallOutCountry) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1sip_trunk~1callout_countries~1{countryId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /accounts/{accountId}/sip_trunk/callout_countries/{countryId} (DeleteInternalCallOutCountry) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1sip_trunk~1internal_numbers~1{numberId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /accounts/{accountId}/sip_trunk/internal_numbers/{numberId} (DeleteInternalNumber) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1sip_trunk~1internal_numbers~1{numberId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /accounts/{accountId}/sip_trunk/internal_numbers/{numberId} (DeleteInternalNumber) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1sip_trunk~1numbers/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /accounts/{accountId}/sip_trunk/numbers (DeleteAllSipNumbers) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1sip_trunk~1numbers/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /accounts/{accountId}/sip_trunk/numbers (DeleteAllSipNumbers) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1sip_trunk~1settings/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /accounts/{accountId}/sip_trunk/settings (AssignSIPConfig) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1sip_trunk~1settings/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /accounts/{accountId}/sip_trunk/settings (AssignSIPConfig) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1sip_trunk~1trunks~1{trunkId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /accounts/{accountId}/sip_trunk/trunks/{trunkId} (DeleteSIPTrunk) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1sip_trunk~1trunks~1{trunkId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /accounts/{accountId}/sip_trunk/trunks/{trunkId} (DeleteSIPTrunk) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1users~1{userId}~1account/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /accounts/{accountId}/users/{userId}/account (SwitchUserAccount) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1accounts~1{accountId}~1users~1{userId}~1account/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /accounts/{accountId}/users/{userId}/account (SwitchUserAccount) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1channels~1{channelId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /chat/channels/{channelId} (DeleteUserLevelChannel) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1channels~1{channelId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /chat/channels/{channelId} (DeleteUserLevelChannel) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1channels~1{channelId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /chat/channels/{channelId} (UpdateUserLevelChannel) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1channels~1{channelId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /chat/channels/{channelId} (UpdateUserLevelChannel) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1channels~1{channelId}~1members~1me/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /chat/channels/{channelId}/members/me (LeaveChannel) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1channels~1{channelId}~1members~1me/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /chat/channels/{channelId}/members/me (LeaveChannel) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1channels~1{channelId}~1members~1{memberId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /chat/channels/{channelId}/members/{memberId} (RemoveAUserLevelChannelMember) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1channels~1{channelId}~1members~1{memberId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /chat/channels/{channelId}/members/{memberId} (RemoveAUserLevelChannelMember) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1users~1{userId}~1channels~1{channelId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /chat/users/{userId}/channels/{channelId} (DeleteChannel) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1users~1{userId}~1channels~1{channelId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /chat/users/{userId}/channels/{channelId} (DeleteChannel) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1users~1{userId}~1channels~1{channelId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /chat/users/{userId}/channels/{channelId} (UpdateChannel) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1users~1{userId}~1channels~1{channelId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /chat/users/{userId}/channels/{channelId} (UpdateChannel) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1users~1{userId}~1channels~1{channelId}~1members~1{memberId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /chat/users/{userId}/channels/{channelId}/members/{memberId} (RemoveAChannelMember) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1chat~1users~1{userId}~1channels~1{channelId}~1members~1{memberId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /chat/users/{userId}/channels/{channelId}/members/{memberId} (RemoveAChannelMember) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1groups~1{groupId}~1lock_settings/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /groups/{groupId}/lock_settings (GroupLockedSettings) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1groups~1{groupId}~1lock_settings/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /groups/{groupId}/lock_settings (GroupLockedSettings) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1groups~1{groupId}~1members~1{memberId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /groups/{groupId}/members/{memberId} (UpdateAGroupMember) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1groups~1{groupId}~1members~1{memberId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /groups/{groupId}/members/{memberId} (UpdateAGroupMember) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1groups~1{groupId}~1settings/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /groups/{groupId}/settings (UpdateGroupSettings) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1groups~1{groupId}~1settings/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /groups/{groupId}/settings (UpdateGroupSettings) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1auto_receptionists~1{autoReceptionistId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /phone/auto_receptionists/{autoReceptionistId} (UpdateAutoReceptionist) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1auto_receptionists~1{autoReceptionistId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /phone/auto_receptionists/{autoReceptionistId} (UpdateAutoReceptionist) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1auto_receptionists~1{autoReceptionistId}~1phone_numbers/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/auto_receptionists/{autoReceptionistId}/phone_numbers (UnassignAllPhoneNumsAutoReceptionist) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1auto_receptionists~1{autoReceptionistId}~1phone_numbers/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/auto_receptionists/{autoReceptionistId}/phone_numbers (UnassignAllPhoneNumsAutoReceptionist) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1auto_receptionists~1{autoReceptionistId}~1phone_numbers/post/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: POST /phone/auto_receptionists/{autoReceptionistId}/phone_numbers (AssignPhoneNumbersAutoReceptionist) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1auto_receptionists~1{autoReceptionistId}~1phone_numbers/post/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: POST /phone/auto_receptionists/{autoReceptionistId}/phone_numbers (AssignPhoneNumbersAutoReceptionist) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1auto_receptionists~1{autoReceptionistId}~1phone_numbers~1{phoneNumberId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/auto_receptionists/{autoReceptionistId}/phone_numbers/{phoneNumberId} (UnassignAPhoneNumAutoReceptionist) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1auto_receptionists~1{autoReceptionistId}~1phone_numbers~1{phoneNumberId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/auto_receptionists/{autoReceptionistId}/phone_numbers/{phoneNumberId} (UnassignAPhoneNumAutoReceptionist) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1blocked_list~1{blockedListId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/blocked_list/{blockedListId} (DeleteABlockedList) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1blocked_list~1{blockedListId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/blocked_list/{blockedListId} (DeleteABlockedList) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1blocked_list~1{blockedListId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /phone/blocked_list/{blockedListId} (UpdateBlockedList) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1blocked_list~1{blockedListId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /phone/blocked_list/{blockedListId} (UpdateBlockedList) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/call_queues/{callQueueId} (DeleteACallQueue) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/call_queues/{callQueueId} (DeleteACallQueue) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /phone/call_queues/{callQueueId} (UpdateCallQueue) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /phone/call_queues/{callQueueId} (UpdateCallQueue) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1manager/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /phone/call_queues/{callQueueId}/manager (ChangeCallQueueManager) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1manager/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /phone/call_queues/{callQueueId}/manager (ChangeCallQueueManager) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1members/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/call_queues/{callQueueId}/members (UnassignAllMembers) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1members/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/call_queues/{callQueueId}/members (UnassignAllMembers) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1members~1{memberId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/call_queues/{callQueueId}/members/{memberId} (UnassignMemberFromCallQueue) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1members~1{memberId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/call_queues/{callQueueId}/members/{memberId} (UnassignMemberFromCallQueue) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1phone_numbers/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/call_queues/{callQueueId}/phone_numbers (UnassignAPhoneNumCallQueue) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1phone_numbers/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/call_queues/{callQueueId}/phone_numbers (UnassignAPhoneNumCallQueue) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1phone_numbers/post/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: POST /phone/call_queues/{callQueueId}/phone_numbers (AssignPhoneToCallQueue) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1phone_numbers/post/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: POST /phone/call_queues/{callQueueId}/phone_numbers (AssignPhoneToCallQueue) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1phone_numbers~1{phoneNumberId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/call_queues/{callQueueId}/phone_numbers/{phoneNumberId} (UnAssignPhoneNumCallQueue) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1call_queues~1{callQueueId}~1phone_numbers~1{phoneNumberId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/call_queues/{callQueueId}/phone_numbers/{phoneNumberId} (UnAssignPhoneNumCallQueue) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1common_area_phones~1{commonAreaPhoneId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/common_area_phones/{commonAreaPhoneId} (DeleteCommonAreaPhone) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1common_area_phones~1{commonAreaPhoneId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/common_area_phones/{commonAreaPhoneId} (DeleteCommonAreaPhone) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1common_area_phones~1{commonAreaPhoneId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /phone/common_area_phones/{commonAreaPhoneId} (UpdateCommonAreaPhone) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1common_area_phones~1{commonAreaPhoneId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /phone/common_area_phones/{commonAreaPhoneId} (UpdateCommonAreaPhone) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1company_number/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /phone/company_number (ChangeMainCompanyNumber) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1company_number/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /phone/company_number (ChangeMainCompanyNumber) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1devices~1{deviceId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/devices/{deviceId} (DeleteADevice) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1devices~1{deviceId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/devices/{deviceId} (DeleteADevice) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1devices~1{deviceId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /phone/devices/{deviceId} (UpdateADevice) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1devices~1{deviceId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /phone/devices/{deviceId} (UpdateADevice) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1numbers~1{numberId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /phone/numbers/{numberId} (UpdatePhoneNumberDetails) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1numbers~1{numberId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /phone/numbers/{numberId} (UpdatePhoneNumberDetails) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1setting_templates~1{templateId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /phone/setting_templates/{templateId} (UpdateSettingTemplate) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1setting_templates~1{templateId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /phone/setting_templates/{templateId} (UpdateSettingTemplate) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1shared_line_groups~1{sharedLineGroupId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/shared_line_groups/{sharedLineGroupId} (DeleteASharedLineGroup) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1shared_line_groups~1{sharedLineGroupId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/shared_line_groups/{sharedLineGroupId} (DeleteASharedLineGroup) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1shared_line_groups~1{sharedLineGroupId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /phone/shared_line_groups/{sharedLineGroupId} (UpdateASharedLineGroup) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1shared_line_groups~1{sharedLineGroupId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /phone/shared_line_groups/{sharedLineGroupId} (UpdateASharedLineGroup) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1shared_line_groups~1{sharedLineGroupId}~1members/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/shared_line_groups/{sharedLineGroupId}/members (DeleteMembersOfSLG) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1shared_line_groups~1{sharedLineGroupId}~1members/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/shared_line_groups/{sharedLineGroupId}/members (DeleteMembersOfSLG) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1sites/post/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: POST /phone/sites (CreatePhoneSite) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1sites/post/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: POST /phone/sites (CreatePhoneSite) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1sites~1{siteId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/sites/{siteId} (DeletePhoneSite) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1sites~1{siteId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/sites/{siteId} (DeletePhoneSite) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1sites~1{siteId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /phone/sites/{siteId} (UpdateSiteDetails) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1sites~1{siteId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /phone/sites/{siteId} (UpdateSiteDetails) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /phone/users/{userId} (UpdateUserProfile) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /phone/users/{userId} (UpdateUserProfile) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}~1call_logs~1{callLogId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/users/{userId}/call_logs/{callLogId} (DeleteCallLog) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}~1call_logs~1{callLogId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/users/{userId}/call_logs/{callLogId} (DeleteCallLog) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}~1calling_plans~1{type}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/users/{userId}/calling_plans/{type} (UnassignCallingPlan) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}~1calling_plans~1{type}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/users/{userId}/calling_plans/{type} (UnassignCallingPlan) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}~1phone_numbers~1{phoneNumberId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/users/{userId}/phone_numbers/{phoneNumberId} (UnassignPhoneNumber) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}~1phone_numbers~1{phoneNumberId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/users/{userId}/phone_numbers/{phoneNumberId} (UnassignPhoneNumber) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}~1settings~1{settingType}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/users/{userId}/settings/{settingType} (DeleteUserSetting) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}~1settings~1{settingType}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/users/{userId}/settings/{settingType} (DeleteUserSetting) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}~1settings~1{settingType}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /phone/users/{userId}/settings/{settingType} (UpdateUserSetting) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1users~1{userId}~1settings~1{settingType}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /phone/users/{userId}/settings/{settingType} (UpdateUserSetting) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1voice_mails~1{voicemailId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /phone/voice_mails/{voicemailId} (DeleteVoicemail) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1phone~1voice_mails~1{voicemailId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /phone/voice_mails/{voicemailId} (DeleteVoicemail) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1roles~1{roleId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /roles/{roleId} (DeleteRole) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1roles~1{roleId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /roles/{roleId} (DeleteRole) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1account_profile/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /rooms/account_profile (UpdateZRAccProfile) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1account_profile/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /rooms/account_profile (UpdateZRAccProfile) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1account_settings/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /rooms/account_settings (UpdateZoomRoomAccSettings) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1account_settings/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /rooms/account_settings (UpdateZoomRoomAccSettings) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1locations~1structure/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /rooms/locations/structure (UpdateZoomRoomsLocationStructure) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1locations~1structure/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /rooms/locations/structure (UpdateZoomRoomsLocationStructure) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1locations~1{locationId}~1location/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /rooms/locations/{locationId}/location (ChangeParentLocation) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1locations~1{locationId}~1location/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /rooms/locations/{locationId}/location (ChangeParentLocation) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1locations~1{locationId}~1settings/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /rooms/locations/{locationId}/settings (UpdateZRLocationSettings) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1locations~1{locationId}~1settings/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /rooms/locations/{locationId}/settings (UpdateZRLocationSettings) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1{roomId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /rooms/{roomId} (DeleteAZoomRoom) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1{roomId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /rooms/{roomId} (DeleteAZoomRoom) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1{roomId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /rooms/{roomId} (UpdateRoomProfile) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1{roomId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /rooms/{roomId} (UpdateRoomProfile) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1{roomId}~1devices~1{deviceId}~1app_version/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /rooms/{roomId}/devices/{deviceId}/app_version (ChangeZoomRoomsAppVersion) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1{roomId}~1devices~1{deviceId}~1app_version/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /rooms/{roomId}/devices/{deviceId}/app_version (ChangeZoomRoomsAppVersion) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1{roomId}~1location/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /rooms/{roomId}/location (ChangeZRLocation) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1{roomId}~1location/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /rooms/{roomId}/location (ChangeZRLocation) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1{roomId}~1settings/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /rooms/{roomId}/settings (UpdateZRSettings) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1rooms~1{roomId}~1settings/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /rooms/{roomId}/settings (UpdateZRSettings) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1sip_phones~1{phoneId}/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /sip_phones/{phoneId} (DeleteSIPPhone) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1sip_phones~1{phoneId}/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /sip_phones/{phoneId} (DeleteSIPPhone) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1sip_phones~1{phoneId}/patch/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PATCH /sip_phones/{phoneId} (UpdateSIPPhone) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1sip_phones~1{phoneId}/patch/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PATCH /sip_phones/{phoneId} (UpdateSIPPhone) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1users~1{userId}~1presence_status/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /users/{userId}/presence_status (UpdatePresenceStatus) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1users~1{userId}~1presence_status/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /users/{userId}/presence_status (UpdatePresenceStatus) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1users~1{userId}~1schedulers/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /users/{userId}/schedulers (UserSchedulersDelete) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1users~1{userId}~1schedulers/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /users/{userId}/schedulers (UserSchedulersDelete) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1users~1{userId}~1status/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /users/{userId}/status (UserStatus) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "zoom",
+      "sourceSha256": "cdfd27047bb0e4f7038135605d9aa4e72eeb17d86f2195b5f92f09f76191ce18",
+      "pointer": "#/paths/~1users~1{userId}~1status/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /users/{userId}/status (UserStatus) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
       "cardinality": 1
     }
   ],

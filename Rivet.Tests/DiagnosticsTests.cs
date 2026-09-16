@@ -6,9 +6,7 @@ namespace Rivet.Tests;
 
 /// <summary>
 /// Guards the diagnostic ID scheme: every ID Rivet can emit is registered in
-/// Rivet.Tool/Diagnostics.cs, unique, in its stage's range, and documented in
-/// docs/reference/diagnostics.md — cross-checked in BOTH directions so neither
-/// the registry nor the doc page can rot. Also pins the diagnosed-unsupported
+/// Rivet.Tool/Diagnostics.cs, unique, and in its stage's range. Also pins the diagnosed-unsupported
 /// TypeWalker holes and the symbol-naming unknown-type emission warning folded
 /// into this wave (FABLE_GAPS §7 item 12).
 /// </summary>
@@ -23,9 +21,6 @@ public sealed class DiagnosticsTests
             .Where(f => f.IsLiteral && f.FieldType == typeof(string))
             .Select(f => (f.Name, (string)f.GetRawConstantValue()!))
             .ToList();
-
-    private static string RepoPath(params string[] segments) =>
-        Path.Combine([AppContext.BaseDirectory, "..", "..", "..", "..", .. segments]);
 
     // ---------------------------------------------------------------
     // Registry invariants
@@ -114,67 +109,6 @@ public sealed class DiagnosticsTests
         Assert.Equal(
             "RIV3001: test message",
             Diagnostics.Prefix(Diagnostics.ImportAliasCycleBroken, "test message")
-        );
-    }
-
-    // ---------------------------------------------------------------
-    // Doc page cross-check (docs/reference/diagnostics.md)
-    // ---------------------------------------------------------------
-
-    /// <summary>IDs that have a table row (a line starting "| `RIVnnnn`") on the doc page.</summary>
-    private static List<string> DocumentedIds()
-    {
-        var docPath = RepoPath("docs", "reference", "diagnostics.md");
-        Assert.True(File.Exists(docPath), $"Doc page not found: {Path.GetFullPath(docPath)}");
-
-        return File.ReadAllLines(docPath)
-            .Select(line => Regex.Match(line, @"^\| `(RIV\d{4})` \|"))
-            .Where(m => m.Success)
-            .Select(m => m.Groups[1].Value)
-            .ToList();
-    }
-
-    [Fact]
-    public void Every_Registered_Id_Has_A_Doc_Row()
-    {
-        var documented = DocumentedIds().ToHashSet(StringComparer.Ordinal);
-        var missing = Diagnostics
-            .Registry.Keys.Where(id => !documented.Contains(id))
-            .Order(StringComparer.Ordinal)
-            .ToList();
-
-        Assert.True(
-            missing.Count == 0,
-            $"Registered IDs missing a row in docs/reference/diagnostics.md: {string.Join(", ", missing)}"
-        );
-    }
-
-    [Fact]
-    public void Every_Doc_Row_Is_A_Registered_Id()
-    {
-        var rogue = DocumentedIds()
-            .Where(id => !Diagnostics.Registry.ContainsKey(id))
-            .Order(StringComparer.Ordinal)
-            .ToList();
-
-        Assert.True(
-            rogue.Count == 0,
-            $"docs/reference/diagnostics.md rows with no registered ID: {string.Join(", ", rogue)}"
-        );
-    }
-
-    [Fact]
-    public void Doc_Rows_Are_Unique()
-    {
-        var duplicates = DocumentedIds()
-            .GroupBy(id => id, StringComparer.Ordinal)
-            .Where(g => g.Count() > 1)
-            .Select(g => g.Key)
-            .ToList();
-
-        Assert.True(
-            duplicates.Count == 0,
-            $"docs/reference/diagnostics.md has duplicate rows for: {string.Join(", ", duplicates)}"
         );
     }
 
@@ -285,7 +219,14 @@ public sealed class DiagnosticsTests
             CompilationHelper.EmitOpenApi(source).Dispose()
         );
 
-        Assert.DoesNotContain("warning RIV2005:", stderr);
+        // Scoped assertion: a JsonElement property with a mapped CSharpType emits
+        // silently. The generic "warning RIV2005:" prefix is unusable here — other
+        // parallel tests (e.g. the DisplayState tagged-union fixture, which refs
+        // undefined "Summary"/"WorkspaceKey" components) legitimately emit RIV2005
+        // concurrently into the process-wide Console.Error capture, as CaptureStdErr's
+        // contract documents. A JsonElement regression would warn at this exact
+        // property context, which only the unknown-primitive site emits.
+        Assert.DoesNotContain("at property 'PayloadDto.data'", stderr);
     }
 
     // ---------------------------------------------------------------

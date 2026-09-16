@@ -90,6 +90,22 @@ public static class EndpointWalker
 
         var parameters = ExtractParams(wkt, method, typeWalker, fullRoute);
         var responses = ExtractAllResponseTypes(wkt, method, typeWalker).ToList();
+        var isVoidAction = IsVoidAction(wkt, method);
+        if (responses.Count == 0)
+        {
+            // The annotation frontend owns its success default: MVC actually sends
+            // 200 OK for non-void actions and 204 No Content for void actions —
+            // regardless of the HTTP method. This is a host-truthful synthesis at
+            // the extraction frontend, not a shared method-based default; explicit
+            // [ProducesResponseType] metadata (responses.Count > 0) always wins.
+            var defaultType = isVoidAction ? null : ExtractReturnType(wkt, method, typeWalker);
+            responses.Add(
+                isVoidAction
+                    ? new TsResponseType(204, null, "No Content")
+                    : new TsResponseType(200, defaultType)
+            );
+        }
+
         var successResponse = responses.FirstOrDefault(response =>
             response.StatusCode is >= 200 and < 300
         );
@@ -105,6 +121,11 @@ public static class EndpointWalker
         );
         var name = Naming.ToCamelCase(method.Name);
         var controllerName = DeriveControllerFileName(method.ContainingType);
+        var responseContentTypeOverride = ResolveResponseContentType(
+            wkt,
+            method,
+            successResponse?.DataType
+        );
 
         return new TsEndpointDefinition(
             name,
@@ -115,8 +136,94 @@ public static class EndpointWalker
             controllerName,
             responses,
             IsFormEncoded: isFormEncoded,
-            RequestExamples: requestExamples
+            RequestExamples: requestExamples,
+            ResponseContentTypeOverride: responseContentTypeOverride
         );
+    }
+
+    /// <summary>
+    /// True when the method's signature declares no result: void, Task or ValueTask
+    /// (non-generic). Signature-based by design — a non-void action whose type maps
+    /// to nothing (IActionResult, Task&lt;IActionResult&gt;) is NOT void; the host can
+    /// absolutely return bodies there, so it synthesizes the 200 default.
+    /// </summary>
+    internal static bool IsVoidAction(WellKnownTypes wkt, IMethodSymbol method)
+    {
+        UnwrapTask(wkt, method.ReturnType, out var isVoidTask);
+        return isVoidTask;
+    }
+
+    /// <summary>
+    /// Resolves the success response's media type from statically-knowable MVC
+    /// metadata: an explicit [Produces] content type (action or controller) wins;
+    /// otherwise a plain string action carries MVC's text/plain formatter default;
+    /// otherwise null leaves the application/json default in the emitter.
+    /// </summary>
+    internal static string? ResolveResponseContentType(
+        WellKnownTypes wkt,
+        IMethodSymbol method,
+        TsType? successDataType
+    )
+    {
+        var declared = ExtractProducesContentType(wkt, method);
+        if (declared is not null)
+        {
+            return declared;
+        }
+
+        // MVC's string-formatting serializer writes plain string actions as
+        // text/plain (matching EndpointRuntime's non-JSON-requires-string rule).
+        // Only a truly plain string (no format, no CSharpType marker) qualifies —
+        // byte[] (base64 string) is JSON.
+        return
+            successDataType is TsType.Primitive { Name: "string", Format: null, CSharpType: null }
+            ? "text/plain"
+            : null;
+    }
+
+    /// <summary>
+    /// Reads the first content type declared via [Produces] on the action, falling
+    /// back to the controller. Returns null when MVC metadata declares none.
+    /// </summary>
+    private static string? ExtractProducesContentType(WellKnownTypes wkt, IMethodSymbol method)
+    {
+        if (wkt.Produces is null)
+        {
+            return null;
+        }
+
+        foreach (var attr in method.GetAttributes().Concat(method.ContainingType.GetAttributes()))
+        {
+            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.Produces))
+            {
+                continue;
+            }
+
+            // ProducesAttribute's constructor is (string contentType,
+            // params string[] additionalContentTypes), so even a single
+            // [Produces("x")] carries two arguments (string + empty array).
+            // Read the first declared content type across every argument:
+            // the string positionals first, then any additional array values.
+            foreach (var value in attr.ConstructorArguments)
+            {
+                if (value.Kind == TypedConstantKind.Array)
+                {
+                    foreach (var item in value.Values)
+                    {
+                        if (item.Value is string arrayContentType && arrayContentType.Length > 0)
+                        {
+                            return arrayContentType;
+                        }
+                    }
+                }
+                else if (value.Value is string contentType && contentType.Length > 0)
+                {
+                    return contentType;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static IReadOnlyList<TsEndpointExample>? ExtractRequestExamples(
@@ -470,6 +577,12 @@ public static class EndpointWalker
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var parameters = new List<TsEndpointParam>();
+        // MVC rejects multiple body-bound parameters on one action; extraction must
+        // not confidently emit a body surface MVC cannot execute
+        // (planner-constraint:multi-body-diagnostic-production). Any Body-classified
+        // source occupies the single body slot — explicit [FromBody]/[FromForm] body
+        // as well as the inferred complex type.
+        var bodySeen = false;
 
         // Pre-scan: if any parameter is IFormFile (or a collection of IFormFile,
         // FABLE_GAPS §7 item 12), non-route/non-file params become FormField
@@ -513,12 +626,14 @@ public static class EndpointWalker
                     continue;
                 }
 
-                // In mixed upload methods, unclassified params are form fields
+                // In mixed upload methods, unclassified params are form fields.
+                // FromForm(Name=) / plain form-field wire names must match the actual
+                // request field (planner-constraint:fromform-name-binding).
                 if (hasFileParam)
                 {
                     parameters.Add(
                         new TsEndpointParam(
-                            param.Name,
+                            GetBindingName(param, FormFieldSources(wkt)) ?? param.Name,
                             typeWalker.MapType(param.Type),
                             ParamSource.FormField,
                             IsOptional: param.HasExplicitDefaultValue
@@ -526,6 +641,42 @@ public static class EndpointWalker
                     );
                 }
 
+                continue;
+            }
+
+            // A [FromForm] scalar beside an IFormFile belongs to the multipart form —
+            // MVC never binds it as a second JSON body. Its Name= (or parameter name)
+            // is the form-field key (planner-constraint:fromform-name-binding).
+            if (hasFileParam && source == ParamSource.Body && HasAttribute(param, wkt.FromForm))
+            {
+                parameters.Add(
+                    new TsEndpointParam(
+                        GetBindingName(param, FormFieldSources(wkt)) ?? param.Name,
+                        typeWalker.MapType(param.Type),
+                        ParamSource.FormField,
+                        IsOptional: param.HasExplicitDefaultValue
+                    )
+                );
+                continue;
+            }
+
+            // Without an explicit attribute, an unattributed scalar beside an IFormFile
+            // binds from the multipart form — MVC's inference for non-IFormFile params
+            // in a multipart action is form data, not the query string. An explicit
+            // [FromQuery] keeps its query binding (explicit attributes take precedence);
+            // reclassified fields keep the FormFieldSources Name= path
+            // (planner-constraint:mixed-upload-explicit-query-precedence,
+            // planner-constraint:mixed-upload-formfield-ordering).
+            if (hasFileParam && source == ParamSource.Query && !HasAttribute(param, wkt.FromQuery))
+            {
+                parameters.Add(
+                    new TsEndpointParam(
+                        GetBindingName(param, FormFieldSources(wkt)) ?? param.Name,
+                        typeWalker.MapType(param.Type),
+                        ParamSource.FormField,
+                        IsOptional: param.HasExplicitDefaultValue
+                    )
+                );
                 continue;
             }
 
@@ -537,18 +688,83 @@ public static class EndpointWalker
                         ? new TsType.Array(new TsType.Primitive("File"))
                         : (TsType)new TsType.Primitive("File")
                     : typeWalker.MapType(param.Type);
-            // E8: a C# default value makes the param optional on the wire
+            // E8: a C# default value makes the param optional on the wire.
+            // FromQuery(Name=)/FromRoute(Name=)/FromForm(Name=) rename the wire surface
+            // to match the actual request key / route placeholder (IModelNameProvider).
+            var wireName = GetBindingName(param, WireNamedSources(wkt)) ?? param.Name;
+            // A second Body-classified parameter cannot share the single body slot:
+            // report it (RIV1100) and exclude it rather than silently emitting a
+            // contract MVC itself would reject at startup.
+            if (bodySeen && source == ParamSource.Body)
+            {
+                WarnUnresolvedBinding(param, "a second request body");
+                continue;
+            }
             parameters.Add(
                 new TsEndpointParam(
-                    param.Name,
+                    wireName,
                     tsType,
                     source.Value,
                     IsOptional: param.HasExplicitDefaultValue
                 )
             );
+            if (source == ParamSource.Body)
+            {
+                bodySeen = true;
+            }
         }
 
         return parameters;
+    }
+
+    /// <summary>
+    /// Binding sources whose attribute exposes a Name (IModelNameProvider semantics):
+    /// FromQuery, FromRoute, FromForm and FromHeader all carry a wire-name override.
+    /// </summary>
+    private static IReadOnlyList<INamedTypeSymbol?> WireNamedSources(WellKnownTypes wkt) =>
+        [wkt.FromQuery, wkt.FromRoute, wkt.FromForm, wkt.FromHeader];
+
+    /// <summary>
+    /// Sources eligible for the mixed-upload FormField branch: only [FromForm] names a
+    /// form field explicitly; the others never apply to a form field.
+    /// </summary>
+    private static IReadOnlyList<INamedTypeSymbol?> FormFieldSources(WellKnownTypes wkt) =>
+        [wkt.FromForm];
+
+    /// <summary>
+    /// The Name= named argument on a binding attribute (FromQuery/FromRoute/FromForm/
+    /// FromHeader), or null. Route names additionally must agree with the route
+    /// template — an explicit name wins because MVC binds route data by it.
+    /// </summary>
+    private static string? GetBindingName(
+        IParameterSymbol param,
+        IReadOnlyList<INamedTypeSymbol?> sources
+    )
+    {
+        foreach (var attr in param.GetAttributes())
+        {
+            var attrClass = attr.AttributeClass;
+            if (attrClass is null)
+            {
+                continue;
+            }
+
+            foreach (var source in sources)
+            {
+                if (source is null || !SymbolEqualityComparer.Default.Equals(attrClass, source))
+                {
+                    continue;
+                }
+
+                var named = attr.NamedArguments.FirstOrDefault(kv => kv.Key == "Name");
+                if (named.Value.Value is string name && !string.IsNullOrEmpty(name))
+                {
+                    return name;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static bool HasAttribute(IParameterSymbol param, INamedTypeSymbol? attributeType) =>
@@ -635,7 +851,105 @@ public static class EndpointWalker
             return ParamSource.Route;
         }
 
+        // MVC default inference (planner-constraint:mvc-default-inference-boundary):
+        // the boundary is pinned to observed real binding in the MVC host fixture —
+        // scalar/simple types bind to Query, declared complex types bind to the JSON
+        // body. Host plumbing and anything unsupported by static host metadata must
+        // never be confidently invented into a source.
+        if (IsHostPlumbingType(param.Type))
+        {
+            WarnUnresolvedBinding(param, "host plumbing type");
+            return null;
+        }
+
+        if (typeWalker.IsScalarQueryType(param.Type))
+        {
+            return ParamSource.Query;
+        }
+
+        if (IsComplexBodyCandidate(param.Type))
+        {
+            return ParamSource.Body;
+        }
+
+        // Unresolvable from static host metadata — report loudly, exclude the input.
+        WarnUnresolvedBinding(param, "no supported binding source");
         return null;
+    }
+
+    /// <summary>
+    /// Types whose MVC binding cannot be established from supported static host
+    /// metadata: interfaces (DI services without [FromServices]) and the known host
+    /// plumbing classes (HttpContext/HttpRequest/HttpResponse/ClaimsPrincipal-like).
+    /// These are deliberately NOT invented into a Query or Body source.
+    /// </summary>
+    private static bool IsHostPlumbingType(ITypeSymbol type)
+    {
+        if (type.TypeKind is TypeKind.Interface or TypeKind.TypeParameter)
+        {
+            return true;
+        }
+
+        var name = type.Name;
+        var ns = type.ContainingNamespace?.ToDisplayString();
+        if (ns is null)
+        {
+            return false;
+        }
+
+        // HttpContext and friends (Microsoft.AspNetCore.*), ClaimsPrincipal, and
+        // service-provider plumbing are runtime host state, not user input.
+        if (ns.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal))
+        {
+            return name
+                is "HttpContext"
+                    or "HttpRequest"
+                    or "HttpResponse"
+                    or "ClaimsPrincipal"
+                    or "ClaimsIdentity"
+                    or "RouteData"
+                    or "ActionContext"
+                    or "ActionExecutingContext"
+                    or "ControllerBase"
+                    or "Controller";
+        }
+
+        if (ns is "Microsoft.Extensions.DependencyInjection" or "System.ServiceModel")
+        {
+            return name is "IServiceProvider" or "ServiceProvider" or "ServiceContainer";
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// A declared complex type binds to the request body under MVC's default inference.
+    /// Everything that is not a scalar/collection-of-scalar and not host plumbing is a
+    /// candidate — including unattributed class/record/struct DTOs.
+    /// </summary>
+    private static bool IsComplexBodyCandidate(ITypeSymbol type)
+    {
+        return type switch
+        {
+            IArrayTypeSymbol => false,
+            INamedTypeSymbol named when named.TypeKind is TypeKind.Struct or TypeKind.Class => true,
+            _ => false,
+        };
+    }
+
+    private static void WarnUnresolvedBinding(IParameterSymbol param, string cause)
+    {
+        var endpoint = param.ContainingSymbol is IMethodSymbol method
+            ? method.Name
+            : param.ContainingSymbol?.Name ?? "<unknown>";
+        var controller = param.ContainingSymbol?.ContainingType?.Name ?? "<unknown>";
+        Diagnostics.Warn(
+            Diagnostics.UnresolvedBindingSource,
+            $"parameter '{param.Name}' of type '{param.Type.ToDisplayString()}' on endpoint "
+                + $"'{controller}.{endpoint}' has {cause} — the input cannot be bound from static host "
+                + "metadata and is EXCLUDED from the contract. Add an explicit binding "
+                + "([FromQuery]/[FromBody]/[FromRoute]/[FromHeader]) or [FromServices] for DI plumbing."
+        );
     }
 
     /// <summary>
@@ -925,9 +1239,17 @@ public static class EndpointWalker
                 continue;
             }
 
-            var tsType = parsed.Value.Type is not null
-                ? typeWalker.MapType(parsed.Value.Type)
-                : null;
+            // typeof(void) as a declared response type means "no body": System.Text.Json
+            // never serializes a void payload, so mapping it to a schema would advertise
+            // a body the host cannot send (a false declaration on 204/205/304 and on
+            // no-body 2xx alike). Keep the response, drop the DataType.
+            var isVoidResponse =
+                parsed.Value.Type is INamedTypeSymbol voidType
+                && voidType.SpecialType == SpecialType.System_Void;
+            var tsType =
+                parsed.Value.Type is not null && !isVoidResponse
+                    ? typeWalker.MapType(parsed.Value.Type)
+                    : null;
             responses.Add(new TsResponseType(statusCode, tsType));
         }
 

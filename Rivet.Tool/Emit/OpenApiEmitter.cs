@@ -691,6 +691,11 @@ public static class OpenApiEmitter
     {
         var paths = new Dictionary<string, object>();
 
+        // Order-independent operationId allocation: unique endpoint names keep the
+        // baseline {Controller}_{Name}; a colliding name group gets a deterministic
+        // route-derived disambiguator on ALL of its members.
+        var operationIds = AssignOperationIds(endpoints);
+
         foreach (var ep in endpoints)
         {
             var pathKey = ep.RouteTemplate;
@@ -705,13 +710,40 @@ public static class OpenApiEmitter
             var methodKey = ep.HttpMethod.ToLowerInvariant();
             if (pathItem.ContainsKey(methodKey))
             {
+                // Defense in depth: the merger collapses equivalent declarations and
+                // fails contradictory ones, but a direct emit call (e.g. --from contract
+                // JSON, or a caller bypassing Merge) can still deliver two incompatible
+                // operations for one path item. Fail BEFORE any output is written
+                // instead of lossy last-wins overwrite.
+                var existingEndpoint = endpoints.FirstOrDefault(candidate =>
+                    string.Equals(candidate.RouteTemplate, pathKey, StringComparison.Ordinal)
+                    && string.Equals(
+                        candidate.HttpMethod.ToLowerInvariant(),
+                        methodKey,
+                        StringComparison.Ordinal
+                    )
+                    && !ReferenceEquals(candidate, ep)
+                );
+                if (
+                    existingEndpoint is not null
+                    && !EndpointMerger.EndpointSurfaceEquivalent(existingEndpoint, ep)
+                )
+                {
+                    throw new OpenApiEmissionException(
+                        $"error {Diagnostics.ConflictingOperations}: transport identity {ep.HttpMethod.ToUpperInvariant()} {TransportIdentity.NormalizeRoute(pathKey)} is declared by two incompatible operations: "
+                            + $"'{existingEndpoint.ControllerName}.{existingEndpoint.Name}' and '{ep.ControllerName}.{ep.Name}'. "
+                            + "Resolve the contradiction at the source — first-wins/last-wins cannot resolve conflicting declarations."
+                    );
+                }
+
                 Diagnostics.Warn(
                     Diagnostics.DuplicateEndpoint,
-                    $"duplicate endpoint {ep.HttpMethod} {pathKey} — later definition wins"
+                    $"duplicate endpoint {ep.HttpMethod} {pathKey} — an equivalent representative is emitted"
                 );
             }
             var operation = BuildOperation(
                 ep,
+                operationIds,
                 definitions,
                 requestBodyComponentIds,
                 parameterComponentIds,
@@ -723,8 +755,68 @@ public static class OpenApiEmitter
         return paths;
     }
 
+    /// <summary>
+    /// Assigns one operationId per endpoint. Endpoint names that appear only once in
+    /// the output set keep the baseline <c>{Controller}_{Name}</c>; every member of a
+    /// colliding name group is disambiguated with a deterministic, order-independent
+    /// route-derived suffix so overloaded actions (Get() at /items, Get(id) at
+    /// /items/{id}) and cross-frontend same-name operations stay distinct. Imported
+    /// operations with their own provenance operationId are not touched.
+    /// </summary>
+    private static IReadOnlyDictionary<TsEndpointDefinition, string> AssignOperationIds(
+        IReadOnlyList<TsEndpointDefinition> endpoints
+    )
+    {
+        var result = new Dictionary<TsEndpointDefinition, string>();
+        var nameGroups = endpoints
+            .GroupBy<TsEndpointDefinition, (string ControllerName, string Name)>(ep =>
+                (ep.ControllerName, ep.Name)
+            )
+            .ToList();
+
+        foreach (var group in nameGroups)
+        {
+            if (group.Count() == 1)
+            {
+                result[group.First()] = $"{group.Key.ControllerName}_{group.Key.Name}";
+                continue;
+            }
+
+            foreach (var ep in group)
+            {
+                var disambiguator = RouteDisambiguator(
+                    TransportIdentity.NormalizeRoute(ep.RouteTemplate)
+                );
+                result[ep] = $"{ep.ControllerName}_{ep.Name}_{disambiguator}";
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Deterministic, order-independent route disambiguator: path segments joined
+    /// with underscores, parameter tokens reduced to their bare names so constraints
+    /// and casing drift do not change the id ({Id:guid} → id).
+    /// </summary>
+    private static string RouteDisambiguator(string normalizedRoute)
+    {
+        var segments = normalizedRoute
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(segment =>
+                segment.Length > 1 && segment.StartsWith('{') && segment.EndsWith('}')
+                    ? segment[1..^1]
+                    : segment
+            )
+            .ToList();
+
+        var joined = string.Join("_", segments);
+        return joined.Length == 0 ? "root" : joined;
+    }
+
     private static Dictionary<string, object> BuildOperation(
         TsEndpointDefinition ep,
+        IReadOnlyDictionary<TsEndpointDefinition, string> operationIds,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlySet<string> requestBodyComponentIds,
         IReadOnlySet<string> parameterComponentIds,
@@ -765,7 +857,7 @@ public static class OpenApiEmitter
         }
         else
         {
-            operation["operationId"] = $"{ep.ControllerName}_{ep.Name}";
+            operation["operationId"] = operationIds[ep];
             operation["tags"] = new List<string> { UpperFirst(ep.ControllerName) };
         }
 
@@ -1131,6 +1223,34 @@ public static class OpenApiEmitter
         {
             var respObj = new Dictionary<string, object>();
 
+            // RIV1102 defense in depth: HTTP forbids a message body on 1xx/204/205/304.
+            // Authored examples or contents there could never reach the wire, so
+            // emission aborts before any output is written (mirrors the RIV2012
+            // path: typed exception → EmitPipeline catch → exit 1). The parse-side
+            // guard in ResponseStatusValidation runs on every frontend; this re-check
+            // catches any path that assembled content without passing through it.
+            // captures any path that assembled content without passing through it.
+            // A bare DataType on a body-forbidden status is the synthesized
+            // status-preservation artifact (e.g. a .Status(204) override with
+            // TOutput in scope); it is not authored content, so it emits
+            // description-only bodyless instead of fabricating JSON the host
+            // could never send.
+            var bodyForbidden = ResponseStatusValidation.IsBodyForbiddenStatusKey(
+                resp.EffectiveStatusKey
+            );
+            if (
+                bodyForbidden
+                && (resp.Examples is { Count: > 0 } || resp.Contents is { Count: > 0 })
+            )
+            {
+                throw new OpenApiEmissionException(
+                    $"error {Diagnostics.BodyForbiddenStatusExample}: endpoint '{ep.ControllerName}.{ep.Name}' "
+                        + $"authors response content on body-forbidden status {resp.EffectiveStatusKey} — "
+                        + "HTTP forbids a message body on 1xx/204/205/304, so the authored example/content "
+                        + "could never reach the wire; move it to a status that allows a body or remove it"
+                );
+            }
+
             respObj["description"] =
                 resp.Description
                 ?? (resp.StatusCode == 0 ? "Response" : DefaultStatusDescription(resp.StatusCode));
@@ -1242,7 +1362,7 @@ public static class OpenApiEmitter
 
                 respObj["content"] = WithExamples(content, resp.Examples);
             }
-            else if (resp.DataType is not null)
+            else if (resp.DataType is not null && !bodyForbidden)
             {
                 // .ProducesContentType() overrides the SUCCESS response's media
                 // type only — declared error responses stay application/json.
@@ -1719,8 +1839,13 @@ public static class OpenApiEmitter
             return false;
         }
 
+        // Route-filtered lowering is request surface: a response-only property
+        // (serialized but never deserializable — derived readOnly, or an explicit
+        // [RivetReadOnly]) cannot appear in a request body; route-bound properties
+        // are excluded as before (they are bound by the route, not the JSON body)
+        // (planner-constraint:component-schema-directionality).
         bodyProperties = sourceProperties
-            .Where(prop => !matchedBodyNames.Contains(prop.Name))
+            .Where(prop => !matchedBodyNames.Contains(prop.Name) && !prop.IsReadOnly)
             .ToList();
         return bodyProperties.Count != sourceProperties.Count;
     }
@@ -2242,7 +2367,19 @@ public static class OpenApiEmitter
 
         foreach (var field in obj.Fields)
         {
-            properties[field.Name] = MapTsTypeToJsonSchema(field.Type, context);
+            var fieldSchema = MapTsTypeToJsonSchema(field.Type, context);
+            // Polymorphic-variant surface asymmetry becomes readOnly/writeOnly
+            // (planner-constraint:tagged-union-variant-surface).
+            if (field.Surface is TsType.InlineObjectFieldSurface.ResponseOnly)
+            {
+                fieldSchema["readOnly"] = true;
+            }
+            else if (field.Surface is TsType.InlineObjectFieldSurface.RequestOnly)
+            {
+                fieldSchema["writeOnly"] = true;
+            }
+
+            properties[field.Name] = fieldSchema;
             if (!field.Optional)
             {
                 required.Add(field.Name);

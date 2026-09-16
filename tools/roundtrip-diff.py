@@ -16,6 +16,25 @@ import urllib.parse
 
 
 METHODS = ("get", "put", "post", "delete", "patch", "head", "options", "trace")
+
+
+def is_body_forbidden_status(status_key):
+    """Mirror Analysis.ResponseStatusValidation.IsBodyForbiddenStatusKey.
+
+    HTTP forbids a message body on 1xx/204/205/304 — exact 3-digit codes or a
+    "1XX" informational wildcard."""
+    if not isinstance(status_key, str):
+        return False
+    text = status_key.strip()
+    if len(text) == 3 and text.isdigit():
+        code = int(text)
+        return code >= 100 and (code < 200 or code in (204, 205, 304))
+    return (
+        len(text) == 3
+        and text[0] == "1"
+        and text[1] in ("X", "x")
+        and text[2] in ("X", "x")
+    )
 COMPONENT_NAMESPACES = (
     "schemas",
     "responses",
@@ -535,7 +554,6 @@ class Comparator:
         self.invented_components = sorted(self.reemitted_components - self.original_components)
         self.source_defects = []
         self.collect_source_defects(self.original, "#")
-        self.collect_reserved_header_source_defects()
 
     @staticmethod
     def schemas(document):
@@ -668,20 +686,55 @@ class Comparator:
                         f"{content_path}/{pointer_token(media_type)}/schema",
                     )
 
-        def collect_response(response, response_path):
+        def collect_response(response, response_path, status_key=None):
+            """Collect one response; returns (contentDefect, exampleDefect).
+
+            Mirrors the import's RIV3024 behavior: authored content (and its
+            example surface) on a body-forbidden status (1xx/204/205/304) is
+            dropped loudly while the status, its description and its headers
+            are preserved bodyless. The C# guards skip responses without
+            content before the forbidden check, so this fires only when the
+            response actually carries authored content — resolved through
+            resolve_once so $ref'd operation responses behave like the
+            library-resolved import. Only operation responses pass a status
+            key: document- and components-level responses are never resolved
+            per operation by the import, so they never fire here and are only
+            walked. The caller groups both defects of a firing response after
+            the operation's parameter-stage defects, reproducing the import's
+            per-operation stderr order (all content drops, then all example
+            drops).
+            """
             if not isinstance(response, dict):
-                return
+                return None, None
+            if (
+                status_key is not None
+                and is_body_forbidden_status(status_key)
+                and resolve_once(document, response).get("content")
+            ):
+                return (
+                    {
+                        "path": f"{response_path}/content",
+                        "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+                    },
+                    {
+                        "path": f"{response_path}/examples",
+                        "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+                    },
+                )
             collect_schema(response.get("schema"), f"{response_path}/schema")
             collect_content(response.get("content"), f"{response_path}/content")
             headers = response.get("headers", {})
             if isinstance(headers, dict):
                 for name, header in headers.items():
                     collect_parameter(header, f"{response_path}/headers/{pointer_token(name)}")
+            return None, None
 
         for name, schema in document.get("definitions", {}).items():
             collect_schema(schema, f"{path}/definitions/{pointer_token(name)}")
         collect_parameters(document.get("parameters"), f"{path}/parameters")
         for name, response in document.get("responses", {}).items():
+            # Document-level responses are never resolved per operation by the
+            # import, so they never fire the forbidden-content drop here.
             collect_response(response, f"{path}/responses/{pointer_token(name)}")
 
         components = document.get("components", {})
@@ -698,6 +751,8 @@ class Comparator:
                         f"{path}/components/requestBodies/{pointer_token(name)}/content",
                     )
             for name, response in components.get("responses", {}).items():
+                # Components-level responses are never resolved per operation by
+                # the import, so they never fire the forbidden-content drop here.
                 collect_response(
                     response, f"{path}/components/responses/{pointer_token(name)}"
                 )
@@ -710,25 +765,87 @@ class Comparator:
             if not isinstance(path_item, dict):
                 continue
             route_path = f"{path}/paths/{pointer_token(route)}"
-            collect_parameters(path_item.get("parameters"), f"{route_path}/parameters")
-            for method in METHODS:
-                operation = path_item.get(method)
-                if not isinstance(operation, dict):
+            path_parameters = path_item.get("parameters", [])
+            # Path-level parameters are walked per operation below, matching
+            # MergeParameters' per-operation merged list (the import emits
+            # param-stage defects once per operation, not once per route).
+            # Operations iterate in JSON document order (ContractBuilder.cs
+            # :46-48), not a fixed METHODS order.
+            for method, operation in path_item.items():
+                if method not in METHODS or not isinstance(operation, dict):
                     continue
                 operation_path = f"{route_path}/{method}"
-                collect_parameters(
-                    operation.get("parameters"), f"{operation_path}/parameters"
-                )
-                request_body = operation.get("requestBody")
-                if isinstance(request_body, dict):
-                    collect_content(
-                        request_body.get("content"), f"{operation_path}/requestBody/content"
+
+                # Reproduce MergeParameters: path-level parameters insert first,
+                # operation-level parameters overwrite by (Name, In) keep-last
+                # with the key keeping its first-insertion position. CollectParam
+                # Properties walks that merged list, so per-param defect order is
+                # merged order, not a path-then-operation declaration split.
+                merged = collections.OrderedDict()
+                for index, parameter in enumerate(path_parameters):
+                    if not isinstance(parameter, dict):
+                        continue
+                    merged[(str(parameter.get("name", "")), parameter.get("in"))] = (
+                        index,
+                        parameter,
+                        "path",
                     )
+                for index, parameter in enumerate(operation.get("parameters", [])):
+                    if not isinstance(parameter, dict):
+                        continue
+                    merged[(str(parameter.get("name", "")), parameter.get("in"))] = (
+                        index,
+                        parameter,
+                        "operation",
+                    )
+                effective_operation = dict(operation)
+                effective_operation["parameters"] = [
+                    *path_parameters,
+                    *operation.get("parameters", []),
+                ]
+                for _, (index, parameter, origin) in merged.items():
+                    collect_parameter(
+                        parameter,
+                        f"{route_path}/parameters/{index}"
+                        if origin == "path"
+                        else f"{operation_path}/parameters/{index}",
+                    )
+                    reason = self.reserved_header_reason(
+                        self.original, effective_operation, parameter
+                    )
+                    if reason is not None:
+                        self.source_defects.append(
+                            {
+                                "path": (
+                                    f"#/paths/{pointer_token(route)}/parameters/{index}/name"
+                                    if origin == "path"
+                                    else f"#/paths/{pointer_token(route)}/{method}/parameters/{index}/name"
+                                ),
+                                "reason": reason,
+                            }
+                        )
+                if isinstance(operation.get("requestBody"), dict):
+                    collect_content(
+                        operation["requestBody"].get("content"),
+                        f"{operation_path}/requestBody/content",
+                    )
+                # The import's per-operation stderr order groups ALL content
+                # drops (ResolveResponseContents) before ALL example drops
+                # (ResolveResponseExamples), both in responses-document order.
+                content_defects = []
+                example_defects = []
                 for status, response in operation.get("responses", {}).items():
-                    collect_response(
+                    content_defect, example_defect = collect_response(
                         response,
                         f"{operation_path}/responses/{pointer_token(status)}",
+                        status_key=str(status),
                     )
+                    if content_defect is not None:
+                        content_defects.append(content_defect)
+                    if example_defect is not None:
+                        example_defects.append(example_defect)
+                self.source_defects.extend(content_defects)
+                self.source_defects.extend(example_defects)
 
     @staticmethod
     def finite_parameter_values(parameter):
@@ -807,44 +924,6 @@ class Comparator:
             "accept": "reserved Accept header parameter is ignored by OpenAPI; response media types are represented by responses content",
             "authorization": "reserved Authorization header parameter is ignored by OpenAPI; authentication is represented by security schemes",
         }.get(name)
-
-    def collect_reserved_header_source_defects(self):
-        for route, path_item in self.original.get("paths", {}).items():
-            if not isinstance(path_item, dict):
-                continue
-            path_parameters = path_item.get("parameters", [])
-            for method in METHODS:
-                operation = path_item.get(method)
-                if not isinstance(operation, dict):
-                    continue
-                effective_operation = dict(operation)
-                effective_operation["parameters"] = [
-                    *path_parameters,
-                    *operation.get("parameters", []),
-                ]
-                for index, raw_parameter in enumerate(path_parameters):
-                    reason = self.reserved_header_reason(
-                        self.original, effective_operation, raw_parameter
-                    )
-                    if reason is not None:
-                        self.source_defects.append(
-                            {
-                                "path": f"#/paths/{pointer_token(route)}/parameters/{index}/name",
-                                "reason": reason,
-                            }
-                        )
-                for index, raw_parameter in enumerate(operation.get("parameters", [])):
-                    reason = self.reserved_header_reason(
-                        self.original, effective_operation, raw_parameter
-                    )
-                    if reason is None:
-                        continue
-                    self.source_defects.append(
-                        {
-                            "path": f"#/paths/{pointer_token(route)}/{method}/parameters/{index}/name",
-                            "reason": reason,
-                        }
-                    )
 
     def compare_value(self, scope, category, path, original, reemitted, normalize=None):
         if normalize:
@@ -1257,9 +1336,12 @@ class Comparator:
                 response_path,
                 "operation",
                 "response",
+                status_key=str(status),
             )
 
-    def compare_response_value(self, original_raw, reemitted_raw, path, scope, category):
+    def compare_response_value(
+        self, original_raw, reemitted_raw, path, scope, category, status_key=None
+    ):
         original = resolve_once(self.original, original_raw)
         reemitted = resolve_once(self.reemitted, reemitted_raw)
         if not isinstance(original, dict) or not isinstance(reemitted, dict):
@@ -1288,6 +1370,11 @@ class Comparator:
             reemitted.get("links", {}),
             canonical_json,
         )
+        # The import preserves the status, its description and its headers
+        # bodyless on body-forbidden statuses, so only the content comparison
+        # is suppressed there (rf-error-responses-skip-semantics).
+        if status_key is not None and is_body_forbidden_status(status_key):
+            return
         self.compare_content(
             original.get("content", {}),
             reemitted.get("content", {}),

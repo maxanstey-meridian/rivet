@@ -896,7 +896,7 @@ public sealed class OpenApiRoundTripTests
     }
 
     [Fact]
-    public void ResponseExampleJson_On_201_And_204_Survives_OpenApi_RoundTrip()
+    public void ResponseExampleJson_On_201_And_404_Survives_OpenApi_RoundTrip()
     {
         var source = """
             using Rivet;
@@ -909,6 +909,9 @@ public sealed class OpenApiRoundTripTests
             [RivetType]
             public sealed record OrderDto(string Id);
 
+            [RivetType]
+            public sealed record NotFoundDto(string Message);
+
             [RivetContract]
             public static class OrdersContract
             {
@@ -918,7 +921,8 @@ public sealed class OpenApiRoundTripTests
 
                 public static readonly RouteDefinition DeleteOrder =
                     Define.Delete("/api/orders/{id}")
-                        .ResponseExampleJson(204, "{\"message\":\"deleted\"}", name: "deleted");
+                        .Returns<NotFoundDto>(404, "Not found")
+                        .ResponseExampleJson(404, "{\"message\":\"gone\"}", name: "gone");
             }
             """;
 
@@ -931,10 +935,10 @@ public sealed class OpenApiRoundTripTests
         Assert.Equal("""{"id":"ord_123"}""", createdExample.Json);
 
         var deleteOrder = endpoints.Single(endpoint => endpoint.HttpMethod == "DELETE");
-        var deletedResponse = deleteOrder.Responses.Single(response => response.StatusCode == 204);
-        var deletedExample = Assert.Single(deletedResponse.Examples!);
-        Assert.Equal("deleted", deletedExample.Name);
-        Assert.Equal("""{"message":"deleted"}""", deletedExample.Json);
+        var goneResponse = deleteOrder.Responses.Single(response => response.StatusCode == 404);
+        var goneExample = Assert.Single(goneResponse.Examples!);
+        Assert.Equal("gone", goneExample.Name);
+        Assert.Equal("""{"message":"gone"}""", goneExample.Json);
     }
 
     [Fact]

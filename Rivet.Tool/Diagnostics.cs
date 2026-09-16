@@ -52,6 +52,9 @@ public static class Diagnostics
     public const string DuplicateResponseStatus = "RIV1021";
     public const string InvalidRequestBodyProvenance = "RIV1022";
     public const string ImportedSchemaProvenanceConflict = "RIV1023";
+    public const string UnresolvedBindingSource = "RIV1100";
+    public const string JsonIncludeFieldNotRepresented = "RIV1101";
+    public const string BodyForbiddenStatusExample = "RIV1102";
 
     // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
     // rivet/php sibling runtime. Native Rivet diagnostics must not use them.
@@ -68,6 +71,7 @@ public static class Diagnostics
     public const string ReservedHeaderParameterSkipped = "RIV2009";
     public const string DuplicateResponseStatusInIr = "RIV2010";
     public const string DuplicateSecuritySchemeDefinition = "RIV2011";
+    public const string ConflictingOperations = "RIV2012";
 
     // ----- RIV3xxx: import -----
     public const string ImportAliasCycleBroken = "RIV3001";
@@ -89,6 +93,7 @@ public static class Diagnostics
     public const string ImportReservedContentTypeHeaderDropped = "RIV3021";
     public const string ImportReservedAuthorizationHeaderDropped = "RIV3022";
     public const string ImportReservedAcceptHeaderDropped = "RIV3023";
+    public const string ImportBodyForbiddenStatusContentDropped = "RIV3024";
 
     // ----- RIV4xxx: coverage -----
     public const string CoverageMissingImplementation = "RIV4001";
@@ -146,6 +151,12 @@ public static class Diagnostics
             "A [RivetRequestBody] type is not represented independently by the endpoint input type.",
         [ImportedSchemaProvenanceConflict] =
             "Imported generated C# changed while raw schema provenance still targets its original typed shape — extraction fails instead of emitting stale OpenAPI.",
+        [UnresolvedBindingSource] =
+            "A parameter's binding source cannot be established from supported static host metadata — the input is excluded from the contract and reported instead of being silently dropped.",
+        [JsonIncludeFieldNotRepresented] =
+            "Reserved unsupported-[JsonInclude]-shape diagnostic: a [JsonInclude] accessor shape System.Text.Json supports but the extractor cannot prove statically would be reported and excluded here rather than guessed. Currently dormant — the mixed-accessor and field cases are now determined.",
+        [BodyForbiddenStatusExample] =
+            "A response example or content is authored on a body-forbidden status (1xx, 204, 205, 304) — HTTP forbids a message body there; generation fails instead of emitting body content the host cannot send.",
         [TaggedUnionComponentCollision] =
             "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
         [UndefinedSecurityScheme] =
@@ -168,6 +179,8 @@ public static class Diagnostics
             "External contract IR declares the same response status more than once; the duplicate is dropped and the first declaration is kept.",
         [DuplicateSecuritySchemeDefinition] =
             "A security scheme name is configured as both the primary and an additional definition.",
+        [ConflictingOperations] =
+            "Two incompatible endpoints declare the same normalized HTTP method + route — generation fails instead of writing a lossy spec.",
         [ImportAliasCycleBroken] =
             "Alias schema is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object.",
         [ImportSecuritySchemesDropped] =
@@ -204,6 +217,8 @@ public static class Diagnostics
             "Reserved Authorization header parameter is dropped — authentication is represented by security and security schemes.",
         [ImportReservedAcceptHeaderDropped] =
             "Reserved Accept header parameter is dropped — response media types are represented by response content.",
+        [ImportBodyForbiddenStatusContentDropped] =
+            "Response content authored on a body-forbidden status (1xx/204/205/304) is dropped; HTTP forbids a message body there; the status and its description/headers are preserved.",
         [CoverageMissingImplementation] = "Contract endpoint has no matching implementation.",
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",

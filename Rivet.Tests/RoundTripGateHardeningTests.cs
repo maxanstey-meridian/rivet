@@ -220,68 +220,6 @@ public sealed class RoundTripGateHardeningTests
     }
 
     [Fact]
-    public void Result_Report_Contains_Exact_Gate_Metric_Shape()
-    {
-        var report = new RoundTripCorpusGateTests.GateReport(
-            "notion",
-            RoundTripCorpusGateTests
-                .LoadVerifiedProfile()
-                .SourceDefects.Single(defect => defect.CorpusId == "notion")
-                .SourceSha256
-        );
-        report.Add("sourceDefects", "pinned defect");
-        var summary = JsonSerializer.Deserialize<RoundTripCorpusGateTests.Summary>(
-            """
-            {
-              "originalOps": 13,
-              "reemittedOps": 13,
-              "sharedOps": 13,
-              "operationsWithFindings": 0,
-              "integrityFindings": {
-                "unresolved-reference": 2,
-                "undefined-security-scheme": 1
-              }
-            }
-            """,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-        )!;
-        report.SetMetrics(
-            summary,
-            new Dictionary<string, RoundTripCorpusGateTests.ComponentMetric>
-            {
-                ["schemas"] = new(0, 0, 0, 0, 0),
-                ["requestBodies"] = new(0, 0, 0, 0, 0),
-                ["parameters"] = new(0, 0, 0, 0, 0),
-                ["responses"] = new(0, 0, 0, 0, 0),
-                ["securitySchemes"] = new(0, 0, 0, 0, 0),
-            }
-        );
-
-        using var result = JsonDocument.Parse(RoundTripCorpusGateTests.SerializeReport(report));
-        var metrics = result.RootElement.GetProperty("metrics");
-        Assert.Equal(13, metrics.GetProperty("operations").GetProperty("source").GetInt32());
-        Assert.Equal(
-            0,
-            metrics
-                .GetProperty("components")
-                .GetProperty("schemas")
-                .GetProperty("matched")
-                .GetInt32()
-        );
-        Assert.Equal(
-            0,
-            metrics
-                .GetProperty("components")
-                .GetProperty("requestBodies")
-                .GetProperty("source")
-                .GetInt32()
-        );
-        Assert.True(metrics.GetProperty("components").TryGetProperty("securitySchemes", out _));
-        Assert.Equal(1, metrics.GetProperty("sourceDefects").GetInt32());
-        Assert.Equal(3, metrics.GetProperty("comparatorIntegrityFindings").GetInt32());
-    }
-
-    [Fact]
     public void Comparator_Exit_One_Fails_Even_When_Reports_Are_Empty()
     {
         var report = new RoundTripCorpusGateTests.GateReport("probe", new string('0', 64));

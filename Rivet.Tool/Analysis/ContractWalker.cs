@@ -132,15 +132,41 @@ public static class ContractWalker
             .ExtractAllResponseTypes(wkt, method, typeWalker, normalize: false)
             .ToList();
         var name = Naming.ToCamelCase(method.Name);
+        if (responses.Count == 0)
+        {
+            // The annotation frontend owns its success default — MVC sends 200 for
+            // non-void abstract methods and 204 No Content for void ones, regardless
+            // of HTTP method. Host-truthful synthesis at the extraction frontend;
+            // explicit [ProducesResponseType] metadata always wins.
+            var isVoidAction = EndpointWalker.IsVoidAction(wkt, method);
+            var defaultType = isVoidAction
+                ? null
+                : EndpointWalker.ExtractReturnType(wkt, method, typeWalker);
+            responses.Add(
+                isVoidAction
+                    ? new TsResponseType(204, null, "No Content")
+                    : new TsResponseType(200, defaultType)
+            );
+        }
+
         ResponseStatusValidation.RejectContractDuplicates(responses, name);
         responses.Sort((left, right) => left.StatusCode.CompareTo(right.StatusCode));
+        var successResponse = responses.FirstOrDefault(response =>
+            response.StatusCode is >= 200 and < 300
+        );
         var returnType =
-            responses.FirstOrDefault(response => response.StatusCode is >= 200 and < 300)?.DataType
+            successResponse?.DataType
             ?? (
                 responses.Count == 0
                     ? EndpointWalker.ExtractReturnType(wkt, method, typeWalker)
                     : null
             );
+
+        var responseContentTypeOverride = EndpointWalker.ResolveResponseContentType(
+            wkt,
+            method,
+            successResponse?.DataType
+        );
 
         return new TsEndpointDefinition(
             name,
@@ -149,7 +175,8 @@ public static class ContractWalker
             parameters,
             returnType,
             controllerName,
-            responses
+            responses,
+            ResponseContentTypeOverride: responseContentTypeOverride
         );
     }
 
@@ -847,16 +874,18 @@ public static class ContractWalker
             fileContentType ??= "application/octet-stream";
         }
 
-        // byte[] or (byte[], string) as TOutput → file endpoint
-        // The runtime contract keeps the original type for response validation, but the TS client gets Blob
-        if (tOutput is IArrayTypeSymbol { ElementType.SpecialType: SpecialType.System_Byte })
+        // Ordinary byte[] is a JSON value: System.Text.Json serializes byte[] as a
+        // base64 JSON string, so an ordinary Define.Get<byte[]> response emits the
+        // base64 string schema (TypeWalker's mapping) — NOT a binary file. Only an
+        // explicit file declaration ([ProducesFile]/.ProducesFile/Define.File) makes
+        // it a file: then a plain byte[] (or a (byte[], string) named tuple) maps to
+        // no TS type and the client gets Blob.
+        if (fileContentType is not null)
         {
-            fileContentType ??= "application/octet-stream";
-            tOutput = null; // Don't map byte[] → number[] in TS
-        }
-        else if (fileContentType is not null && IsByteArrayStringTuple(tOutput))
-        {
-            tOutput = null; // Named file tuple — don't map to TS, client gets Blob
+            if (IsByteArrayStringTuple(tOutput) || IsPlainByteArray(tOutput))
+            {
+                tOutput = null; // Explicit file payload — don't map to TS, client gets Blob
+            }
         }
 
         // Stream / FileResult return types → implicit file endpoint
@@ -1297,9 +1326,14 @@ public static class ContractWalker
         {
             foreach (var prop in typeWalker.GetEffectiveProperties(tInput))
             {
+                if (prop is not IPropertySymbol headerProp)
+                {
+                    continue;
+                }
+
                 if (
-                    typeWalker.IsJsonIgnored(prop)
-                    || TypeWalker.GetHeaderName(prop) is not { } headerName
+                    typeWalker.IsJsonIgnored(headerProp)
+                    || TypeWalker.GetHeaderName(headerProp) is not { } headerName
                 )
                 {
                     continue;
@@ -1308,9 +1342,9 @@ public static class ContractWalker
                 parameters.Add(
                     new TsEndpointParam(
                         headerName,
-                        typeWalker.MapPropertyType(prop),
+                        typeWalker.MapPropertyType(headerProp),
                         ParamSource.Header,
-                        IsOptional: TypeWalker.IsOptionalProperty(prop)
+                        IsOptional: TypeWalker.IsOptionalProperty(headerProp)
                     )
                 );
             }
@@ -1328,7 +1362,7 @@ public static class ContractWalker
                 string? bodyPropertyName = null;
                 if (tInput is not null)
                 {
-                    // A3: match against the flattened property surface (incl. inherited)
+                    // A3: match against the flattened member surface (incl. inherited)
                     var normalized = RouteParser.NormalizeForMatching(paramName);
                     var matchingProp = typeWalker
                         .GetEffectiveProperties(tInput)
@@ -1337,12 +1371,14 @@ public static class ContractWalker
                         );
                     if (matchingProp is not null)
                     {
-                        paramType = typeWalker.MapPropertyType(matchingProp);
+                        paramType = matchingProp is IPropertySymbol matchedProperty
+                            ? typeWalker.MapPropertyType(matchedProperty)
+                            : typeWalker.MapType(TypeWalker.GetMemberType(matchingProp));
                         routeMatchedProps.Add(matchingProp.Name);
                         if (requestBodyType is null)
                         {
                             bodyPropertyName =
-                                typeWalker.GetJsonPropertyName(matchingProp)
+                                typeWalker.GetJsonMemberName(matchingProp)
                                 ?? Naming.ToCamelCase(matchingProp.Name);
                         }
                     }
@@ -1403,41 +1439,54 @@ public static class ContractWalker
                             ? typeWalker.MapType(tInput, $"multipart input '{tInput.Name}'")
                             : null;
                     inputTypeName = mappedInput is TsType.TypeRef typeRef ? typeRef.Name : null;
-                    // A3: walk the flattened property surface (incl. inherited)
+                    // A3: walk the flattened property surface (incl. inherited).
+                    // Form fields are request surface: request-only properties lower,
+                    // response-only properties are absent from the multipart body
+                    // (planner-constraint:component-schema-directionality).
                     foreach (var prop in typeWalker.GetEffectiveProperties(tInput))
                     {
-                        if (typeWalker.IsJsonIgnored(prop))
+                        if (prop is not IPropertySymbol formProp)
+                        {
+                            continue;
+                        }
+
+                        if (
+                            typeWalker.IsJsonIgnored(formProp)
+                            || typeWalker.GetJsonPropertySurface(formProp)
+                                == JsonPropertySurface.ResponseOnly
+                        )
                         {
                             continue;
                         }
 
                         // [RivetHeader] properties were already emitted as header params
-                        if (TypeWalker.GetHeaderName(prop) is not null)
+                        if (TypeWalker.GetHeaderName(formProp) is not null)
                         {
                             continue;
                         }
 
                         // Skip properties already emitted as route params
-                        if (routeMatchedProps.Contains(prop.Name))
+                        if (routeMatchedProps.Contains(formProp.Name))
                         {
                             continue;
                         }
 
                         var tsName =
-                            typeWalker.GetJsonPropertyName(prop) ?? Naming.ToCamelCase(prop.Name);
+                            typeWalker.GetJsonPropertyName(formProp)
+                            ?? Naming.ToCamelCase(formProp.Name);
 
-                        if (IsFormFileType(wkt, prop.Type))
+                        if (IsFormFileType(wkt, formProp.Type))
                         {
                             parameters.Add(
                                 new TsEndpointParam(
                                     tsName,
                                     new TsType.Primitive("File"),
                                     ParamSource.File,
-                                    IsOptional: TypeWalker.IsOptionalProperty(prop)
+                                    IsOptional: TypeWalker.IsOptionalProperty(formProp)
                                 )
                             );
                         }
-                        else if (typeWalker.IsCollectionOf(prop.Type, wkt.IFormFile))
+                        else if (typeWalker.IsCollectionOf(formProp.Type, wkt.IFormFile))
                         {
                             // FABLE_GAPS §7 item 12: List<IFormFile>/IFormFile[] →
                             // multipart array-of-binary part, consistent with single files
@@ -1446,7 +1495,7 @@ public static class ContractWalker
                                     tsName,
                                     new TsType.Array(new TsType.Primitive("File")),
                                     ParamSource.File,
-                                    IsOptional: TypeWalker.IsOptionalProperty(prop)
+                                    IsOptional: TypeWalker.IsOptionalProperty(formProp)
                                 )
                             );
                         }
@@ -1456,9 +1505,9 @@ public static class ContractWalker
                             parameters.Add(
                                 new TsEndpointParam(
                                     tsName,
-                                    typeWalker.MapPropertyType(prop),
+                                    typeWalker.MapPropertyType(formProp),
                                     ParamSource.FormField,
-                                    IsOptional: TypeWalker.IsOptionalProperty(prop)
+                                    IsOptional: TypeWalker.IsOptionalProperty(formProp)
                                 )
                             );
                         }
@@ -1469,10 +1518,16 @@ public static class ContractWalker
                     // FABLE_ROUNDTRIP #4: an input whose every property is route-bound
                     // has no body left to carry — emitting one anyway fabricated a
                     // required JSON body on bodyless POST/PUTs (66 github-corpus ops).
+                    // Request-surface comparison: route-binding equivalence is judged on
+                    // properties the request surface actually carries.
                     var bodyProps = typeWalker
                         .GetEffectiveProperties(tInput)
+                        .OfType<IPropertySymbol>()
                         .Where(p =>
-                            !typeWalker.IsJsonIgnored(p) && TypeWalker.GetHeaderName(p) is null
+                            !typeWalker.IsJsonIgnored(p)
+                            && typeWalker.GetJsonPropertySurface(p)
+                                != JsonPropertySurface.ResponseOnly
+                            && TypeWalker.GetHeaderName(p) is null
                         )
                         .ToList();
                     if (
@@ -1519,25 +1574,38 @@ public static class ContractWalker
                 inputTypeName = tInput.Name;
                 var matchedRouteParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                // A3: walk the flattened property surface (incl. inherited)
+                // A3: walk the flattened property surface (incl. inherited).
+                // Query/route lowering is request surface: response-only properties
+                // (serialized but never deserializable) cannot carry request values,
+                // so they are absent from the param list
+                // (planner-constraint:component-schema-directionality).
                 foreach (var prop in typeWalker.GetEffectiveProperties(tInput))
                 {
-                    if (typeWalker.IsJsonIgnored(prop))
+                    if (prop is not IPropertySymbol queryProp)
+                    {
+                        continue;
+                    }
+
+                    if (
+                        typeWalker.IsJsonIgnored(queryProp)
+                        || typeWalker.GetJsonPropertySurface(queryProp)
+                            == JsonPropertySurface.ResponseOnly
+                    )
                     {
                         continue;
                     }
 
                     // [RivetHeader] properties were already emitted as header params
-                    if (TypeWalker.GetHeaderName(prop) is not null)
+                    if (TypeWalker.GetHeaderName(queryProp) is not null)
                     {
                         continue;
                     }
 
-                    var jsonName = typeWalker.GetJsonPropertyName(prop);
-                    var tsName = jsonName ?? Naming.ToCamelCase(prop.Name);
+                    var jsonName = typeWalker.GetJsonPropertyName(queryProp);
+                    var tsName = jsonName ?? Naming.ToCamelCase(queryProp.Name);
 
                     var isFormFile = SymbolEqualityComparer.Default.Equals(
-                        prop.Type,
+                        queryProp.Type,
                         wkt.IFormFile
                     );
                     if (isFormFile)
@@ -1552,12 +1620,12 @@ public static class ContractWalker
                         continue;
                     }
 
-                    var tsType = typeWalker.MapPropertyType(prop);
+                    var tsType = typeWalker.MapPropertyType(queryProp);
                     // Route matching uses the normalized C# property name ({thing_id}
                     // matches ThingId), never the JSON name — the token is wire truth
                     if (
                         normalizedRouteTokens.TryGetValue(
-                            RouteParser.NormalizeForMatching(prop.Name),
+                            RouteParser.NormalizeForMatching(queryProp.Name),
                             out var routeName
                         )
                     )
@@ -1571,7 +1639,7 @@ public static class ContractWalker
                         {
                             Diagnostics.Warn(
                                 Diagnostics.RouteBoundJsonPropertyNameIgnored,
-                                $"[JsonPropertyName(\"{jsonName}\")] on route-bound property '{prop.Name}' "
+                                $"[JsonPropertyName(\"{jsonName}\")] on route-bound property '{queryProp.Name}' "
                                     + $"is ignored for route interpolation — the contract param keeps the route name '{routeName}'."
                             );
                         }
@@ -1594,7 +1662,7 @@ public static class ContractWalker
                             tsName,
                             tsType,
                             ParamSource.Query,
-                            IsOptional: TypeWalker.IsOptionalProperty(prop)
+                            IsOptional: TypeWalker.IsOptionalProperty(queryProp)
                         )
                     );
                 }
@@ -1781,6 +1849,9 @@ public static class ContractWalker
         TypeWalker typeWalker
     )
     {
+        // Like-surface comparison (planner-constraint:compatible-body-surface-comparison):
+        // both sides are request surfaces — a response-only accessibility exclusion on
+        // one side must not by itself make equivalent request declarations incompatible.
         var routeNames = RouteParser
             .ParseRouteParamNames(route)
             .Select(RouteParser.NormalizeForMatching)
@@ -1788,8 +1859,11 @@ public static class ContractWalker
         if (
             typeWalker
                 .GetEffectiveProperties(inputType)
+                .OfType<IPropertySymbol>()
                 .Any(property =>
                     !typeWalker.IsJsonIgnored(property)
+                    && typeWalker.GetJsonPropertySurface(property)
+                        != JsonPropertySurface.ResponseOnly
                     && TypeWalker.GetHeaderName(property) is null
                     && !routeNames.Contains(RouteParser.NormalizeForMatching(property.Name))
                     && SymbolEqualityComparer.Default.Equals(property.Type, bodyType)
@@ -1801,8 +1875,11 @@ public static class ContractWalker
 
         var inputProperties = typeWalker
             .GetEffectiveProperties(inputType)
+            .OfType<IPropertySymbol>()
             .Where(property =>
-                !typeWalker.IsJsonIgnored(property) && TypeWalker.GetHeaderName(property) is null
+                !typeWalker.IsJsonIgnored(property)
+                && typeWalker.GetJsonPropertySurface(property) != JsonPropertySurface.ResponseOnly
+                && TypeWalker.GetHeaderName(property) is null
             )
             .GroupBy(
                 property =>
@@ -1812,8 +1889,11 @@ public static class ContractWalker
             .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
         var bodyProperties = typeWalker
             .GetEffectiveProperties(bodyType)
+            .OfType<IPropertySymbol>()
             .Where(property =>
-                !typeWalker.IsJsonIgnored(property) && TypeWalker.GetHeaderName(property) is null
+                !typeWalker.IsJsonIgnored(property)
+                && typeWalker.GetJsonPropertySurface(property) != JsonPropertySurface.ResponseOnly
+                && TypeWalker.GetHeaderName(property) is null
             )
             .ToList();
         if (bodyProperties.Count == 0)
@@ -1859,6 +1939,7 @@ public static class ContractWalker
         // format:binary strings, an unimplementable spec (FABLE_GAPS §7 item 12).
         typeWalker
             .GetEffectiveProperties(type)
+            .OfType<IPropertySymbol>()
             .Any(p =>
                 IsFormFileType(wkt, p.Type) || typeWalker.IsCollectionOf(p.Type, wkt.IFormFile)
             );
@@ -1906,6 +1987,15 @@ public static class ContractWalker
 
         return first is IArrayTypeSymbol { ElementType.SpecialType: SpecialType.System_Byte }
             && second.SpecialType == SpecialType.System_String;
+    }
+
+    /// <summary>
+    /// Checks if the type is a plain byte[] — an explicit file declaration on it
+    /// selects Blob semantics (ReturnType null) instead of the base64 JSON string.
+    /// </summary>
+    private static bool IsPlainByteArray(ITypeSymbol? type)
+    {
+        return type is IArrayTypeSymbol { ElementType.SpecialType: SpecialType.System_Byte };
     }
 
     internal static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? defineType)

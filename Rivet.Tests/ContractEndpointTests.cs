@@ -983,7 +983,7 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
-    public void ResponseExampleJson_Attaches_To_Synthesized_Delete_Success_Response()
+    public void ResponseExampleJson_On_BodyForbidden_204_Fails_Generation()
     {
         var source = """
             using Rivet;
@@ -999,14 +999,17 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        var endpoints = Generate(source);
+        // RIV1102: HTTP forbids a message body on 204 — an authored example there
+        // could never reach the wire, so generation fails instead of emitting it.
+        // The parse-side guard fires on the shared normalization path every
+        // frontend passes through, which is emission — not the walk alone.
+        var exception = Assert.Throws<ContractAnalysisException>(() =>
+            CompilationHelper.EmitOpenApi(source)
+        );
 
-        var ep = Assert.Single(endpoints);
-        var response = ep.Responses.First(r => r.StatusCode == 204);
-        var example = Assert.Single(response.Examples!);
-        Assert.Equal("deleted", example.Name);
-        Assert.Equal("application/json", example.MediaType);
-        Assert.Equal("""{"message":"deleted"}""", example.Json);
+        Assert.Contains("RIV1102", exception.Message);
+        Assert.Contains("deleteSession", exception.Message);
+        Assert.Contains("204", exception.Message);
     }
 
     [Fact]
@@ -1981,7 +1984,7 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
-    public void ByteArray_TOutput_InfersFileEndpoint()
+    public void ByteArray_TOutput_Stays_Json_Base64()
     {
         var source = """
             using Rivet;
@@ -2006,9 +2009,14 @@ public sealed class ContractEndpointTests
         Assert.Single(endpoints);
         var ep = endpoints[0];
         Assert.Equal("download", ep.Name);
-        // byte[] infers file endpoint — no explicit .ProducesFile() needed
-        Assert.Equal("application/octet-stream", ep.FileContentType);
-        Assert.Null(ep.ReturnType); // TS gets Blob, not number[]
+        // Ordinary byte[] is a JSON value: STJ serializes it as a base64 JSON string.
+        // No implicit binary file terminal, no octet-stream content type.
+        Assert.False(ep.IsFileEndpoint);
+        Assert.Null(ep.FileContentType);
+        Assert.NotNull(ep.ReturnType);
+        Assert.Equal("string", Assert.IsType<TsType.Primitive>(ep.ReturnType).Name);
+        Assert.Equal("base64", Assert.IsType<TsType.Primitive>(ep.ReturnType).Format);
+        Assert.Equal("byte[]", Assert.IsType<TsType.Primitive>(ep.ReturnType).CSharpType);
         // Error response still typed
         Assert.Single(ep.Responses, r => r.StatusCode == 404);
     }
@@ -2033,12 +2041,12 @@ public sealed class ContractEndpointTests
         var endpoints = Generate(source);
 
         Assert.Single(endpoints);
-        // Explicit .ProducesFile() wins over the byte[] default
+        // Explicit .ProducesFile() declares the file — byte[] stays unmapped (Blob)
         Assert.Equal("application/pdf", endpoints[0].FileContentType);
     }
 
     [Fact]
-    public void ByteArray_TOutput_OpenApi_EmitsBinarySchema()
+    public void ByteArray_TOutput_OpenApi_Emits_Json_Base64_Schema()
     {
         var source = """
             using Rivet;
@@ -2064,9 +2072,13 @@ public sealed class ContractEndpointTests
             null
         );
 
-        Assert.Contains("application/octet-stream", json);
-        Assert.Contains("\"format\": \"binary\"", json);
-        Assert.DoesNotContain("application/json", json);
+        // JSON base64 string schema under application/json — matching the runtime's
+        // actual Success(byte[]) wire shape — with no binary file terminal.
+        Assert.Contains("\"type\": \"string\"", json);
+        Assert.Contains("\"contentEncoding\": \"base64\"", json);
+        Assert.Contains("application/json", json);
+        Assert.DoesNotContain("application/octet-stream", json);
+        Assert.DoesNotContain("\"format\": \"binary\"", json);
     }
 
     [Fact]

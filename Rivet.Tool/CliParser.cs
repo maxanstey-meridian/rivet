@@ -139,6 +139,17 @@ internal static class CliParser
             return null;
         }
 
+        // --routes is a listing mode that exits before emission, so it can never
+        // perform the --verify comparison; accepting both would silently drop the
+        // verification gate while printing routes and returning success.
+        if (verify && routes)
+        {
+            Console.Error.WriteLine(
+                "error: '--routes' and '--verify' cannot be combined — --routes lists endpoints and exits before any spec verification runs"
+            );
+            return null;
+        }
+
         // Contract JSON mode doesn't need a project path
         if (fromContractPath is not null)
         {

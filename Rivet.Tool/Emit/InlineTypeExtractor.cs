@@ -45,7 +45,8 @@ public static class InlineTypeExtractor
                     ",",
                     obj.Fields.OrderBy(f => f.Name)
                         .Select(f =>
-                            $"N:{Encode(f.Name)}O:{(f.Optional ? 1 : 0)}T:{CanonicalHash(f.Type)}"
+                            $"N:{Encode(f.Name)}O:{(f.Optional ? 1 : 0)}S:{(int)f.Surface}"
+                            + $"T:{CanonicalHash(f.Type)}"
                         )
                 )
                 + "}",
@@ -509,7 +510,9 @@ public static class InlineTypeExtractor
                 .Fields.Select(f => new TsPropertyDefinition(
                     f.Name,
                     ReplaceInType(f.Type, replacements),
-                    IsOptional: f.Optional
+                    IsOptional: f.Optional,
+                    IsReadOnly: f.Surface == TsType.InlineObjectFieldSurface.ResponseOnly,
+                    IsWriteOnly: f.Surface == TsType.InlineObjectFieldSurface.RequestOnly
                 ))
                 .ToList();
 
@@ -604,7 +607,8 @@ public static class InlineTypeExtractor
                     .Fields.Select(f => new TsType.InlineObjectField(
                         f.Name,
                         ReplaceInType(f.Type, replacements),
-                        f.Optional
+                        f.Optional,
+                        f.Surface
                     ))
                     .ToList();
                 return new TsType.InlineObject(replacedFields);

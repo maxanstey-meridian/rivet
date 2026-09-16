@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.OpenApi;
+using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -1787,7 +1788,7 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
-    public void Untyped_204_ResponseExampleJson_Emits_Content_Without_Schema()
+    public void BodyForbidden_204_ResponseExampleJson_Fails_Emission_With_RIV1102()
     {
         var source = """
             using Rivet;
@@ -1803,26 +1804,18 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
-        var mediaType = doc
-            .RootElement.GetProperty("paths")
-            .GetProperty("/api/auth/session")
-            .GetProperty("delete")
-            .GetProperty("responses")
-            .GetProperty("204")
-            .GetProperty("content")
-            .GetProperty("application/json");
+        // RIV1102 guard: an authored example on 204 cannot create emitted content —
+        // the shared parse-side guard inside EmitWithSecurityMetadata aborts before
+        // any output is written (the BuildResponses re-check stays as defense in
+        // depth dominated by this guard on every public path).
+        var exception = Assert.Throws<ContractAnalysisException>(() => EmitOpenApi(source));
 
-        Assert.False(mediaType.TryGetProperty("schema", out _));
-        Assert.Equal(
-            "deleted",
-            mediaType
-                .GetProperty("examples")
-                .GetProperty("deleted")
-                .GetProperty("value")
-                .GetProperty("message")
-                .GetString()
-        );
+        Assert.Contains("RIV1102", exception.Message);
+        // The parse guard receives bare endpoint.Name ('deleteSession'); the
+        // BuildResponses defense-in-depth re-check would name 'AuthContract.deleteSession'
+        // but is dominated by this guard on every public path.
+        Assert.Contains("'deleteSession'", exception.Message);
+        Assert.Contains("204", exception.Message);
     }
 
     [Fact]
@@ -2879,8 +2872,9 @@ public sealed class OpenApiEmitterTests
                         .ProducesFile("application/pdf")
                         .Returns<NotFoundDto>(404, "File not found");
 
-                public static readonly RouteDefinition<byte[]> DownloadRaw =
-                    Define.Get<byte[]>("/api/files/{id}/raw");
+                public static readonly RouteDefinition DownloadRaw =
+                    Define.Get("/api/files/{id}/raw")
+                        .ProducesFile("application/octet-stream");
             }
             """;
 

@@ -203,7 +203,14 @@ internal static class ContractBuilder
             && operation.Responses?.TryGetValue(successStatusKey, out var primaryResponse) is true
                 ? primaryResponse.Description
                 : null;
-        var responseContents = ResolveResponseContents(operation, mapper, fieldName);
+        var responseContents = ResolveResponseContents(
+            operation,
+            mapper,
+            fieldName,
+            httpMethod,
+            route,
+            warnings
+        );
 
         // File endpoint: binary content type on a GET endpoint → Define.File()
         // Non-GET binary endpoints (e.g. POST → PDF) keep Define.{Method}().ProducesFile()
@@ -214,7 +221,15 @@ internal static class ContractBuilder
         // Error responses
         var errorResponses = ResolveErrorResponses(operation, mapper, fieldName, successStatus);
         var requestExamples = ResolveRequestExamples(operation, unsupported, componentExamples);
-        var responseExamples = ResolveResponseExamples(operation, unsupported, componentExamples);
+        var responseExamples = ResolveResponseExamples(
+            operation,
+            unsupported,
+            warnings,
+            httpMethod,
+            route,
+            fieldName,
+            componentExamples
+        );
         // P2 wave 5: response headers re-emit as .WithResponseHeader(...) chain calls —
         // resolved AFTER the declared-status set is final (success + error responses).
         var responseHeaders = ResolveResponseHeaders(
@@ -422,7 +437,10 @@ internal static class ContractBuilder
     private static IReadOnlyList<GeneratedResponseMediaTypeContent> ResolveResponseContents(
         OpenApiOperation operation,
         SchemaMapper mapper,
-        string fieldName
+        string fieldName,
+        string httpMethod,
+        string route,
+        List<string> warnings
     )
     {
         var result = new List<GeneratedResponseMediaTypeContent>();
@@ -432,6 +450,24 @@ internal static class ContractBuilder
             var statusCode = int.TryParse(status, out var parsed) ? parsed : 0;
             if (response.Content is not { Count: > 0 } content)
             {
+                continue;
+            }
+
+            // HTTP forbids a message body on 1xx/204/205/304 (the same statuses
+            // EndpointRuntime.AllowsBody rejects at runtime). Content authored there
+            // can never reach the wire: drop it at import so the generated C# carries
+            // no forbidden-status content and first/fixed-point emissions stay clean,
+            // while the status itself (and its description/headers) is preserved.
+            if (IsBodyForbiddenStatusCode(statusCode))
+            {
+                warnings.Add(
+                    Diagnostics.Prefix(
+                        Diagnostics.ImportBodyForbiddenStatusContentDropped,
+                        $"Response content dropped: {httpMethod.ToUpperInvariant()} {route} ({fieldName}) authors "
+                            + $"content on body-forbidden status {status}; HTTP forbids a message body on 1xx/204/205/304; "
+                            + "the status, its description and headers are preserved."
+                    )
+                );
                 continue;
             }
 
@@ -1260,6 +1296,16 @@ internal static class ContractBuilder
             fileContentType = null;
             responseContentType = null;
 
+            // Body-forbidden success statuses (204/205) carry no body: no output type
+            // may resolve from their content — importing it would re-declare forbidden
+            // content in the generated C# and the fixed-point import would re-warn
+            // RIV3024 forever. The status itself stays (bodyless success).
+            if (IsBodyForbiddenStatusCode(code))
+            {
+                outputType = null;
+                continue;
+            }
+
             if (response.Content is { Count: > 0 })
             {
                 if (
@@ -1351,6 +1397,29 @@ internal static class ContractBuilder
                 continue;
             }
 
+            // Body-forbidden statuses (1xx/204/205/304) cannot carry typed error
+            // content: importing it would re-declare forbidden content in the
+            // generated C# and the fixed-point import would re-warn RIV3024 forever.
+            // Skip only content resolution while preserving the status bodyless —
+            // the same declaration the untyped branch below already emits — so the
+            // status, its description and any headers stay in the contract, matching
+            // ResolveResponseContents' drop and ResolveOutputType's bodyless-success
+            // branch.
+            if (IsBodyForbiddenStatusCode(code))
+            {
+                if (
+                    !errors.Any(e =>
+                        e.StatusKey.Equals(statusStr, StringComparison.OrdinalIgnoreCase)
+                    )
+                )
+                {
+                    errors.Add(
+                        new GeneratedErrorResponse(code, statusStr, null, response.Description)
+                    );
+                }
+                continue;
+            }
+
             if (response.Content is { Count: > 0 })
             {
                 if (
@@ -1420,9 +1489,18 @@ internal static class ContractBuilder
         return ResolveMediaExamples(content, unsupported, "request-example", componentExamples);
     }
 
+    // Mirror of Analysis.ResponseStatusValidation.IsBodyForbiddenStatus: HTTP forbids a
+    // message body on 1xx/204/205/304, so content authored there can never reach the wire.
+    private static bool IsBodyForbiddenStatusCode(int statusCode) =>
+        statusCode is >= 100 and (< 200 or 204 or 205 or 304);
+
     private static IReadOnlyList<GeneratedEndpointResponseExample> ResolveResponseExamples(
         OpenApiOperation operation,
         List<string> unsupported,
+        List<string> warnings,
+        string httpMethod,
+        string route,
+        string fieldName,
         IDictionary<string, IOpenApiExample>? componentExamples
     )
     {
@@ -1438,6 +1516,23 @@ internal static class ContractBuilder
             var statusCode = int.TryParse(statusStr, out var parsed) ? parsed : 0;
             if (response.Content is not { Count: > 0 } content)
             {
+                continue;
+            }
+
+            // Same body-forbidden rule as ResolveOutputType and ResolveResponseExamples:
+            // content authored on 1xx/204/205/304 could never reach the wire and the
+            // RIV1102 emission guard would reject the generated C#, so drop it at
+            // import too.
+            if (IsBodyForbiddenStatusCode(statusCode))
+            {
+                warnings.Add(
+                    Diagnostics.Prefix(
+                        Diagnostics.ImportBodyForbiddenStatusContentDropped,
+                        $"Response example dropped: {httpMethod.ToUpperInvariant()} {route} ({fieldName}) authors "
+                            + $"an example on body-forbidden status {statusStr}; HTTP forbids a message body on 1xx/204/205/304; "
+                            + "the status, its description and headers are preserved."
+                    )
+                );
                 continue;
             }
 

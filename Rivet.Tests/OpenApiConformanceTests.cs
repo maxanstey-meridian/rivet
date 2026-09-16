@@ -690,8 +690,9 @@ public sealed class OpenApiConformanceTests : IDisposable
             [RivetContract]
             public static class FilesContract
             {
-                public static readonly RouteDefinition<byte[]> Download =
-                    Define.Get<byte[]>("/api/files/{id}")
+                public static readonly RouteDefinition Download =
+                    Define.Get("/api/files/{id}")
+                        .ProducesFile("application/octet-stream")
                         .Description("Download a file")
                         .Returns<NotFoundDto>(404, "File not found");
 

@@ -898,7 +898,10 @@ public sealed class RoundTripCorpusGateTests
         var sourceDefectSha256 = Convert.ToHexStringLower(SHA256.HashData(sourceDefectJson));
         if (sourceDefectSha256 != profile.ReviewedSourceDefectsSha256)
         {
-            throw new InvalidDataException("Reviewed source-defect policy changed.");
+            throw new InvalidDataException(
+                $"Reviewed source-defect policy changed: profile declares '{profile.ReviewedSourceDefectsSha256}'"
+                    + $" but the tracked sourceDefects array hashes to '{sourceDefectSha256}'."
+            );
         }
 
         foreach (var defect in profile.SourceDefects)

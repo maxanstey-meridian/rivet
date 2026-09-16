@@ -11,7 +11,7 @@ error RIV2002: <message>
 IDs are stable across releases — grep, baseline, or suppress by ID, never by
 message text. Most diagnostics are **warnings** and allow processing to continue.
 Diagnostics marked **Error** are fatal and exit `1`; currently this applies to
-`RIV1021`, `RIV1022`, `RIV1023`, `RIV2002`, and `RIV2011`. Coverage warnings also exit `1` when `--check` is used without
+`RIV1021`, `RIV1022`, `RIV1023`, `RIV1102`, `RIV2002`, `RIV2011`, and `RIV2012`. Coverage warnings also exit `1` when `--check` is used without
 `--output`; other warnings do not change the exit code.
 
 The ID ranges follow the pipeline stages:
@@ -59,6 +59,9 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1021` | Error | An authored contract declares the same response status more than once, including a `.Returns(...)` collision with the success status. Such a contract fails at runtime and generation therefore aborts. | Declare a `[RivetUnion]` type if the status genuinely returns multiple shapes and return it once; otherwise remove the duplicate (often one `.Returns(...)` is mistyped). |
 | `RIV1022` | Error | `[RivetRequestBody]` names a body type that is not represented independently by the endpoint input type. | Use the importer-generated marker and composite input, or remove the invalid hand-authored override. |
 | `RIV1023` | Error | Imported generated C# changed while raw schema provenance still targets its original typed shape. | Re-import the OpenAPI document, or remove/update the stale raw schema provenance before emitting. |
+| `RIV1100` | Warning | A parameter's binding source cannot be established from supported static host metadata (e.g. an unattributed interface/abstract type or host plumbing like `HttpContext`) — the input is excluded from the contract and reported instead of being silently dropped. | Give the parameter an explicit binding (`[FromQuery]`, `[FromBody]`, `[FromRoute]`, `[FromHeader]`, or `[FromServices]` for DI plumbing), or remove it from the action. |
+| `RIV1101` | Warning | Reserved unsupported-`[JsonInclude]`-shape diagnostic. The mixed-accessor case (public accessor on one side, non-public on the other) is now determined as both-surface when `[JsonInclude]` is present — STJ serializes via the public accessor and deserializes via the included non-public accessor — and public/private `[JsonInclude]` fields are represented, so no currently supported shape triggers it; it is kept registered for future unsupported shapes. | Currently no supported shape triggers this ID. If a future serializer shape cannot be proven statically, the member will be reported here rather than guessed. |
+| `RIV1102` | Error | A response example or response content is authored on a body-forbidden status (1xx, 204, 205, 304) — HTTP forbids a message body on those statuses, so the authored content could never reach the wire. Reported at frontend parsing and again at emission as defense in depth; generation fails before any output is written. | Move the example/content to a status that allows a body, or remove it; the ordinary bodyless 204 response needs no example. |
 
 `RIV1024`-`RIV1099` are documented by `rivet/php`; this repository reserves the
 block but does not register those sibling-runtime diagnostics as native Rivet
@@ -87,7 +90,7 @@ Retired IDs are never reused; they keep a tombstone here instead of a table row.
 |---|---|---|---|
 | `RIV2001` | Warning | Synthesized tagged-union variant component collides with an existing schema — the existing schema wins. | Rename the colliding type or the union variant so component names stay distinct. |
 | `RIV2002` | Error | Endpoint references a security scheme with no definition; generation fails rather than inventing security semantics. | Define the same scheme via `--security`, or fix the `.Secure("...")` name. |
-| `RIV2003` | Warning | Two endpoints share an HTTP method + path — the later definition wins. | Remove or re-route the duplicate endpoint. |
+| `RIV2003` | Warning | Two endpoints share an HTTP method + path and their declarations are equivalent — one representative is emitted. | Remove or re-route the redundant duplicate endpoint. |
 | `RIV2004` | Warning | Multipart input type is absent from the contract's type definitions — the request schema is built inline from the endpoint's params. | Fix the upstream producer (rivet-ts/rivet-php lowerer) to include the input type definition. |
 | `RIV2005` | Warning | `unknown` type (`JsonElement`/`JsonNode` or an unmapped C# type) in the OpenAPI schema — emitted as untyped. The message names the offending type/property or endpoint site. | Replace the named property/param type with a concrete supported type, or accept the untyped schema. |
 | `RIV2006` | Warning | Unresolved generic type parameter in the OpenAPI schema — emitted as `object`. | Expose a closed generic instantiation; open type parameters cannot be emitted. |
@@ -96,6 +99,7 @@ Retired IDs are never reused; they keep a tombstone here instead of a table row.
 | `RIV2009` | Warning | Header parameter named `Accept`, `Content-Type` or `Authorization` — OpenAPI forbids these as header parameters; the parameter is omitted from the spec. | Describe content negotiation via media types and auth via security schemes; use a custom header name for anything else. |
 | `RIV2010` | Warning | External contract IR declares the same response status more than once — the duplicate is dropped and the first declaration, including its metadata, is kept. | Fix the producer to emit one response per status; use a union schema when one status genuinely has multiple payload shapes. |
 | `RIV2011` | Error | A programmatic security configuration defines the primary scheme name again in its additional definitions. | Keep each scheme name unique; the CLI already rejects duplicate `--security` names. |
+| `RIV2012` | Error | Two incompatible endpoints declare the same normalized HTTP method + route (e.g. contradictory response shapes from different extraction frontends) — generation fails naming both sources instead of writing a lossy spec. | Resolve the contradiction at the source; equivalent duplicate declarations collapse silently. |
 
 ## RIV3xxx — import
 
@@ -125,6 +129,7 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV3021` | Warning | Imported operation declares `Content-Type` as a header parameter even though OpenAPI represents request media types through `requestBody.content`. | Remove the reserved header parameter and retain the corresponding request-body media type. |
 | `RIV3022` | Warning | Imported operation declares `Authorization` as a header parameter even though OpenAPI represents authentication through security schemes. | Remove the reserved header parameter and retain the corresponding operation or document security requirement. |
 | `RIV3023` | Warning | Imported operation declares `Accept` as a header parameter even though OpenAPI represents response media types through response content. | Remove the reserved header parameter and retain the corresponding response media type. |
+| `RIV3024` | Warning | Imported operation authors response content or an example on a body-forbidden status (1xx/204/205/304); the content is dropped while the status, description and headers are preserved. | Remove the body from the forbidden status in the source specification — HTTP forbids a message body on 1xx/204/205/304. |
 
 ## RIV4xxx — coverage (`--check`)
 

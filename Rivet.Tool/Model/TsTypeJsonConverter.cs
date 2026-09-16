@@ -121,10 +121,17 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                         var optional = e.TryGetProperty("optional", out var optionalElement)
                             ? optionalElement.GetBoolean()
                             : type is TsType.Nullable;
+                        var surface = e.TryGetProperty("surface", out var surfaceElement)
+                            ? Enum.Parse<TsType.InlineObjectFieldSurface>(
+                                surfaceElement.GetString()!,
+                                ignoreCase: true
+                            )
+                            : TsType.InlineObjectFieldSurface.Both;
                         return new TsType.InlineObjectField(
                             e.GetProperty("name").GetString()!,
                             type,
-                            optional
+                            optional,
+                            surface
                         );
                     })
                     .ToArray()
@@ -339,6 +346,10 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                     writer.WritePropertyName("type");
                     JsonSerializer.Serialize(writer, field.Type, options);
                     writer.WriteBoolean("optional", field.Optional);
+                    if (field.Surface is not TsType.InlineObjectFieldSurface.Both)
+                    {
+                        writer.WriteString("surface", field.Surface.ToString());
+                    }
                     writer.WriteEndObject();
                 }
                 writer.WriteEndArray();
