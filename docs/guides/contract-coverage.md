@@ -31,7 +31,7 @@ Coverage: 6/6 endpoints covered. All OK.
 
 ## Exit code
 
-When `--check` is used **without** `--output`, any warning makes the command exit
-with code `1` — suitable for CI. With `--output`, warnings are printed but the spec
-is still emitted and the exit code reflects emission. Combine with `-q`/`--quiet` to
-suppress generation output in CI logs.
+When `--check` is used, any warning makes the command exit with code `1` — suitable for CI,
+both with and without `--output`: coverage runs before emission, so a failed check prints
+the warnings and writes nothing even when an output directory is requested. Combine with
+`-q`/`--quiet` to suppress generation output in CI logs.

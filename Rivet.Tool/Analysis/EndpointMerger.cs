@@ -66,9 +66,11 @@ public static class EndpointMerger
 
     /// <summary>
     /// True when two endpoint definitions describe the same supported HTTP surface:
-    /// identical declared responses (status, payload shape, headers, contents) and
-    /// an equivalent request-body declaration. Source identity (names) is
-    /// deliberately excluded — it is diagnostic context, not part of the surface.
+    /// identical declared responses (status, payload shape, headers, contents), an
+    /// equivalent request-body declaration, the same set of (wire name, source,
+    /// mapped type) parameters with per-name requiredness, and the same resolved
+    /// declared media types on the file/content-type axes. Source identity (names)
+    /// is deliberately excluded — it is diagnostic context, not part of the surface.
     /// </summary>
     internal static bool EndpointSurfaceEquivalent(
         TsEndpointDefinition left,
@@ -101,7 +103,129 @@ public static class EndpointMerger
             }
         }
 
-        return RequestSurfaceEquivalent(left, right);
+        return RequestSurfaceEquivalent(left, right)
+            && ParamsEquivalent(left.Params, right.Params)
+            && FileContentTypeEquivalent(left.FileContentType, right.FileContentType)
+            && ContentTypeOverrideEquivalent(
+                left.RequestContentTypeOverride,
+                right.RequestContentTypeOverride
+            )
+            && ContentTypeOverrideEquivalent(
+                left.ResponseContentTypeOverride,
+                right.ResponseContentTypeOverride
+            );
+    }
+
+    /// <summary>
+    /// Parameter-surface equivalence: the same set of (wire name, source, mapped type)
+    /// entries with per-name requiredness agreement, compared order-independently.
+    /// Wire names (not source identifiers) are what an OpenAPI consumer observes, so a
+    /// [FromQuery(Name=)] rename or an MVC-inferred source is part of the surface.
+    /// </summary>
+    private static bool ParamsEquivalent(
+        IReadOnlyList<TsEndpointParam> left,
+        IReadOnlyList<TsEndpointParam> right
+    )
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        // Strict multiset pairing: each left entry is matched with at most one
+        // unconsumed right entry on the full observable key (wire name, source,
+        // mapped type, requiredness). A duplicate key on one side cannot
+        // double-match a single right entry, so duplicate-vs-distinct
+        // contradictions fail instead of collapsing silently.
+        var rightCandidates = right.Select(param => (Param: param, Key: ParamKey(param))).ToList();
+        var consumed = new bool[rightCandidates.Count];
+        foreach (var param in left)
+        {
+            var key = ParamKey(param);
+            var matched = false;
+            for (var index = 0; index < rightCandidates.Count; index++)
+            {
+                var candidate = rightCandidates[index];
+                if (
+                    consumed[index]
+                    || !string.Equals(candidate.Key.Name, key.Name, StringComparison.Ordinal)
+                    || candidate.Key.Source != key.Source
+                    || !TsTypeEquivalent(param.Type, candidate.Param.Type)
+                    || param.IsOptional != candidate.Param.IsOptional
+                )
+                {
+                    continue;
+                }
+
+                consumed[index] = true;
+                matched = true;
+                break;
+            }
+
+            if (!matched)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static (string Name, ParamSource Source) ParamKey(TsEndpointParam param) =>
+        (param.Name, param.Source);
+
+    /// <summary>
+    /// File-axis media-type equivalence. Only an observable declaration
+    /// difference is a conflict: when exactly one declaration is null (no
+    /// explicit declaration) the two are treated as equivalent when the
+    /// non-null value is one of the file/JSON defaults, keeping cross-frontend
+    /// pairs that carry their file media type on different representation axes
+    /// (one in FileContentType, the other in response contents, or the default
+    /// omitted on one side) collapsing, while any explicitly differing file
+    /// media type fails the merge.
+    /// </summary>
+    private static bool FileContentTypeEquivalent(string? left, string? right) =>
+        DeclaredMediaTypeEquivalent(left, right);
+
+    /// <summary>
+    /// Content-type-override equivalence on the request and response axes.
+    /// The allowance for a null-vs-populated representation difference does not
+    /// apply here: the emitter resolves a null override to application/json
+    /// (OpenApiEmitter BuildOperation requestBody / success-response content),
+    /// so two declarations whose resolved media types observably differ —
+    /// including one side null and the other a non-null declared override —
+    /// produce different artifacts and conflict.
+    /// </summary>
+    private static bool ContentTypeOverrideEquivalent(string? left, string? right)
+    {
+        const string jsonDefault = "application/json";
+        return string.Equals(
+            left ?? jsonDefault,
+            right ?? jsonDefault,
+            StringComparison.OrdinalIgnoreCase
+        );
+    }
+
+    private static bool DeclaredMediaTypeEquivalent(string? left, string? right)
+    {
+        if (string.Equals(left, right, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (left is null || right is null)
+        {
+            // One side omitted the declaration. The comparison stays on the observable
+            // surface: null is equivalent to the JSON default and to an octet-stream
+            // file default only when the other side carries exactly that default.
+            const string jsonDefault = "application/json";
+            const string fileDefault = "application/octet-stream";
+            var populated = left ?? right;
+            return string.Equals(populated, jsonDefault, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(populated, fileDefault, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
     }
 
     private static bool ResponseEquivalent(TsResponseType left, TsResponseType right)

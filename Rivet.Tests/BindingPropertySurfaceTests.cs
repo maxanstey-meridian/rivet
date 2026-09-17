@@ -41,7 +41,8 @@ public sealed class BindingPropertySurfaceTests
                     Guid id,
                     [FromQuery(Name = "view")] string view,
                     SaveProfileRequest request,
-                    CancellationToken ct)
+                    [FromQuery] int maxResults = 25,
+                    CancellationToken ct = default)
                     => throw new NotImplementedException();
             }
             """;
@@ -53,8 +54,19 @@ public sealed class BindingPropertySurfaceTests
         var route = Assert.Single(ep.Params, p => p.Source == ParamSource.Route);
         Assert.Equal("id", route.Name);
 
-        var query = Assert.Single(ep.Params, p => p.Source == ParamSource.Query);
+        var query = Assert.Single(
+            ep.Params,
+            p => p.Source == ParamSource.Query && p.Name == "view"
+        );
         Assert.Equal("view", query.Name);
+
+        // The C# default value makes the scalar optional on the wire (E8) —
+        // HasExplicitDefaultValue flows into IsOptional.
+        var defaulted = Assert.Single(
+            ep.Params,
+            p => p.Source == ParamSource.Query && p.Name == "maxResults"
+        );
+        Assert.True(defaulted.IsOptional);
 
         var body = Assert.Single(ep.Params, p => p.Source == ParamSource.Body);
         Assert.True(body.Type is TsType.TypeRef { Name: "SaveProfileRequest" });

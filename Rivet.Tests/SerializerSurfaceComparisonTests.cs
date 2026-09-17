@@ -6,11 +6,12 @@ namespace Rivet.Tests;
 
 /// <summary>
 /// The emitted component schema must agree with the observed System.Text.Json web
-/// wire surface (planner-constraint:stj-constructor-truth). Every case serializes and
-/// deserializes with the real JsonSerializerOptions.Web — present and omitted values —
-/// and then asserts the extraction's emitted schema matches the observed surface:
-/// request-only accessibility does not imply an identical response surface
-/// (planner-constraint:json-surface-position-aware).
+/// wire surface (planner-constraint:stj-constructor-truth). One shared probe shape
+/// feeds both sides of the comparison: the emission side compiles the same member
+/// set the serializer side round-trips, and the assertions enumerate the real
+/// JsonSerializerOptions.Web output — present and omitted values — instead of
+/// selected hand-picked pairs. Request-only accessibility does not imply an
+/// identical response surface (planner-constraint:json-surface-position-aware).
 /// </summary>
 public sealed class SerializerSurfaceComparisonTests
 {
@@ -57,9 +58,11 @@ public sealed class SerializerSurfaceComparisonTests
     [Fact]
     public void Emitted_Schema_Matches_Observed_Stj_Web_Surface()
     {
+        // The emission probe declares the same member set as the serializer mirror
+        // class below; the mechanical comparison fails when the two diverge.
         var dtoSource = """
             [RivetType]
-            public sealed record SurfaceDto(
+            public sealed record SurfaceProbe(
                 string PublicValue,
                 [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
                 string NeverIgnored,
@@ -79,59 +82,140 @@ public sealed class SerializerSurfaceComparisonTests
                 [JsonInclude]
                 public int IncludedField;
                 public string PlainField;
+                public string WriteOnlySecret { private get; set; } = "";
             }
             """;
 
-        // The emitted schema for SurfaceDto.
-        var doc = EmitSchema(
-            "SurfaceProbe",
-            dtoSource.Replace(
-                "public sealed record SurfaceDto(",
-                "public sealed record SurfaceProbe("
+        // The emitted schema for the shared probe shape.
+        var doc = EmitSchema("SurfaceProbe", dtoSource);
+
+        var probeSchema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("SurfaceProbe");
+        var schemaProperties = probeSchema.GetProperty("properties");
+        var emittedNames = schemaProperties
+            .EnumerateObject()
+            .Select(p => p.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var writeOnlyNames = schemaProperties
+            .EnumerateObject()
+            .Where(p =>
+                p.Value.TryGetProperty("writeOnly", out var writeOnly) && writeOnly.GetBoolean()
             )
+            .Select(p => p.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        // The real serializer over the same shape — the mirror class declares the
+        // same member set — in a present-value case and an omission case.
+        var options = JsonSerializerOptions.Web;
+        var present = new SurfaceProbe
+        {
+            PublicValue = "x",
+            NeverIgnored = "n",
+            WhenNull = "pn", // present: WhenWritingNull keeps it on the wire
+            WhenDefault = 5, // present: WhenWritingDefault keeps it on the wire
+            AlwaysIgnored = "hidden",
+            PlainField = "p",
+            WriteOnlySecret = "s",
+        };
+        var omitted = new SurfaceProbe
+        {
+            PublicValue = "x",
+            NeverIgnored = "n",
+            WhenNull = null, // omitted on the wire by WhenWritingNull
+            WhenDefault = 0, // omitted by WhenWritingDefault
+            AlwaysIgnored = "hidden",
+            PlainField = "p",
+            WriteOnlySecret = "s",
+        };
+
+        using var presentDoc = JsonDocument.Parse(
+            JsonSerializer.SerializeToUtf8Bytes(present, options)
+        );
+        using var omittedDoc = JsonDocument.Parse(
+            JsonSerializer.SerializeToUtf8Bytes(omitted, options)
+        );
+        var presentNames = presentDoc
+            .RootElement.EnumerateObject()
+            .Select(p => p.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var omittedNames = omittedDoc
+            .RootElement.EnumerateObject()
+            .Select(p => p.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        // Conditional members, both ways. Present values serialize, and the emitted
+        // schema agrees: both members are schema properties.
+        Assert.Equal("pn", presentDoc.RootElement.GetProperty("whenNull").GetString());
+        Assert.Equal(5, presentDoc.RootElement.GetProperty("whenDefault").GetInt32());
+        Assert.Contains("whenNull", emittedNames);
+        Assert.Contains("whenDefault", emittedNames);
+
+        // Omitted values disappear, and the emitted schema agrees by not requiring
+        // them: a member the serializer can leave off the wire cannot be required.
+        Assert.False(omittedDoc.RootElement.TryGetProperty("whenNull", out _));
+        Assert.False(omittedDoc.RootElement.TryGetProperty("whenDefault", out _));
+        var requiredNames = probeSchema.TryGetProperty("required", out var requiredProp)
+            ? requiredProp
+                .EnumerateArray()
+                .Select(r => r.GetString()!)
+                .ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+        var omissibleNames = presentNames.Except(omittedNames).ToHashSet(StringComparer.Ordinal);
+        Assert.Empty(omissibleNames.Intersect(requiredNames));
+
+        // The single-shape comparison, enumerated mechanically: the emitted member
+        // set equals the members the real serializer produces across the exercised
+        // cases plus the request-direction members it marks writeOnly. A member
+        // declared on one probe side only fails here.
+        var serializedNames = new HashSet<string>(presentNames, StringComparer.Ordinal);
+        serializedNames.UnionWith(omittedNames);
+        var wireSurface = new HashSet<string>(serializedNames, StringComparer.Ordinal);
+        wireSurface.UnionWith(writeOnlyNames);
+        Assert.True(
+            emittedNames.SetEquals(wireSurface),
+            $"emitted [{string.Join(", ", emittedNames.OrderBy(n => n, StringComparer.Ordinal))}] vs "
+                + $"wire [{string.Join(", ", wireSurface.OrderBy(n => n, StringComparer.Ordinal))}]"
         );
 
-        var properties = doc
-            .RootElement.GetProperty("components")
-            .GetProperty("schemas")
-            .GetProperty("SurfaceProbe")
-            .GetProperty("properties");
+        // Requiredness agrees with observed omission: exactly the members serialized
+        // in every case, plus the request-direction (writeOnly) members.
+        var alwaysSerialized = serializedNames
+            .Intersect(omittedNames)
+            .ToHashSet(StringComparer.Ordinal);
+        alwaysSerialized.UnionWith(writeOnlyNames);
+        Assert.True(
+            requiredNames.SetEquals(alwaysSerialized),
+            $"required [{string.Join(", ", requiredNames.OrderBy(n => n, StringComparer.Ordinal))}] vs "
+                + $"always-serialized/writeOnly [{string.Join(", ", alwaysSerialized.OrderBy(n => n, StringComparer.Ordinal))}]"
+        );
 
-        var names = properties.EnumerateObject().Select(p => p.Name).ToHashSet();
+        // Directionality markers agree with the observed serializer behavior: the
+        // computed get-only member serializes and is readOnly; the set-only member
+        // never serializes and is writeOnly.
+        Assert.Contains("getOnly", presentNames);
+        Assert.True(schemaProperties.GetProperty("getOnly").GetProperty("readOnly").GetBoolean());
+        Assert.DoesNotContain("writeOnlySecret", presentNames);
+        Assert.DoesNotContain("writeOnlySecret", omittedNames);
+        Assert.True(
+            schemaProperties.GetProperty("writeOnlySecret").GetProperty("writeOnly").GetBoolean()
+        );
 
-        // Public get+set: both surfaces.
-        Assert.Contains("publicValue", names);
-        // [JsonIgnore(Never)]: retained.
-        Assert.Contains("neverIgnored", names);
-        // AlwaysIgnored ([JsonIgnore] no condition → Always): excluded.
-        Assert.DoesNotContain("alwaysIgnored", names);
-        // Private-only accessor without include: invisible to STJ.
-        Assert.DoesNotContain("privateOnly", names);
-        // Private accessor with [JsonInclude]: both surfaces (STJ touches the member).
-        Assert.Contains("includedPrivate", names);
-        // Get-only computed property: serialized, not deserialized → readOnly.
-        var getOnly = properties.GetProperty("getOnly");
-        Assert.True(getOnly.GetProperty("readOnly").GetBoolean());
-
-        // Included field: present. Non-included public field (PlainField): absent
-        // under web defaults (planner-constraint:jsoninclude-fields-represented).
-        Assert.Contains("includedField", names);
-        Assert.DoesNotContain("plainField", names);
-
-        // Requiredness consistent with possible omission: WhenWritingNull/WhenWritingDefault
-        // can be omitted on the wire, so neither is required.
-        var required = doc
-            .RootElement.GetProperty("components")
-            .GetProperty("schemas")
-            .GetProperty("SurfaceProbe")
-            .TryGetProperty("required", out var requiredProp)
-            ? requiredProp.EnumerateArray().Select(r => r.GetString()!).ToHashSet()
-            : new HashSet<string>();
-        Assert.DoesNotContain("whenNull", required);
-        Assert.DoesNotContain("whenDefault", required);
+        // Members invisible to the serializer are absent from the schema too.
+        foreach (var excluded in new[] { "alwaysIgnored", "privateOnly", "plainField" })
+        {
+            Assert.DoesNotContain(excluded, emittedNames);
+            Assert.DoesNotContain(excluded, presentNames);
+        }
     }
 
-    /// <summary>The real serializer fixture: the C# shape exercised above.</summary>
+    /// <summary>
+    /// The serializer fixture: the same C# shape the emission side compiles as
+    /// <c>SurfaceProbe</c> — same member set, accessibility and attributes. A
+    /// member declared on one side only fails the mechanical comparison in
+    /// Emitted_Schema_Matches_Observed_Stj_Web_Surface.
+    /// </summary>
     private sealed class SurfaceProbe
     {
         public string PublicValue { get; set; } = "";
@@ -148,27 +232,46 @@ public sealed class SerializerSurfaceComparisonTests
         [JsonIgnore]
         public string AlwaysIgnored { get; set; } = "";
 
+        [JsonIgnore]
+        private string PrivateOnly { get; set; } = "";
+
         [JsonInclude]
         private string IncludedPrivate { get; set; } = "";
 
+        public string GetOnly => PublicValue + "!";
+
         [JsonInclude]
         public int IncludedField = 0;
+
         public string PlainField = "";
 
+        // Public setter only: the request direction populates it; the private getter
+        // (without [JsonInclude]) keeps it out of serialized output.
+        public string WriteOnlySecret { private get; set; } = "";
+
         public string GetIncludedPrivateForTest() => IncludedPrivate;
+
+        public string GetWriteOnlySecretForTest() => WriteOnlySecret;
+
+        public string GetPrivateOnlyForTest() => PrivateOnly;
     }
 
     [Fact]
-    public void Real_Serializer_RoundTrip_Agrees_With_Emitted_Surface()
+    public void Real_Serializer_RoundTrip_Populates_Emitted_Surface_Members()
     {
+        var options = JsonSerializerOptions.Web;
+
+        // Serialize the present-value case: the writeOnly member stays off the wire
+        // behind its private getter; the computed member serializes.
         var probe = new SurfaceProbe
         {
             PublicValue = "x",
             NeverIgnored = "n",
-            WhenNull = null, // omitted on the wire by WhenWritingNull
-            WhenDefault = 0, // omitted by WhenWritingDefault
+            WhenNull = "pn",
+            WhenDefault = 5,
             AlwaysIgnored = "hidden",
             PlainField = "p",
+            WriteOnlySecret = "s",
         };
         // IncludedPrivate is private — set it directly so the round-trip proves the
         // included private setter actually populates the property.
@@ -179,33 +282,34 @@ public sealed class SerializerSurfaceComparisonTests
             )!
             .SetValue(probe, "x");
 
-        var options = JsonSerializerOptions.Web;
+        using var serialized = JsonDocument.Parse(
+            JsonSerializer.SerializeToUtf8Bytes(probe, options)
+        );
+        Assert.False(serialized.RootElement.TryGetProperty("writeOnlySecret", out _));
+        Assert.Equal("x!", serialized.RootElement.GetProperty("getOnly").GetString());
 
-        var json = JsonSerializer.SerializeToUtf8Bytes(probe, options);
-        using var doc = JsonDocument.Parse(json);
-
-        // Present values — JsonSerializerOptions.Web camelCases property names.
-        Assert.Equal("x", doc.RootElement.GetProperty("publicValue").GetString());
-        Assert.Equal("n", doc.RootElement.GetProperty("neverIgnored").GetString());
-        Assert.True(doc.RootElement.TryGetProperty("includedField", out var included));
-        Assert.Equal(0, included.GetInt32());
-
-        // Omitted values: WhenWritingNull/WhenWritingDefault omit; AlwaysIgnored
-        // (no condition) is fully excluded; PlainField (no include) is invisible.
-        Assert.False(doc.RootElement.TryGetProperty("whenNull", out _));
-        Assert.False(doc.RootElement.TryGetProperty("whenDefault", out _));
-        Assert.False(doc.RootElement.TryGetProperty("alwaysIgnored", out _));
-        Assert.False(doc.RootElement.TryGetProperty("privateOnly", out _));
-        Assert.False(doc.RootElement.TryGetProperty("plainField", out _));
-
-        // Mixed-accessor [JsonInclude]: deserializes through the included private setter.
-        var roundTripped = JsonSerializer.Deserialize<SurfaceProbe>(json, options);
+        // Feed the emitted member surface through the real deserializer: every bound
+        // member populates, the derived member recomputes (the spoofed wire value is
+        // ignored), and the writeOnly member populates through its public setter.
+        var wire =
+            """{"publicValue":"y","neverIgnored":"m","whenNull":"q","whenDefault":9,"includedPrivate":"x","getOnly":"SPOOFED","includedField":3,"writeOnlySecret":"s"}""";
+        var roundTripped = JsonSerializer.Deserialize<SurfaceProbe>(wire, options);
         Assert.NotNull(roundTripped);
-        Assert.Equal("x", roundTripped!.GetIncludedPrivateForTest());
+        Assert.Equal("y", roundTripped!.PublicValue);
+        Assert.Equal("m", roundTripped.NeverIgnored);
+        Assert.Equal("q", roundTripped.WhenNull);
+        Assert.Equal(9, roundTripped.WhenDefault);
+        Assert.Equal(3, roundTripped.IncludedField);
+        Assert.Equal("x", roundTripped.GetIncludedPrivateForTest());
+        Assert.Equal("s", roundTripped.GetWriteOnlySecretForTest());
+        Assert.Equal("y!", roundTripped.GetOnly);
 
-        // Present + omitted round-trip values.
-        Assert.Equal("x", roundTripped.PublicValue);
-        Assert.Equal(0, roundTripped.IncludedField);
+        // Re-serialize the round-tripped instance: the derived member recomputes and
+        // the writeOnly member drops again.
+        var reSerialized = JsonSerializer.Serialize(roundTripped, options);
+        Assert.Contains("\"getOnly\":\"y!\"", reSerialized);
+        Assert.DoesNotContain("SPOOFED", reSerialized);
+        Assert.DoesNotContain("writeOnlySecret", reSerialized);
     }
 
     [Fact]
@@ -328,6 +432,27 @@ public sealed class SerializerSurfaceComparisonTests
         // property; the shared component schema marks it readOnly.
         var upper = properties.GetProperty("upper");
         Assert.True(upper.TryGetProperty("readOnly", out _));
+
+        // The real serializer over the same shape: the computed member is present in
+        // serialized output and is not populated on deserialization — the spoofed
+        // wire value is ignored and the expression recomputes.
+        var probe = new ComputedProbe { Name = "n" };
+        Assert.Contains(
+            "\"upper\":\"N\"",
+            JsonSerializer.Serialize(probe, JsonSerializerOptions.Web)
+        );
+
+        var roundTripped = JsonSerializer.Deserialize<ComputedProbe>(
+            """{"name":"n","upper":"SPOOFED"}""",
+            JsonSerializerOptions.Web
+        );
+        Assert.NotNull(roundTripped);
+        Assert.Equal("n", roundTripped!.Name);
+        Assert.Equal("N", roundTripped.Upper);
+        Assert.DoesNotContain(
+            "SPOOFED",
+            JsonSerializer.Serialize(roundTripped, JsonSerializerOptions.Web)
+        );
     }
 
     private sealed class ComputedProbe

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Rivet.Tool.Analysis;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -12,6 +14,12 @@ namespace Rivet.Tests;
 ///   public CLI with exit 1, a diagnostic naming both sources, and no partial
 ///   replacement of previously written output.
 /// - Reported operation counts equal the emitted operation count.
+/// - Reported operation counts equal the emitted operation count.
+/// - Parameter-level contradictions (name, type, requiredness, file media type,
+///   declared content-type overrides) of one transport identity fail at the merge
+///   with RIV2012 naming both sources, through compiled cross-frontend fixtures and
+///   the public CLI; semantically equivalent declarations on every compared axis
+///   still collapse.
 /// </summary>
 public sealed class OperationIdentityTests
 {
@@ -447,6 +455,344 @@ public sealed class OperationIdentityTests
         Assert.True(listPath.TryGetProperty("get", out _));
         Assert.True(paths.TryGetProperty("/api/items/{id}", out var itemPath));
         Assert.True(itemPath.TryGetProperty("get", out _));
+    }
+
+    // ------------------------------------------------------------------
+    // Param-level conflict detection on the newly compared axes.
+    // Every contradiction fixture keeps responses identical and diverges in
+    // exactly one request-surface axis, so a failure names the extended
+    // comparison, not the pre-existing response-shape axis.
+    // ------------------------------------------------------------------
+
+    private const string ParamConflictHeader = """
+        using System;
+        using System.Threading;
+        using System.Threading.Tasks;
+        using Microsoft.AspNetCore.Mvc;
+        using Rivet;
+
+        namespace Test;
+
+        [RivetType]
+        public sealed record ItemDto(string Id, string Title);
+
+        """;
+
+    /// <summary>
+    /// Same transport identity, same responses, params differ in wire name only:
+    /// the contract side declares the route {id} (Id property) plus a query
+    /// 'filter', while the annotation side renames the same-shape query param
+    /// via [FromQuery(Name = "page")]. The observable (wire name, source, type)
+    /// surface diverges on exactly the wire-name axis, so the pair must fail
+    /// RIV2012 naming both sources — not silently collapse contract-first.
+    /// </summary>
+    [Fact]
+    public void Param_Name_Contradiction_Fails_At_Merge()
+    {
+        var source =
+            ParamConflictHeader
+            + """
+
+                [RivetContract]
+                public static class ItemsContract
+                {
+                    public static readonly Define GetItem =
+                        Define.Get<ItemsQuery, ItemDto>("/api/items/{id}");
+                }
+
+                [RivetType]
+                public sealed record ItemsQuery(int Id, string filter);
+
+                [RivetClient]
+                [ApiController]
+                [Route("api")]
+                public sealed class ItemsController : ControllerBase
+                {
+                    [HttpGet("items/{id}")]
+                    [ProducesResponseType(typeof(ItemDto), 200)]
+                    public Task<IActionResult> Get(
+                        int id,
+                        [FromQuery(Name = "page")] string filter,
+                        CancellationToken ct)
+                        => throw new NotImplementedException();
+                }
+                """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
+
+        Assert.Contains("error RIV2012:", exception.Message);
+        Assert.Contains("GET /api/items/{id}", exception.Message);
+        Assert.Contains("'items.getItem'", exception.Message);
+        Assert.Contains("'items.get'", exception.Message);
+    }
+
+    /// <summary>
+    /// Same transport identity, same responses, params differ in requiredness
+    /// (a [property: RivetOptional] query param on the contract side, required
+    /// query param on the annotation side). Must fail RIV2012.
+    /// </summary>
+    [Fact]
+    public void Param_Requiredness_Contradiction_Fails_At_Merge()
+    {
+        var source =
+            ParamConflictHeader
+            + """
+
+                [RivetContract]
+                public static class ItemsContract
+                {
+                    public static readonly Define GetItems =
+                        Define.Get<ItemsQuery, ItemDto[]>("/api/items");
+                }
+
+                [RivetType]
+                public sealed record ItemsQuery([property: RivetOptional] string filter);
+
+                [RivetClient]
+                [ApiController]
+                [Route("api")]
+                public sealed class ItemsController : ControllerBase
+                {
+                    [HttpGet("items")]
+                    [ProducesResponseType(typeof(ItemDto[]), 200)]
+                    public Task<IActionResult> Get(string filter, CancellationToken ct)
+                        => throw new NotImplementedException();
+                }
+                """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
+
+        Assert.Contains("error RIV2012:", exception.Message);
+        Assert.Contains("'items.getItems'", exception.Message);
+        Assert.Contains("'items.get'", exception.Message);
+    }
+
+    /// <summary>
+    /// Non-default .ProducesContentType override on exactly one side of a
+    /// same-identity pair: the resolved declared response media types observably
+    /// differ (text/html vs application/json), so RIV2012 must fire — the
+    /// null-vs-default allowance is scoped to the file axis only
+    /// (planner-constraint:media-allowance-file-axis-only).
+    /// </summary>
+    [Fact]
+    public void Response_ContentType_Override_Contradiction_Fails_At_Merge()
+    {
+        var source =
+            ParamConflictHeader
+            + """
+
+                [RivetContract]
+                public static class ItemsContract
+                {
+                    public static readonly Define GetItems =
+                        Define.Get<ItemDto>("/api/items")
+                            .ProducesContentType("text/html");
+                }
+
+                [RivetClient]
+                [ApiController]
+                [Route("api")]
+                public sealed class ItemsController : ControllerBase
+                {
+                    [HttpGet("items")]
+                    [ProducesResponseType(typeof(ItemDto), 200)]
+                    public Task<IActionResult> Get(CancellationToken ct)
+                        => throw new NotImplementedException();
+                }
+                """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
+
+        Assert.Contains("error RIV2012:", exception.Message);
+        Assert.Contains("'items.getItems'", exception.Message);
+        Assert.Contains("'items.get'", exception.Message);
+    }
+
+    /// <summary>
+    /// Collapse boundary on the newly compared axes: two contract declarations
+    /// of one transport identity carrying the same non-default file media type
+    /// (application/pdf) are semantically equivalent, so the pair must still
+    /// collapse to one operation carrying the file surface
+    /// (planner-constraint:collapse-regression-file-contenttype). An equivalent
+    /// cross-frontend (annotation vs contract) representation of the file axis
+    /// is not statically representable — FileContentType is produced only by
+    /// ContractWalker (never by the annotation walker), so a cross-frontend
+    /// pair would observably diverge by design and is pinned separately as a
+    /// contradiction axis.
+    /// </summary>
+    [Fact]
+    public void Equivalent_File_ContentType_Declarations_Still_Collapse()
+    {
+        var source =
+            ParamConflictHeader
+            + """
+
+                [RivetContract]
+                public static class ReportsContract
+                {
+                    public static readonly RouteDefinition Download =
+                        Define.Get("/api/reports/{id}")
+                            .ProducesFile("application/pdf");
+                }
+
+                [RivetContract]
+                public static class ReportsContractDuplicate
+                {
+                    public static readonly RouteDefinition GetReportPdf =
+                        Define.Get("/api/reports/{id}")
+                            .ProducesFile("application/pdf");
+                }
+                """;
+
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
+
+        // Equivalent file-media-type declarations of one transport identity
+        // collapse to one emitted operation — the first (contract-first)
+        // representative stays.
+        var endpoint = Assert.Single(endpoints);
+        Assert.Equal("GET", endpoint.HttpMethod);
+        Assert.Equal("/api/reports/{id}", endpoint.RouteTemplate);
+        Assert.Equal("application/pdf", endpoint.FileContentType);
+    }
+
+    /// <summary>
+    /// Strict multiset pairing (planner-constraint:param-pairing-consumed): a
+    /// duplicated left key cannot re-match one right entry while an unmatched
+    /// right param hides. Two contract declarations of one identity with
+    /// {A:string, A:string} vs {A:string, B:int} params must conflict, even
+    /// though counts are equal and every left key finds a name match.
+    /// Supplementary model-level pin — the primary param-conflict evidence is
+    /// the compiled cross-frontend fixtures and the public-CLI test.
+    /// </summary>
+    [Fact]
+    public void Duplicate_Vs_Distinct_Param_Keys_Do_Not_Collapse()
+    {
+        static TsEndpointDefinition Endpoint(
+            string name,
+            params (string ParamName, TsType Type)[] parameters
+        )
+        {
+            return new TsEndpointDefinition(
+                name,
+                "GET",
+                "/api/pairing",
+                parameters
+                    .Select(p => new TsEndpointParam(p.ParamName, p.Type, ParamSource.Query))
+                    .ToList(),
+                null,
+                "Pairing",
+                [new TsResponseType(200, new TsType.Primitive("string"))]
+            );
+        }
+
+        var left = Endpoint(
+            "getA",
+            ("a", new TsType.Primitive("string")),
+            ("a", new TsType.Primitive("string"))
+        );
+        var right = Endpoint(
+            "getB",
+            ("a", new TsType.Primitive("string")),
+            ("b", new TsType.Primitive("number"))
+        );
+
+        // Duplicate-vs-distinct keys are a contradiction: the left duplicate
+        // cannot consume the same right entry twice.
+        Assert.ThrowsAny<InvalidOperationException>(() => EndpointMerger.Merge([left], [right]));
+
+        // Distinct-vs-distinct with identical keys still collapses.
+        var distinctLeft = Endpoint(
+            "getA",
+            ("a", new TsType.Primitive("string")),
+            ("b", new TsType.Primitive("number"))
+        );
+        var distinctRight = Endpoint(
+            "getB",
+            ("b", new TsType.Primitive("number")),
+            ("a", new TsType.Primitive("string"))
+        );
+
+        var merged = EndpointMerger.Merge([distinctLeft], [distinctRight]);
+        var endpoint = Assert.Single(merged);
+        Assert.Equal("getA", endpoint.Name);
+    }
+
+    /// <summary>
+    /// Public CLI: a param-level contradiction of one transport identity exits 1
+    /// with RIV2012 naming both sources, and a previously written openapi.json
+    /// is left byte-identical (no partial replacement), in the same style as
+    /// Public_Cli_Fails_On_Contradictory_Operations_Without_Partial_Replacement
+    /// (planner-constraint:primary-evidence-cli). The two sides diverge on the
+    /// requiredness axis — the contract's [RivetOptional] query param is
+    /// optional on the wire while the annotation's plain 'string filter' is
+    /// required (the ct guard's repair is what exposes this contradiction:
+    /// under the inert guard the annotation side carried a fabricated ("ct",
+    /// Body) param and the pair failed for a different reason).
+    /// </summary>
+    [Fact]
+    public async Task Public_Cli_Fails_On_Param_Contradiction_Without_Partial_Replacement()
+    {
+        using var work = OperationIdentityWork.Create();
+        var outputDir = Path.Combine(work.Path, "output");
+        Directory.CreateDirectory(outputDir);
+
+        var specPath = Path.Combine(outputDir, "openapi.json");
+        const string previousSpec = "{ \"previous\": true }";
+        await File.WriteAllTextAsync(specPath, previousSpec);
+
+        var sourcePath = Path.Combine(work.Path, "ParamConflict.cs");
+        await File.WriteAllTextAsync(
+            sourcePath,
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Id, string Title);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly Define GetItems =
+                    Define.Get<ItemsQuery, ItemDto[]>("/api/items");
+            }
+
+            [RivetType]
+            public sealed record ItemsQuery([property: RivetOptional] string filter);
+
+            [RivetClient]
+            [ApiController]
+            [Route("api")]
+            public sealed class ItemsController : ControllerBase
+            {
+                [HttpGet("items")]
+                [ProducesResponseType(typeof(ItemDto[]), 200)]
+                public Task<IActionResult> Get(string filter, CancellationToken ct)
+                    => throw new NotImplementedException();
+            }
+            """
+        );
+
+        var emission = CliRunner.RunCli(work.Path, [sourcePath, "--output", outputDir]);
+
+        Assert.Equal(1, emission.ExitCode);
+        Assert.Contains("error RIV2012:", emission.StdErr);
+        Assert.Contains("getItems", emission.StdErr);
+        Assert.Contains("'items.get'", emission.StdErr);
+        Assert.DoesNotContain("Unhandled exception", emission.StdErr);
+
+        Assert.Equal(previousSpec, await File.ReadAllTextAsync(specPath));
     }
 }
 

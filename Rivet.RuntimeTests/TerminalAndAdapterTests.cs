@@ -43,6 +43,28 @@ public sealed class TerminalAndAdapterTests
         Assert.Equal("hello", Encoding.UTF8.GetString(response.Body));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Byte_Array_Success_Keeps_The_Json_Base64_Wire_Shape_In_Both_Adapters(bool mvc)
+    {
+        var payload = new byte[] { 1, 2, 3, 4 };
+        var result = Define.Get<byte[]>("/blobs").Success(payload);
+
+        var response = await ExecuteAsync(result, mvc);
+
+        // Executed end-to-end, the byte[] terminal stays a JSON terminal: the wire is
+        // application/json whose payload is the base64 string of the original bytes
+        // (matching the emitted string+base64 schema), never a raw binary file.
+        Assert.Equal(StatusCodes.Status200OK, response.StatusCode);
+        Assert.StartsWith("application/json", response.ContentType);
+        Assert.Equal(
+            Convert.ToBase64String(payload),
+            JsonDocument.Parse(response.Body).RootElement.GetString()
+        );
+        Assert.Equal(string.Empty, response.ContentDisposition);
+    }
+
     [Fact]
     public async Task Explicit_primary_content_type_wins_over_a_multi_content_map()
     {

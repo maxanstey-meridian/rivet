@@ -95,20 +95,37 @@ public sealed class TasksController(CreateTaskUseCase createTask) : ControllerBa
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
+    // [FromRoute(Name=)] renames the wire surface to the route placeholder — MVC
+    // binds route data by the placeholder name (IModelNameProvider), so the live
+    // request's {taskId} placeholder and the emitted contract's param name agree.
     [RivetEndpoint]
-    [HttpPut("{id:guid}/status")]
+    [HttpPut("{taskId:guid}/status")]
     [ProducesResponseType(typeof(TaskDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateStatus(
-        Guid id,
+        [FromRoute(Name = "taskId")] Guid id,
         [FromBody] UpdateWorkItemStatusRequest request,
         CancellationToken ct
     )
     {
         _ = ct;
-        _ = id;
-        _ = request;
-        return Ok(default(TaskDetailDto));
+        // A real DTO (200 JSON), not Ok(default(...)): a null DTO hits MVC's
+        // HttpNoContentOutputFormatter and would 204, contradicting the declared
+        // 200 ProducesResponseType the emitted contract carries.
+        return Ok(
+            new TaskDetailDto(
+                id,
+                $"status={request.Status}",
+                null,
+                request.Status,
+                Priority.Low,
+                null,
+                [],
+                [],
+                DateTime.MinValue,
+                null
+            )
+        );
     }
 
     [RivetEndpoint]
@@ -121,9 +138,10 @@ public sealed class TasksController(CreateTaskUseCase createTask) : ControllerBa
     )
     {
         _ = ct;
-        _ = id;
-        _ = request;
-        return StatusCode(StatusCodes.Status201Created, default(CommentDto));
+        return StatusCode(
+            StatusCodes.Status201Created,
+            new CommentDto(Guid.NewGuid(), request.Body, id.ToString(), DateTime.UtcNow)
+        );
     }
 
     [RivetEndpoint]
@@ -153,18 +171,37 @@ public sealed class TasksController(CreateTaskUseCase createTask) : ControllerBa
     // Default MVC inference exercised on the real host: the defaulted scalar binds
     // from the query string and the unattributed complex type binds from the body —
     // [FromQuery(Name=)] renames the wire surface to match the actual request.
+    // The handler echoes the bound inputs: the host test asserts the actually bound
+    // limit (default 20 when the query param is omitted, the supplied value when
+    // present) and the received body term — value fidelity, not just status.
     [RivetEndpoint]
     [HttpPost("search")]
     [ProducesResponseType(typeof(PagedResult<TaskListItemDto>), StatusCodes.Status200OK)]
     public IActionResult Search(
         [FromQuery(Name = "q")] string term,
-        [FromQuery] int limit,
-        SearchTasksRequest request
+        SearchTasksRequest request,
+        [FromQuery] int limit = 20
     )
     {
-        _ = term;
-        _ = request;
-        return Ok(new PagedResult<TaskListItemDto>([], 0, 1, limit));
+        _ = request.MinPriority;
+        _ = request.Tag;
+        return Ok(
+            new PagedResult<TaskListItemDto>(
+                [
+                    new TaskListItemDto(
+                        Guid.Empty,
+                        $"term={term}",
+                        WorkItemStatus.Open,
+                        Priority.Low,
+                        null,
+                        DateTime.MinValue
+                    ),
+                ],
+                request.Term.Length,
+                1,
+                limit
+            )
+        );
     }
 
     // Plain-string action returning the string directly: MVC's string formatter

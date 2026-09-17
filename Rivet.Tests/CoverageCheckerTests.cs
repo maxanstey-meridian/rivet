@@ -1833,4 +1833,36 @@ public sealed class CoverageCheckerTests
         // → "Widgets"), identically in extraction and coverage.
         Assert.Equal("/api/Widgets", warning.Actual);
     }
+
+    [Fact]
+    public void Unroutable_Mvc_Action_Is_Reported_Unresolved()
+    {
+        // [HttpGet] with no template on a controller without [Route]: the route
+        // template cannot be statically resolved, so the implementation is
+        // unresolved — it must not disappear into an All OK result.
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpGet]
+                public IActionResult List() =>
+                    TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToActionResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListTasks" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        // Unresolved, known-mismatched and verified states remain distinguishable:
+        // the Actual text states the unresolved cause instead of a resolved route.
+        Assert.Contains("unresolved route", warning.Actual);
+        Assert.Contains("no route template", warning.Actual);
+    }
 }

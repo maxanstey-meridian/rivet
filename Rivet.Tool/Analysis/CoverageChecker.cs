@@ -559,7 +559,18 @@ public static class CoverageChecker
         var fullRoute = EndpointWalker.CombineRoutes(controllerRoute, methodRoute);
         if (fullRoute is null)
         {
-            return new EndpointContext(true, [httpMethod], null);
+            // An MVC action with no statically resolvable route ([HttpGet] with no
+            // template on a controller without [Route]) is unresolved, not verified:
+            // report it through the established RouteError channel so BuildWarnings
+            // emits a warning (the requested check exits nonzero) and the
+            // unresolved state stays distinguishable from a known-mismatched
+            // route, mirroring the minimal-API unresolved reporting.
+            return new EndpointContext(
+                true,
+                [httpMethod],
+                null,
+                RouteError: "unresolved route: the action declares no route template and the controller declares no [Route]"
+            );
         }
 
         // A6: substitute [controller]/[action] tokens exactly like extraction

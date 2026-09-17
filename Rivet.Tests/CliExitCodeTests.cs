@@ -282,4 +282,77 @@ public sealed class CliExitCodeTests
             DeleteWork(work);
         }
     }
+
+    private const string UnroutableMvcSource = """
+        using Microsoft.AspNetCore.Mvc;
+        using Rivet;
+
+        namespace Test;
+
+        [RivetType]
+        public sealed record ItemDto(string Id);
+
+        [RivetContract]
+        public static class ItemsContract
+        {
+            public static readonly RouteDefinition<ItemDto> GetItems =
+                Define.Get<ItemDto>("/api/items");
+        }
+
+        // [HttpGet] with no template on a controller without [Route]: the route
+        // template cannot be statically resolved, so the requested coverage check
+        // must report the implementation unresolved and exit nonzero — the
+        // unroutable action cannot disappear into an All OK result.
+        public sealed class ItemsController : ControllerBase
+        {
+            [HttpGet]
+            public IActionResult Get() =>
+                ItemsContract.GetItems.Success(new ItemDto("1")).ToActionResult();
+        }
+        """;
+
+    [Fact]
+    public async Task Failed_Check_On_Unroutable_Mvc_Action_Exits_Nonzero_Without_Output()
+    {
+        var (work, sourcePath) = await WriteSourceAsync("Api.cs", UnroutableMvcSource);
+        try
+        {
+            var result = CliRunner.RunCli(work, [sourcePath, "--check"]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("warning RIV4003:", result.StdErr);
+            Assert.Contains("[RouteMismatch]", result.StdErr);
+            // The unresolved cause is stated, not a fabricated resolved route.
+            Assert.Contains("unresolved route", result.StdErr);
+            Assert.Contains("Coverage:", result.StdErr);
+        }
+        finally
+        {
+            DeleteWork(work);
+        }
+    }
+
+    [Fact]
+    public async Task Failed_Check_On_Unroutable_Mvc_Action_Exits_Nonzero_With_Output()
+    {
+        var (work, sourcePath) = await WriteSourceAsync("Api.cs", UnroutableMvcSource);
+        try
+        {
+            var outputDir = Path.Combine(work, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var result = CliRunner.RunCli(work, [sourcePath, "--check", "--output", outputDir]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("[RouteMismatch]", result.StdErr);
+            Assert.Contains("unresolved route", result.StdErr);
+            // A successful write must not clear the coverage failure: nothing is
+            // emitted and the output directory stays empty.
+            Assert.Empty(Directory.GetFiles(outputDir, "*", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            DeleteWork(work);
+        }
+    }
 }

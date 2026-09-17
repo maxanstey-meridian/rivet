@@ -11,8 +11,9 @@ error RIV2002: <message>
 IDs are stable across releases — grep, baseline, or suppress by ID, never by
 message text. Most diagnostics are **warnings** and allow processing to continue.
 Diagnostics marked **Error** are fatal and exit `1`; currently this applies to
-`RIV1021`, `RIV1022`, `RIV1023`, `RIV1102`, `RIV2002`, `RIV2011`, and `RIV2012`. Coverage warnings also exit `1` when `--check` is used without
-`--output`; other warnings do not change the exit code.
+`RIV1021`, `RIV1022`, `RIV1023`, `RIV1102`, `RIV2002`, `RIV2011`, and `RIV2012`. Coverage
+warnings also exit `1` whenever `--check` is used, with or without `--output`; other
+warnings do not change the exit code.
 
 The ID ranges follow the pipeline stages:
 

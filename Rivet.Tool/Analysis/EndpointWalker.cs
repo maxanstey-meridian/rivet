@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
@@ -601,6 +602,26 @@ public static class EndpointWalker
                 continue;
             }
 
+            // CancellationToken is host plumbing, never user input. It is excluded
+            // BEFORE classification: unattributed, the struct would otherwise reach
+            // the complex-body inference and be fabricated into a ("ct", Body)
+            // request surface MVC never binds. Interfaces and other unclassified
+            // params must NOT take this silent path — they keep flowing into
+            // ClassifyParam so IsHostPlumbingType can warn-and-exclude (RIV1100).
+            //
+            // The identification is structural and reference-set-robust on purpose:
+            // WellKnownTypes.CancellationToken resolves via GetTypeByMetadataName,
+            // which returns null whenever more than one referenced assembly
+            // declares System.Threading.CancellationToken (the loose-file CLI
+            // references the whole NETCore.App framework, where System.Runtime and
+            // System.Private.CoreLib both carry the struct). A symbol-equality
+            // guard would then be inert and ct would be fabricated into a body —
+            // so both guard sites identify the struct by name/namespace/shape.
+            if (IsCancellationToken(param.Type))
+            {
+                continue;
+            }
+
             // P2 wave 5 (retires RIV1005): [FromHeader] maps to ParamSource.Header. The
             // attribute's Name property keeps the wire casing ("X-Api-Key"); without one
             // the C# parameter name is the header name.
@@ -611,7 +632,8 @@ public static class EndpointWalker
                         GetFromHeaderName(param, wkt) ?? param.Name,
                         typeWalker.MapType(param.Type),
                         ParamSource.Header,
-                        IsOptional: param.HasExplicitDefaultValue
+                        IsOptional: param.HasExplicitDefaultValue,
+                        DefaultValue: GetDefaultValueLiteral(param)
                     )
                 );
                 continue;
@@ -636,7 +658,8 @@ public static class EndpointWalker
                             GetBindingName(param, FormFieldSources(wkt)) ?? param.Name,
                             typeWalker.MapType(param.Type),
                             ParamSource.FormField,
-                            IsOptional: param.HasExplicitDefaultValue
+                            IsOptional: param.HasExplicitDefaultValue,
+                            DefaultValue: GetDefaultValueLiteral(param)
                         )
                     );
                 }
@@ -654,7 +677,8 @@ public static class EndpointWalker
                         GetBindingName(param, FormFieldSources(wkt)) ?? param.Name,
                         typeWalker.MapType(param.Type),
                         ParamSource.FormField,
-                        IsOptional: param.HasExplicitDefaultValue
+                        IsOptional: param.HasExplicitDefaultValue,
+                        DefaultValue: GetDefaultValueLiteral(param)
                     )
                 );
                 continue;
@@ -674,7 +698,8 @@ public static class EndpointWalker
                         GetBindingName(param, FormFieldSources(wkt)) ?? param.Name,
                         typeWalker.MapType(param.Type),
                         ParamSource.FormField,
-                        IsOptional: param.HasExplicitDefaultValue
+                        IsOptional: param.HasExplicitDefaultValue,
+                        DefaultValue: GetDefaultValueLiteral(param)
                     )
                 );
                 continue;
@@ -705,7 +730,8 @@ public static class EndpointWalker
                     wireName,
                     tsType,
                     source.Value,
-                    IsOptional: param.HasExplicitDefaultValue
+                    IsOptional: param.HasExplicitDefaultValue,
+                    DefaultValue: GetDefaultValueLiteral(param)
                 )
             );
             if (source == ParamSource.Body)
@@ -773,6 +799,35 @@ public static class EndpointWalker
             .GetAttributes()
             .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, attributeType));
 
+    /// <summary>
+    /// The literal source text of a parameter's C# default value (for example "20"
+    /// for `int limit = 20`, "default" for a default literal), or null. E8: surfaced
+    /// on the param so emitters can publish schema.default alongside IsOptional —
+    /// the contract frontend already flows [RivetDefault] through the same field.
+    /// </summary>
+    private static string? GetDefaultValueLiteral(IParameterSymbol param)
+    {
+        if (!param.HasExplicitDefaultValue)
+        {
+            return null;
+        }
+
+        foreach (var reference in param.DeclaringSyntaxReferences)
+        {
+            var node = reference.GetSyntax();
+            var parameterSyntax =
+                node as ParameterSyntax
+                ?? node.AncestorsAndSelf().OfType<ParameterSyntax>().FirstOrDefault();
+            var clause = parameterSyntax?.Default;
+            if (clause?.Value is { } value)
+            {
+                return value.ToString();
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>The [FromHeader(Name = "...")] value, or null when unset.</summary>
     private static string? GetFromHeaderName(IParameterSymbol param, WellKnownTypes wkt)
     {
@@ -786,9 +841,26 @@ public static class EndpointWalker
         return named?.Value.Value as string;
     }
 
+    /// <summary>
+    /// True for System.Threading.CancellationToken regardless of which referenced
+    /// assembly supplied the symbol. WellKnownTypes.CancellationToken goes through
+    /// GetTypeByMetadataName, which returns null when two referenced assemblies
+    /// declare the same full name (System.Runtime.dll and System.Private.CoreLib.dll
+    /// both do) — so the ct guards must not rely on symbol equality.
+    /// </summary>
+    private static bool IsCancellationToken(ITypeSymbol type)
+    {
+        return type is INamedTypeSymbol named
+            && named.TypeKind == TypeKind.Struct
+            && named.Name == "CancellationToken"
+            && named.ContainingNamespace?.ToDisplayString() == "System.Threading";
+    }
+
     private static bool IsInfrastructureType(WellKnownTypes wkt, ITypeSymbol type)
     {
-        if (SymbolEqualityComparer.Default.Equals(type, wkt.CancellationToken))
+        // Structural ct identification (see ExtractParams): symbol equality via
+        // WellKnownTypes is inert under an ambiguous reference set.
+        if (IsCancellationToken(type))
         {
             return true;
         }
