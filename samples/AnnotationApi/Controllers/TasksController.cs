@@ -168,8 +168,8 @@ public sealed class TasksController(CreateTaskUseCase createTask) : ControllerBa
         );
     }
 
-    // Default MVC inference exercised on the real host: the defaulted scalar binds
-    // from the query string and the unattributed complex type binds from the body —
+    // Explicit binding surface exercised on the real host: the defaulted scalar
+    // binds from the query string and the DTO binds from the body via [FromBody] —
     // [FromQuery(Name=)] renames the wire surface to match the actual request.
     // The handler echoes the bound inputs: the host test asserts the actually bound
     // limit (default 20 when the query param is omitted, the supplied value when
@@ -179,7 +179,7 @@ public sealed class TasksController(CreateTaskUseCase createTask) : ControllerBa
     [ProducesResponseType(typeof(PagedResult<TaskListItemDto>), StatusCodes.Status200OK)]
     public IActionResult Search(
         [FromQuery(Name = "q")] string term,
-        SearchTasksRequest request,
+        [FromBody] SearchTasksRequest request,
         [FromQuery] int limit = 20
     )
     {

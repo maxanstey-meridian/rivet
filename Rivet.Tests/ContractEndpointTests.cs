@@ -2395,13 +2395,14 @@ public sealed class ContractEndpointTests
 
             namespace Test;
 
+            [JsonConverter(typeof(JsonStringEnumConverter<Status>))]
             public enum Status
             {
                 [JsonStringEnumMemberName("in-progress")]
                 InProgress,
                 [JsonStringEnumMemberName("on_hold")]
                 OnHold,
-                Done
+                Done,
             }
 
             [RivetType]

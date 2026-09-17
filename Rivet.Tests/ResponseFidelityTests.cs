@@ -6,20 +6,17 @@ using Rivet.Tool.Model;
 namespace Rivet.Tests;
 
 /// <summary>
-/// Response-fidelity regressions: response status/media-type/body declarations
-/// agree with the supported host behavior. Covers the frontend-distinguished
-/// success defaults (MVC 200/204 vs contract-first 201), the text/plain media
-/// type of plain string actions, [Produces] precedence, the RIV1102
-/// body-forbidden-status guard through C# contract AND contract-JSON inputs,
-/// the emitter's defense-in-depth re-check, and ordinary byte[] staying JSON
-/// base64 without an implicit file terminal.
+/// Response-fidelity regressions: explicit response status/media-type/body declarations
+/// agree with the emitted contract. Covers the text/plain media type of plain string
+/// actions, [Produces] precedence, the RIV1102 body-forbidden-status guard through C#
+/// contract AND contract-JSON inputs, the emitter's defense-in-depth re-check, ordinary
+/// byte[] staying JSON base64 without an explicit file declaration, and refusal of
+/// ambiguous result containers (no invented success responses).
 /// </summary>
 public sealed class ResponseFidelityTests
 {
-    // ════════════════ Frontend-distinguished success defaults ════════════════
-
     [Fact]
-    public void Annotation_Post_Without_Metadata_Synthesizes_Host_Truthful_200()
+    public void Annotation_Ambiguous_Result_Container_Refuses_With_RIV1006()
     {
         var source = """
             using System;
@@ -30,9 +27,6 @@ public sealed class ResponseFidelityTests
             using Rivet;
 
             namespace Test;
-
-            [RivetType]
-            public sealed record ItemDto(string Id);
 
             [RivetClient]
             [ApiController]
@@ -45,18 +39,17 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var (endpoints, _) = CompilationHelper.WalkMerged(source);
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
 
-        var ep = Assert.Single(endpoints);
-        Assert.Equal("POST", ep.HttpMethod);
-        // MVC actually sends 200 OK for a non-void action — NOT the contract-first
-        // POST→201 default. No method-based invention in the shared model.
-        var response = Assert.Single(ep.Responses);
-        Assert.Equal(200, response.StatusCode);
+        // Bare IActionResult/void/Task actions acquire no invented success response.
+        Assert.Contains("RIV1006", exception.Message);
+        Assert.Contains("ItemsController.Post", exception.Message);
     }
 
     [Fact]
-    public void Annotation_Void_Action_Synthesizes_Host_Truthful_204()
+    public void Annotation_Void_Action_Without_Response_Declaration_Refuses_With_RIV1006()
     {
         var source = """
             using System;
@@ -79,14 +72,45 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var (endpoints, _) = CompilationHelper.WalkMerged(source);
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
 
-        var ep = Assert.Single(endpoints);
-        Assert.Equal("DELETE", ep.HttpMethod);
-        // MVC's void actions return 204 No Content — regardless of HTTP method.
-        var response = Assert.Single(ep.Responses);
-        Assert.Equal(204, response.StatusCode);
-        Assert.Null(response.DataType);
+        // void/non-generic Task stays unresolved — no synthetic 204.
+        Assert.Contains("RIV1006", exception.Message);
+        Assert.Contains("TasksController.Delete", exception.Message);
+    }
+
+    [Fact]
+    public void Annotation_Variable_Status_Typed_Result_Refuses_With_RIV1006()
+    {
+        var source = """
+            using System;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetClient]
+            [ApiController]
+            [Route("api")]
+            public sealed class ProblemsController : ControllerBase
+            {
+                [HttpPost("problems")]
+                public ProblemHttpResult Post() => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
+
+        // ProblemHttpResult carries its status at runtime — no invented 200/500.
+        // The Results<ProblemHttpResult, ...> branch form is refused by the same
+        // unmapped-branch refusal in CollectTypedResultMappings.
+        Assert.Contains("RIV1006", exception.Message);
+        Assert.Contains("ProblemsController.Post", exception.Message);
     }
 
     [Fact]
@@ -157,40 +181,6 @@ public sealed class ResponseFidelityTests
         var response = Assert.Single(ep.Responses);
         Assert.Equal(200, response.StatusCode);
         Assert.Equal("string", Assert.IsType<TsType.Primitive>(response.DataType).Name);
-    }
-
-    [Fact]
-    public void Annotation_Plain_Dto_Action_Keeps_Application_Json_Default()
-    {
-        var source = """
-            using System;
-            using System.Threading;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Http;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
-
-            namespace Test;
-
-            [RivetType]
-            public sealed record ItemDto(string Id);
-
-            [RivetClient]
-            [ApiController]
-            [Route("api")]
-            public sealed class ItemsController : ControllerBase
-            {
-                [HttpPost("items")]
-                public Task<IActionResult> Post(CancellationToken ct)
-                    => throw new NotImplementedException();
-            }
-            """;
-
-        var (endpoints, _) = CompilationHelper.WalkMerged(source);
-
-        var ep = Assert.Single(endpoints);
-        // DTO surface stays the application/json default — no override invented.
-        Assert.Null(ep.ResponseContentTypeOverride);
     }
 
     [Fact]

@@ -44,6 +44,7 @@ public sealed class WellKnownTypes
     public readonly INamedTypeSymbol? ActionResultOfT;
     public readonly INamedTypeSymbol? ActionResult;
     public readonly INamedTypeSymbol? IActionResult;
+    public readonly INamedTypeSymbol? IResult;
 
     // Infrastructure
     public readonly INamedTypeSymbol? CancellationToken;
@@ -71,12 +72,16 @@ public sealed class WellKnownTypes
 
     // A8: previously-unmapped typed results — Results<> branches using these were
     // silently dropped from the contract
-    public readonly INamedTypeSymbol? ProblemHttpResult;
     public readonly INamedTypeSymbol? ValidationProblem;
     public readonly INamedTypeSymbol? ForbidHttpResult;
     public readonly INamedTypeSymbol? InternalServerError;
     public readonly INamedTypeSymbol? InternalServerErrorOfT;
+
+    // Variable-status typed results — deliberately absent from the fixed-status
+    // table; recognized only as unresolved result containers.
+    public readonly INamedTypeSymbol? ProblemHttpResult;
     public readonly INamedTypeSymbol? JsonHttpResultOfT;
+    public readonly INamedTypeSymbol? StatusCodeHttpResult;
 
     // Coverage analysis
     public readonly INamedTypeSymbol? RouteDefinition;
@@ -171,6 +176,7 @@ public sealed class WellKnownTypes
         );
         ActionResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ActionResult");
         IActionResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.IActionResult");
+        IResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IResult");
 
         // Infrastructure
         CancellationToken = compilation.GetTypeByMetadataName("System.Threading.CancellationToken");
@@ -224,10 +230,7 @@ public sealed class WellKnownTypes
             "Microsoft.AspNetCore.Http.HttpResults.UnprocessableEntity"
         );
 
-        // A8: typed results that were missing from the mapping table
-        ProblemHttpResult = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult"
-        );
+        // Typed results with genuinely fixed statuses
         ValidationProblem = compilation.GetTypeByMetadataName(
             "Microsoft.AspNetCore.Http.HttpResults.ValidationProblem"
         );
@@ -240,8 +243,17 @@ public sealed class WellKnownTypes
         InternalServerErrorOfT = compilation.GetTypeByMetadataName(
             "Microsoft.AspNetCore.Http.HttpResults.InternalServerError`1"
         );
+
+        // Variable-status typed results — mapped nowhere; a Results<...> branch or a
+        // direct return using them is an unresolved contract.
+        ProblemHttpResult = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult"
+        );
         JsonHttpResultOfT = compilation.GetTypeByMetadataName(
             "Microsoft.AspNetCore.Http.HttpResults.JsonHttpResult`1"
+        );
+        StatusCodeHttpResult = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Http.HttpResults.StatusCodeHttpResult"
         );
 
         // Coverage analysis
@@ -310,15 +322,14 @@ public sealed class WellKnownTypes
         TryAdd(builder, Conflict, 409);
         TryAdd(builder, UnprocessableEntityOfT, 422);
         TryAdd(builder, UnprocessableEntity, 422);
-        // A8: ProblemHttpResult defaults to 500, ValidationProblem is a 400
-        // ValidationProblemDetails, ForbidHttpResult is 403, InternalServerError[<T>]
-        // is 500 (.NET 9), JsonHttpResult<T> is a 200 with a JSON body
-        TryAdd(builder, ProblemHttpResult, 500);
+        // Only genuinely fixed statuses live here. ProblemHttpResult (a Results.Problem
+        // branch can carry any status) and JsonHttpResult<T> (Results.Json selects its
+        // own status) can carry/select another status at runtime, so they are not
+        // entries — a Results<...> branch using them is an unresolved contract.
         TryAdd(builder, ValidationProblem, 400);
         TryAdd(builder, ForbidHttpResult, 403);
         TryAdd(builder, InternalServerError, 500);
         TryAdd(builder, InternalServerErrorOfT, 500);
-        TryAdd(builder, JsonHttpResultOfT, 200);
         return builder.ToImmutable();
     }
 

@@ -134,18 +134,27 @@ public static class ContractWalker
         var name = Naming.ToCamelCase(method.Name);
         if (responses.Count == 0)
         {
-            // The annotation frontend owns its success default — MVC sends 200 for
-            // non-void abstract methods and 204 No Content for void ones, regardless
-            // of HTTP method. Host-truthful synthesis at the extraction frontend;
-            // explicit [ProducesResponseType] metadata always wins.
-            var isVoidAction = EndpointWalker.IsVoidAction(wkt, method);
-            var defaultType = isVoidAction
-                ? null
-                : EndpointWalker.ExtractReturnType(wkt, method, typeWalker);
+            // Same explicit-response boundary as annotated controllers: an abstract
+            // contract method with no declared success response is an incomplete
+            // contract — refuse rather than fabricate 204/200. The concrete payload
+            // T convenience applies after Task/ValueTask unwrapping; result
+            // containers and void stay unresolved.
+            var unwrapped = EndpointWalker.UnwrapTask(wkt, method.ReturnType, out _);
+            if (
+                unwrapped is null
+                || EndpointWalker.IsStatusSelectingResultContainer(wkt, unwrapped)
+            )
+            {
+                throw new ContractAnalysisException(
+                    $"error {Diagnostics.UnmappedTypedResult}: contract endpoint "
+                        + $"'{name}' declares no success response. "
+                        + "Rivet reads explicit contract declarations — add .Status(...).Returns(...) "
+                        + "(or a concrete payload output type) to declare the success response."
+                );
+            }
+
             responses.Add(
-                isVoidAction
-                    ? new TsResponseType(204, null, "No Content")
-                    : new TsResponseType(200, defaultType)
+                new TsResponseType(200, EndpointWalker.ExtractReturnType(wkt, method, typeWalker))
             );
         }
 
@@ -888,13 +897,12 @@ public static class ContractWalker
             }
         }
 
-        // Stream / FileResult return types → implicit file endpoint
-        if (IsFileReturnType(tOutput))
-        {
-            isFileEndpoint = true;
-            fileContentType ??= "application/octet-stream";
-            tOutput = null; // Don't map Stream/FileResult to TS — client gets Blob
-        }
+        // No implicit file contract: a Stream/FileResult output type does not make an
+        // ordinary Define.* endpoint a binary file endpoint. File behavior requires an
+        // explicit declaration — Define.File(), .ProducesFile(...) or [ProducesFile]
+        // through the contract surface above (acceptance:no-implicit-contract-file-by-
+        // output-type). An undeclared Stream output is an unresolved contract; the
+        // return-type mapping below surfaces it.
 
         // Build return type from TOutput
         TsType? returnType = tOutput is not null ? typeWalker.MapType(tOutput) : null;
@@ -1943,29 +1951,6 @@ public static class ContractWalker
             .Any(p =>
                 IsFormFileType(wkt, p.Type) || typeWalker.IsCollectionOf(p.Type, wkt.IFormFile)
             );
-
-    /// <summary>
-    /// Checks if the return type is a known file/stream type that should be treated
-    /// as a file endpoint (Stream, FileResult, FileStreamResult, etc.).
-    /// </summary>
-    private static bool IsFileReturnType(ITypeSymbol? type)
-    {
-        if (type is null)
-        {
-            return false;
-        }
-
-        var ns = type.ContainingNamespace?.ToDisplayString();
-        return type.Name switch
-        {
-            "Stream" when ns is "System.IO" => true,
-            "FileResult"
-            or "FileStreamResult"
-            or "FileContentResult"
-            or "PhysicalFileResult" when ns is "Microsoft.AspNetCore.Mvc" => true,
-            _ => false,
-        };
-    }
 
     /// <summary>
     /// Checks if the type is a (byte[], string) tuple — used for named file downloads

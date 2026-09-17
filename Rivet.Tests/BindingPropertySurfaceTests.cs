@@ -3,9 +3,10 @@ using Rivet.Tool.Model;
 namespace Rivet.Tests;
 
 /// <summary>
-/// Extraction-oracle tests for the binding-and-properties slice: MVC default inference
-/// (scalar → Query, complex → Body), explicit FromQuery/FromRoute/FromForm Name= wire
-/// names, infrastructure exclusion, and the RIV1100 unresolved-binding diagnostic.
+/// Extraction-oracle tests for the binding-and-properties slice: explicit FromQuery/
+/// FromRoute/FromForm declarations (including Name= wire names) succeed, unattributed
+/// non-allowlisted inputs refuse with RIV1100, and the retained narrow conventions
+/// (exact route match, CancellationToken) behave as documented.
 /// </summary>
 public sealed class BindingPropertySurfaceTests
 {
@@ -17,7 +18,7 @@ public sealed class BindingPropertySurfaceTests
     }
 
     [Fact]
-    public void Defaulted_Scalar_Binds_Query_And_Complex_Binds_Body()
+    public void Explicit_Bindings_Produce_Their_Declared_Surface()
     {
         var source = """
             using System;
@@ -40,7 +41,7 @@ public sealed class BindingPropertySurfaceTests
                 public Task<IActionResult> Save(
                     Guid id,
                     [FromQuery(Name = "view")] string view,
-                    SaveProfileRequest request,
+                    [FromBody] SaveProfileRequest request,
                     [FromQuery] int maxResults = 25,
                     CancellationToken ct = default)
                     => throw new NotImplementedException();
@@ -71,7 +72,7 @@ public sealed class BindingPropertySurfaceTests
         var body = Assert.Single(ep.Params, p => p.Source == ParamSource.Body);
         Assert.True(body.Type is TsType.TypeRef { Name: "SaveProfileRequest" });
 
-        // The CancellationToken is infrastructure — never emitted as user input.
+        // The CancellationToken is host plumbing — never emitted as user input.
         Assert.DoesNotContain(ep.Params, p => p.Name == "ct");
     }
 
@@ -106,7 +107,7 @@ public sealed class BindingPropertySurfaceTests
     }
 
     [Fact]
-    public void Unattributed_Interface_Parameter_Is_Reported_And_Excluded()
+    public void Unattributed_Interface_Parameter_Refuses_With_RIV1100()
     {
         var source = """
             using System;
@@ -132,17 +133,15 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var stderr = CompilationHelper.CaptureStdErr(() => WalkEndpoints(source));
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
 
-        // Actionable diagnostic naming parameter and type; the input is excluded, not dropped silently.
-        Assert.Contains("RIV1100", stderr);
-        Assert.Contains("'pricing'", stderr);
-        Assert.Contains("IPricingService", stderr);
-        Assert.Contains("EXCLUDED", stderr);
+        Assert.Contains("RIV1100", exception.Message);
+        Assert.Contains("'pricing'", exception.Message);
+        Assert.Contains("IPricingService", exception.Message);
     }
 
     [Fact]
-    public void Host_Plumbing_Parameter_Is_Reported_And_Excluded()
+    public void Unattributed_Host_Plumbing_Parameter_Refuses_With_RIV1100()
     {
         var source = """
             using System;
@@ -164,15 +163,15 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var stderr = CompilationHelper.CaptureStdErr(() => WalkEndpoints(source));
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
 
-        Assert.Contains("RIV1100", stderr);
-        Assert.Contains("'http'", stderr);
-        Assert.Contains("HttpContext", stderr);
+        Assert.Contains("RIV1100", exception.Message);
+        Assert.Contains("'http'", exception.Message);
+        Assert.Contains("HttpContext", exception.Message);
     }
 
     [Fact]
-    public void Second_Unattributed_Complex_Parameter_Is_Reported_Not_Invented()
+    public void Unattributed_Complex_Parameters_Refuse_With_RIV1100()
     {
         var source = """
             using System;
@@ -198,16 +197,15 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var stderr = CompilationHelper.CaptureStdErr(() => WalkEndpoints(source));
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
 
-        // MVC itself rejects multiple body params — the second cannot be confidently bound.
-        Assert.Contains("RIV1100", stderr);
-        Assert.Contains("'second'", stderr);
-        Assert.Contains("SecondBody", stderr);
+        // No partial operation is emitted for the unresolved inputs.
+        Assert.Contains("RIV1100", exception.Message);
+        Assert.Contains("'first'", exception.Message);
     }
 
     [Fact]
-    public void Unattributed_Object_Parameter_Binds_Body_Untyped_Not_Query()
+    public void Unattributed_Object_Parameter_Refuses_With_RIV1100()
     {
         var source = """
             using System;
@@ -228,12 +226,83 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+
+        Assert.Contains("RIV1100", exception.Message);
+        Assert.Contains("'payload'", exception.Message);
+    }
+
+    [Fact]
+    public void Unattributed_Scalar_Parameter_Refuses_With_RIV1100()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/echo")]
+            public sealed class QueryController
+            {
+                [RivetEndpoint]
+                [HttpGet("")]
+                [ProducesResponseType(typeof(void), 200)]
+                public Task<IActionResult> Get(bool dryRun)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+
+        Assert.Contains("RIV1100", exception.Message);
+        Assert.Contains("'dryRun'", exception.Message);
+    }
+
+    [Fact]
+    public void Exact_Route_Name_Match_Is_The_Retained_Convention()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record SaveProfileRequest(string DisplayName);
+
+            [Route("api/profiles")]
+            public sealed class ProfilesController
+            {
+                [RivetEndpoint]
+                [HttpPut("{id:guid}")]
+                [ProducesResponseType(typeof(void), 204)]
+                public Task<IActionResult> Save(
+                    Guid id,
+                    [FromQuery] bool dryRun,
+                    [FromBody] SaveProfileRequest request,
+                    CancellationToken ct = default)
+                    => throw new NotImplementedException();
+            }
+            """;
+
         var endpoints = WalkEndpoints(source);
 
         var ep = Assert.Single(endpoints);
+        // Exact parameter-name match against the declared placeholder is Route input.
+        var route = Assert.Single(ep.Params, p => p.Source == ParamSource.Route);
+        Assert.Equal("id", route.Name);
+        Assert.True(route.Type is TsType.Primitive { Name: "string" });
+
+        // Explicit [FromQuery] and [FromBody] keep their declared sources.
+        Assert.Contains(ep.Params, p => p.Source == ParamSource.Query && p.Name == "dryRun");
         var body = Assert.Single(ep.Params, p => p.Source == ParamSource.Body);
-        // object keeps the established untyped-schema representation.
-        Assert.True(body.Type is TsType.Primitive { Name: "unknown" });
+        Assert.True(body.Type is TsType.TypeRef { Name: "SaveProfileRequest" });
+
+        Assert.DoesNotContain(ep.Params, p => p.Name == "ct");
     }
 
     [Fact]
@@ -268,5 +337,34 @@ public sealed class BindingPropertySurfaceTests
         Assert.Contains(ep.Params, p => p.Source == ParamSource.File && p.Name == "file");
         var field = Assert.Single(ep.Params, p => p.Source == ParamSource.FormField);
         Assert.Equal("alt_text", field.Name);
+    }
+
+    [Fact]
+    public void Unattributed_Parameter_Beside_File_Refuses_With_RIV1100()
+    {
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/uploads")]
+            public sealed class UploadsController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(typeof(void), 201)]
+                public Task<IActionResult> Upload(IFormFile file, string altText)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+
+        Assert.Contains("RIV1100", exception.Message);
+        Assert.Contains("'altText'", exception.Message);
     }
 }

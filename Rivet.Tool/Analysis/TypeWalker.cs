@@ -1678,7 +1678,10 @@ public sealed class TypeWalker
                 return new TsType.Dictionary(MapTypeCore(namedType.TypeArguments[1], context), key);
             }
 
-            // Enum → named string union type
+            // Enum → named union type. Ordinary enums are numeric by default
+            // (matching ordinary System.Text.Json serialization); an explicit
+            // type-level [JsonConverter(typeof(JsonStringEnumConverter<...>))]
+            // opts into a string union honoring [JsonStringEnumMemberName].
             if (namedType.TypeKind == TypeKind.Enum)
             {
                 // A5: full-namespace keyed naming — colliding enum names disambiguate
@@ -1691,7 +1694,37 @@ public sealed class TypeWalker
                         .OfType<IFieldSymbol>()
                         .Where(f => f.HasConstantValue)
                         .ToList();
-                    if (IsNumericEnum(namedType))
+                    if (IsStringEnum(namedType))
+                    {
+                        var members = fields
+                            .Select(f =>
+                            {
+                                // Check for [JsonStringEnumMemberName("original")] attribute
+                                var attr = f.GetAttributes()
+                                    .FirstOrDefault(a =>
+                                        a.AttributeClass?.Name
+                                            is "JsonStringEnumMemberNameAttribute"
+                                    );
+                                if (
+                                    attr?.ConstructorArguments.Length > 0
+                                    && attr.ConstructorArguments[0].Value is string original
+                                )
+                                {
+                                    return original;
+                                }
+                                return Naming.ToCamelCase(f.Name);
+                            })
+                            .ToList();
+
+                        _enums[enumName] = new TsType.StringUnion(
+                            members,
+                            GetTypeMetadata(namedType),
+                            GetTypeFormat(namedType),
+                            GetTypeDescription(namedType),
+                            _generatedEnumMetadata.GetValueOrDefault(enumName)
+                        );
+                    }
+                    else
                     {
                         var format =
                             namedType
@@ -1708,36 +1741,7 @@ public sealed class TypeWalker
                             GetTypeDescription(namedType),
                             _generatedEnumMetadata.GetValueOrDefault(enumName)
                         );
-                        _typeNamespaces.TryAdd(enumName, GetNamespaceGroup(namedType));
-                        return new TsType.TypeRef(enumName);
                     }
-
-                    var members = fields
-                        .Select(f =>
-                        {
-                            // Check for [JsonStringEnumMemberName("original")] attribute
-                            var attr = f.GetAttributes()
-                                .FirstOrDefault(a =>
-                                    a.AttributeClass?.Name is "JsonStringEnumMemberNameAttribute"
-                                );
-                            if (
-                                attr?.ConstructorArguments.Length > 0
-                                && attr.ConstructorArguments[0].Value is string original
-                            )
-                            {
-                                return original;
-                            }
-                            return Naming.ToCamelCase(f.Name);
-                        })
-                        .ToList();
-
-                    _enums[enumName] = new TsType.StringUnion(
-                        members,
-                        GetTypeMetadata(namedType),
-                        GetTypeFormat(namedType),
-                        GetTypeDescription(namedType),
-                        _generatedEnumMetadata.GetValueOrDefault(enumName)
-                    );
                     _typeNamespaces.TryAdd(enumName, GetNamespaceGroup(namedType));
                 }
 
@@ -1750,19 +1754,19 @@ public sealed class TypeWalker
                 && _walkableAssemblies.Contains(namedType.ContainingAssembly)
             )
             {
-                // Value Object convention: single property named "Value" → branded type
-                // Skip for generic types — Wrapper<T>(T Value) is a generic record, not a VO
-                var voInner =
-                    namedType.IsGenericType || IsGeneratedRecord(namedType)
-                        ? null
-                        : TryGetValueObjectInner(namedType);
-                if (voInner is not null)
+                // Scalar brand: explicit [RivetScalar] opt-in — the Value type
+                // determines the branded-scalar wire representation. Without the
+                // attribute a one-property type is an ordinary object schema.
+                var scalarInner = TryGetScalarInner(namedType);
+                if (scalarInner is not null)
                 {
-                    // A5: brands used to be keyed by simple name with first-wins TryAdd
                     var brandName = GetEmittedName(namedType);
                     var brand = new TsType.Brand(
                         brandName,
-                        ApplyTypeFormat(MapTypeCore(voInner, context), GetTypeFormat(namedType)),
+                        ApplyTypeFormat(
+                            MapTypeCore(scalarInner, context),
+                            GetTypeFormat(namedType)
+                        ),
                         GetTypeMetadata(namedType),
                         GetTypeDescription(namedType)
                     );
@@ -1826,14 +1830,20 @@ public sealed class TypeWalker
         return new TsType.Primitive("unknown");
     }
 
-    private static bool IsNumericEnum(INamedTypeSymbol type) =>
+    /// <summary>
+    /// True only when the enum explicitly declares the type-level
+    /// [JsonConverter(typeof(JsonStringEnumConverter<...>))] (or the non-generic
+    /// JsonStringEnumConverter) declaration. Ordinary enums are numeric — Rivet no
+    /// longer turns unannotated enums into camelCase string unions by convention.
+    /// </summary>
+    private static bool IsStringEnum(INamedTypeSymbol type) =>
         type.GetAttributes()
             .Any(attribute =>
                 attribute.AttributeClass?.Name == "JsonConverterAttribute"
                 && attribute.ConstructorArguments is [var converterArgument]
                 && converterArgument.Value is INamedTypeSymbol converterType
                 && converterType.Name.StartsWith(
-                    "JsonNumberEnumConverter",
+                    "JsonStringEnumConverter",
                     StringComparison.Ordinal
                 )
             );
@@ -1843,19 +1853,6 @@ public sealed class TypeWalker
             .FirstOrDefault(attribute => attribute.AttributeClass?.Name == "RivetFormatAttribute")
             ?.ConstructorArguments.FirstOrDefault()
             .Value as string;
-
-    private static bool IsGeneratedRecord(INamedTypeSymbol type)
-    {
-        var attribute = type.GetAttributes()
-            .FirstOrDefault(attribute =>
-                attribute.AttributeClass?.Name == "RivetGeneratedTypeAttribute"
-            );
-        return attribute is not null
-            && (
-                attribute.ConstructorArguments.Length < 3
-                || attribute.ConstructorArguments[2].Value is not true
-            );
-    }
 
     private static TsType ApplyTypeFormat(TsType type, string? format) =>
         format is null
@@ -1906,9 +1903,8 @@ public sealed class TypeWalker
             // never registers a brand schema as a side effect of the probe.
             if (
                 named.TypeKind is TypeKind.Class or TypeKind.Struct
-                && !named.IsGenericType
                 && _walkableAssemblies.Contains(named.ContainingAssembly)
-                && TryGetValueObjectInner(named) is { SpecialType: SpecialType.System_String }
+                && TryGetScalarInner(named) is { SpecialType: SpecialType.System_String }
             )
             {
                 return MapTypeCore(named, context);
@@ -2025,20 +2021,37 @@ public sealed class TypeWalker
     /// Detects Value Object convention: a record with exactly one non-implicit
     /// property named "Value". Returns the inner type symbol, or null.
     /// </summary>
-    private static ITypeSymbol? TryGetValueObjectInner(INamedTypeSymbol symbol)
+    /// <summary>
+    /// Explicit [RivetScalar] opt-in: the annotated type's single eligible Value
+    /// property determines the scalar brand inner type. Unannotated one-property
+    /// types are ordinary object schemas — shape alone is never the decision. An
+    /// attributed type with an invalid shape fails with RIV1103 instead of
+    /// silently falling back to object semantics.
+    /// </summary>
+    private static ITypeSymbol? TryGetScalarInner(INamedTypeSymbol symbol)
     {
+        if (symbol.GetAttributes().All(a => a.AttributeClass?.Name != "RivetScalarAttribute"))
+        {
+            return null;
+        }
+
         var props = symbol
             .GetMembers()
             .OfType<IPropertySymbol>()
             .Where(p => !p.IsStatic && !p.IsIndexer && !p.IsImplicitlyDeclared)
             .ToList();
 
-        if (props.Count == 1 && props[0].Name == "Value")
+        if (symbol.IsGenericType || props.Count != 1 || props[0].Name != "Value")
         {
-            return props[0].Type;
+            throw new ContractAnalysisException(
+                $"error {Diagnostics.InvalidRivetScalarShape}: [RivetScalar] type "
+                    + $"'{symbol.ToDisplayString()}' must be a non-generic class/struct/record "
+                    + "with exactly one eligible non-static, non-indexer, non-implicit property "
+                    + "named 'Value' — the Value type determines the scalar wire representation."
+            );
         }
 
-        return null;
+        return props[0].Type;
     }
 
     /// <summary>
@@ -2082,16 +2095,19 @@ public sealed class TypeWalker
         return true;
     }
 
+    private bool IsCollectionType(INamedTypeSymbol symbol) =>
+        _collectionTypes.Contains(symbol.OriginalDefinition);
+
     /// <summary>
-    /// True when the type binds to the query string under MVC's default inference for
-    /// an ApiController: primitives, string, enums, supported scalar wrappers
-    /// (Guid/DateTime/…), Nullable&lt;scalar&gt; and scalar collections. The scalar
-    /// classification is the same surface MapType lowers to primitives — one shared
-    /// source so the binding boundary cannot drift from the emitted schema.
+    /// True for the scalar/simple shapes an explicit [FromForm] parameter declares
+    /// as a single form field: primitives, string, the well-known scalar structs
+    /// (Guid/DateTime/…), enums, and Nullable/array/collection surfaces of those.
+    /// Anything else (class/record DTOs) is the form body. Consulted only inside
+    /// the [FromForm] attribute branch — never as a general binding inference —
+    /// and shares the scalar surface with MapType so the two cannot drift.
     /// </summary>
-    public bool IsScalarQueryType(ITypeSymbol type)
+    public bool IsSimpleFormType(ITypeSymbol type)
     {
-        // Nullable<int> / string? → unwrap before classifying
         if (
             type is INamedTypeSymbol
             {
@@ -2099,7 +2115,7 @@ public sealed class TypeWalker
             } nullable
         )
         {
-            return IsScalarQueryType(nullable.TypeArguments[0]);
+            return IsSimpleFormType(nullable.TypeArguments[0]);
         }
 
         if (type.TypeKind == TypeKind.Enum)
@@ -2107,23 +2123,14 @@ public sealed class TypeWalker
             return true;
         }
 
-        // System.Object is NOT a scalar query type (planner-constraint:object-dynamic-parity):
-        // MVC binds an unattributed object parameter from the request body, so it must
-        // fall through to the Body classification with the established untyped-schema
-        // representation — never an invented query param.
-        if (type.SpecialType == SpecialType.System_Object)
-        {
-            return false;
-        }
-
         if (type.SpecialType is not SpecialType.None)
         {
-            return true; // string, int, bool, …
+            return true;
         }
 
         if (type is IArrayTypeSymbol arrayType)
         {
-            return IsScalarQueryType(arrayType.ElementType);
+            return IsSimpleFormType(arrayType.ElementType);
         }
 
         if (type is INamedTypeSymbol named)
@@ -2135,15 +2142,12 @@ public sealed class TypeWalker
 
             if (IsCollectionType(named) && named.TypeArguments.Length == 1)
             {
-                return IsScalarQueryType(named.TypeArguments[0]);
+                return IsSimpleFormType(named.TypeArguments[0]);
             }
         }
 
         return false;
     }
-
-    private bool IsCollectionType(INamedTypeSymbol symbol) =>
-        _collectionTypes.Contains(symbol.OriginalDefinition);
 
     private bool IsDictionaryType(INamedTypeSymbol symbol) =>
         _dictionaryTypes.Contains(symbol.OriginalDefinition);

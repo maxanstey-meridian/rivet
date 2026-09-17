@@ -26,6 +26,7 @@ validating hosts at runtime.
 | `[RivetFormat("fmt")]` | property | `format` — for custom formats (`uri-template`, `currency`, ...) with no dedicated C# type; takes precedence over formats inferred from DataAnnotations |
 | `[RivetConstraints(...)]` | property | `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minItems`, `maxItems`, `uniqueItems` — constraints DataAnnotations cannot express. Also a `ValidationAttribute`: enforced at runtime under validating hosts (`[ApiController]` model validation, `Validator.TryValidateObject`); null values pass — pair with `[Required]`. See [Runtime validation](../guides/runtime-validation.md#enforcing-constraints-at-runtime) |
 | `[RivetHeader("Wire-Name")]` | property | Marks a contract input-record property as a **request header parameter** (`in: header`, original casing preserved; without a name the property name is the header name). The property never enters the JSON schema. **Spec-only** — header binding stays the host's job. `Accept`/`Content-Type`/`Authorization` are rejected by the emitter (RIV2009). |
+| `[RivetScalar]` | class, struct, record | Declares an explicit **scalar value object**: the type must have exactly one non-static property named `Value`, whose type becomes the wire primitive with `x-rivet-brand`. Opt-in replacement for the retired shape-only single-`Value`-property convention; a `Value` wrapper without it is an ordinary object schema (invalid shapes fail with RIV1103). |
 
 ## Operation metadata
 

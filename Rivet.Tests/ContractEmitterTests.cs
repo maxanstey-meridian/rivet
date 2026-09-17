@@ -1208,13 +1208,20 @@ public sealed class ContractEmitterTests
             ]
         );
 
-        var json = ContractEmitter.Emit(
-            new Dictionary<string, TsTypeDefinition>(),
-            new Dictionary<string, TsType>(),
-            [endpoint]
-        );
+        string? json = null;
+        // Capture the intentionally-triggered RIV2010: an uncaptured Console.Error
+        // write leaks into concurrent CaptureStdErr windows (its doc contract),
+        // breaking their exact-count assertions.
+        _ = CompilationHelper.CaptureStdErr(() =>
+        {
+            json = ContractEmitter.Emit(
+                new Dictionary<string, TsTypeDefinition>(),
+                new Dictionary<string, TsType>(),
+                [endpoint]
+            );
+        });
 
-        using var doc = JsonDocument.Parse(json);
+        using var doc = JsonDocument.Parse(json!);
         var responses = doc.RootElement.GetProperty("endpoints")[0].GetProperty("responses");
         Assert.Equal(
             [200, 404, 500],

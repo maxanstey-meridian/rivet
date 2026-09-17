@@ -4,8 +4,9 @@ using Rivet.Tool.Model;
 namespace Rivet.Tests;
 
 /// <summary>
-/// Brand (value-object) detection is TypeWalker behavior — asserted against the walker's
-/// brand model and the brand representation in emitted OpenAPI (both survive the pivot).
+/// Scalar value objects are an explicit [RivetScalar] contract decision — the
+/// shape-only single-Value-property convention is retired. Asserted against the
+/// walker's brand model and the brand representation in emitted OpenAPI.
 /// </summary>
 public sealed class ValueObjectTests
 {
@@ -13,7 +14,7 @@ public sealed class ValueObjectTests
         doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty(name);
 
     [Fact]
-    public void SingleValueProperty_EmitsAsBrand()
+    public void RivetScalar_EmitsAsBrand()
     {
         var source = """
             using System;
@@ -21,6 +22,7 @@ public sealed class ValueObjectTests
 
             namespace Test;
 
+            [RivetScalar]
             public sealed record Email(string Value);
 
             [RivetType]
@@ -62,13 +64,14 @@ public sealed class ValueObjectTests
     }
 
     [Fact]
-    public void SingleValueProperty_NumericInner()
+    public void RivetScalar_NumericInner()
     {
         var source = """
             using Rivet;
 
             namespace Test;
 
+            [RivetScalar]
             public sealed record Quantity(int Value);
 
             [RivetType]
@@ -99,7 +102,7 @@ public sealed class ValueObjectTests
     }
 
     [Fact]
-    public void SingleValueProperty_GuidInner()
+    public void RivetScalar_GuidInner()
     {
         var source = """
             using System;
@@ -107,6 +110,7 @@ public sealed class ValueObjectTests
 
             namespace Test;
 
+            [RivetScalar]
             public sealed record Uprn(string Value)
             {
                 public override string ToString() => Value;
@@ -118,7 +122,7 @@ public sealed class ValueObjectTests
 
         var (_, walker) = CompilationHelper.WalkContract(source);
 
-        // ToString override does not defeat VO detection
+        // ToString override does not defeat the explicit scalar decision
         var brand = Assert.Contains("Uprn", walker.Brands);
         var inner = Assert.IsType<TsType.Primitive>(brand.Inner);
         Assert.Equal("string", inner.Name);
@@ -135,7 +139,41 @@ public sealed class ValueObjectTests
     }
 
     [Fact]
-    public void MultipleProperties_NotAVO()
+    public void Unannotated_ValueWrapper_IsOrdinaryObject()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record Email(string Value);
+
+            [RivetType]
+            public sealed record UserDto(Guid Id, Email Email);
+            """;
+
+        var (_, walker) = CompilationHelper.WalkContract(source);
+
+        // No [RivetScalar] — Email is an ordinary object type definition, not a brand
+        Assert.Empty(walker.Brands);
+        var email = walker.Definitions["Email"];
+        var valueProp = Assert.Single(email.Properties, p => p.Name == "value");
+        Assert.Equal("string", Assert.IsType<TsType.Primitive>(valueProp.Type).Name);
+
+        var userDto = walker.Definitions["UserDto"];
+        var emailRef = Assert.Single(userDto.Properties, p => p.Name == "email");
+        Assert.Equal("Email", Assert.IsType<TsType.TypeRef>(emailRef.Type).Name);
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var emailSchema = GetSchema(doc, "Email");
+        Assert.Equal("object", emailSchema.GetProperty("type").GetString());
+        Assert.True(emailSchema.GetProperty("properties").TryGetProperty("value", out _));
+        Assert.False(emailSchema.TryGetProperty("x-rivet-brand", out _));
+    }
+
+    [Fact]
+    public void MultipleProperties_NotAScalar()
     {
         var source = """
             using Rivet;
@@ -171,42 +209,60 @@ public sealed class ValueObjectTests
     }
 
     [Fact]
-    public void SinglePropertyNotNamedValue_NotAVO()
+    public void ScalarAttribute_WithInvalidShape_Fails()
     {
         var source = """
             using Rivet;
 
             namespace Test;
 
+            [RivetScalar]
+            public sealed record Money(decimal Amount, string Currency);
+
+            [RivetType]
+            public sealed record ProductDto(string Name, Money Price);
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
+
+        Assert.Contains("error RIV1103:", exception.Message);
+        Assert.Contains("Money", exception.Message);
+    }
+
+    [Fact]
+    public void ScalarAttribute_WithWrongPropertyName_Fails()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetScalar]
             public sealed record Wrapper(string Content);
 
             [RivetType]
             public sealed record ThingDto(Wrapper Data);
             """;
 
-        var (_, walker) = CompilationHelper.WalkContract(source);
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
 
-        // Single property but not named "Value" — object type, not a brand
-        Assert.Empty(walker.Brands);
-        var wrapper = walker.Definitions["Wrapper"];
-        var contentProp = Assert.Single(wrapper.Properties, p => p.Name == "content");
-        Assert.Equal("string", Assert.IsType<TsType.Primitive>(contentProp.Type).Name);
-
-        using var doc = CompilationHelper.EmitOpenApi(source);
-        var wrapperSchema = GetSchema(doc, "Wrapper");
-        Assert.Equal("object", wrapperSchema.GetProperty("type").GetString());
-        Assert.True(wrapperSchema.GetProperty("properties").TryGetProperty("content", out _));
-        Assert.False(wrapperSchema.TryGetProperty("x-rivet-brand", out _));
+        Assert.Contains("error RIV1103:", exception.Message);
+        Assert.Contains("Wrapper", exception.Message);
     }
 
     [Fact]
-    public void NullableVO_EmitsBrandOrNull()
+    public void RivetScalar_Nullable_EmitsBrandOrNull()
     {
         var source = """
             using Rivet;
 
             namespace Test;
 
+            [RivetScalar]
             public sealed record Email(string Value);
 
             [RivetType]

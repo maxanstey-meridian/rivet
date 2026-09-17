@@ -34,7 +34,7 @@ public sealed class SerializerSurfaceComparisonTests
                 [RivetEndpoint]
                 [HttpPost("")]
                 [ProducesResponseType(typeof(void), 200)]
-                public Task<IActionResult> Post({{dtoName}} dto)
+                public Task<IActionResult> Post([FromBody] {{dtoName}} dto)
                     => throw new NotImplementedException();
             }
             """;

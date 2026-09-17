@@ -91,6 +91,7 @@ public sealed class HeaderSupportTests
             {
                 [RivetEndpoint]
                 [HttpPut("{id}")]
+                [ProducesResponseType(typeof(void), 200)]
                 public IActionResult Update(
                     string id,
                     [FromQuery] bool dryRun,

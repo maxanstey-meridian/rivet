@@ -23,9 +23,11 @@ Verified limits of the current tool, so you don't discover them in production.
 
 - Input must compile: generation aborts on compilation errors, and on type-name
   collisions between namespaces (component names are global).
-- Enum values are emitted camelCased — the spec matches a camelCase
-  `JsonStringEnumConverter`; if your API serializes enums differently (e.g. as
-  integers), the spec will not match the wire.
+- Enums are emitted as integers by default, matching ordinary System.Text.Json
+  serialization of unannotated enums. String-valued enums require a type-level
+  `[JsonConverter(typeof(JsonStringEnumConverter<T>))]`; Rivet reads only explicit
+  type-level serializer metadata, not application-wide serializer options, so if
+  your API registers that converter globally the spec will not match the wire.
 - `TimeSpan` and `BigInteger` have no schema mapping — they emit an untyped (empty)
   schema with a diagnostic (`RIV1009`/`RIV1010`). Escape hatch: expose the value as a
   `string` property (ISO 8601 for `TimeSpan`, digits for `BigInteger`) or as a number

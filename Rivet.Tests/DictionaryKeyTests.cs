@@ -21,10 +21,12 @@ public sealed class DictionaryKeyTests
     {
         var source = """
             using System.Collections.Generic;
+            using System.Text.Json.Serialization;
             using Rivet;
 
             namespace Test;
 
+            [JsonConverter(typeof(JsonStringEnumConverter<Color>))]
             public enum Color { Red, Green, Blue }
 
             [RivetType]
@@ -66,7 +68,7 @@ public sealed class DictionaryKeyTests
 
             namespace Test;
 
-            [RivetType]
+            [RivetScalar]
             public sealed record Sku(string Value);
 
             [RivetType]
@@ -236,13 +238,16 @@ public sealed class DictionaryKeyTests
 
     private const string EmitterSource = """
         using System.Collections.Generic;
+        using System.Text.Json.Serialization;
         using Rivet;
 
         namespace Test;
 
+        [JsonConverter(typeof(JsonStringEnumConverter<Color>))]
         public enum Color { Red, Green, Blue }
 
         [RivetType]
+        [RivetScalar]
         public sealed record Sku(string Value);
 
         [RivetType]

@@ -1135,6 +1135,50 @@ public static class OpenApiEmitter
                 ),
             };
         }
+        else if (formFieldParams.Count > 0)
+        {
+            // Declared form fields without files: the endpoint's [FromForm] surface
+            // stands on its own (planner-constraint:declared-form-fields-always-
+            // represented). The fields-only content is form-urlencoded, matching
+            // the multipart branch's field schema construction.
+            var formSchema = new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["properties"] = new Dictionary<string, object>(),
+            };
+            var formProps = (Dictionary<string, object>)formSchema["properties"];
+            var requiredFields = new List<string>();
+            foreach (var ff in formFieldParams)
+            {
+                formProps[ff.Name] = MapTsTypeToJsonSchema(
+                    ff.Type,
+                    $"form field '{ff.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+                );
+                if (ff.Type is not TsType.Nullable && !ff.IsOptional)
+                {
+                    requiredFields.Add(ff.Name);
+                }
+            }
+            if (requiredFields.Count > 0)
+            {
+                formSchema["required"] = requiredFields;
+            }
+
+            operation["requestBody"] = new Dictionary<string, object>
+            {
+                ["required"] = ep.RequestBodyRequired ?? true,
+                ["content"] = WithExamples(
+                    new Dictionary<string, object>
+                    {
+                        ["application/x-www-form-urlencoded"] = new Dictionary<string, object>
+                        {
+                            ["schema"] = formSchema,
+                        },
+                    },
+                    ep.RequestExamples
+                ),
+            };
+        }
         else if (bodyParam is not null)
         {
             var bodyContentType = ep.IsFormEncoded

@@ -439,7 +439,9 @@ public sealed class OpenApiConformanceTests : IDisposable
         {
             public enum Priority { Low, Medium, High, Critical }
             public enum WorkItemStatus { Open, InProgress, Done }
+            [RivetScalar]
             public sealed record Email(string Value);
+            [RivetScalar]
             public sealed record TaskId(Guid Value);
 
             [RivetType]
@@ -477,6 +479,7 @@ public sealed class OpenApiConformanceTests : IDisposable
                     => throw new NotImplementedException();
 
                 [HttpGet("{id:guid}")]
+                [ProducesResponseType(typeof(TaskDetailDto), StatusCodes.Status200OK)]
                 public async Task<ActionResult<TaskDetailDto>> Get(Guid id, CancellationToken ct)
                     => throw new NotImplementedException();
 
@@ -488,6 +491,7 @@ public sealed class OpenApiConformanceTests : IDisposable
                     => throw new NotImplementedException();
 
                 [HttpDelete("{id:guid}")]
+                [ProducesResponseType(typeof(void), StatusCodes.Status204NoContent)]
                 public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
                     => throw new NotImplementedException();
 
@@ -578,6 +582,7 @@ public sealed class OpenApiConformanceTests : IDisposable
         namespace MyApp.Domain
         {
             public enum Priority { Low, Medium, High }
+            [RivetScalar]
             public sealed record Email(string Value);
         }
 
@@ -618,6 +623,7 @@ public sealed class OpenApiConformanceTests : IDisposable
                     => throw new NotImplementedException();
 
                 [HttpDelete("{id:guid}")]
+                [ProducesResponseType(typeof(void), StatusCodes.Status204NoContent)]
                 public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
                     => throw new NotImplementedException();
             }

@@ -53,7 +53,7 @@ The spec is OpenAPI 3.1. The interesting parts:
 
 ```jsonc
 // components/schemas
-"TaskStatus": { "type": "string", "enum": ["open", "done"] },
+"TaskStatus": { "type": "integer", "enum": [0, 1] },
 "TaskDto": {
   "type": "object",
   "properties": {
@@ -65,8 +65,11 @@ The spec is OpenAPI 3.1. The interesting parts:
 }
 ```
 
-Note the defaults: property names and enum values are camelCased, `Guid` becomes
-`format: uuid`, and non-nullable members are `required`.
+Note the defaults: property names are camelCased, `Guid` becomes
+`format: uuid`, and non-nullable members are `required`. Enums are integers by
+default (ordinary System.Text.Json serialization); add a type-level
+`[JsonConverter(typeof(JsonStringEnumConverter<TaskStatus>))]` to make them
+strings.
 
 ## 4. Project mode
 

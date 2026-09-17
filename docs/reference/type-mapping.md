@@ -25,9 +25,11 @@ How C# types lower into OpenAPI 3.1 schemas. Property names camelCase by default
 
 - **Records / classes** → `object` schemas in `components/schemas` with
   `properties` + `required`.
-- **Enums** → `string` schemas with camelCased `enum` values
-  (`{ Draft, Open }` → `["draft", "open"]` — pair with a camelCase
-  `JsonStringEnumConverter` at runtime).
+- **Enums** → `integer` schemas by default, matching ordinary System.Text.Json
+  serialization of unannotated enums (`{ Draft, Open }` → values 0 and 1). A
+  type-level `[JsonConverter(typeof(JsonStringEnumConverter<T>))]` (including the
+  generic converter form) opts the enum into `string` schemas with
+  `JsonStringEnumMemberName`-honoring values.
 - **Nullable members** (`string?`, `int?`) → 3.1 type arrays
   (`"type": ["string", "null"]`); nullable `$ref`s use a null branch.
 - **Collections** (`List<T>`, `IReadOnlyList<T>`, arrays) → `array` with `items`.
@@ -41,10 +43,12 @@ How C# types lower into OpenAPI 3.1 schemas. Property names camelCase by default
   degrade to unconstrained string keys with diagnostic `RIV1013`.
 - **Generics** are monomorphised: `PagedResult<MemberDto>` becomes a
   `PagedResult_MemberDto` component carrying `x-rivet-generic`.
-- **Value-object brands**: a record with exactly one property named `Value`
-  (e.g. `record Email(string Value)`) lowers to its inner primitive with
-  `x-rivet-brand` — `{ "type": "string", "x-rivet-brand": "Email" }`. On the wire
-  it is just the primitive.
+- **Value-object brands**: an explicit `[RivetScalar]` on a record/class/struct
+  with exactly one property named `Value` (e.g. `[RivetScalar] record Email(string
+  Value)`) lowers to its inner primitive with `x-rivet-brand` —
+  `{ "type": "string", "x-rivet-brand": "Email" }`. On the wire it is just the
+  primitive. Without `[RivetScalar]` the same record is an ordinary object schema
+  (the shape alone no longer decides).
 - **Polymorphic hierarchies** (`[JsonPolymorphic]`/`[JsonDerivedType]` on a base
   type) → `oneOf` + `discriminator` with a complete tag → `$ref` `mapping`, named
   after the base. Each registration becomes a `{Base}_{Tag}` variant component:

@@ -55,6 +55,7 @@ public static class Diagnostics
     public const string UnresolvedBindingSource = "RIV1100";
     public const string JsonIncludeFieldNotRepresented = "RIV1101";
     public const string BodyForbiddenStatusExample = "RIV1102";
+    public const string InvalidRivetScalarShape = "RIV1103";
 
     // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
     // rivet/php sibling runtime. Native Rivet diagnostics must not use them.
@@ -120,7 +121,7 @@ public static class Diagnostics
         [ControllerExampleUndeclaredStatus] =
             "Response example targets a status code the controller endpoint does not declare — the example is ignored.",
         [UnmappedTypedResult] =
-            "Unmapped typed result branch in Results<...> — the response branch is omitted from the contract.",
+            "Unmapped typed result branch in Results<...> or an action with no declared success response — the contract is refused, not silently completed.",
         [TypeNameCollision] =
             "Two walked types share a simple name — the later type is emitted under a disambiguated name.",
         [UnparseableRangeBound] =
@@ -152,11 +153,13 @@ public static class Diagnostics
         [ImportedSchemaProvenanceConflict] =
             "Imported generated C# changed while raw schema provenance still targets its original typed shape — extraction fails instead of emitting stale OpenAPI.",
         [UnresolvedBindingSource] =
-            "A parameter's binding source cannot be established from supported static host metadata — the input is excluded from the contract and reported instead of being silently dropped.",
+            "A parameter's binding source cannot be established from explicit declarations or the retained narrow conventions — the contract is refused, not silently completed.",
         [JsonIncludeFieldNotRepresented] =
             "Reserved unsupported-[JsonInclude]-shape diagnostic: a [JsonInclude] accessor shape System.Text.Json supports but the extractor cannot prove statically would be reported and excluded here rather than guessed. Currently dormant — the mixed-accessor and field cases are now determined.",
         [BodyForbiddenStatusExample] =
             "A response example or content is authored on a body-forbidden status (1xx, 204, 205, 304) — HTTP forbids a message body there; generation fails instead of emitting body content the host cannot send.",
+        [InvalidRivetScalarShape] =
+            "A [RivetScalar] type is not a non-generic class/struct/record with exactly one eligible non-static, non-indexer, non-implicit property named 'Value' — generation fails instead of silently falling back to object semantics.",
         [TaggedUnionComponentCollision] =
             "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
         [UndefinedSecurityScheme] =

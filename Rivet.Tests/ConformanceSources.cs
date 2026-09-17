@@ -5,20 +5,25 @@ internal static class ConformanceSources
     internal const string MaximalContract = """
         using System;
         using System.Collections.Generic;
+        using System.Text.Json.Serialization;
         using Microsoft.AspNetCore.Http;
         using Rivet;
 
         namespace Test;
 
+        [JsonConverter(typeof(JsonStringEnumConverter<Priority>))]
         public enum Priority { Low, Medium, High, Critical }
 
         [RivetType]
+        [RivetScalar]
         public sealed record Email(string Value);
 
         [RivetType]
+        [RivetScalar]
         public sealed record Uprn(string Value);
 
         [RivetType]
+        [RivetScalar]
         public sealed record Quantity(int Value);
 
         [RivetType]

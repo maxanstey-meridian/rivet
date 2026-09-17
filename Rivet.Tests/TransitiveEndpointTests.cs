@@ -80,10 +80,13 @@ public sealed class TransitiveEndpointTests
             using System.Threading.Tasks;
             using Microsoft.AspNetCore.Mvc;
             using Rivet;
+            using System.Text.Json.Serialization;
 
             namespace Test;
 
+            [JsonConverter(typeof(JsonStringEnumConverter<Priority>))]
             public enum Priority { Low, Medium, High }
+            [RivetScalar]
             public sealed record Email(string Value);
             public sealed record AuthorInfo(string Name, Email Email);
 

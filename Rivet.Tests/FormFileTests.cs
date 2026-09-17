@@ -197,66 +197,6 @@ public sealed class FormFileTests
     }
 
     [Fact]
-    public void EndpointWalker_MixedUpload_ClassifiesFormFields()
-    {
-        var source = """
-            using System;
-            using System.Threading;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Http;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
-
-            namespace Test;
-
-            [RivetType]
-            public sealed record UploadResult(Guid Id);
-
-            [Route("api/documents")]
-            public sealed class DocumentsController
-            {
-                [RivetEndpoint]
-                [HttpPost("")]
-                [ProducesResponseType(typeof(UploadResult), 201)]
-                public Task<IActionResult> Upload(
-                    IFormFile file,
-                    string title,
-                    CancellationToken ct)
-                    => throw new NotImplementedException();
-            }
-            """;
-
-        var (endpoints, _) = CompilationHelper.WalkMerged(source);
-
-        // Validate endpoint param types and sources
-        var ep = Assert.Single(endpoints);
-        var fileParam = Assert.Single(ep.Params, p => p.Name == "file");
-        Assert.Equal(ParamSource.File, fileParam.Source);
-        Assert.IsType<TsType.Primitive>(fileParam.Type);
-        Assert.Equal("File", ((TsType.Primitive)fileParam.Type).Name);
-        var titleParam = Assert.Single(ep.Params, p => p.Name == "title");
-        Assert.Equal(ParamSource.FormField, titleParam.Source);
-        Assert.IsType<TsType.Primitive>(titleParam.Type);
-        Assert.Equal("string", ((TsType.Primitive)titleParam.Type).Name);
-
-        // OpenAPI: file is binary, title is a plain string form field, both required
-        using var doc = CompilationHelper.EmitOpenApi(source);
-        var operation = GetOperation(doc, "/api/documents", "post");
-        var schema = GetMultipartSchema(operation);
-        AssertBinaryFileProperty(schema, "file");
-
-        var titleProp = schema.GetProperty("properties").GetProperty("title");
-        Assert.Equal("string", titleProp.GetProperty("type").GetString());
-        Assert.False(titleProp.TryGetProperty("format", out _));
-        var required = schema
-            .GetProperty("required")
-            .EnumerateArray()
-            .Select(e => e.GetString())
-            .ToList();
-        Assert.Contains("title", required);
-    }
-
-    [Fact]
     public void Contract_IFormFile_InTInput_EmitsFormData()
     {
         var source = """
@@ -554,7 +494,7 @@ public sealed class FormFileTests
                 [ProducesResponseType(200)]
                 public Task<IActionResult> Upload(
                     List<IFormFile> photos,
-                    string album,
+                    [FromForm] string album,
                     CancellationToken ct)
                     => throw new NotImplementedException();
             }
@@ -563,7 +503,7 @@ public sealed class FormFileTests
         var (endpoints, _) = CompilationHelper.WalkMerged(source);
 
         // Walker classification: collection param → File source with Array(File) type,
-        // sibling params become form fields (the pre-scan sees the collection)
+        // the explicitly declared [FromForm] field joins the multipart surface.
         var ep = Assert.Single(endpoints);
         var photosParam = Assert.Single(ep.Params, p => p.Name == "photos");
         Assert.Equal(ParamSource.File, photosParam.Source);

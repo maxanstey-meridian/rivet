@@ -395,6 +395,7 @@ public sealed class OpenApiEmitterTests
             {
                 [RivetEndpoint]
                 [HttpPut("/api/members/{id}")]
+                [ProducesResponseType(typeof(void), 200)]
                 public IActionResult Update(string id, [FromBody] UpdateRequest request) => Ok();
             }
             """;
@@ -1370,51 +1371,6 @@ public sealed class OpenApiEmitterTests
             .GetProperty("examples")
             .GetProperty("create-item");
         Assert.Equal("Ada", componentExample.GetProperty("value").GetProperty("name").GetString());
-    }
-
-    [Fact]
-    public void Controller_ResponseExampleAttribute_Attaches_To_Synthesized_ActionResult_Success_Response_In_OpenApi()
-    {
-        var source = """
-            using System;
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Mvc;
-            using Rivet;
-
-            namespace Test;
-
-            [RivetType]
-            public sealed record ItemDto(Guid Id, string Name);
-
-            [RivetType]
-            public sealed record ErrorDto(string Message);
-
-            public static class Endpoints
-            {
-                [RivetEndpoint]
-                [HttpGet("/api/items/{id}")]
-                [ProducesResponseType(typeof(ErrorDto), 404)]
-                [RivetResponseExample(200, "{\"id\":\"550e8400-e29b-41d4-a716-446655440000\",\"name\":\"Ada\"}", name: "ok")]
-                public static Task<ActionResult<ItemDto>> Get([FromRoute] Guid id)
-                    => throw new NotImplementedException();
-            }
-            """;
-
-        using var doc = EmitOpenApiFromController(source);
-        var examples = doc
-            .RootElement.GetProperty("paths")
-            .GetProperty("/api/items/{id}")
-            .GetProperty("get")
-            .GetProperty("responses")
-            .GetProperty("200")
-            .GetProperty("content")
-            .GetProperty("application/json")
-            .GetProperty("examples");
-
-        Assert.Equal(
-            "Ada",
-            examples.GetProperty("ok").GetProperty("value").GetProperty("name").GetString()
-        );
     }
 
     [Fact]
@@ -3350,6 +3306,7 @@ public sealed class OpenApiEmitterTests
 
             namespace Test;
 
+            [RivetScalar]
             [RivetType]
             public sealed record Email(string Value);
 

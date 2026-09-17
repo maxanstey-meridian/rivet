@@ -371,10 +371,12 @@ public sealed class OpenApiRoundTripTests
     public void Types_Survive_RoundTrip()
     {
         var source = """
+            using System.Text.Json.Serialization;
             using Rivet;
 
             namespace Test;
 
+            [JsonConverter(typeof(JsonStringEnumConverter<Priority>))]
             public enum Priority { Low, Medium, High }
 
             [RivetType]
@@ -460,6 +462,7 @@ public sealed class OpenApiRoundTripTests
     {
         var source = """
             using System.Collections.Generic;
+            using System.Text.Json.Serialization;
             using Rivet;
 
             namespace Test;
@@ -467,6 +470,7 @@ public sealed class OpenApiRoundTripTests
             [RivetType]
             public sealed record LabelDto(string Name);
 
+            [JsonConverter(typeof(JsonStringEnumConverter<Color>))]
             public enum Color { Red, Green }
 
             [RivetType]
@@ -536,11 +540,13 @@ public sealed class OpenApiRoundTripTests
     {
         var source = """
             using System.Collections.Generic;
+            using System.Text.Json.Serialization;
             using Rivet;
 
             namespace Test;
 
             // Used ONLY as a dictionary key — previously vanished from the spec
+            [JsonConverter(typeof(JsonStringEnumConverter<Severity>))]
             public enum Severity { Low, High }
 
             [RivetType]
@@ -1524,6 +1530,7 @@ public sealed class OpenApiRoundTripTests
 
             namespace Test;
 
+            [RivetScalar]
             [RivetType]
             public sealed record Email(string Value);
 

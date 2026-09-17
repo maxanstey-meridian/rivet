@@ -17,22 +17,12 @@ public enum RivetGeneratedTypeProvenance
 public sealed class RivetGeneratedTypeAttribute : Attribute
 {
     public RivetGeneratedTypeAttribute(string? componentId, RivetGeneratedTypeProvenance provenance)
-        : this(componentId, provenance, false) { }
-
-    public RivetGeneratedTypeAttribute(
-        string? componentId,
-        RivetGeneratedTypeProvenance provenance,
-        bool valueObject
-    )
     {
         ComponentId = componentId;
         Provenance = provenance;
-        ValueObject = valueObject;
     }
 
     public string? ComponentId { get; }
 
     public RivetGeneratedTypeProvenance Provenance { get; }
-
-    public bool ValueObject { get; }
 }

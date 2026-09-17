@@ -472,8 +472,10 @@ public sealed class Wp12GapFillTests
         {
             """
                 using Rivet;
+                using System.Text.Json.Serialization;
                 namespace Foo.Models
                 {
+                    [JsonConverter(typeof(JsonStringEnumConverter<Status>))]
                     public enum Status { Active, Closed }
 
                     [RivetType]
@@ -482,8 +484,10 @@ public sealed class Wp12GapFillTests
                 """,
             """
                 using Rivet;
+                using System.Text.Json.Serialization;
                 namespace Bar.Models
                 {
+                    [JsonConverter(typeof(JsonStringEnumConverter<Status>))]
                     public enum Status { Draft, Published, Archived }
 
                     [RivetType]
@@ -654,127 +658,6 @@ public sealed class Wp12GapFillTests
     }
 
     // ---------------------------------------------------------------
-    // A8 — typed-results mapping table completeness + unmapped diagnostic
-    // ---------------------------------------------------------------
-
-    [Fact]
-    public void A8_ProblemValidationForbidJson_TypedResults_AreMapped()
-    {
-        var source = """
-            using Microsoft.AspNetCore.Http;
-            using Microsoft.AspNetCore.Http.HttpResults;
-            using Microsoft.AspNetCore.Mvc;
-            using System.Threading.Tasks;
-            using Rivet;
-
-            namespace Test;
-
-            public sealed record TaskDto(string Name);
-
-            [ApiController]
-            [Route("api/tasks")]
-            public class TasksController : ControllerBase
-            {
-                [RivetEndpoint]
-                [HttpPost]
-                public Task<Results<Ok<TaskDto>, ProblemHttpResult, ValidationProblem, ForbidHttpResult>> Create()
-                    => Task.FromResult<Results<Ok<TaskDto>, ProblemHttpResult, ValidationProblem, ForbidHttpResult>>(
-                        TypedResults.Ok(new TaskDto("x")));
-            }
-            """;
-
-        var (endpoints, _) = CompilationHelper.WalkMerged(source);
-
-        var ep = Assert.Single(endpoints);
-        var statuses = ep.Responses.Select(r => r.StatusCode).ToList();
-
-        Assert.Contains(200, statuses);
-        Assert.Contains(500, statuses); // ProblemHttpResult
-        Assert.Contains(400, statuses); // ValidationProblem
-        Assert.Contains(403, statuses); // ForbidHttpResult
-    }
-
-    [Fact]
-    public void A8_JsonHttpResult_And_InternalServerError_AreMapped()
-    {
-        var source = """
-            using Microsoft.AspNetCore.Http;
-            using Microsoft.AspNetCore.Http.HttpResults;
-            using Microsoft.AspNetCore.Mvc;
-            using System.Threading.Tasks;
-            using Rivet;
-
-            namespace Test;
-
-            public sealed record TaskDto(string Name);
-            public sealed record ErrorDto(string Message);
-
-            [ApiController]
-            [Route("api/tasks")]
-            public class TasksController : ControllerBase
-            {
-                [RivetEndpoint]
-                [HttpGet]
-                public Task<Results<JsonHttpResult<TaskDto>, InternalServerError<ErrorDto>>> Get()
-                    => Task.FromResult<Results<JsonHttpResult<TaskDto>, InternalServerError<ErrorDto>>>(
-                        TypedResults.Json(new TaskDto("x")));
-            }
-            """;
-
-        var (endpoints, _) = CompilationHelper.WalkMerged(source);
-
-        var ep = Assert.Single(endpoints);
-
-        var ok = Assert.Single(ep.Responses, r => r.StatusCode == 200);
-        Assert.Equal("TaskDto", Assert.IsType<TsType.TypeRef>(ok.DataType).Name);
-
-        var ise = Assert.Single(ep.Responses, r => r.StatusCode == 500);
-        Assert.Equal("ErrorDto", Assert.IsType<TsType.TypeRef>(ise.DataType).Name);
-    }
-
-    [Fact]
-    public void A8_UnmappedResultsBranch_EmitsLoudDiagnostic_NotSilentDrop()
-    {
-        var source = """
-            using Microsoft.AspNetCore.Http;
-            using Microsoft.AspNetCore.Http.HttpResults;
-            using Microsoft.AspNetCore.Mvc;
-            using System.Threading.Tasks;
-            using Rivet;
-
-            namespace Test;
-
-            public sealed record TaskDto(string Name);
-
-            [ApiController]
-            [Route("api/tasks")]
-            public class TasksController : ControllerBase
-            {
-                [RivetEndpoint]
-                [HttpGet]
-                public Task<Results<Ok<TaskDto>, ChallengeHttpResult>> Get()
-                    => Task.FromResult<Results<Ok<TaskDto>, ChallengeHttpResult>>(
-                        TypedResults.Ok(new TaskDto("x")));
-            }
-            """;
-
-        IReadOnlyList<TsEndpointDefinition> endpoints = null!;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-        {
-            (endpoints, _) = CompilationHelper.WalkMerged(source);
-        });
-
-        var ep = Assert.Single(endpoints);
-
-        // The mapped branch survives…
-        Assert.Single(ep.Responses, r => r.StatusCode == 200);
-
-        // …and the unmapped one is loudly diagnosed (enforceability rule), not silently dropped
-        Assert.Contains("ChallengeHttpResult", stderr);
-        Assert.Contains("unmapped", stderr);
-    }
-
-    // ---------------------------------------------------------------
     // A9 — [Range(typeof(decimal), "0.1", "100")] overload crashed the walker
     // ---------------------------------------------------------------
 
@@ -928,6 +811,7 @@ public sealed class Wp12GapFillTests
             {
                 [RivetEndpoint]
                 [HttpPost]
+                [ProducesResponseType(typeof(void), 200)]
                 public IActionResult Upload(
                     IFormFile file,
                     [FromForm] string title,

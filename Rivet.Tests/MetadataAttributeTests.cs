@@ -282,6 +282,32 @@ public sealed class MetadataAttributeTests
         Assert.Equal("uri-template", prop.GetProperty("format").GetString());
     }
 
+    // ========== Enum wire representation ==========
+
+    [Fact]
+    public void Ordinary_Enum_Is_Numeric_By_Default()
+    {
+        var source = """
+            using Rivet;
+
+            public enum Priority
+            {
+                Low,
+                Medium,
+                High,
+            }
+
+            [RivetType]
+            public sealed record TaskDto(string Title, Priority Priority);
+            """;
+
+        var (walker, _) = WalkSource(source);
+
+        // No explicit string converter — ordinary System.Text.Json numeric serialization.
+        var union = Assert.IsType<TsType.IntUnion>(walker.Enums["Priority"]);
+        Assert.Equal([0, 1, 2], union.Members);
+    }
+
     // ========== [JsonStringEnumMemberName] in TypeWalker ==========
 
     [Fact]

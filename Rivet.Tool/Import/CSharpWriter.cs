@@ -636,14 +636,8 @@ internal static class CSharpWriter
             sb.AppendLine($"[Rivet.RivetFormat(\"{EscapeString(brand.Format)}\")]");
         }
         sb.AppendLine("[Rivet.RivetType]");
-        sb.AppendLine(
-            GeneratedTypeAttribute(
-                brand.ComponentId,
-                brand.IsSynthetic,
-                "Rivet.",
-                valueObject: true
-            )
-        );
+        sb.AppendLine(GeneratedTypeAttribute(brand.ComponentId, brand.IsSynthetic, "Rivet."));
+        sb.AppendLine("[Rivet.RivetScalar]");
         sb.AppendLine($"public sealed record {brand.Name}({brand.InnerType} Value)");
         sb.AppendLine("{");
         sb.AppendLine(
@@ -658,14 +652,12 @@ internal static class CSharpWriter
     private static string GeneratedTypeAttribute(
         string? componentId,
         bool synthetic,
-        string prefix = "",
-        bool valueObject = false
+        string prefix = ""
     )
     {
         var id = componentId is null ? "null" : $"\"{EscapeString(componentId)}\"";
         var provenance = synthetic ? "Synthetic" : "Component";
-        var valueObjectArgument = valueObject ? ", true" : "";
-        return $"[{prefix}RivetGeneratedType({id}, {prefix}RivetGeneratedTypeProvenance.{provenance}{valueObjectArgument})]";
+        return $"[{prefix}RivetGeneratedType({id}, {prefix}RivetGeneratedTypeProvenance.{provenance})]";
     }
 
     public static string WriteContract(GeneratedContract contract, string ns)

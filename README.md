@@ -25,8 +25,10 @@ dotnet tool install --global dotnet-rivet
 
 ### Already have an ASP.NET API? Annotate it.
 
-Mark the endpoints you want surfaced — the operation is derived from the real
-transport shape (routes, params, bodies, response types):
+Mark the endpoints you want surfaced — the operation is derived from what you
+explicitly declare (routes, `[FromBody]`/`[FromQuery]`/... bindings,
+`[ProducesResponseType]` entries) plus a few documented narrow conventions, not
+from a reconstruction of MVC's model-binding defaults:
 
 ```csharp
 [ApiController]
@@ -89,9 +91,13 @@ dotnet rivet --project path/to/Api.csproj --output ./generated --security admin=
 ```
 
 Writes `./generated/openapi.json`, derived from the compiled C# via the Roslyn
-semantic model. Value-object brands, generics, nullability, validation
-attributes, polymorphic hierarchies (`oneOf` + discriminator), dictionary key
-types, headers, descriptions, and examples all flow into the spec.
+semantic model. Rivet reads explicit contract declarations and explicit ASP.NET
+transport metadata, with deliberately tiny documented conventions — value-object
+brands are opt-in via `[RivetScalar]`, enums are numeric unless a type-level
+`JsonStringEnumConverter` declares them string-valued. Generics, nullability,
+validation attributes, polymorphic hierarchies (`oneOf` + discriminator),
+dictionary key types, headers, descriptions, and examples all flow into the
+spec.
 
 ## Consume
 

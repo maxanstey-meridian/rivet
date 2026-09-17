@@ -557,7 +557,7 @@ public sealed class OperationIdentityTests
                 {
                     [HttpGet("items")]
                     [ProducesResponseType(typeof(ItemDto[]), 200)]
-                    public Task<IActionResult> Get(string filter, CancellationToken ct)
+                    public Task<IActionResult> Get([FromQuery] string filter, CancellationToken ct)
                         => throw new NotImplementedException();
                 }
                 """;
@@ -730,10 +730,8 @@ public sealed class OperationIdentityTests
     /// Public_Cli_Fails_On_Contradictory_Operations_Without_Partial_Replacement
     /// (planner-constraint:primary-evidence-cli). The two sides diverge on the
     /// requiredness axis — the contract's [RivetOptional] query param is
-    /// optional on the wire while the annotation's plain 'string filter' is
-    /// required (the ct guard's repair is what exposes this contradiction:
-    /// under the inert guard the annotation side carried a fabricated ("ct",
-    /// Body) param and the pair failed for a different reason).
+    /// optional on the wire while the annotation's [FromQuery] string filter is
+    /// required.
     /// </summary>
     [Fact]
     public async Task Public_Cli_Fails_On_Param_Contradiction_Without_Partial_Replacement()
@@ -778,7 +776,7 @@ public sealed class OperationIdentityTests
             {
                 [HttpGet("items")]
                 [ProducesResponseType(typeof(ItemDto[]), 200)]
-                public Task<IActionResult> Get(string filter, CancellationToken ct)
+                public Task<IActionResult> Get([FromQuery] string filter, CancellationToken ct)
                     => throw new NotImplementedException();
             }
             """

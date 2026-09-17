@@ -60,12 +60,24 @@ static async Task<int> Run(string[] args)
     }
 
     var wkt = new WellKnownTypes(compilation);
-    var endpoints = EndpointWalker.Walk(
-        wkt,
-        walker,
-        discovered.EndpointMethods,
-        discovered.ClientTypes
-    );
+    // Controller-path refusals (unresolved binding, incomplete response) follow the
+    // same established stderr + exit-1 pattern as the contract path: the walker
+    // throws ContractAnalysisException and Program prints it verbatim.
+    IReadOnlyList<TsEndpointDefinition> endpoints;
+    try
+    {
+        endpoints = EndpointWalker.Walk(
+            wkt,
+            walker,
+            discovered.EndpointMethods,
+            discovered.ClientTypes
+        );
+    }
+    catch (ContractAnalysisException exception)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 1;
+    }
     IReadOnlyList<TsEndpointDefinition> contractEndpoints;
     try
     {
