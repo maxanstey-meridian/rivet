@@ -28,7 +28,7 @@ jobs:
 
       - run: dotnet restore
 
-      - run: dotnet test --no-restore --filter "Category!=Local"
+      - run: dotnet test --no-restore
 
       - name: Extract version from tag
         id: version

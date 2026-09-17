@@ -27,3 +27,6 @@ docs/.vitepress/cache/
 .claude/
 vendor/
 .orchrc.json
+AGENTS.md
+CLAUDE.md
+reviews/
