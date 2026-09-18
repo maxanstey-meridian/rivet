@@ -1695,36 +1695,54 @@ public sealed class TypeWalker
                         .OfType<IFieldSymbol>()
                         .Where(f => f.HasConstantValue)
                         .ToList();
+                    var enumNamingPolicy = GetEnumNamingPolicy(namedType);
+                    IReadOnlyList<string>? stringMembers = null;
                     if (IsStringEnum(namedType))
                     {
-                        var members = fields
-                            .Select(f =>
-                            {
-                                // Check for [JsonStringEnumMemberName("original")] attribute
-                                var attr = f.GetAttributes()
-                                    .FirstOrDefault(a =>
-                                        a.AttributeClass?.Name
-                                            is "JsonStringEnumMemberNameAttribute"
-                                    );
-                                if (
-                                    attr?.ConstructorArguments.Length > 0
-                                    && attr.ConstructorArguments[0].Value is string original
-                                )
-                                {
-                                    return original;
-                                }
-
-                                // No [JsonStringEnumMemberName]: the wire value is the
-                                // exact C# member name — JsonStringEnumConverter with no
-                                // naming policy writes the CLR name verbatim, so Rivet
-                                // must not camel-case it
-                                // (acceptance:string-enum-preserves-member-name).
-                                return f.Name;
-                            })
+                        var candidates = fields
+                            .Select(f => EnumWireValue(f, enumNamingPolicy))
                             .ToList();
+                        if (candidates.Distinct(StringComparer.Ordinal).Count() != candidates.Count)
+                        {
+                            // Reachable with a [RivetEnumNamingPolicy] casing two
+                            // member names together, or with duplicate
+                            // [JsonStringEnumMemberName] pins — either way the
+                            // string union would not match a distinct wire-value set.
+                            var colliding = candidates
+                                .GroupBy(value => value, StringComparer.Ordinal)
+                                .First(group => group.Count() > 1)
+                                .Key;
+                            var collidingMembers = string.Join(
+                                ", ",
+                                fields
+                                    .Where(f => EnumWireValue(f, enumNamingPolicy) == colliding)
+                                    .Select(f => f.Name)
+                            );
+                            Diagnostics.Warn(
+                                Diagnostics.RivetEnumNamingPolicyCollision,
+                                $"enum '{namedType.Name}' members ({collidingMembers}) produce the same wire value '{colliding}' — "
+                                    + "the string union would not match the emitted wire values; emitted as numeric instead"
+                            );
+                        }
+                        else
+                        {
+                            stringMembers = candidates;
+                        }
+                    }
+                    else if (enumNamingPolicy is not null)
+                    {
+                        Diagnostics.Warn(
+                            Diagnostics.RivetEnumNamingPolicyWithoutStringConverter,
+                            $"enum '{namedType.Name}' declares [RivetEnumNamingPolicy] but has no type-level "
+                                + "[JsonConverter(typeof(JsonStringEnumConverter<...>))] — the marker has no "
+                                + "string wire to name; emitted as numeric. Add the string converter or remove the marker."
+                        );
+                    }
 
+                    if (stringMembers is not null)
+                    {
                         _enums[enumName] = new TsType.StringUnion(
-                            members,
+                            stringMembers,
                             GetTypeMetadata(namedType),
                             GetTypeFormat(namedType),
                             GetTypeDescription(namedType),
@@ -1854,6 +1872,54 @@ public sealed class TypeWalker
                     StringComparison.Ordinal
                 )
             );
+
+    /// <summary>
+    /// The wire value of one enum member: an explicit
+    /// [JsonStringEnumMemberName("original")] wins; otherwise the naming policy
+    /// declared by [RivetEnumNamingPolicy] cases the member name; without either,
+    /// the wire value is the exact C# member name — JsonStringEnumConverter with
+    /// no naming policy writes the CLR name verbatim, so Rivet must not camel-case
+    /// it (acceptance:string-enum-preserves-member-name).
+    /// </summary>
+    private static string EnumWireValue(IFieldSymbol field, RivetNamingPolicy? policy)
+    {
+        var attr = field
+            .GetAttributes()
+            .FirstOrDefault(a => a.AttributeClass?.Name is "JsonStringEnumMemberNameAttribute");
+        if (
+            attr?.ConstructorArguments.Length > 0
+            && attr.ConstructorArguments[0].Value is string original
+        )
+        {
+            return original;
+        }
+
+        return policy is null ? field.Name : Naming.ToPolicyCase(field.Name, policy.Value);
+    }
+
+    /// <summary>
+    /// The [RivetEnumNamingPolicy] casing convention declared on the enum, or null.
+    /// Emission-only — see RivetEnumNamingPolicyAttribute. Roslyn hands the typed
+    /// enum argument over boxed as its underlying Int32, so decode through the raw
+    /// value; undefined values (possible only via an explicit cast) leave no policy.
+    /// </summary>
+    private static RivetNamingPolicy? GetEnumNamingPolicy(INamedTypeSymbol type)
+    {
+        var attribute = type
+            .GetAttributes()
+            .FirstOrDefault(a => a.AttributeClass?.Name == "RivetEnumNamingPolicyAttribute");
+        if (attribute?.ConstructorArguments is not [var argument])
+        {
+            return null;
+        }
+
+        return argument.Value switch
+        {
+            RivetNamingPolicy policy when Enum.IsDefined(policy) => policy,
+            int raw when Enum.IsDefined(typeof(RivetNamingPolicy), raw) => (RivetNamingPolicy)raw,
+            _ => null,
+        };
+    }
 
     private static string? GetTypeFormat(INamedTypeSymbol type) =>
         type.GetAttributes()

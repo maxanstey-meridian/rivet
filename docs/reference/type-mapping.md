@@ -29,7 +29,14 @@ How C# types lower into OpenAPI 3.1 schemas. Property names camelCase by default
   serialization of unannotated enums (`{ Draft, Open }` → values 0 and 1). A
   type-level `[JsonConverter(typeof(JsonStringEnumConverter<T>))]` (including the
   generic converter form) opts the enum into `string` schemas with
-  `JsonStringEnumMemberName`-honoring values.
+  `JsonStringEnumMemberName`-honoring values. A companion
+  `[RivetEnumNamingPolicy(RivetNamingPolicy.Policy)]` marker cases the member
+  names (`LowerCase`, `CamelCase`, `SnakeCase`, `KebabCase`); a per-member
+  `[JsonStringEnumMemberName]` still overrides the policy. The marker is
+  emission-only: the runtime keeps its own serializer arrangement. A marker on an
+  enum with no string converter (`RIV1105`), or two members producing the same
+  wire value (`RIV1106`, via policy casing or duplicate member pins), degrades
+  loudly — the enum is emitted as numeric, never with a wrong string union.
 - **Nullable members** (`string?`, `int?`) → 3.1 type arrays
   (`"type": ["string", "null"]`); nullable `$ref`s use a null branch.
 - **Collections** (`List<T>`, `IReadOnlyList<T>`, arrays) → `array` with `items`.
