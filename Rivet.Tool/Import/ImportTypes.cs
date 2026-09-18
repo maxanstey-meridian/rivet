@@ -88,7 +88,10 @@ internal sealed record RecordProperty(
 internal sealed record GeneratedEnumMember(
     string CSharpName,
     string? OriginalName,
-    int? IntValue = null
+    // Decimal literal of the enum constant ("1", "5000000000"): a string carrier
+    // so constants beyond Int32 round-trip byte-for-byte through generated C#
+    // (planner-constraint:generated-enum-underlying-type).
+    string? IntValue = null
 );
 
 internal sealed record GeneratedEnum(

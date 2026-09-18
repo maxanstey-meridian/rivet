@@ -53,7 +53,7 @@ public sealed class DictionaryKeyTests
             $"Color enum vanished. Enums: [{string.Join(", ", walker.Enums.Keys)}]"
         );
         var color = Assert.IsType<TsType.StringUnion>(walker.Enums["Color"]);
-        Assert.Equal(["red", "green", "blue"], color.Members);
+        Assert.Equal(["Red", "Green", "Blue"], color.Members);
 
         // Supported keys no longer diagnose
         Assert.DoesNotContain("RIV1013", stderr);
@@ -289,7 +289,7 @@ public sealed class DictionaryKeyTests
             .EnumerateArray()
             .Select(e => e.GetString())
             .ToList();
-        Assert.Equal(["red", "green", "blue"], colorValues);
+        Assert.Equal(["Red", "Green", "Blue"], colorValues);
 
         // Brand key → $ref to the brand schema
         Assert.Equal(

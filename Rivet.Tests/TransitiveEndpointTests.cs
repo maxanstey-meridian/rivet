@@ -135,7 +135,7 @@ public sealed class TransitiveEndpointTests
         // Priority discovered as named enum type via PostDto
         var priority = Assert.Contains("Priority", walker.Enums);
         var union = Assert.IsType<TsType.StringUnion>(priority);
-        Assert.Equal(["low", "medium", "high"], union.Members);
+        Assert.Equal(["Low", "Medium", "High"], union.Members);
     }
 
     [Fact]

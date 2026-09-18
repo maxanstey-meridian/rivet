@@ -162,12 +162,12 @@ public sealed class ParamWireNamePinningTests
     }
 
     [Fact]
-    public void RouteOnly_Endpoint_Without_Input_Does_Not_Warn()
+    public void RouteOnly_Endpoint_Without_Input_Warns_And_Keeps_String_Param()
     {
         // The route string doubles as the assertion needle: stderr capture is
         // process-global, so under parallel test classes another fixture's
         // legitimate RIV1019 can land in this window — only an endpoint-unique
-        // substring makes the absence assertion sound.
+        // substring makes the warning-presence assertion sound.
         var source = """
             using Rivet;
 
@@ -184,9 +184,25 @@ public sealed class ParamWireNamePinningTests
             }
             """;
 
-        var stderr = CompilationHelper.CaptureStdErr(() => Generate(source));
+        IReadOnlyList<TsEndpointDefinition> endpoints = [];
+        var stderr = CompilationHelper.CaptureStdErr(() => endpoints = Generate(source));
 
-        Assert.DoesNotContain("/route-only-no-input-things/", stderr);
+        // acceptance:no-input-route-token-warns: the schema type is unknown, so the
+        // same missing-type warning fires even though the route template itself
+        // declares the placeholder's existence and transport location.
+        Assert.Contains("RIV1019", stderr);
+        Assert.Contains("/route-only-no-input-things/", stderr);
+
+        // The narrow exception still applies: {id} remains a usable string path param.
+        var ep = Assert.Single(endpoints);
+        var idParam = Assert.Single(
+            ep.Params,
+            p => p.Source == ParamSource.Route && p.Name == "id"
+        );
+        Assert.True(
+            idParam.Type is TsType.Primitive { Name: "string" },
+            $"Expected Primitive(string) but got {idParam.Type}"
+        );
     }
 
     [Fact]

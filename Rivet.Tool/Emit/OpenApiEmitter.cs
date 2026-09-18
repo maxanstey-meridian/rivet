@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
@@ -2345,13 +2346,18 @@ public static class OpenApiEmitter
 
     private static Dictionary<string, object> MapIntUnion(TsType.IntUnion union)
     {
+        // Member literals are decimal strings in the IR so legal enum constants
+        // beyond Int32 survive; parse them to wide numbers so OpenAPI emits exact
+        // digits, not quoted strings
+        // (acceptance:numeric-enums-cover-all-legal-underlying-values).
+        var enumValues = union.Members.Select(ParseEnumLiteral).ToList<object>();
         var schema = new Dictionary<string, object>
         {
             ["type"] =
                 union.ScalarMetadata?.IsNullable == true
                     ? new List<string> { "integer", "null" }
                     : "integer",
-            ["enum"] = union.Members.ToList(),
+            ["enum"] = enumValues,
         };
         if (union.Format is not null)
         {
@@ -2364,6 +2370,42 @@ public static class OpenApiEmitter
         EnrichScalarSchema(schema, union.ScalarMetadata);
 
         return schema;
+    }
+
+    /// <summary>
+    /// Parses a decimal enum member literal into the widest whole number STJ can
+    /// write exactly: long, then ulong (values above long.MaxValue), else the raw
+    /// digits string so no legal enum constant is truncated or quoted.
+    /// </summary>
+    private static object ParseEnumLiteral(string literal)
+    {
+        if (
+            long.TryParse(
+                literal,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var signed
+            )
+        )
+        {
+            return signed;
+        }
+
+        if (
+            ulong.TryParse(
+                literal,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var unsigned
+            )
+        )
+        {
+            return unsigned;
+        }
+
+        // Decimal enum digit strings always parse above; keep the raw digits as a
+        // final safety net rather than truncating (packet-constraint:repair-not-redesign).
+        return literal;
     }
 
     private static Dictionary<string, object> MapStringUnion(TsType.StringUnion union)

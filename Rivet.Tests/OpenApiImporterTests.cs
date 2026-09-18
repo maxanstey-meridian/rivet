@@ -4131,7 +4131,7 @@ public sealed class OpenApiImporterTests
         var compilation = CompilationHelper.CompileImportResult(result);
         var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var numericEnum = Assert.IsType<TsType.IntUnion>(walker.Enums["Constant"]);
-        Assert.Equal([42], numericEnum.Members);
+        Assert.Equal(["42"], numericEnum.Members);
     }
 
     [Fact]
@@ -4240,7 +4240,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void IntEnum_Value_Exceeding_Int32_Range_Falls_Through_To_Long()
+    public void IntEnum_Value_Exceeding_Int32_Range_Generates_Enum_With_Wide_Underlying_Type()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -4261,18 +4261,140 @@ public sealed class OpenApiImporterTests
 
         var result = CompilationHelper.Import(spec);
 
-        // Value exceeds int.MaxValue — should not generate an int enum
-        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("BigVals.cs"));
+        // planner-constraint:generated-enum-underlying-type — the import no longer
+        // drops the enum: it generates BigVals.cs declaring a wide underlying type.
+        var enumContent = CompilationHelper.FindFile(result, "BigVals.cs");
+        Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<BigVals>))]", enumContent);
+        Assert.Contains("public enum BigVals : long", enumContent);
+        Assert.Contains("Value2147483648 = 2147483648", enumContent);
 
         var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
-        Assert.Contains("long Code", dtoContent);
+        Assert.Contains("BigVals Code", dtoContent);
 
-        // Never silently: the dropped enum constraint emits a named warning (I.A-15)
+        // The generated C# compiles and forward-emits the authored values
+        // byte-for-byte — 2147483648 survives the full import→compile→walk→emit
+        // loop (planner-constraint:generated-enum-underlying-type).
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emittedJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            security: null
+        );
+        var bigVals = (TsType.IntUnion)walker.Enums["BigVals"];
+        Assert.Equal(["1", "2147483648"], bigVals.Members);
+        var schema = JsonSerializer
+            .Deserialize<JsonElement>(emittedJson)
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("BigVals");
+        var emittedValues = schema
+            .GetProperty("enum")
+            .EnumerateArray()
+            .Select(v => v.GetRawText())
+            .ToList();
+        Assert.Equal(["1", "2147483648"], emittedValues);
+    }
+
+    [Fact]
+    public void IntEnum_Value_Exceeding_Int64_Generates_Ulong_Enum_With_Raw_Digit_Assignment()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "BigVals": {
+                "type": "integer",
+                "enum": [1, 2147483648, 18446744073709551615]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "code": { "$ref": "#/components/schemas/BigVals" }
+                },
+                "required": ["code"]
+            }
+            """,
+            title: "API"
+        );
+
+        var result = CompilationHelper.Import(spec);
+
+        // planner-constraint:generated-enum-underlying-type — a constant above
+        // long.MaxValue generates BigVals.cs with a ulong underlying type instead
+        // of crashing the naming read (planner-constraint:wide-enum-tests-prove-naming-fix).
+        var enumContent = CompilationHelper.FindFile(result, "BigVals.cs");
+        Assert.Contains("[JsonConverter(typeof(JsonNumberEnumConverter<BigVals>))]", enumContent);
+        Assert.Contains("public enum BigVals : ulong", enumContent);
+        Assert.Contains("Value2147483648 = 2147483648", enumContent);
+        Assert.Contains("Value18446744073709551615 = 18446744073709551615", enumContent);
+
+        var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
+        Assert.Contains("BigVals Code", dtoContent);
+
+        // The generated C# compiles and forward-emits the authored values
+        // byte-for-byte — 18446744073709551615 survives the full import→compile→
+        // walk→emit loop with the wide-carrier walker and raw-digit naming intact
+        // (acceptance:numeric-enums-cover-all-legal-underlying-values).
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emittedJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            security: null
+        );
+        var bigVals = (TsType.IntUnion)walker.Enums["BigVals"];
+        Assert.Equal(["1", "2147483648", "18446744073709551615"], bigVals.Members);
+        var schema = JsonSerializer
+            .Deserialize<JsonElement>(emittedJson)
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("BigVals");
+        var emittedValues = schema
+            .GetProperty("enum")
+            .EnumerateArray()
+            .Select(v => v.GetRawText())
+            .ToList();
+        Assert.Equal(["1", "2147483648", "18446744073709551615"], emittedValues);
+    }
+
+    [Fact]
+    public void IntEnum_Mixing_Negative_And_Beyond_Int64_Values_Drops_The_Constraint()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "ImpossibleVals": {
+                "type": "integer",
+                "enum": [-1, 18446744073709551615]
+            },
+            "OrderDto": {
+                "type": "object",
+                "properties": {
+                    "code": { "$ref": "#/components/schemas/ImpossibleVals" }
+                },
+                "required": ["code"]
+            }
+            """,
+            title: "API"
+        );
+
+        var result = CompilationHelper.Import(spec);
+
+        // No single C# underlying type can express both constants (a negative beside
+        // a value above long.MaxValue) — the schema is not classified as an integer
+        // enum, so the constraint drops through the existing warning instead of
+        // generating uncompilable generated C# (enum : ulong with a negative member).
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("ImpossibleVals.cs"));
+        Assert.Contains("long Code", CompilationHelper.FindFile(result, "OrderDto.cs"));
         Assert.Contains(
             result.Warnings,
             w =>
                 w.StartsWith("RIV3012: Enum constraint dropped")
-                && w.Contains("2147483648")
+                && w.Contains("18446744073709551615")
                 && w.Contains("'long'")
         );
     }

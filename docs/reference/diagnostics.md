@@ -11,7 +11,7 @@ error RIV2002: <message>
 IDs are stable across releases — grep, baseline, or suppress by ID, never by
 message text. Most diagnostics are **warnings** and allow processing to continue.
 Diagnostics marked **Error** are fatal and exit `1`; currently this applies to
-`RIV1006`, `RIV1021`, `RIV1022`, `RIV1023`, `RIV1102`, `RIV1103`, `RIV2002`, `RIV2011`, and `RIV2012`. Coverage
+`RIV1006`, `RIV1021`, `RIV1022`, `RIV1023`, `RIV1102`, `RIV1103`, `RIV1104`, `RIV2002`, `RIV2011`, and `RIV2012`. Coverage
 warnings also exit `1` whenever `--check` is used, with or without `--output`; other
 warnings do not change the exit code.
 
@@ -64,6 +64,7 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1101` | Warning | Reserved unsupported-`[JsonInclude]`-shape diagnostic. The mixed-accessor case (public accessor on one side, non-public on the other) is now determined as both-surface when `[JsonInclude]` is present — STJ serializes via the public accessor and deserializes via the included non-public accessor — and public/private `[JsonInclude]` fields are represented, so no currently supported shape triggers it; it is kept registered for future unsupported shapes. | Currently no supported shape triggers this ID. If a future serializer shape cannot be proven statically, the member will be reported here rather than guessed. |
 | `RIV1102` | Error | A response example or response content is authored on a body-forbidden status (1xx, 204, 205, 304) — HTTP forbids a message body on those statuses, so the authored content could never reach the wire. Reported at frontend parsing and again at emission as defense in depth; generation fails before any output is written. | Move the example/content to a status that allows a body, or remove it; the ordinary bodyless 204 response needs no example. |
 | `RIV1103` | Error | A `[RivetScalar]` type is not a non-generic class/struct/record with exactly one eligible non-static, non-indexer, non-implicit property named `Value`. | Give the type exactly one `Value` property (the Value type determines the scalar wire type), or remove `[RivetScalar]` if the type is an ordinary object. |
+| `RIV1104` | Error | A multipart endpoint mixes `IFormFile` file parameters with an explicit body parameter — a `[FromBody]` JSON body or a `[FromForm]` DTO whose recursive form shape Rivet cannot faithfully lower without emulating MVC's recursive form binder — the contract is refused instead of silently dropping the declared input. | Split the form DTO into scalar fields (each scalar emits a form part beside the file), move a `[FromBody]` body to a separate JSON endpoint, or accept the file-only surface. |
 
 `RIV1024`-`RIV1099` are documented by `rivet/php`; this repository reserves the
 block but does not register those sibling-runtime diagnostics as native Rivet

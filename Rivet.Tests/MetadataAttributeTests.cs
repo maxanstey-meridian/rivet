@@ -305,7 +305,64 @@ public sealed class MetadataAttributeTests
 
         // No explicit string converter — ordinary System.Text.Json numeric serialization.
         var union = Assert.IsType<TsType.IntUnion>(walker.Enums["Priority"]);
-        Assert.Equal([0, 1, 2], union.Members);
+        Assert.Equal(["0", "1", "2"], union.Members);
+    }
+
+    [Fact]
+    public void Wide_Enum_Underlying_Types_Preserve_Values_Outside_Int32()
+    {
+        var source = """
+            using Rivet;
+
+            public enum Large : long
+            {
+                Huge = 5000000000,
+            }
+
+            public enum Unbound : ulong
+            {
+                Huge = 5000000000,
+                Max = 18446744073709551615,
+            }
+
+            [RivetType]
+            public sealed record WideDto(Large Large, Unbound Unbound);
+
+            [RivetContract]
+            public static class WideContract
+            {
+                public static readonly RouteDefinition<WideDto> Get = Define.Get<WideDto>("/api/wide");
+            }
+            """;
+
+        var (walker, _) = WalkSource(source);
+
+        // Signed and unsigned underlying types carry every legal constant as exact
+        // decimal digits — no Int32 truncation and no negative reinterpretation for
+        // values above Int64
+        // (acceptance:numeric-enums-cover-all-legal-underlying-values).
+        var large = Assert.IsType<TsType.IntUnion>(walker.Enums["Large"]);
+        Assert.Equal(["5000000000"], large.Members);
+
+        var unbound = Assert.IsType<TsType.IntUnion>(walker.Enums["Unbound"]);
+        Assert.Equal(["5000000000", "18446744073709551615"], unbound.Members);
+
+        using var doc = EmitOpenApi(source);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        var largeValues = schemas
+            .GetProperty("Large")
+            .GetProperty("enum")
+            .EnumerateArray()
+            .Select(v => v.GetRawText())
+            .ToList();
+        Assert.Equal(["5000000000"], largeValues);
+        var unboundValues = schemas
+            .GetProperty("Unbound")
+            .GetProperty("enum")
+            .EnumerateArray()
+            .Select(v => v.GetRawText())
+            .ToList();
+        Assert.Equal(["5000000000", "18446744073709551615"], unboundValues);
     }
 
     // ========== [JsonStringEnumMemberName] in TypeWalker ==========
@@ -389,11 +446,11 @@ public sealed class MetadataAttributeTests
             .ToList();
 
         Assert.Contains("in-progress", values);
-        Assert.Contains("active", values);
+        Assert.Contains("Active", values);
         Assert.Contains("on_hold", values);
         Assert.DoesNotContain("InProgress", values);
         Assert.DoesNotContain("OnHold", values);
-        Assert.DoesNotContain("Active", values);
+        Assert.DoesNotContain("active", values);
     }
 
     // ========== void .Returns(statusCode) ==========

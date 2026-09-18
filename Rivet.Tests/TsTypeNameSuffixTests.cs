@@ -48,7 +48,7 @@ public sealed class TsTypeNameSuffixTests
         // > 3 members: collapses to "Enum" (residual collisions are disambiguated
         // per-emit by OpenApiEmitter's name registry)
         Assert.Equal("Enum", TsType.GetNameSuffix(new TsType.StringUnion(["A", "B", "C", "D"])));
-        Assert.Equal("Enum", TsType.GetNameSuffix(new TsType.IntUnion([1, 2, 3])));
+        Assert.Equal("Enum", TsType.GetNameSuffix(new TsType.IntUnion(["1", "2", "3"])));
     }
 
     [Fact]

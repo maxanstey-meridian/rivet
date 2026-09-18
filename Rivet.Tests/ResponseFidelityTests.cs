@@ -114,6 +114,163 @@ public sealed class ResponseFidelityTests
     }
 
     [Fact]
+    public void BuiltIn_NonFixed_IResult_Refuses_With_RIV1006()
+    {
+        // acceptance:direct-ambiguous-result-refuses — a built-in result whose
+        // concrete type does not statically carry its status (ContentHttpResult
+        // writes whatever status the runtime set) refuses rather than becoming a
+        // 200 payload contract. Detection is the IResult interface boundary, not a
+        // concrete-class list (acceptance:all-aspnet-result-containers-are-ambiguous).
+        var source = """
+            using System;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetClient]
+            [ApiController]
+            [Route("api")]
+            public sealed class ContentController : ControllerBase
+            {
+                [HttpGet("content")]
+                public ContentHttpResult Get() => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
+
+        Assert.Contains("RIV1006", exception.Message);
+        Assert.Contains("ContentController.Get", exception.Message);
+    }
+
+    [Fact]
+    public void Custom_IResult_Implementation_Refuses_With_RIV1006()
+    {
+        // acceptance:direct-ambiguous-result-refuses — a user-defined IResult
+        // implementation is status/content selecting through the declared interface
+        // relationship and refuses without sufficient explicit response declarations.
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed class TeapotResult : IResult
+            {
+                public Task ExecuteAsync(HttpContext httpContext)
+                    => throw new NotImplementedException();
+            }
+
+            [RivetClient]
+            [ApiController]
+            [Route("api")]
+            public sealed class CustomController : ControllerBase
+            {
+                [HttpGet("teapot")]
+                public TeapotResult Get() => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
+
+        Assert.Contains("RIV1006", exception.Message);
+        Assert.Contains("CustomController.Get", exception.Message);
+    }
+
+    [Fact]
+    public void Results_Branch_Cannot_Hide_Behind_ProducesResponseType()
+    {
+        // acceptance:results-branches-cannot-hide-behind-attributes — one explicit
+        // response attribute must not suppress validation of the declared Results<>
+        // branches: ProblemHttpResult is an unmapped variable-status branch and
+        // refuses with the existing unmapped-result diagnostic.
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record FooDto(string Id);
+
+            [RivetClient]
+            [ApiController]
+            [Route("api")]
+            public sealed class ResultsController : ControllerBase
+            {
+                [HttpGet("items/{id}")]
+                [ProducesResponseType(typeof(FooDto), 200)]
+                public Results<Ok<FooDto>, ProblemHttpResult> Get(string id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
+
+        Assert.Contains("RIV1006", exception.Message);
+        // The validate-and-merge path passes the method name as the warn context, so
+        // the diagnostic names the unmapped branch itself rather than Controller.Method.
+        Assert.Contains("ProblemHttpResult", exception.Message);
+    }
+
+    [Fact]
+    public void Results_AllFixed_Branches_Behind_Attributes_Keep_Mapping()
+    {
+        // acceptance:fixed-typed-results-still-work — an all-fixed Results<> return
+        // behind response attributes stays valid: the already-declared 200 from the
+        // attribute is not duplicated and the fixed NotFound branch merges into 404
+        // (planner-constraint:results-validation-merges-not-appends).
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record FooDto(string Id);
+
+            [RivetClient]
+            [ApiController]
+            [Route("api")]
+            public sealed class FixedResultsController : ControllerBase
+            {
+                [HttpGet("items/{id}")]
+                [ProducesResponseType(typeof(FooDto), 200)]
+                public Results<Ok<FooDto>, NotFound> Get(string id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
+
+        var ep = Assert.Single(endpoints);
+        Assert.Equal([200, 404], ep.Responses.Select(r => r.StatusCode).ToList());
+        var ok = Assert.Single(ep.Responses, r => r.StatusCode == 200);
+        Assert.True(ok.DataType is TsType.TypeRef { Name: "FooDto" });
+        Assert.Null(Assert.Single(ep.Responses, r => r.StatusCode == 404).DataType);
+    }
+
+    [Fact]
     public void Annotation_Explicit_ProducesResponseType_Wins_Over_Defaults()
     {
         var source = """

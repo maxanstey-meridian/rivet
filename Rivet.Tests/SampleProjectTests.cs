@@ -115,13 +115,10 @@ public sealed class SampleProjectTests : IDisposable
     [Fact]
     public async Task SampleProject_Api_Endpoints_Respond_Correctly()
     {
-        var port = Random.Shared.Next(49152, 65000);
-        var url = $"http://localhost:{port}";
-
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var server = await StartSampleServer(url, cts.Token);
+        await using var server = await StartSampleServer(cts.Token);
 
-        using var http = new HttpClient { BaseAddress = new Uri(url) };
+        using var http = new HttpClient { BaseAddress = new Uri(server.Url) };
 
         // GET /api/members → 200 + JSON object (PagedResult)
         var listResponse = await http.GetAsync("/api/members", cts.Token);
@@ -132,7 +129,7 @@ public sealed class SampleProjectTests : IDisposable
 
         // POST /api/members → 201 + JSON with Id
         var invitePayload = new StringContent(
-            """{"email":{"value":"test@example.com"},"role":"admin","nickname":"tester"}""",
+            """{"email":"test@example.com","role":"admin","nickname":"tester"}""",
             Encoding.UTF8,
             "application/json"
         );
@@ -163,18 +160,15 @@ public sealed class SampleProjectTests : IDisposable
     [Fact]
     public async Task SampleProject_Api_Rejects_Invalid_Requests_With_422_ValidationErrorDto()
     {
-        var port = Random.Shared.Next(49152, 65000);
-        var url = $"http://localhost:{port}";
-
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var server = await StartSampleServer(url, cts.Token);
+        await using var server = await StartSampleServer(cts.Token);
 
-        using var http = new HttpClient { BaseAddress = new Uri(url) };
+        using var http = new HttpClient { BaseAddress = new Uri(server.Url) };
 
         // (a) DataAnnotations violation: role/nickname too short → 422
         // ValidationErrorDto with field errors; handler not invoked (no id, no 201).
         var invalidPayload = new StringContent(
-            """{"email":{"value":"test@example.com"},"role":"x","nickname":"z"}""",
+            """{"email":"test@example.com","role":"x","nickname":"z"}""",
             Encoding.UTF8,
             "application/json"
         );
@@ -195,7 +189,7 @@ public sealed class SampleProjectTests : IDisposable
         // (b) [RivetConstraints] facet violation (UniqueItems on tags) → 422,
         // proving the ValidationAttribute participates in MVC model validation.
         var duplicateTagsPayload = new StringContent(
-            """{"email":{"value":"test@example.com"},"role":"admin","nickname":"tester","tags":["a","a"]}""",
+            """{"email":"test@example.com","role":"admin","nickname":"tester","tags":["a","a"]}""",
             Encoding.UTF8,
             "application/json"
         );
@@ -216,7 +210,7 @@ public sealed class SampleProjectTests : IDisposable
 
         // (b continued) MaxItems = 5 violated → 422.
         var tooManyTagsPayload = new StringContent(
-            """{"email":{"value":"test@example.com"},"role":"admin","nickname":"tester","tags":["a","b","c","d","e","f"]}""",
+            """{"email":"test@example.com","role":"admin","nickname":"tester","tags":["a","b","c","d","e","f"]}""",
             Encoding.UTF8,
             "application/json"
         );
@@ -229,7 +223,7 @@ public sealed class SampleProjectTests : IDisposable
 
         // (c) Valid request (with tags) still succeeds → 201 + id.
         var validPayload = new StringContent(
-            """{"email":{"value":"test@example.com"},"role":"admin","nickname":"tester","tags":["a","b"]}""",
+            """{"email":"test@example.com","role":"admin","nickname":"tester","tags":["a","b"]}""",
             Encoding.UTF8,
             "application/json"
         );
@@ -350,13 +344,17 @@ public sealed class SampleProjectTests : IDisposable
         return (process.ExitCode, output);
     }
 
-    private static async Task<AsyncServerHandle> StartSampleServer(string url, CancellationToken ct)
+    private static async Task<AsyncServerHandle> StartSampleServer(CancellationToken ct)
     {
+        // Port 0 asks the OS for a free ephemeral port: two live-host proofs (or an
+        // unrelated process) can no longer collide on a pre-drawn random port and
+        // kill Kestrel before the test asserts anything. The actually bound URL is
+        // read back from the "Now listening on:" line below.
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
             Arguments =
-                $"run --project \"{Path.Combine(_sampleDir, "ContractApi.csproj")}\" --urls {url}",
+                $"run --project \"{Path.Combine(_sampleDir, "ContractApi.csproj")}\" --urls http://127.0.0.1:0",
             WorkingDirectory = _repoRoot,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -369,8 +367,8 @@ public sealed class SampleProjectTests : IDisposable
             Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start sample server");
 
-        // Wait for the server to start listening
-        var started = false;
+        const string listeningMarker = "Now listening on:";
+        string? boundUrl = null;
         var output = new StringBuilder();
 
         try
@@ -385,14 +383,15 @@ public sealed class SampleProjectTests : IDisposable
 
                 output.AppendLine(line);
 
-                if (line.Contains("Now listening on:"))
+                var markerIndex = line.IndexOf(listeningMarker, StringComparison.Ordinal);
+                if (markerIndex >= 0)
                 {
-                    started = true;
+                    boundUrl = line[(markerIndex + listeningMarker.Length)..].Trim();
                     break;
                 }
             }
 
-            if (!started)
+            if (boundUrl is null)
             {
                 var stderr = await process.StandardError.ReadToEndAsync(ct);
                 throw new InvalidOperationException(
@@ -407,11 +406,15 @@ public sealed class SampleProjectTests : IDisposable
             throw;
         }
 
-        return new AsyncServerHandle(process);
+        return new AsyncServerHandle(process, boundUrl);
     }
 
-    private sealed class AsyncServerHandle(Process process) : IAsyncDisposable
+    private sealed class AsyncServerHandle(Process process, string boundUrl) : IAsyncDisposable
     {
+        // The URL the server actually bound — for --urls http://127.0.0.1:0 the OS
+        // assigns a free ephemeral port.
+        public string Url { get; } = boundUrl;
+
         public async ValueTask DisposeAsync()
         {
             try

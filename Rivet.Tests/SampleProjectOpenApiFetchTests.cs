@@ -87,17 +87,15 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         Assert.True(tscExit == 0, $"tsc failed:\n{tscOut}\n{tscErr}");
 
         // 3. Boot the real ContractApi server
-        var port = Random.Shared.Next(49152, 65000);
-        var url = $"http://localhost:{port}";
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        await using var server = await StartSampleServer(url, cts.Token);
+        await using var server = await StartSampleServer(cts.Token);
 
         // 4. Run the consumer against the live server, assert expected literals
         await File.WriteAllTextAsync(Path.Combine(_tempDir, "single-run.mjs"), SingleRunScript);
 
         var (nodeExit, nodeOutput) = await RunProcessAsync(
             "node",
-            $"\"{Path.Combine(_tempDir, "single-run.mjs")}\" {url}",
+            $"\"{Path.Combine(_tempDir, "single-run.mjs")}\" {server.Url}",
             workingDir: _tempDir
         );
 
@@ -291,10 +289,9 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
 
         // ── 2. POST /api/members → 201 + { id } (fresh Guid per request → shape) ──
         {
-          // NB: wire shape matches the live server (Email round-trips as an object on
-          // the wire in this sample); the client type surface brands it as string, so
-          // the call site casts.
-          const body = { email: { value: "single@example.com" }, role: "member", nickname: "single" };
+          // Email is a [RivetScalar]: contract and live server both speak the bare
+          // string wire shape, so the payload carries the primitive directly.
+          const body = { email: "single@example.com", role: "member", nickname: "single" };
           const o = await inviteMember(api, body);
           expectStatus("invite", o.status, 201);
           if (!isUuid(o.data?.id)) failures.push(`invite: id is not a uuid: ${JSON.stringify(o.data)}`);
@@ -436,13 +433,17 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         return (process.ExitCode, output);
     }
 
-    private static async Task<AsyncServerHandle> StartSampleServer(string url, CancellationToken ct)
+    private static async Task<AsyncServerHandle> StartSampleServer(CancellationToken ct)
     {
+        // Port 0 asks the OS for a free ephemeral port: two live-host proofs (or an
+        // unrelated process) can no longer collide on a pre-drawn random port and
+        // kill Kestrel before the test asserts anything. The actually bound URL is
+        // read back from the "Now listening on:" line below.
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
             Arguments =
-                $"run --project \"{Path.Combine(_sampleDir, "ContractApi.csproj")}\" --urls {url}",
+                $"run --project \"{Path.Combine(_sampleDir, "ContractApi.csproj")}\" --urls http://127.0.0.1:0",
             WorkingDirectory = _repoRoot,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -455,7 +456,8 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
             Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start sample server");
 
-        var started = false;
+        const string listeningMarker = "Now listening on:";
+        string? boundUrl = null;
         var output = new StringBuilder();
 
         try
@@ -470,14 +472,15 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
 
                 output.AppendLine(line);
 
-                if (line.Contains("Now listening on:"))
+                var markerIndex = line.IndexOf(listeningMarker, StringComparison.Ordinal);
+                if (markerIndex >= 0)
                 {
-                    started = true;
+                    boundUrl = line[(markerIndex + listeningMarker.Length)..].Trim();
                     break;
                 }
             }
 
-            if (!started)
+            if (boundUrl is null)
             {
                 var stderr = await process.StandardError.ReadToEndAsync(ct);
                 throw new InvalidOperationException(
@@ -492,11 +495,15 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
             throw;
         }
 
-        return new AsyncServerHandle(process);
+        return new AsyncServerHandle(process, boundUrl);
     }
 
-    private sealed class AsyncServerHandle(Process process) : IAsyncDisposable
+    private sealed class AsyncServerHandle(Process process, string boundUrl) : IAsyncDisposable
     {
+        // The URL the server actually bound — for --urls http://127.0.0.1:0 the OS
+        // assigns a free ephemeral port.
+        public string Url { get; } = boundUrl;
+
         public async ValueTask DisposeAsync()
         {
             try

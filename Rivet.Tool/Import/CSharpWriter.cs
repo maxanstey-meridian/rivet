@@ -575,7 +575,65 @@ internal static class CSharpWriter
 
     public static string WriteEnum(GeneratedEnum enumDef, string ns)
     {
-        var isIntBacked = enumDef.Members.Any(m => m.IntValue.HasValue);
+        var isIntBacked = enumDef.Members.Any(m => m.IntValue is not null);
+
+        // planner-constraint:generated-enum-underlying-type — a generated enum whose
+        // constants exceed Int32 must declare a wider underlying type so the generated
+        // C# compiles and forward-emits the authored values byte-for-byte.
+        var underlyingSuffix = "";
+        if (isIntBacked)
+        {
+            var exceedsInt32 = false;
+
+            foreach (var member in enumDef.Members)
+            {
+                if (member.IntValue is null)
+                {
+                    continue;
+                }
+
+                var parsed = long.TryParse(
+                    member.IntValue,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out var signedValue
+                );
+
+                if (!parsed || signedValue is < int.MinValue or > int.MaxValue)
+                {
+                    exceedsInt32 = true;
+                    break;
+                }
+            }
+
+            if (exceedsInt32)
+            {
+                var exceedsInt64 = false;
+
+                foreach (var member in enumDef.Members)
+                {
+                    if (member.IntValue is null)
+                    {
+                        continue;
+                    }
+
+                    if (
+                        !long.TryParse(
+                            member.IntValue,
+                            NumberStyles.Integer,
+                            CultureInfo.InvariantCulture,
+                            out _
+                        )
+                    )
+                    {
+                        exceedsInt64 = true;
+                        break;
+                    }
+                }
+
+                underlyingSuffix = exceedsInt64 ? " : ulong" : " : long";
+            }
+        }
 
         var sb = new StringBuilder();
         sb.AppendLine("using System.Text.Json.Serialization;");
@@ -602,7 +660,7 @@ internal static class CSharpWriter
         sb.AppendLine("[Rivet.RivetType]");
         sb.AppendLine(GeneratedTypeAttribute(enumDef.ComponentId, enumDef.IsSynthetic, "Rivet."));
 
-        sb.AppendLine($"public enum {enumDef.Name}");
+        sb.AppendLine($"public enum {enumDef.Name}{underlyingSuffix}");
         sb.AppendLine("{");
 
         for (var i = 0; i < enumDef.Members.Count; i++)
@@ -614,7 +672,7 @@ internal static class CSharpWriter
                 var wireName = member.OriginalName ?? Naming.ToCamelCase(member.CSharpName);
                 sb.AppendLine($"    [JsonStringEnumMemberName(\"{wireName}\")]");
             }
-            var valueAssignment = member.IntValue.HasValue ? $" = {member.IntValue.Value}" : "";
+            var valueAssignment = member.IntValue is not null ? $" = {member.IntValue}" : "";
             sb.AppendLine($"    {member.CSharpName}{valueAssignment}{separator}");
         }
 

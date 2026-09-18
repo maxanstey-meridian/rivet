@@ -367,4 +367,238 @@ public sealed class BindingPropertySurfaceTests
         Assert.Contains("RIV1100", exception.Message);
         Assert.Contains("'altText'", exception.Message);
     }
+
+    [Fact]
+    public void Contradictory_Explicit_Bindings_Refuse_With_One_Diagnostic()
+    {
+        // acceptance:contradictory-bindings-refuse — a parameter carrying multiple
+        // incompatible explicit sources refuses with the single contradiction
+        // diagnostic instead of whichever attribute ClassifyParam inspects first.
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/things")]
+            public sealed class ThingsController
+            {
+                [RivetEndpoint]
+                [HttpGet("{id}")]
+                [ProducesResponseType(typeof(string), 200)]
+                public Task<IActionResult> Get([FromQuery][FromRoute] string id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+
+        Assert.Contains("RIV1100", exception.Message);
+        Assert.Contains("'id'", exception.Message);
+    }
+
+    [Fact]
+    public void FromHeader_Joins_Contradiction_Validation()
+    {
+        // planner-constraint:fromheader-joins-contradiction-validation — the removed
+        // early [FromHeader] continue must not bypass collect-validate-apply: a
+        // [FromHeader] beside any other explicit source refuses with one diagnostic.
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/things")]
+            public sealed class ThingsController
+            {
+                [RivetEndpoint]
+                [HttpGet("{id}")]
+                [ProducesResponseType(typeof(string), 200)]
+                public Task<IActionResult> Get(string id, [FromHeader][FromQuery] string traceId)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+
+        Assert.Contains("RIV1100", exception.Message);
+        Assert.Contains("'traceId'", exception.Message);
+    }
+
+    [Fact]
+    public void IFormFile_FromQuery_Refuses()
+    {
+        // acceptance:contradictory-bindings-refuse — an IFormFile explicitly declared
+        // from an incompatible source must not be silently forced to File.
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/uploads")]
+            public sealed class UploadsController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(typeof(void), 201)]
+                public Task<IActionResult> Upload([FromQuery] IFormFile file)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+
+        Assert.Contains("RIV1100", exception.Message);
+        Assert.Contains("'file'", exception.Message);
+    }
+
+    [Fact]
+    public void FromForm_IFormFile_Is_The_Coherent_Explicit_File_Case()
+    {
+        // planner-constraint:fromform-file-forms-classify-file — [FromForm] on an
+        // IFormFile parameter classifies as File (the coherent explicit file case),
+        // not a refusal and not a form field.
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/uploads")]
+            public sealed class UploadsController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(typeof(void), 201)]
+                public Task<IActionResult> Upload([FromForm] IFormFile file)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        var ep = Assert.Single(endpoints);
+        var fileParam = Assert.Single(ep.Params, p => p.Name == "file");
+        Assert.Equal(ParamSource.File, fileParam.Source);
+        Assert.True(
+            fileParam.Type is TsType.Primitive { Name: "File" },
+            $"Expected Primitive(File) but got {fileParam.Type}"
+        );
+    }
+
+    [Fact]
+    public void FromRoute_Name_Mismatch_Refuses()
+    {
+        // acceptance:explicit-route-name-must-match-template — route "{id}" plus
+        // [FromRoute(Name = "banana")] refuses rather than emitting a path parameter
+        // the route never supplies. The valid Name= wire-name fix is preserved by
+        // FromRoute_Name_Matches_Route_Placeholder above.
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/things")]
+            public sealed class ThingsController
+            {
+                [RivetEndpoint]
+                [HttpGet("{id}")]
+                [ProducesResponseType(typeof(string), 200)]
+                public Task<IActionResult> Get([FromRoute(Name = "banana")] string id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+
+        Assert.Contains("RIV1100", exception.Message);
+        Assert.Contains("banana", exception.Message);
+        Assert.Contains("{id}", exception.Message);
+    }
+
+    [Fact]
+    public void FromRoute_Nameless_Parameter_Not_In_Template_Refuses()
+    {
+        // Sibling of the Name= case: [FromRoute] without Name uses the parameter name
+        // as the wire name — when no route placeholder matches, MVC would bind
+        // nothing, so emitting that path parameter would claim a route value the
+        // template never supplies. Refuses with the same diagnostic.
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/things")]
+            public sealed class ThingsController
+            {
+                [RivetEndpoint]
+                [HttpGet("{id}")]
+                [ProducesResponseType(typeof(string), 200)]
+                public Task<IActionResult> Get([FromRoute] string banana)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+
+        Assert.Contains("RIV1100", exception.Message);
+        Assert.Contains("'banana'", exception.Message);
+        Assert.Contains("{id}", exception.Message);
+    }
+
+    [Fact]
+    public void FromForm_DTO_Beside_File_Refuses_With_RIV1104()
+    {
+        // acceptance:mixed-form-file-never-drops-explicit-input — an explicitly
+        // declared [FromForm] DTO beside an IFormFile would make the multipart body
+        // carry a recursive form object; refuse (RIV1104) rather than silently
+        // dropping the DTO or emulating MVC's recursive form binder. The scalar
+        // [FromForm]-beside-file case keeps emitting both parts
+        // (FromForm_Name_Is_Honored_On_Mixed_Upload above).
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record MetadataDto(string Caption, int Order);
+
+            [Route("api/uploads")]
+            public sealed class UploadsController
+            {
+                [RivetEndpoint]
+                [HttpPost("")]
+                [ProducesResponseType(typeof(void), 201)]
+                public Task<IActionResult> Upload(IFormFile file, [FromForm] MetadataDto metadata)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+
+        Assert.Contains("RIV1104", exception.Message);
+        Assert.Contains("'metadata'", exception.Message);
+    }
 }

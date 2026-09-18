@@ -2422,10 +2422,10 @@ public sealed class ContractEndpointTests
         var statusEnum = (TsType.StringUnion)walker.Enums["Status"];
         Assert.Contains("in-progress", statusEnum.Members);
         Assert.Contains("on_hold", statusEnum.Members);
-        Assert.Contains("done", statusEnum.Members);
+        Assert.Contains("Done", statusEnum.Members);
         Assert.DoesNotContain("InProgress", statusEnum.Members);
         Assert.DoesNotContain("OnHold", statusEnum.Members);
-        Assert.DoesNotContain("Done", statusEnum.Members);
+        Assert.DoesNotContain("done", statusEnum.Members);
     }
 
     // ========== GAP-4 / A1: DELETE default status — cross-system agreement ==========

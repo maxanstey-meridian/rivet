@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -53,29 +54,65 @@ internal static class SchemaClassifier
             return false;
         }
 
+        // The member set must be expressible as one legal C# enum: a negative
+        // constant cannot coexist with a constant above long.MaxValue in any
+        // underlying type, so such a schema is not classified as an integer enum —
+        // it degrades through the existing dropped-constraint warning instead of
+        // generating uncompilable C#. Only Number-kind nodes participate; other
+        // enum entries are rejected by the IsWholeInt64 gate below anyway.
+        var numberNodes = schema
+            .Enum.OfType<JsonNode>()
+            .Where(node => node.GetValueKind() == JsonValueKind.Number)
+            .ToList();
+        var hasNegative = numberNodes.Any(node =>
+            node.AsValue().TryGetValue<long>(out var n) && n < 0
+        );
+        var hasBeyondInt64 = numberNodes.Any(node => !node.AsValue().TryGetValue<long>(out _));
+        if (hasNegative && hasBeyondInt64)
+        {
+            return false;
+        }
+
         if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Integer))
         {
-            return schema.Enum.All(v => v is JsonNode node && IsWholeInt32(node));
+            return schema.Enum.All(v => v is JsonNode node && IsWholeInt64(node));
         }
 
         // No explicit type — infer from values
         if (!schema.Type.HasValue)
         {
-            return schema.Enum.All(v => v is JsonNode node && IsWholeInt32(node));
+            return schema.Enum.All(v => v is JsonNode node && IsWholeInt64(node));
         }
 
         return false;
     }
 
-    private static bool IsWholeInt32(JsonNode node)
+    /// <summary>
+    /// True for any whole JSON number inside the signed/unsigned 64-bit ranges —
+    /// the widest exact carrier the generated C# enum emitter guarantees, so legal
+    /// enum constants beyond Int32 survive import instead of being dropped
+    /// (planner-constraint:generated-enum-underlying-type).
+    /// </summary>
+    internal static bool IsWholeInt64(JsonNode node)
     {
         if (node.GetValueKind() != JsonValueKind.Number)
         {
             return false;
         }
 
-        var value = node.GetValue<double>();
-        return value == Math.Floor(value) && value >= int.MinValue && value <= int.MaxValue;
+        if (node.AsValue().TryGetValue<long>(out _))
+        {
+            return true;
+        }
+
+        // TryGetValue<long> fails for values above long.MaxValue (e.g. 2^63) —
+        // parse the raw digits as ulong so unsigned Int64-range constants survive.
+        return ulong.TryParse(
+            node.ToJsonString().AsSpan().Trim(),
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out _
+        );
     }
 
     internal static bool IsBrand(IOpenApiSchema schema)
@@ -530,17 +567,32 @@ internal static class SchemaClassifier
         var index = 0;
         foreach (var member in schema.Enum!)
         {
-            if (member is not JsonNode memberNode || !IsWholeInt32(memberNode))
+            if (member is not JsonNode memberNode || !IsWholeInt64(memberNode))
             {
                 index++;
                 continue;
             }
 
-            var intVal = memberNode.GetValue<int>();
+            // Naming magnitude only — the member value below keeps raw digits.
+            // GetValue<long> throws above long.MaxValue even though IsWholeInt64
+            // admits those digits, and Math.Abs overflows at long.MinValue, so
+            // derive the name from a defensive magnitude read instead
+            // (acceptance:numeric-enums-cover-all-legal-underlying-values).
+            string namingMagnitude;
+            if (memberNode.AsValue().TryGetValue<long>(out var signedValue))
+            {
+                namingMagnitude = signedValue.ToString(CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                // IsWholeInt64 vetted the raw digits as a legal ulong constant.
+                namingMagnitude = memberNode.ToJsonString().Trim();
+            }
+
             var csharpName =
                 useVarnames ? Naming.ToPascalCaseFromSegments(varnames![index])
-                : intVal < 0 ? $"ValueNeg{Math.Abs(intVal)}"
-                : $"Value{intVal}";
+                : namingMagnitude.StartsWith('-') ? $"ValueNeg{namingMagnitude.TrimStart('-')}"
+                : $"Value{namingMagnitude}";
 
             if (!emitted.Add(csharpName))
             {
@@ -554,7 +606,15 @@ internal static class SchemaClassifier
                 csharpName = deduped;
             }
 
-            members.Add(new GeneratedEnumMember(csharpName, null, intVal));
+            members.Add(
+                new GeneratedEnumMember(
+                    csharpName,
+                    null,
+                    // Raw decimal digits: the string carrier keeps constants above
+                    // Int64 (ulong range) byte-for-byte too.
+                    memberNode.ToJsonString().Trim()
+                )
+            );
             index++;
         }
 

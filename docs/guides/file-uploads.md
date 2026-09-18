@@ -5,9 +5,15 @@
 On controller endpoints, an `IFormFile` parameter — or a collection of them
 (`List<IFormFile>`, `IFormFile[]`, `IReadOnlyList<IFormFile>`, ...) — makes the
 operation a `multipart/form-data` request body; a single file property is emitted as
-`{ "type": "string", "format": "binary" }`, a collection as an array of binary parts,
-and other parameters are classified alongside it (route params stay in the path,
-scalars join the form body).
+`{ "type": "string", "format": "binary" }` and a collection as an array of binary
+parts. `IFormFile` itself is the retained semantic convention; it does not pull
+neighbouring parameters into the form body. Every other form field must declare its
+source explicitly: `[FromForm] string caption` becomes a form field beside the file,
+`[FromRoute]`/`[FromQuery]`/`[FromHeader]` parameters keep their declared locations,
+and any unattributed neighbour refuses extraction (RIV1100). A complex type declared
+`[FromForm]` beside a file refuses too (RIV1104) — lowering it faithfully would mean
+emulating MVC's recursive form binder, and a `[FromBody]` body cannot ride a multipart
+request at all.
 
 On contracts, a `TInput` that is `IFormFile` itself, or a record with `IFormFile`
 (or collection-of-`IFormFile`) properties, is detected as multipart automatically.

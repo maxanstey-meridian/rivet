@@ -76,11 +76,16 @@ public enum TaskStatus
 public sealed record WithEnums(Priority Priority, TaskStatus Status, List<Priority> AllPriorities);
 
 // ========== Value objects (brands) ==========
+// [Rivet.RivetScalar] is the explicit opt-in: each type below is emitted as a
+// branded primitive and serializes as its bare Value, not an object.
 
+[Rivet.RivetScalar]
 public sealed record Email(string Value);
 
+[Rivet.RivetScalar]
 public sealed record UserId(Guid Value);
 
+[Rivet.RivetScalar]
 public sealed record Quantity(int Value);
 
 [RivetType]

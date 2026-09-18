@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.CodeAnalysis;
@@ -1712,7 +1713,13 @@ public sealed class TypeWalker
                                 {
                                     return original;
                                 }
-                                return Naming.ToCamelCase(f.Name);
+
+                                // No [JsonStringEnumMemberName]: the wire value is the
+                                // exact C# member name — JsonStringEnumConverter with no
+                                // naming policy writes the CLR name verbatim, so Rivet
+                                // must not camel-case it
+                                // (acceptance:string-enum-preserves-member-name).
+                                return f.Name;
                             })
                             .ToList();
 
@@ -1735,7 +1742,7 @@ public sealed class TypeWalker
                                 ?.ConstructorArguments.FirstOrDefault()
                                 .Value as string;
                         _enums[enumName] = new TsType.IntUnion(
-                            fields.Select(field => Convert.ToInt32(field.ConstantValue)).ToList(),
+                            fields.Select(field => EnumLiteral(field.ConstantValue)).ToList(),
                             format,
                             GetTypeMetadata(namedType),
                             GetTypeDescription(namedType),
@@ -1853,6 +1860,36 @@ public sealed class TypeWalker
             .FirstOrDefault(attribute => attribute.AttributeClass?.Name == "RivetFormatAttribute")
             ?.ConstructorArguments.FirstOrDefault()
             .Value as string;
+
+    /// <summary>
+    /// The exact decimal literal of an enum constant: ulong constants (the only
+    /// constants Convert.ToInt64 cannot carry) write their digits directly; every
+    /// other legal underlying type converts through Int64. Decimal string literals
+    /// keep every legal C# enum constant exact through the contract IR without an
+    /// Int32 assumption (acceptance:numeric-enums-cover-all-legal-underlying-values).
+    /// </summary>
+    private static string EnumLiteral(object? constantValue)
+    {
+        if (constantValue is null)
+        {
+            // An enum field without a constant value has no wire fact to emit —
+            // refuse rather than guess (packet governing rule). Unreachable for
+            // legal C# enums; reached only if the walker's field selection drifts.
+            throw new InvalidOperationException(
+                "Enum member has no constant value and cannot be emitted as a numeric "
+                    + "union member."
+            );
+        }
+
+        if (constantValue is ulong unsigned)
+        {
+            return unsigned.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return Convert
+            .ToInt64(constantValue, CultureInfo.InvariantCulture)
+            .ToString(CultureInfo.InvariantCulture);
+    }
 
     private static TsType ApplyTypeFormat(TsType type, string? format) =>
         format is null

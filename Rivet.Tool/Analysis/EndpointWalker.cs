@@ -153,12 +153,16 @@ public static class EndpointWalker
 
     /// <summary>
     /// True for result containers whose runtime value selects the response's status
-    /// and/or shape: IActionResult, ActionResult, ActionResult&lt;T&gt;, IResult, and the
-    /// variable-status typed results (ProblemHttpResult, JsonHttpResult&lt;T&gt;,
-    /// StatusCodeHttpResult) whose status is carried at runtime, not statically
-    /// encoded. These are never a success-response source — the declared contract
-    /// cannot know what the host will actually send (planner-constraint:concrete-
-    /// return-convenience-narrowed). A genuinely concrete payload T is not a container.
+    /// and/or shape: any type assignable to IActionResult/IResult whose status is not
+    /// statically encoded. Detection is the declared interface boundary — not a list of
+    /// concrete result classes — so framework types (ContentHttpResult,
+    /// RedirectHttpResult, StatusCodeHttpResult, variable-status typed results) and
+    /// user-defined IResult/IActionResult implementations are all covered. Genuinely
+    /// fixed-status typed results (the TypedResultStatusCodes table) and Results&lt;T1,..&gt;
+    /// arities are excluded: their status/branches are read statically elsewhere, and
+    /// Results&lt;...&gt; unmapped branches refuse with the specific unmapped-result
+    /// diagnostic rather than this generic container refusal
+    /// (planner-constraint:container-guard-excludes-fixed-and-results).
     /// </summary>
     internal static bool IsStatusSelectingResultContainer(WellKnownTypes wkt, ITypeSymbol type)
     {
@@ -168,24 +172,49 @@ public static class EndpointWalker
         }
 
         var original = named.OriginalDefinition;
-        return SymbolEqualityComparer.Default.Equals(original, wkt.IActionResult)
+
+        // Fixed-status typed results keep their mappings — read before any container check.
+        if (wkt.TypedResultStatusCodes.ContainsKey(original))
+        {
+            return false;
+        }
+
+        // Results<T1, ...> is validated branch-by-branch by CollectTypedResultMappings;
+        // an unmapped branch must refuse with RIV1006, not the container refusal.
+        if (wkt.ResultsArities.Contains(original))
+        {
+            return false;
+        }
+
+        // The exact MVC wrapper forms keep their existing recognition.
+        if (
+            SymbolEqualityComparer.Default.Equals(original, wkt.IActionResult)
             || SymbolEqualityComparer.Default.Equals(original, wkt.ActionResult)
             || SymbolEqualityComparer.Default.Equals(original, wkt.ActionResultOfT)
-            || (
-                wkt.IResult is not null
-                && SymbolEqualityComparer.Default.Equals(original, wkt.IResult)
+        )
+        {
+            return true;
+        }
+
+        // Declared-type check: assignable to IResult or IActionResult means the runtime
+        // value selects status/content. IResult itself matches by exact type (it is an
+        // interface); implementations match through their interface list.
+        if (
+            wkt.IResult is not null
+            && (
+                SymbolEqualityComparer.Default.Equals(original, wkt.IResult)
+                || named.AllInterfaces.Any(interfaceType =>
+                    SymbolEqualityComparer.Default.Equals(interfaceType, wkt.IResult)
+                )
             )
-            || (
-                wkt.ProblemHttpResult is not null
-                && SymbolEqualityComparer.Default.Equals(original, wkt.ProblemHttpResult)
-            )
-            || (
-                wkt.JsonHttpResultOfT is not null
-                && SymbolEqualityComparer.Default.Equals(original, wkt.JsonHttpResultOfT)
-            )
-            || (
-                wkt.StatusCodeHttpResult is not null
-                && SymbolEqualityComparer.Default.Equals(original, wkt.StatusCodeHttpResult)
+        )
+        {
+            return true;
+        }
+
+        return wkt.IActionResult is not null
+            && named.AllInterfaces.Any(interfaceType =>
+                SymbolEqualityComparer.Default.Equals(interfaceType, wkt.IActionResult)
             );
     }
 
@@ -617,6 +646,7 @@ public static class EndpointWalker
         // not confidently emit a body surface MVC cannot execute. Any Body-classified
         // source occupies the single body slot.
         var bodySeen = false;
+        var fileSeen = false;
 
         foreach (var param in method.Parameters)
         {
@@ -627,11 +657,12 @@ public static class EndpointWalker
             }
 
             // CancellationToken is host plumbing, never user input. It is excluded
-            // BEFORE classification: unattributed, the struct would otherwise reach
-            // the complex-body inference and be fabricated into a ("ct", Body)
-            // request surface MVC never binds. Interfaces and other unclassified
-            // params must NOT take this silent path — they keep flowing into
-            // ClassifyParam so IsHostPlumbingType can warn-and-exclude (RIV1100).
+            // BEFORE classification: an unattributed struct has no binding declaration,
+            // and the extraction refuses unknown transport sources rather than guessing.
+            // Interfaces and other unclassified params keep flowing into ClassifyParam
+            // so they refuse with the unresolved-binding diagnostic (RIV1100) instead of
+            // being silently dropped or fabricated into a body
+            // (acceptance:no-neighbour-inference-regression).
             //
             // The identification is structural and reference-set-robust on purpose:
             // WellKnownTypes.CancellationToken resolves via GetTypeByMetadataName,
@@ -646,26 +677,47 @@ public static class EndpointWalker
                 continue;
             }
 
-            // P2 wave 5 (retires RIV1005): [FromHeader] maps to ParamSource.Header. The
-            // attribute's Name property keeps the wire casing ("X-Api-Key"); without one
-            // the C# parameter name is the header name.
-            if (HasAttribute(param, wkt.FromHeader))
-            {
-                parameters.Add(
-                    new TsEndpointParam(
-                        GetFromHeaderName(param, wkt) ?? param.Name,
-                        typeWalker.MapType(param.Type),
-                        ParamSource.Header,
-                        IsOptional: param.HasExplicitDefaultValue,
-                        DefaultValue: GetDefaultValueLiteral(param)
-                    )
-                );
-                continue;
-            }
+            // [FromHeader] flows through ClassifyParam like every other explicit
+            // source so contradictory declarations refuse with one diagnostic
+            // (planner-constraint:fromheader-joins-contradiction-validation). The
+            // attribute's Name property keeps the wire casing ("X-Api-Key") via the
+            // shared GetBindingName path below; without one the C# parameter name
+            // is the header name.
 
             var source =
                 ClassifyParam(wkt, typeWalker, param, routeParamNames)
                 ?? ThrowUnresolvedBinding(method, param);
+
+            // A Route-bound parameter's effective wire name (explicit [FromRoute(Name =
+            // "...")] or the parameter name) must name a placeholder the resolved route
+            // template actually contains — otherwise the emitted path parameter would be
+            // one the route never supplies
+            // (acceptance:explicit-route-name-must-match-template). The plain wire-name
+            // fix (Name= wins over the parameter name) is preserved for valid names; the
+            // convention path matches a template token by construction, so it never
+            // trips this check.
+            if (source == ParamSource.Route)
+            {
+                var explicitRouteName = GetBindingName(param, WireNamedSources(wkt));
+                var effectiveRouteName = explicitRouteName ?? param.Name;
+                var declaration = explicitRouteName is null
+                    ? "[FromRoute]"
+                    : $"[FromRoute(Name = \"{explicitRouteName}\")]";
+                if (
+                    !routeParamNames.Contains(effectiveRouteName)
+                    && !routeParamNames
+                        .Select(RouteParser.NormalizeForMatching)
+                        .Contains(RouteParser.NormalizeForMatching(effectiveRouteName))
+                )
+                {
+                    throw new ContractAnalysisException(
+                        $"error {Diagnostics.UnresolvedBindingSource}: parameter '{param.Name}' on endpoint "
+                            + $"'{MethodOwner(method)}.{method.Name}' is {declaration} but route '{routeTemplate}' "
+                            + $"contains no '{{{effectiveRouteName}}}' placeholder — the route binds by its "
+                            + "template. Align the binding name with a route placeholder (e.g. {{id}})."
+                    );
+                }
+            }
 
             // IFormFile maps to the Web API File type — don't walk it through Roslyn.
             // Collection-of-IFormFile params emit array-of-binary (FABLE_GAPS §7 item 12).
@@ -705,6 +757,43 @@ public static class EndpointWalker
             {
                 bodySeen = true;
             }
+
+            if (source == ParamSource.File)
+            {
+                fileSeen = true;
+            }
+        }
+
+        // Mixed form/file: a Body-classified parameter ([FromForm] DTO or [FromBody])
+        // beside an IFormFile parameter would make the multipart body carry a recursive
+        // form object — faithfully lowering it requires emulating MVC's recursive form
+        // binder, so refuse instead of silently dropping the explicitly declared
+        // parameter (acceptance:mixed-form-file-never-drops-explicit-input). Scalar
+        // [FromForm] fields beside files keep emitting both parts.
+        if (fileSeen && bodySeen)
+        {
+            var formBodyParam = method.Parameters.First(param =>
+                !SymbolEqualityComparer.Default.Equals(param.Type, wkt.IFormFile)
+                && !typeWalker.IsCollectionOf(param.Type, wkt.IFormFile)
+                && ClassifyParam(wkt, typeWalker, param, routeParamNames) is ParamSource.Body
+            );
+
+            // The remedy depends on what the body declares: a [FromForm] DTO can split
+            // into scalar form fields, a [FromBody] JSON body has no form representation
+            // at all and must move off the multipart endpoint.
+            var remedy = HasAttribute(formBodyParam, wkt.FromBody)
+                ? "a [FromBody] body cannot ride a multipart request — move the JSON body to a "
+                    + "separate endpoint, or drop the file parameter"
+                : "emit the DTO fields as separate scalar [FromForm] parameters, or drop the "
+                    + "file parameter";
+
+            throw new ContractAnalysisException(
+                $"error {Diagnostics.MixedFormFileParameters}: endpoint "
+                    + $"'{MethodOwner(method)}.{method.Name}' mixes IFormFile file parameters with an "
+                    + $"explicit body parameter '{formBodyParam.Name}' of type "
+                    + $"'{formBodyParam.Type.ToDisplayString()}' — the multipart body cannot faithfully carry "
+                    + $"a recursive form object without emulating MVC form binding. {remedy}."
+            );
         }
 
         return parameters;
@@ -788,19 +877,6 @@ public static class EndpointWalker
         return null;
     }
 
-    /// <summary>The [FromHeader(Name = "...")] value, or null when unset.</summary>
-    private static string? GetFromHeaderName(IParameterSymbol param, WellKnownTypes wkt)
-    {
-        var attr = param
-            .GetAttributes()
-            .FirstOrDefault(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, wkt.FromHeader)
-            );
-
-        var named = attr?.NamedArguments.FirstOrDefault(kv => kv.Key == "Name");
-        return named?.Value.Value as string;
-    }
-
     /// <summary>
     /// True for System.Threading.CancellationToken regardless of which referenced
     /// assembly supplied the symbol. WellKnownTypes.CancellationToken goes through
@@ -822,13 +898,17 @@ public static class EndpointWalker
     /// <code>
     /// [FromServices]      → exclude (handled before classification)
     /// CancellationToken  → exclude (host plumbing)
-    /// IFormFile(+collection) → file
-    /// explicit [From*]    → declared source
+    /// explicit [From*]    → declared source (contradictions refuse)
+    /// IFormFile(+collection) → file (unattributed or [FromForm] only)
     /// exact route match   → route
     /// otherwise           → unresolved contract (refusal)
     /// </code>
     /// There is no MVC model-binding reconstruction: a scalar never becomes Query and
-    /// a class/record/struct never becomes Body from its CLR shape.
+    /// a class/record/struct never becomes Body from its CLR shape. Explicit attributes
+    /// are collected first and validated as one coherent declaration before any
+    /// convention applies — an IFormFile type never overrides explicit metadata, and
+    /// contradictory attributes refuse rather than first-attr-wins
+    /// (acceptance:explicit-binding-resolution-is-authoritative).
     /// </summary>
     private static ParamSource? ClassifyParam(
         WellKnownTypes wkt,
@@ -837,17 +917,8 @@ public static class EndpointWalker
         HashSet<string> routeParamNames
     )
     {
-        // IFormFile parameter (single or collection) → File source. The type itself
-        // is the strongly semantic transport declaration.
-        if (
-            SymbolEqualityComparer.Default.Equals(param.Type, wkt.IFormFile)
-            || typeWalker.IsCollectionOf(param.Type, wkt.IFormFile)
-        )
-        {
-            return ParamSource.File;
-        }
-
-        // Explicit attribute takes precedence over every convention below.
+        // Collect every explicit binding declaration on the parameter.
+        var explicitSources = new List<ParamSource>();
         foreach (var attr in param.GetAttributes())
         {
             var attrClass = attr.AttributeClass;
@@ -858,31 +929,77 @@ public static class EndpointWalker
 
             if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromBody))
             {
-                return ParamSource.Body;
+                explicitSources.Add(ParamSource.Body);
             }
-
-            if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromForm))
+            else if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromForm))
             {
                 // [FromForm] declares its surface from the parameter's own declared
-                // shape, not from neighbouring files: a scalar/simple parameter is a
-                // single form field (Name= honored), a DTO/record is the form body
-                // whose wire representation is the IsFormEncoded x-www-form-urlencoded
-                // content. No file-presence probe exists; unattributed params never
-                // reach this branch.
-                return typeWalker.IsSimpleFormType(param.Type)
-                    ? ParamSource.FormField
-                    : ParamSource.Body;
+                // shape, not from neighbouring files. File-type detection runs first:
+                // IFormFile/collection under [FromForm] is the coherent explicit file
+                // case and classifies as FormField here so the apply step maps it to
+                // File — IsSimpleFormType(IFormFile) is false because IFormFile is an
+                // interface, and the type must not refuse or become Body
+                // (planner-constraint:fromform-file-forms-classify-file). A scalar/
+                // simple parameter is a single form field (Name= honored), a DTO/record
+                // is the form body whose wire representation is the IsFormEncoded
+                // x-www-form-urlencoded content. No file-presence probe exists;
+                // unattributed params never reach this branch.
+                explicitSources.Add(
+                    typeWalker.IsSimpleFormType(param.Type)
+                    || IsFormFileType(wkt, typeWalker, param)
+                        ? ParamSource.FormField
+                        : ParamSource.Body
+                );
+            }
+            else if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromQuery))
+            {
+                explicitSources.Add(ParamSource.Query);
+            }
+            else if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromRoute))
+            {
+                explicitSources.Add(ParamSource.Route);
+            }
+            else if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromHeader))
+            {
+                explicitSources.Add(ParamSource.Header);
+            }
+        }
+
+        // One coherent declaration or none: contradictory explicit sources refuse with
+        // one actionable diagnostic instead of whichever attribute is inspected first
+        // (acceptance:contradictory-bindings-refuse).
+        if (explicitSources.Count > 1 && explicitSources.Distinct().Count() > 1)
+        {
+            ThrowContradictoryBinding(param, explicitSources);
+        }
+
+        if (explicitSources.Count > 0)
+        {
+            var declared = explicitSources[0];
+
+            // An explicit source on an IFormFile/collection parameter is honored only
+            // when it is the coherent explicit file case ([FromForm] → File); any other
+            // source (query/body/route/header) refuses rather than silently forcing File
+            // (acceptance:contradictory-bindings-refuse).
+            var isFormFile = IsFormFileType(wkt, typeWalker, param);
+            if (isFormFile)
+            {
+                if (declared is ParamSource.FormField)
+                {
+                    return ParamSource.File;
+                }
+
+                ThrowIncompatibleFileSource(param, declared);
             }
 
-            if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromQuery))
-            {
-                return ParamSource.Query;
-            }
+            return declared;
+        }
 
-            if (SymbolEqualityComparer.Default.Equals(attrClass, wkt.FromRoute))
-            {
-                return ParamSource.Route;
-            }
+        // IFormFile parameter (single or collection) → File source. The type itself
+        // is the strongly semantic transport declaration.
+        if (IsFormFileType(wkt, typeWalker, param))
+        {
+            return ParamSource.File;
         }
 
         // Retained convention: a parameter named exactly like an explicit route
@@ -895,6 +1012,19 @@ public static class EndpointWalker
         // No declaration, no convention: the transport source is unknown.
         return null;
     }
+
+    /// <summary>
+    /// True for IFormFile itself or a collection of it — the single strongly semantic
+    /// file transport type. Shared by the explicit-source apply step and the
+    /// unattributed convention so both sites cannot drift.
+    /// </summary>
+    private static bool IsFormFileType(
+        WellKnownTypes wkt,
+        TypeWalker typeWalker,
+        IParameterSymbol param
+    ) =>
+        SymbolEqualityComparer.Default.Equals(param.Type, wkt.IFormFile)
+        || typeWalker.IsCollectionOf(param.Type, wkt.IFormFile);
 
     /// <summary>
     /// Refusal for an unattributed parameter whose transport source cannot be
@@ -913,6 +1043,53 @@ public static class EndpointWalker
                 + "or name the parameter exactly like a route placeholder."
         );
     }
+
+    /// <summary>
+    /// Refusal for a parameter carrying multiple incompatible explicit binding sources:
+    /// the contract aborts with one actionable diagnostic instead of whichever attribute
+    /// happens to be inspected first
+    /// (acceptance:contradictory-bindings-refuse).
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static void ThrowContradictoryBinding(IParameterSymbol param, List<ParamSource> sources)
+    {
+        throw new ContractAnalysisException(
+            $"error {Diagnostics.UnresolvedBindingSource}: parameter '{param.Name}' of type "
+                + $"'{param.Type.ToDisplayString()}' carries contradictory binding attributes "
+                + $"({string.Join(", ", sources.Select(source => ToWireLabel(source)))}) — one parameter "
+                + "declares exactly one binding source. Rivet does not pick a winner; keep a single "
+                + "explicit [From*] declaration on the parameter."
+        );
+    }
+
+    /// <summary>
+    /// Refusal for an IFormFile/collection parameter whose single explicit source is
+    /// incompatible with file transport (query/body/route/header): MVC binds IFormFile
+    /// from form files, so forcing File would silently ignore the declaration and
+    /// honoring the declaration would invent a transport the wire cannot carry.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static void ThrowIncompatibleFileSource(IParameterSymbol param, ParamSource declared)
+    {
+        throw new ContractAnalysisException(
+            $"error {Diagnostics.UnresolvedBindingSource}: parameter '{param.Name}' of type "
+                + $"'{param.Type.ToDisplayString()}' is IFormFile but is explicitly declared "
+                + $"{ToWireLabel(declared)} — an incompatible source for file transport. Remove the "
+                + "explicit attribute (IFormFile alone is the retained file convention) or use [FromForm] "
+                + "on the file parameter."
+        );
+    }
+
+    private static string ToWireLabel(ParamSource source) =>
+        source switch
+        {
+            ParamSource.Body => "[FromBody]",
+            ParamSource.FormField or ParamSource.File => "[FromForm]",
+            ParamSource.Query => "[FromQuery]",
+            ParamSource.Route => "[FromRoute]",
+            ParamSource.Header => "[FromHeader]",
+            _ => "[FromServices]",
+        };
 
     private static string MethodOwner(IMethodSymbol method) =>
         method.ContainingType?.Name ?? "<unknown>";
@@ -1220,14 +1397,45 @@ public static class EndpointWalker
         // inserting one from ActionResult<T> (acceptance:no-actionresult-t-success-
         // invention).
 
+        // Results<T1, ...> branches stay visible even behind response attributes
+        // (acceptance:results-branches-cannot-hide-behind-attributes): attributes may
+        // describe responses, but an unmapped branch (ProblemHttpResult, JsonHttpResult<T>,
+        // …) is still an unresolved declared surface and refuses with the existing
+        // unmapped-result diagnostic. Mapped fixed branches merge only into statuses the
+        // attributes have not already declared — blind appends would trip the
+        // duplicate-response refusal on contracts that declare .Status/.Returns for a
+        // fixed branch (planner-constraint:results-validation-merges-not-appends).
+        var unwrappedForValidation = UnwrapTask(wkt, method.ReturnType, out _);
+        if (
+            unwrappedForValidation is INamedTypeSymbol resultsType
+            && IsTypedResults(wkt, resultsType)
+        )
+        {
+            var declaredStatuses = responses.Select(response => response.StatusCode).ToHashSet();
+            foreach (var mapping in CollectTypedResultMappings(wkt, resultsType, method.Name))
+            {
+                if (declaredStatuses.Contains(mapping.StatusCode))
+                {
+                    continue;
+                }
+
+                var tsType = mapping.BodyType is not null
+                    ? typeWalker.MapType(mapping.BodyType)
+                    : null;
+                responses.Add(new TsResponseType(mapping.StatusCode, tsType));
+                declaredStatuses.Add(mapping.StatusCode);
+            }
+        }
+
         // If no [ProducesResponseType] found, try typed results from return type
         if (responses.Count == 0)
         {
             var unwrapped = UnwrapTask(wkt, method.ReturnType, out _);
-            if (unwrapped is INamedTypeSymbol namedType)
+            if (unwrapped is INamedTypeSymbol namedType && !IsTypedResults(wkt, namedType))
             {
                 // A8: warn loudly for unmapped Results<> branches (only on this path so
-                // the warning is emitted once per endpoint)
+                // the warning is emitted once per endpoint). Results<> arities were
+                // validated above; this path covers the single fixed typed result.
                 foreach (var mapping in CollectTypedResultMappings(wkt, namedType, method.Name))
                 {
                     var tsType = mapping.BodyType is not null

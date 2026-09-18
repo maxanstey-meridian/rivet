@@ -337,9 +337,9 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void IntUnion_OrderIndependent()
     {
-        var a = new TsType.IntUnion([3, 1, 2]);
-        var b = new TsType.IntUnion([1, 2, 3]);
-        var c = new TsType.IntUnion([1, 2, 4]);
+        var a = new TsType.IntUnion(["3", "1", "2"]);
+        var b = new TsType.IntUnion(["1", "2", "3"]);
+        var c = new TsType.IntUnion(["1", "2", "4"]);
 
         Assert.Equal(InlineTypeExtractor.CanonicalHash(a), InlineTypeExtractor.CanonicalHash(b));
         Assert.NotEqual(InlineTypeExtractor.CanonicalHash(a), InlineTypeExtractor.CanonicalHash(c));

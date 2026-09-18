@@ -56,6 +56,7 @@ public static class Diagnostics
     public const string JsonIncludeFieldNotRepresented = "RIV1101";
     public const string BodyForbiddenStatusExample = "RIV1102";
     public const string InvalidRivetScalarShape = "RIV1103";
+    public const string MixedFormFileParameters = "RIV1104";
 
     // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
     // rivet/php sibling runtime. Native Rivet diagnostics must not use them.
@@ -160,6 +161,8 @@ public static class Diagnostics
             "A response example or content is authored on a body-forbidden status (1xx, 204, 205, 304) — HTTP forbids a message body there; generation fails instead of emitting body content the host cannot send.",
         [InvalidRivetScalarShape] =
             "A [RivetScalar] type is not a non-generic class/struct/record with exactly one eligible non-static, non-indexer, non-implicit property named 'Value' — generation fails instead of silently falling back to object semantics.",
+        [MixedFormFileParameters] =
+            "A multipart endpoint mixes file parameters with an explicit body parameter ([FromBody] or a [FromForm] DTO) whose declared body shape Rivet cannot faithfully carry on a multipart request — the contract is refused instead of silently dropping the declared input.",
         [TaggedUnionComponentCollision] =
             "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
         [UndefinedSecurityScheme] =

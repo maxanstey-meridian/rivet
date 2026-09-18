@@ -72,7 +72,7 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
             ),
 
             "intUnion" => new TsType.IntUnion(
-                root.GetProperty("values").EnumerateArray().Select(e => e.GetInt32()).ToArray(),
+                root.GetProperty("values").EnumerateArray().Select(ReadEnumLiteral).ToArray(),
                 root.TryGetProperty("format", out var intFormat) ? intFormat.GetString() : null,
                 ReadMetadata(root, options),
                 root.TryGetProperty("description", out var intDescription)
@@ -161,6 +161,21 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
 
             _ => throw new JsonException($"Unknown TsType kind: '{kind}'."),
         };
+    }
+
+    /// <summary>
+    /// Reads a numeric enum literal as its exact decimal string: values inside Int64
+    /// come through GetInt64; larger unsigned values keep their raw digits
+    /// (acceptance:numeric-enums-cover-all-legal-underlying-values).
+    /// </summary>
+    private static string ReadEnumLiteral(JsonElement value)
+    {
+        if (value.TryGetInt64(out var signed))
+        {
+            return signed.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return value.GetRawText();
     }
 
     private static TsTypeMetadata? ReadMetadata(JsonElement root, JsonSerializerOptions options) =>
@@ -276,7 +291,9 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 writer.WriteStartArray("values");
                 foreach (var member in iu.Members)
                 {
-                    writer.WriteNumberValue(member);
+                    // Exact decimal digits (long/ulong enums included) — the contract IR
+                    // keeps numeric JSON shape while never truncating to Int32.
+                    writer.WriteRawValue(member);
                 }
 
                 writer.WriteEndArray();

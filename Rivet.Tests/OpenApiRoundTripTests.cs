@@ -395,9 +395,12 @@ public sealed class OpenApiRoundTripTests
         Assert.True(walker.Definitions.ContainsKey("TaskDto"));
         Assert.True(walker.Enums.ContainsKey("Priority"));
         var priorityEnum = (TsType.StringUnion)walker.Enums["Priority"];
-        Assert.Contains("low", priorityEnum.Members);
-        Assert.Contains("medium", priorityEnum.Members);
-        Assert.Contains("high", priorityEnum.Members);
+        // Explicit JsonStringEnumConverter<Priority> opts the enum into strings; without
+        // [JsonStringEnumMemberName] overrides the wire values are the exact C# member
+        // names (acceptance:string-enum-preserves-member-name).
+        Assert.Contains("Low", priorityEnum.Members);
+        Assert.Contains("Medium", priorityEnum.Members);
+        Assert.Contains("High", priorityEnum.Members);
 
         // Property types on TaskDto survive
         var taskDef = walker.Definitions["TaskDto"];
@@ -568,7 +571,7 @@ public sealed class OpenApiRoundTripTests
             $"Severity enum vanished. Enums: [{string.Join(", ", walker.Enums.Keys)}]"
         );
         var severity = Assert.IsType<TsType.StringUnion>(walker.Enums["Severity"]);
-        Assert.Equal(["low", "high"], severity.Members);
+        Assert.Equal(["Low", "High"], severity.Members);
 
         // …and the dictionary still references it as its key
         var tallies = Assert.Single(walker.Definitions["ReportDto"].Properties);
@@ -676,7 +679,11 @@ public sealed class OpenApiRoundTripTests
             );
         });
         Assert.DoesNotContain("RIV1012", stderr);
-        Assert.DoesNotContain("RIV2005", stderr);
+        // Scoped needle: the process-global stderr capture also carries legitimate
+        // RIV2005 warnings from parallel fixtures (undefined "Summary"/"WorkspaceKey"
+        // components — see DiagnosticsTests). A regression in *this* fixture would
+        // name EnvelopeDto's own properties, which only this site emits.
+        Assert.DoesNotContain("at property 'EnvelopeDto.", stderr);
 
         // Wire shape: bare {} for object, no sidecar; object? is identical
         // (the empty schema already admits null).
@@ -2324,10 +2331,10 @@ public sealed class OpenApiRoundTripTests
 
         Assert.True(wlk2.Enums.ContainsKey("Priority"));
         var prioEnum = (TsType.StringUnion)wlk2.Enums["Priority"];
-        Assert.Contains("low", prioEnum.Members);
-        Assert.Contains("medium", prioEnum.Members);
-        Assert.Contains("high", prioEnum.Members);
-        Assert.Contains("critical", prioEnum.Members);
+        Assert.Contains("Low", prioEnum.Members);
+        Assert.Contains("Medium", prioEnum.Members);
+        Assert.Contains("High", prioEnum.Members);
+        Assert.Contains("Critical", prioEnum.Members);
 
         // ───── Assertion group 6: Generic template survived ─────
 

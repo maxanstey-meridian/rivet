@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Rivet.Tool.Analysis;
@@ -42,7 +43,13 @@ public static class ContractEmitter
     internal sealed record ContractEnum(
         string Name,
         IReadOnlyList<string>? Values = null,
-        IReadOnlyList<int>? IntValues = null,
+        // Decimal member literals carried as strings in the IR so legal enum
+        // constants beyond Int32 survive without truncation; the property converter
+        // below keeps the external contract JSON numeric
+        // (planner-constraint:contract-intvalues-stays-numeric-json).
+        [property: JsonConverter(
+            typeof(ContractEnumIntValuesConverter)
+        )] IReadOnlyList<string>? IntValues = null,
         string? Format = null,
         string? Description = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -237,5 +244,76 @@ public static class ContractEmitter
             definition.Metadata,
             definition.ScalarMetadata
         );
+    }
+}
+
+/// <summary>
+/// Property-level converter for <see cref="ContractEnum.IntValues"/>: the IR carries
+/// decimal member literals as strings so values beyond Int32 survive, but the
+/// external contract JSON stays numeric (rivet-contract-schema.json constrains
+/// intValues items to type integer)
+/// (planner-constraint:contract-intvalues-stays-numeric-json).
+/// </summary>
+public sealed class ContractEnumIntValuesConverter : JsonConverter<IReadOnlyList<string>?>
+{
+    public override IReadOnlyList<string>? Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options
+    )
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+        {
+            return null;
+        }
+
+        if (reader.TokenType != JsonTokenType.StartArray)
+        {
+            throw new JsonException("intValues must be a JSON array of integer enum values.");
+        }
+
+        var values = new List<string>();
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+        {
+            if (reader.TokenType != JsonTokenType.Number)
+            {
+                throw new JsonException("intValues items must be JSON integers, not strings.");
+            }
+
+            // Exact digits: Int64 covers signed/legal ranges; wider unsigned
+            // constants keep their raw text (acceptance:numeric-enums-cover-all-legal-underlying-values).
+            if (reader.TryGetInt64(out var signed))
+            {
+                values.Add(signed.ToString(CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                values.Add(JsonDocument.ParseValue(ref reader).RootElement.GetRawText());
+            }
+        }
+
+        return values;
+    }
+
+    public override void Write(
+        Utf8JsonWriter writer,
+        IReadOnlyList<string>? value,
+        JsonSerializerOptions options
+    )
+    {
+        if (value is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteStartArray();
+        foreach (var member in value)
+        {
+            // The literals are decimal digits produced by the walker; emit them as
+            // raw numeric values so the contract JSON keeps its integer shape.
+            writer.WriteRawValue(member, skipInputValidation: true);
+        }
+        writer.WriteEndArray();
     }
 }

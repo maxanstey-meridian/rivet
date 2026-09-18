@@ -37,13 +37,10 @@ public sealed class MvcResponseHostTests : IDisposable
     [Fact]
     public async Task Plain_String_Post_Returns_200_Text_Plain_As_Emitted()
     {
-        var port = Random.Shared.Next(49152, 65000);
-        var url = $"http://localhost:{port}";
-
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var server = await StartAnnotationApiServer(url, cts.Token);
+        await using var server = await StartAnnotationApiServer(cts.Token);
 
-        using var http = new HttpClient { BaseAddress = new Uri(url) };
+        using var http = new HttpClient { BaseAddress = new Uri(server.Url) };
 
         // The live host's actual wire behavior for a plain string action. The
         // request side uses the JSON string "hello contract" because MVC registers
@@ -67,13 +64,10 @@ public sealed class MvcResponseHostTests : IDisposable
     [Fact]
     public async Task Plain_Dto_Post_Returns_200_Json_As_Emitted()
     {
-        var port = Random.Shared.Next(49152, 65000);
-        var url = $"http://localhost:{port}";
-
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var server = await StartAnnotationApiServer(url, cts.Token);
+        await using var server = await StartAnnotationApiServer(cts.Token);
 
-        using var http = new HttpClient { BaseAddress = new Uri(url) };
+        using var http = new HttpClient { BaseAddress = new Uri(server.Url) };
 
         using var payload = new StringContent(
             """{"body":"label text"}""",
@@ -181,16 +175,17 @@ public sealed class MvcResponseHostTests : IDisposable
         return (process.ExitCode, output);
     }
 
-    private static async Task<AsyncServerHandle> StartAnnotationApiServer(
-        string url,
-        CancellationToken ct
-    )
+    private static async Task<AsyncServerHandle> StartAnnotationApiServer(CancellationToken ct)
     {
+        // Port 0 asks the OS for a free ephemeral port: two live-host proofs (or an
+        // unrelated process) can no longer collide on a pre-drawn random port and
+        // kill Kestrel before the test asserts anything. The actually bound URL is
+        // read back from the "Now listening on:" line below.
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
             Arguments =
-                $"run --project \"{Path.Combine(_sampleDir, "AnnotationApi.csproj")}\" --urls {url}",
+                $"run --project \"{Path.Combine(_sampleDir, "AnnotationApi.csproj")}\" --urls http://127.0.0.1:0",
             WorkingDirectory = _repoRoot,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -203,7 +198,8 @@ public sealed class MvcResponseHostTests : IDisposable
             Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start AnnotationApi server");
 
-        var started = false;
+        const string listeningMarker = "Now listening on:";
+        string? boundUrl = null;
         var output = new StringBuilder();
 
         try
@@ -218,14 +214,15 @@ public sealed class MvcResponseHostTests : IDisposable
 
                 output.AppendLine(line);
 
-                if (line.Contains("Now listening on:"))
+                var markerIndex = line.IndexOf(listeningMarker, StringComparison.Ordinal);
+                if (markerIndex >= 0)
                 {
-                    started = true;
+                    boundUrl = line[(markerIndex + listeningMarker.Length)..].Trim();
                     break;
                 }
             }
 
-            if (!started)
+            if (boundUrl is null)
             {
                 var stderr = await process.StandardError.ReadToEndAsync(ct);
                 throw new InvalidOperationException(
@@ -240,11 +237,15 @@ public sealed class MvcResponseHostTests : IDisposable
             throw;
         }
 
-        return new AsyncServerHandle(process);
+        return new AsyncServerHandle(process, boundUrl);
     }
 
-    private sealed class AsyncServerHandle(Process process) : IAsyncDisposable
+    private sealed class AsyncServerHandle(Process process, string boundUrl) : IAsyncDisposable
     {
+        // The URL the server actually bound — for --urls http://127.0.0.1:0 the OS
+        // assigns a free ephemeral port.
+        public string Url { get; } = boundUrl;
+
         public async ValueTask DisposeAsync()
         {
             try

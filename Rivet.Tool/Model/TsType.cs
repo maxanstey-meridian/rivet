@@ -41,9 +41,12 @@ public abstract record TsType
         TsScalarMetadata? ScalarMetadata = null
     ) : TsType;
 
-    /// <summary>1 | 2 | 3 — int enum rendered as numeric literal union.</summary>
+    /// <summary>1 | 2 | 3 — int enum rendered as numeric literal union. Members are
+    /// decimal string literals so every legal C# enum constant survives without an
+    /// Int32 assumption (long/ulong enums, negative values) — emitters parse them to
+    /// wide integers for exact digit output.</summary>
     public sealed record IntUnion(
-        IReadOnlyList<int> Members,
+        IReadOnlyList<string> Members,
         string? Format = null,
         TsTypeMetadata? Metadata = null,
         string? Description = null,

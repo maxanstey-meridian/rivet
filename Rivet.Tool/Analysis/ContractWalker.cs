@@ -1698,9 +1698,18 @@ public static class ContractWalker
             }
             else
             {
-                // No TInput but might have route params (e.g. DELETE with route params)
+                // No TInput: the route template itself declares each placeholder's
+                // existence and transport location (the narrow documented exception),
+                // so the param emits as an untyped string — but its schema type is
+                // unknown and must warn exactly like the missing-property paths above
+                // (acceptance:no-input-route-token-warns).
                 foreach (var paramName in routeParamNames)
                 {
+                    Diagnostics.Warn(
+                        Diagnostics.RouteTokenWithoutInputProperty,
+                        $"route token '{{{paramName}}}' on {httpMethod} {route} has no input type — "
+                            + "emitted as an untyped string path param."
+                    );
                     parameters.Add(
                         new TsEndpointParam(
                             paramName,
