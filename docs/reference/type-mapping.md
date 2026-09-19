@@ -27,16 +27,17 @@ How C# types lower into OpenAPI 3.1 schemas. Property names camelCase by default
   `properties` + `required`.
 - **Enums** → `integer` schemas by default, matching ordinary System.Text.Json
   serialization of unannotated enums (`{ Draft, Open }` → values 0 and 1). A
-  type-level `[JsonConverter(typeof(JsonStringEnumConverter<T>))]` (including the
-  generic converter form) opts the enum into `string` schemas with
-  `JsonStringEnumMemberName`-honoring values. A companion
-  `[RivetEnumNamingPolicy(RivetNamingPolicy.Policy)]` marker cases the member
-  names (`LowerCase`, `CamelCase`, `SnakeCase`, `KebabCase`); a per-member
-  `[JsonStringEnumMemberName]` still overrides the policy. The marker is
-  emission-only: the runtime keeps its own serializer arrangement. A marker on an
-  enum with no string converter (`RIV1105`), or two members producing the same
-  wire value (`RIV1106`, via policy casing or duplicate member pins), degrades
-  loudly — the enum is emitted as numeric, never with a wrong string union.
+  type-level `[JsonConverter(typeof(JsonStringEnumConverter<T>))]` opts the enum
+  into `string` schemas with the exact C# member names as values (no naming
+  policy writes CLR names verbatim). One of the `Rivet*EnumConverter` family
+  members (`RivetLowerCaseEnumConverter<T>`, `RivetCamelCaseEnumConverter<T>`,
+  `RivetSnakeCaseEnumConverter<T>`, `RivetKebabCaseEnumConverter<T>`) opts into a
+  cased string union — the casing lives in the converter class name, and the
+  emitted contract values equal the runtime serializer's wire values by
+  construction (the same `JsonNamingPolicy` instance drives both). A per-member
+  `[JsonStringEnumMemberName]` overrides the converter's casing. When the casing
+  produces the same wire value for two members (`RIV1106`), the enum is emitted
+  as numeric — loudly, never with a wrong string union.
 - **Nullable members** (`string?`, `int?`) → 3.1 type arrays
   (`"type": ["string", "null"]`); nullable `$ref`s use a null branch.
 - **Collections** (`List<T>`, `IReadOnlyList<T>`, arrays) → `array` with `items`.

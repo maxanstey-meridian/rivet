@@ -271,6 +271,132 @@ public sealed class ResponseFidelityTests
     }
 
     [Fact]
+    public void Conflicting_Payload_Types_Behind_Attributes_Refuse_With_RIV1107()
+    {
+        // acceptance:declared-response-conflicts-refuse — a mapped Results<> branch
+        // landing on an already-declared status must agree with the attribute on the
+        // payload; a different payload type is two authorities answering the same
+        // question differently and refuses instead of silently attribute-wins.
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record FooDto(string Id);
+
+            [RivetType]
+            public sealed record BarDto(string Id);
+
+            [RivetClient]
+            [ApiController]
+            [Route("api")]
+            public sealed class ClashResultsController : ControllerBase
+            {
+                [HttpGet("items/{id}")]
+                [ProducesResponseType(typeof(FooDto), 200)]
+                public Results<Ok<FooDto>, Ok<BarDto>> Get(string id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
+
+        Assert.Contains("RIV1107", exception.Message);
+        Assert.Contains("ClashResultsController.Get", exception.Message);
+        Assert.Contains("FooDto", exception.Message);
+        Assert.Contains("BarDto", exception.Message);
+    }
+
+    [Fact]
+    public void Body_Attribute_Vs_Bodyless_Branch_Refuses_With_RIV1107()
+    {
+        // acceptance:declared-response-conflicts-refuse — a typed attribute on a
+        // status where the mapped branch carries no body (NotFound) is a
+        // body-vs-bodyless disagreement: the spec would lie about body presence.
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record FooDto(string Id);
+
+            [RivetType]
+            public sealed record ErrorDto(string Message);
+
+            [RivetClient]
+            [ApiController]
+            [Route("api")]
+            public sealed class PresenceResultsController : ControllerBase
+            {
+                [HttpGet("items/{id}")]
+                [ProducesResponseType(typeof(ErrorDto), 404)]
+                public Results<Ok<FooDto>, NotFound> Get(string id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
+
+        Assert.Contains("RIV1107", exception.Message);
+        Assert.Contains("PresenceResultsController.Get", exception.Message);
+    }
+
+    [Fact]
+    public void Bodyless_Attribute_Vs_Body_Bearing_Branch_Refuses_With_RIV1107()
+    {
+        // acceptance:declared-response-conflicts-refuse — the mirror case: a
+        // bodyless attribute declaration against a mapped branch that carries a
+        // payload is the same lie from the other side.
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Http.HttpResults;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record FooDto(string Id);
+
+            [RivetClient]
+            [ApiController]
+            [Route("api")]
+            public sealed class MirrorResultsController : ControllerBase
+            {
+                [HttpGet("items/{id}")]
+                [ProducesResponseType(200)]
+                public Results<Ok<FooDto>, NotFound> Get(string id)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
+
+        Assert.Contains("RIV1107", exception.Message);
+        Assert.Contains("MirrorResultsController.Get", exception.Message);
+    }
+
+    [Fact]
     public void Annotation_Explicit_ProducesResponseType_Wins_Over_Defaults()
     {
         var source = """

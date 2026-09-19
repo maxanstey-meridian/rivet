@@ -100,7 +100,11 @@ internal sealed record GeneratedEnum(
     string? Format = null,
     string? Description = null,
     string? ComponentId = null,
-    bool IsSynthetic = true
+    bool IsSynthetic = true,
+    // The x-rivet-enum-naming-policy token carried from a Rivet-emitted spec —
+    // the imported enum re-derives its wire values from the matching family
+    // converter instead of blanket member pins.
+    string? NamingPolicy = null
 );
 
 internal sealed record GeneratedBrand(

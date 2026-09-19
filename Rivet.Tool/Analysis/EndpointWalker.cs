@@ -1367,6 +1367,10 @@ public static class EndpointWalker
     )
     {
         var responses = new List<TsResponseType>();
+        // Body-type symbols behind the declared statuses, retained for the
+        // Results<> merge conflict check below — TsResponseType only carries the
+        // mapped schema, and symbol equality is the honest comparison here.
+        var declaredBodyTypes = new List<(int StatusCode, ITypeSymbol? BodyType)>();
 
         foreach (var attr in method.GetAttributes())
         {
@@ -1389,6 +1393,12 @@ public static class EndpointWalker
                     ? typeWalker.MapType(parsed.Value.Type)
                     : null;
             responses.Add(new TsResponseType(statusCode, tsType));
+            declaredBodyTypes.Add(
+                (
+                    statusCode,
+                    parsed.Value.Type is not null && !isVoidResponse ? parsed.Value.Type : null
+                )
+            );
         }
 
         // No 200/T invention: [ProducesResponseType] entries declare exactly the
@@ -1405,6 +1415,11 @@ public static class EndpointWalker
         // attributes have not already declared — blind appends would trip the
         // duplicate-response refusal on contracts that declare .Status/.Returns for a
         // fixed branch (planner-constraint:results-validation-merges-not-appends).
+        // When a mapped branch lands on an already-declared status, the two
+        // declarations must agree on the body — same payload type, or both bodyless.
+        // A payload-type disagreement or a body-vs-bodyless disagreement is two
+        // authorities answering the same question differently: refuse loudly
+        // (RIV1107) instead of silently letting the attribute win.
         var unwrappedForValidation = UnwrapTask(wkt, method.ReturnType, out _);
         if (
             unwrappedForValidation is INamedTypeSymbol resultsType
@@ -1416,6 +1431,29 @@ public static class EndpointWalker
             {
                 if (declaredStatuses.Contains(mapping.StatusCode))
                 {
+                    var declaredBody = declaredBodyTypes
+                        .First(declared => declared.StatusCode == mapping.StatusCode)
+                        .BodyType;
+                    var declarationsAgree =
+                        (declaredBody is null && mapping.BodyType is null)
+                        || (
+                            declaredBody is not null
+                            && mapping.BodyType is not null
+                            && SymbolEqualityComparer.Default.Equals(declaredBody, mapping.BodyType)
+                        );
+                    if (!declarationsAgree)
+                    {
+                        throw new ContractAnalysisException(
+                            $"error {Diagnostics.ConflictingResponseDeclaration}: endpoint "
+                                + $"'{method.ContainingType.Name}.{method.Name}' declares response status "
+                                + $"{mapping.StatusCode} twice with different bodies — the attribute "
+                                + $"declares '{declaredBody?.ToDisplayString() ?? "no body"}' while the "
+                                + $"mapped Results<> branch declares '{mapping.BodyType?.ToDisplayString() ?? "no body"}'. "
+                                + "One response status carries exactly one shape: align the attribute and the "
+                                + "branch (or drop the redundant declaration)"
+                        );
+                    }
+
                     continue;
                 }
 

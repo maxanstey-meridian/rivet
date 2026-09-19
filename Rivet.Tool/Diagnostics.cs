@@ -57,8 +57,12 @@ public static class Diagnostics
     public const string BodyForbiddenStatusExample = "RIV1102";
     public const string InvalidRivetScalarShape = "RIV1103";
     public const string MixedFormFileParameters = "RIV1104";
-    public const string RivetEnumNamingPolicyWithoutStringConverter = "RIV1105";
-    public const string RivetEnumNamingPolicyCollision = "RIV1106";
+
+    // RIV1105 (RivetEnumNamingPolicyWithoutStringConverter) retired in the converter-family
+    // wave: the naming policy lives in the converter class name itself, so a policy cannot
+    // exist without a string wire. The number is never reused.
+    public const string EnumWireValueCollision = "RIV1106";
+    public const string ConflictingResponseDeclaration = "RIV1107";
 
     // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
     // rivet/php sibling runtime. Native Rivet diagnostics must not use them.
@@ -165,10 +169,10 @@ public static class Diagnostics
             "A [RivetScalar] type is not a non-generic class/struct/record with exactly one eligible non-static, non-indexer, non-implicit property named 'Value' — generation fails instead of silently falling back to object semantics.",
         [MixedFormFileParameters] =
             "A multipart endpoint mixes file parameters with an explicit body parameter ([FromBody] or a [FromForm] DTO) whose declared body shape Rivet cannot faithfully carry on a multipart request — the contract is refused instead of silently dropping the declared input.",
-        [RivetEnumNamingPolicyWithoutStringConverter] =
-            "An enum declares [RivetEnumNamingPolicy] but no type-level [JsonConverter(typeof(JsonStringEnumConverter<...>))] — the marker has no string wire to name; emitted as numeric.",
-        [RivetEnumNamingPolicyCollision] =
-            "Two enum members produce the same wire value ([RivetEnumNamingPolicy] casing or duplicate [JsonStringEnumMemberName] pins) — the string union would not match the emitted wire values; emitted as numeric instead.",
+        [EnumWireValueCollision] =
+            "Two enum members produce the same wire value (the declared converter's casing or duplicate [JsonStringEnumMemberName] pins) — the string union would not match the emitted wire values; emitted as numeric instead.",
+        [ConflictingResponseDeclaration] =
+            "An endpoint declares the same response status twice with different bodies ([ProducesResponseType]/.Returns vs a mapped Results<> branch) — one status carries exactly one shape; generation fails instead of silently letting the attribute win.",
         [TaggedUnionComponentCollision] =
             "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
         [UndefinedSecurityScheme] =

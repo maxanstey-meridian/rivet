@@ -2,6 +2,21 @@ using System.Text.Json;
 
 namespace Rivet.Tool;
 
+/// <summary>
+/// Casing conventions the tool recognizes on a string-wire enum's
+/// [JsonConverter] declaration. The wire value casing must match the runtime
+/// converter of the same name exactly — each STJ policy here is the same
+/// object the matching Rivet*EnumConverter passes to its base class, and
+/// CamelCase is the shared JsonNamingPolicy.CamelCase instance on both sides.
+/// </summary>
+internal enum RivetNamingPolicy
+{
+    LowerCase,
+    CamelCase,
+    SnakeCase,
+    KebabCase,
+}
+
 internal static class Naming
 {
     public static string ToCamelCase(string name)
@@ -15,59 +30,63 @@ internal static class Naming
     }
 
     /// <summary>
-    /// Casing policies for enum wire values declared by
-    /// [RivetEnumNamingPolicy]. Applied to the exact C# member name.
+    /// Casing policies for enum wire values declared by a
+    /// [RivetCamelCaseEnumConverter<...>]-family converter. Applied to the exact
+    /// C# member name. Each policy delegates to the same System.Text.Json
+    /// naming-policy instance the matching runtime converter passes to its base
+    /// class — emission and runtime wire casing are one algorithm, not two that
+    /// must be kept in sync (a hand-rolled word-boundary heuristic diverged from
+    /// SnakeCaseLower/KebabCaseLower at digit boundaries).
     /// </summary>
     public static string ToPolicyCase(string name, RivetNamingPolicy policy) =>
         policy switch
         {
             RivetNamingPolicy.LowerCase => name.ToLowerInvariant(),
             RivetNamingPolicy.CamelCase => ToCamelCase(name),
-            RivetNamingPolicy.SnakeCase => ToWordCase(name, '_'),
-            RivetNamingPolicy.KebabCase => ToWordCase(name, '-'),
+            RivetNamingPolicy.SnakeCase => JsonNamingPolicy.SnakeCaseLower.ConvertName(name),
+            RivetNamingPolicy.KebabCase => JsonNamingPolicy.KebabCaseLower.ConvertName(name),
             _ => name,
         };
 
     /// <summary>
-    /// Lowercase from word boundaries detected in the member name: a lowercase or
-    /// digit followed by an uppercase letter, a digit run after letters, a letter
-    /// run after digits, and a trailing acronym before a lowercase word
-    /// ("RestrictedByway2A" → "restricted_byway2_a" / "restricted-byway2-a").
-    /// Existing underscores pass through unchanged.
+    /// The camelCase token carried on the IR ("namingPolicy") and the OpenAPI
+    /// extension ("x-rivet-enum-naming-policy") for a policy — the import
+    /// round-trip's single carrier.
     /// </summary>
-    private static string ToWordCase(string name, char separator)
+    public static string ToPolicyToken(RivetNamingPolicy policy) =>
+        policy switch
+        {
+            RivetNamingPolicy.LowerCase => "lowerCase",
+            RivetNamingPolicy.CamelCase => "camelCase",
+            RivetNamingPolicy.SnakeCase => "snakeCase",
+            RivetNamingPolicy.KebabCase => "kebabCase",
+            _ => throw new ArgumentOutOfRangeException(nameof(policy), policy, null),
+        };
+
+    /// <summary>
+    /// Parses a naming-policy token; null for anything that is not a declared
+    /// policy — the import path refuses to guess an unknown token's casing.
+    /// </summary>
+    public static bool TryPolicyFromToken(string token, out RivetNamingPolicy policy)
     {
-        if (string.IsNullOrEmpty(name))
+        policy = default;
+        switch (token)
         {
-            return name;
+            case "lowerCase":
+                policy = RivetNamingPolicy.LowerCase;
+                return true;
+            case "camelCase":
+                policy = RivetNamingPolicy.CamelCase;
+                return true;
+            case "snakeCase":
+                policy = RivetNamingPolicy.SnakeCase;
+                return true;
+            case "kebabCase":
+                policy = RivetNamingPolicy.KebabCase;
+                return true;
+            default:
+                return false;
         }
-
-        var sb = new System.Text.StringBuilder(name.Length + 4);
-        for (var i = 0; i < name.Length; i++)
-        {
-            var c = name[i];
-            var startsNewWord =
-                i > 0
-                && (
-                    (char.IsUpper(c) && (char.IsLower(name[i - 1]) || char.IsDigit(name[i - 1])))
-                    || (
-                        char.IsUpper(c)
-                        && char.IsUpper(name[i - 1])
-                        && i + 1 < name.Length
-                        && char.IsLower(name[i + 1])
-                    )
-                    || (char.IsDigit(c) && i > 0 && char.IsLetter(name[i - 1]))
-                    || (char.IsLetter(c) && char.IsLower(c) && i > 0 && char.IsDigit(name[i - 1]))
-                );
-            if (startsNewWord)
-            {
-                sb.Append(separator);
-            }
-
-            sb.Append(char.ToLowerInvariant(c));
-        }
-
-        return sb.ToString();
     }
 
     /// <summary>

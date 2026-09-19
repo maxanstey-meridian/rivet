@@ -1680,9 +1680,10 @@ public sealed class TypeWalker
             }
 
             // Enum → named union type. Ordinary enums are numeric by default
-            // (matching ordinary System.Text.Json serialization); an explicit
-            // type-level [JsonConverter(typeof(JsonStringEnumConverter<...>))]
-            // opts into a string union honoring [JsonStringEnumMemberName].
+            // (matching ordinary System.Text.Json serialization); a type-level
+            // [JsonConverter(typeof(JsonStringEnumConverter<...>))] or a
+            // Rivet*EnumConverter family declaration opts into a string union
+            // honoring [JsonStringEnumMemberName].
             if (namedType.TypeKind == TypeKind.Enum)
             {
                 // A5: full-namespace keyed naming — colliding enum names disambiguate
@@ -1695,17 +1696,17 @@ public sealed class TypeWalker
                         .OfType<IFieldSymbol>()
                         .Where(f => f.HasConstantValue)
                         .ToList();
-                    var enumNamingPolicy = GetEnumNamingPolicy(namedType);
+                    var (isStringEnum, enumNamingPolicy) = GetEnumWireShape(namedType);
                     IReadOnlyList<string>? stringMembers = null;
-                    if (IsStringEnum(namedType))
+                    if (isStringEnum)
                     {
                         var candidates = fields
                             .Select(f => EnumWireValue(f, enumNamingPolicy))
                             .ToList();
                         if (candidates.Distinct(StringComparer.Ordinal).Count() != candidates.Count)
                         {
-                            // Reachable with a [RivetEnumNamingPolicy] casing two
-                            // member names together, or with duplicate
+                            // Reachable with a family converter casing two member
+                            // names together, or with duplicate
                             // [JsonStringEnumMemberName] pins — either way the
                             // string union would not match a distinct wire-value set.
                             var colliding = candidates
@@ -1719,7 +1720,7 @@ public sealed class TypeWalker
                                     .Select(f => f.Name)
                             );
                             Diagnostics.Warn(
-                                Diagnostics.RivetEnumNamingPolicyCollision,
+                                Diagnostics.EnumWireValueCollision,
                                 $"enum '{namedType.Name}' members ({collidingMembers}) produce the same wire value '{colliding}' — "
                                     + "the string union would not match the emitted wire values; emitted as numeric instead"
                             );
@@ -1729,15 +1730,6 @@ public sealed class TypeWalker
                             stringMembers = candidates;
                         }
                     }
-                    else if (enumNamingPolicy is not null)
-                    {
-                        Diagnostics.Warn(
-                            Diagnostics.RivetEnumNamingPolicyWithoutStringConverter,
-                            $"enum '{namedType.Name}' declares [RivetEnumNamingPolicy] but has no type-level "
-                                + "[JsonConverter(typeof(JsonStringEnumConverter<...>))] — the marker has no "
-                                + "string wire to name; emitted as numeric. Add the string converter or remove the marker."
-                        );
-                    }
 
                     if (stringMembers is not null)
                     {
@@ -1746,7 +1738,10 @@ public sealed class TypeWalker
                             GetTypeMetadata(namedType),
                             GetTypeFormat(namedType),
                             GetTypeDescription(namedType),
-                            _generatedEnumMetadata.GetValueOrDefault(enumName)
+                            _generatedEnumMetadata.GetValueOrDefault(enumName),
+                            enumNamingPolicy is null
+                                ? null
+                                : Naming.ToPolicyToken(enumNamingPolicy.Value)
                         );
                     }
                     else
@@ -1856,30 +1851,12 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// True only when the enum explicitly declares the type-level
-    /// [JsonConverter(typeof(JsonStringEnumConverter<...>))] (or the non-generic
-    /// JsonStringEnumConverter) declaration. Ordinary enums are numeric — Rivet no
-    /// longer turns unannotated enums into camelCase string unions by convention.
-    /// </summary>
-    private static bool IsStringEnum(INamedTypeSymbol type) =>
-        type.GetAttributes()
-            .Any(attribute =>
-                attribute.AttributeClass?.Name == "JsonConverterAttribute"
-                && attribute.ConstructorArguments is [var converterArgument]
-                && converterArgument.Value is INamedTypeSymbol converterType
-                && converterType.Name.StartsWith(
-                    "JsonStringEnumConverter",
-                    StringComparison.Ordinal
-                )
-            );
-
-    /// <summary>
     /// The wire value of one enum member: an explicit
-    /// [JsonStringEnumMemberName("original")] wins; otherwise the naming policy
-    /// declared by [RivetEnumNamingPolicy] cases the member name; without either,
-    /// the wire value is the exact C# member name — JsonStringEnumConverter with
-    /// no naming policy writes the CLR name verbatim, so Rivet must not camel-case
-    /// it (acceptance:string-enum-preserves-member-name).
+    /// [JsonStringEnumMemberName("original")] wins; otherwise the casing the
+    /// declared converter names applies; without either, the wire value is the
+    /// exact C# member name — JsonStringEnumConverter with no naming policy
+    /// writes the CLR name verbatim, so Rivet must not camel-case it
+    /// (acceptance:string-enum-preserves-member-name).
     /// </summary>
     private static string EnumWireValue(IFieldSymbol field, RivetNamingPolicy? policy)
     {
@@ -1898,26 +1875,37 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// The [RivetEnumNamingPolicy] casing convention declared on the enum, or null.
-    /// Emission-only — see RivetEnumNamingPolicyAttribute. Roslyn hands the typed
-    /// enum argument over boxed as its underlying Int32, so decode through the raw
-    /// value; undefined values (possible only via an explicit cast) leave no policy.
+    /// The string-wire shape an enum declares through its type-level
+    /// [JsonConverter]: whether the converter writes strings at all, and the
+    /// casing convention its name declares. The converter type is the single
+    /// declared fact — the built-in JsonStringEnumConverter keeps CLR names
+    /// verbatim (no policy), and each Rivet*EnumConverter family member carries
+    /// its casing in the class name (attribute args cannot hold a naming
+    /// policy). Null when the enum is numeric-wire.
     /// </summary>
-    private static RivetNamingPolicy? GetEnumNamingPolicy(INamedTypeSymbol type)
+    private static (bool IsString, RivetNamingPolicy? Policy) GetEnumWireShape(
+        INamedTypeSymbol type
+    )
     {
-        var attribute = type
-            .GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.Name == "RivetEnumNamingPolicyAttribute");
-        if (attribute?.ConstructorArguments is not [var argument])
+        var converterType = type.GetAttributes()
+            .Where(a => a.AttributeClass?.Name == "JsonConverterAttribute")
+            .SelectMany(a => a.ConstructorArguments)
+            .Select(argument => argument.Value)
+            .OfType<INamedTypeSymbol>()
+            .FirstOrDefault();
+        if (converterType is null)
         {
-            return null;
+            return (false, null);
         }
 
-        return argument.Value switch
+        return converterType.Name switch
         {
-            RivetNamingPolicy policy when Enum.IsDefined(policy) => policy,
-            int raw when Enum.IsDefined(typeof(RivetNamingPolicy), raw) => (RivetNamingPolicy)raw,
-            _ => null,
+            "JsonStringEnumConverter" => (true, null),
+            "RivetLowerCaseEnumConverter" => (true, RivetNamingPolicy.LowerCase),
+            "RivetCamelCaseEnumConverter" => (true, RivetNamingPolicy.CamelCase),
+            "RivetSnakeCaseEnumConverter" => (true, RivetNamingPolicy.SnakeCase),
+            "RivetKebabCaseEnumConverter" => (true, RivetNamingPolicy.KebabCase),
+            _ => (false, null),
         };
     }
 

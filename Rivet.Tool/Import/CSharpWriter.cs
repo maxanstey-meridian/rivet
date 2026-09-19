@@ -640,9 +640,25 @@ internal static class CSharpWriter
         sb.AppendLine();
         sb.AppendLine($"namespace {ns};");
         sb.AppendLine();
+        // The naming-policy token names the family converter the source enum
+        // declared; without one the built-in no-policy converter keeps the exact
+        // member names and every member needs an explicit pin to reproduce the
+        // wire.
+        string? familyConverter = enumDef.NamingPolicy switch
+        {
+            "lowerCase" => "RivetLowerCaseEnumConverter",
+            "camelCase" => "RivetCamelCaseEnumConverter",
+            "snakeCase" => "RivetSnakeCaseEnumConverter",
+            "kebabCase" => "RivetKebabCaseEnumConverter",
+            _ => null,
+        };
         if (isIntBacked)
         {
             sb.AppendLine($"[JsonConverter(typeof(JsonNumberEnumConverter<{enumDef.Name}>))]");
+        }
+        else if (familyConverter is not null)
+        {
+            sb.AppendLine($"[JsonConverter(typeof({familyConverter}<{enumDef.Name}>))]");
         }
         else
         {
@@ -670,7 +686,13 @@ internal static class CSharpWriter
             if (!isIntBacked)
             {
                 var wireName = member.OriginalName ?? Naming.ToCamelCase(member.CSharpName);
-                sb.AppendLine($"    [JsonStringEnumMemberName(\"{wireName}\")]");
+                // With a declared policy the runtime re-derives the wire from the
+                // converter's casing; only members whose original wire value
+                // differs from it (OriginalName retained by MapEnum) need a pin.
+                if (familyConverter is null || member.OriginalName is not null)
+                {
+                    sb.AppendLine($"    [JsonStringEnumMemberName(\"{wireName}\")]");
+                }
             }
             var valueAssignment = member.IntValue is not null ? $" = {member.IntValue}" : "";
             sb.AppendLine($"    {member.CSharpName}{valueAssignment}{separator}");

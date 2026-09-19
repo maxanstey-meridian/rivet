@@ -2422,6 +2422,13 @@ public static class OpenApiEmitter
         {
             schema["format"] = union.Format;
         }
+        if (union.NamingPolicy is not null)
+        {
+            // The declared converter casing, round-tripped for the importer:
+            // re-deriving the wire from the policy keeps imported enums on the
+            // same family converter instead of blanket member pins.
+            schema["x-rivet-enum-naming-policy"] = union.NamingPolicy;
+        }
         if (union.Description is not null)
         {
             schema["description"] = union.Description;

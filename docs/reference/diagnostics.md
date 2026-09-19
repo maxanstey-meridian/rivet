@@ -65,8 +65,8 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1102` | Error | A response example or response content is authored on a body-forbidden status (1xx, 204, 205, 304) — HTTP forbids a message body on those statuses, so the authored content could never reach the wire. Reported at frontend parsing and again at emission as defense in depth; generation fails before any output is written. | Move the example/content to a status that allows a body, or remove it; the ordinary bodyless 204 response needs no example. |
 | `RIV1103` | Error | A `[RivetScalar]` type is not a non-generic class/struct/record with exactly one eligible non-static, non-indexer, non-implicit property named `Value`. | Give the type exactly one `Value` property (the Value type determines the scalar wire type), or remove `[RivetScalar]` if the type is an ordinary object. |
 | `RIV1104` | Error | A multipart endpoint mixes `IFormFile` file parameters with an explicit body parameter — a `[FromBody]` JSON body or a `[FromForm]` DTO whose recursive form shape Rivet cannot faithfully lower without emulating MVC's recursive form binder — the contract is refused instead of silently dropping the declared input. | Split the form DTO into scalar fields (each scalar emits a form part beside the file), move a `[FromBody]` body to a separate JSON endpoint, or accept the file-only surface. |
-| `RIV1105` | Warning | An enum declares `[RivetEnumNamingPolicy]` but has no type-level `[JsonConverter(typeof(JsonStringEnumConverter<...>))]` — the marker has no string wire to name, so it is emitted as numeric. | Add the type-level string converter, or remove `[RivetEnumNamingPolicy]` from the enum. |
-| `RIV1106` | Warning | Two enum members produce the same wire value (via `[RivetEnumNamingPolicy]` casing or duplicate `[JsonStringEnumMemberName]` pins) — the string union would not match the emitted wire values, so the enum is emitted as numeric instead. | Rename one of the colliding members (or fix its `[JsonStringEnumMemberName]`) so the wire values are distinct. |
+| `RIV1106` | Warning | Two enum members produce the same wire value (via the declared converter's casing or duplicate `[JsonStringEnumMemberName]` pins) — the string union would not match the emitted wire values, so the enum is emitted as numeric instead. | Rename one of the colliding members (or fix its `[JsonStringEnumMemberName]`) so the wire values are distinct. |
+| `RIV1107` | Error | An endpoint declares the same response status twice with different bodies — a `[ProducesResponseType]`/`.Returns(...)` declaration and a mapped `Results<>` branch disagree on the payload type, or one declares a body where the other declares none. One status carries exactly one shape; generation fails instead of silently letting the attribute win. | Align the attribute declaration and the `Results<>` branch (same payload type, or both bodyless), or drop the redundant declaration. |
 
 `RIV1024`-`RIV1099` are documented by `rivet/php`; this repository reserves the
 block but does not register those sibling-runtime diagnostics as native Rivet
@@ -88,6 +88,10 @@ Retired IDs are never reused; they keep a tombstone here instead of a table row.
   untyped (empty) schema with this warning; the untyped schema *is* the honest spec for
   "any JSON value", so `object`/`object?` now map to it deliberately and silently, and
   the diagnostic no longer exists.
+- ~~`RIV1105`~~ (`RivetEnumNamingPolicyWithoutStringConverter`) — retired in the
+  converter-family wave (0.44.0). The casing convention now lives in the enum's
+  `[JsonConverter]` declaration itself (`RivetCamelCaseEnumConverter<T>` family), so a
+  policy cannot exist without a string wire and the dangling-marker case is unexpressible.
 
 ## RIV2xxx — emission
 

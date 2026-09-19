@@ -516,6 +516,18 @@ internal static class SchemaClassifier
 
     internal static GeneratedEnum MapEnum(string name, IOpenApiSchema schema)
     {
+        // A Rivet-emitted spec declares the wire casing via
+        // x-rivet-enum-naming-policy — the imported enum keeps the family
+        // converter and needs member pins only where the wire value differs
+        // from the policy-cased name. An unknown token is ignored (not guessed):
+        // the schema then imports through the exact-pin path like any foreign
+        // spec.
+        var policyToken = GetExtensionString(schema, "x-rivet-enum-naming-policy");
+        var policy =
+            policyToken is not null && Naming.TryPolicyFromToken(policyToken, out var parsed)
+                ? parsed
+                : (RivetNamingPolicy?)null;
+
         var seen = new Dictionary<string, int>();
         var members = new List<GeneratedEnumMember>();
         foreach (var member in schema.Enum!)
@@ -538,23 +550,29 @@ internal static class SchemaClassifier
             {
                 seen[sanitized] = 1;
                 // Pin when the EMITTED wire value would differ from the original.
-                // The emitter camelCases unpinned member names (TypeWalker), so the
-                // comparison must be against ToCamelCase(sanitized), not sanitized:
-                // 'Ready' (Pascal == original, old check skipped the pin) still
-                // emits as 'ready' — a silent case-mangle both directions
+                // The emitted casing follows the enum's declared converter: the
+                // policy-cased member name when a policy is declared, otherwise
+                // the emitter's camelCase (TypeWalker). 'Ready' (Pascal ==
+                // original, old check skipped the pin) still emits as 'ready' —
+                // a silent case-mangle both directions
                 // (FABLE_ROUNDTRIP #3, 63 properties on the github corpus).
-                var originalName = string.Equals(
-                    Naming.ToCamelCase(sanitized),
-                    original,
-                    StringComparison.Ordinal
-                )
+                var derived = policy is null
+                    ? Naming.ToCamelCase(sanitized)
+                    : Naming.ToPolicyCase(sanitized, policy.Value);
+                var originalName = string.Equals(derived, original, StringComparison.Ordinal)
                     ? null
                     : original;
                 members.Add(new GeneratedEnumMember(sanitized, originalName));
             }
         }
 
-        return new GeneratedEnum(name, members, schema.Format, schema.Description);
+        return new GeneratedEnum(
+            name,
+            members,
+            schema.Format,
+            schema.Description,
+            NamingPolicy: policy is null ? null : Naming.ToPolicyToken(policy.Value)
+        );
     }
 
     internal static GeneratedEnum MapIntEnum(string name, IOpenApiSchema schema)

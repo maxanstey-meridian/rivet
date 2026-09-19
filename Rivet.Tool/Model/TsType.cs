@@ -32,13 +32,17 @@ public abstract record TsType
         TsScalarMetadata? ValueMetadata = null
     ) : TsType;
 
-    /// <summary>"A" | "B" | "C" — string enum rendered as union.</summary>
+    /// <summary>"A" | "B" | "C" — string enum rendered as union. NamingPolicy names
+    /// the casing convention the source enum's Rivet*EnumConverter family converter
+    /// declares ("camelCase" etc.); present so the import round-trip re-derives the
+    /// wire values from the policy instead of blanket member pins.</summary>
     public sealed record StringUnion(
         IReadOnlyList<string> Members,
         TsTypeMetadata? Metadata = null,
         string? Format = null,
         string? Description = null,
-        TsScalarMetadata? ScalarMetadata = null
+        TsScalarMetadata? ScalarMetadata = null,
+        string? NamingPolicy = null
     ) : TsType;
 
     /// <summary>1 | 2 | 3 — int enum rendered as numeric literal union. Members are

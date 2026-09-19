@@ -68,6 +68,9 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                         stringScalarMetadata.GetRawText(),
                         options
                     )
+                    : null,
+                root.TryGetProperty("namingPolicy", out var stringNamingPolicy)
+                    ? stringNamingPolicy.GetString()
                     : null
             ),
 
@@ -277,6 +280,10 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 if (su.Description is not null)
                 {
                     writer.WriteString("description", su.Description);
+                }
+                if (su.NamingPolicy is not null)
+                {
+                    writer.WriteString("namingPolicy", su.NamingPolicy);
                 }
                 WriteMetadata(writer, su.Metadata, options);
                 if (su.ScalarMetadata is not null)
