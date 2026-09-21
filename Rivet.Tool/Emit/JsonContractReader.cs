@@ -52,7 +52,8 @@ public static class JsonContractReader
                     e.Metadata,
                     e.Format,
                     e.Description,
-                    e.ScalarMetadata
+                    e.ScalarMetadata,
+                    e.NamingPolicy
                 );
             }
         }

@@ -59,7 +59,7 @@ These are non-negotiable:
 - `sealed` on all concrete types.
 - Records for DTOs, commands, results, value objects.
 - Colocate `Command` and `Result` records with their use case class.
-- `JsonStringEnumConverter` globally.
+- Declare string enums with a type-level `JsonConverter` attribute (the built-in converter for exact member names, or a Rivet naming-policy converter). Unannotated enums are numeric. Rivet cannot infer arbitrary global serializer settings.
 
 ## TypeScript conventions
 

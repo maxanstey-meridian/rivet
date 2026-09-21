@@ -52,7 +52,16 @@ static async Task<int> Run(string[] args)
     // Single-pass discovery: scan source assembly types once instead of 4× full namespace walks
     var discovered = SymbolDiscovery.Discover(compilation);
 
-    var walker = TypeWalker.Create(compilation, discovered.RivetTypes);
+    TypeWalker walker;
+    try
+    {
+        walker = TypeWalker.Create(compilation, discovered.RivetTypes);
+    }
+    catch (ContractAnalysisException exception)
+    {
+        Console.Error.WriteLine(exception.Message);
+        return 1;
+    }
     if (walker.HasErrors)
     {
         Console.Error.WriteLine("Aborting — type name collisions detected.");

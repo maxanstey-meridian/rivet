@@ -62,6 +62,7 @@ public static class Diagnostics
     // wave: the naming policy lives in the converter class name itself, so a policy cannot
     // exist without a string wire. The number is never reused.
     public const string EnumWireValueCollision = "RIV1106";
+    public const string UnsupportedEnumConverter = "RIV1108";
     public const string ConflictingResponseDeclaration = "RIV1107";
 
     // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
@@ -166,11 +167,13 @@ public static class Diagnostics
         [BodyForbiddenStatusExample] =
             "A response example or content is authored on a body-forbidden status (1xx, 204, 205, 304) — HTTP forbids a message body there; generation fails instead of emitting body content the host cannot send.",
         [InvalidRivetScalarShape] =
-            "A [RivetScalar] type is not a non-generic class/struct/record with exactly one eligible non-static, non-indexer, non-implicit property named 'Value' — generation fails instead of silently falling back to object semantics.",
+            "A [RivetScalar] type is not a non-generic class/struct/record with one public readable Value property and a matching public constructor, without inheritance, competing converters or property-level JSON settings — generation fails instead of silently falling back to object semantics.",
         [MixedFormFileParameters] =
-            "A multipart endpoint mixes file parameters with an explicit body parameter ([FromBody] or a [FromForm] DTO) whose declared body shape Rivet cannot faithfully carry on a multipart request — the contract is refused instead of silently dropping the declared input.",
+            "An endpoint mixes form fields or files with an explicit body parameter ([FromBody] or a [FromForm] DTO) whose combined shape Rivet cannot faithfully represent — the contract is refused instead of silently dropping the declared input.",
+        [UnsupportedEnumConverter] =
+            "An enum converter is unsupported, targets another enum, or declares string flags/aliases whose runtime values cannot be represented as distinct member names. Generation fails; use a supported converter and distinct values, or numeric enum serialization.",
         [EnumWireValueCollision] =
-            "Two enum members produce the same wire value (the declared converter's casing or duplicate [JsonStringEnumMemberName] pins) — the string union would not match the emitted wire values; emitted as numeric instead.",
+            "Two enum members produce the same wire value (the declared converter's casing or duplicate [JsonStringEnumMemberName] pins) — generation fails instead of emitting an incorrect numeric schema.",
         [ConflictingResponseDeclaration] =
             "An endpoint declares the same response status twice with different bodies ([ProducesResponseType]/.Returns vs a mapped Results<> branch) — one status carries exactly one shape; generation fails instead of silently letting the attribute win.",
         [TaggedUnionComponentCollision] =

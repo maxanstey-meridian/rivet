@@ -50,3 +50,5 @@ Want runtime validation? Generate Zod schemas from the same spec with
 - See [OpenAPI Emission](/guides/openapi-emission) for what flows into the spec
 - Read [Runtime Validation](/guides/runtime-validation) for what Rivet does and
   doesn't enforce at runtime
+
+Upgrading an existing contract? See [Migrating from v0.42](./guides/migrating-from-0.42.md).

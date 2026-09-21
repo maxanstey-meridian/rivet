@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -11,8 +12,7 @@ namespace Rivet.Tests;
 /// name declares the casing convention. Rules: plain enums are numeric; a
 /// built-in [JsonConverter(typeof(JsonStringEnumConverter<...>))] emits exact
 /// C# member names; a family converter cases those names; a per-member
-/// [JsonStringEnumMemberName] wins over the policy; a casing collision degrades
-/// loudly to numeric. The emitted string union must equal the runtime wire the
+/// [JsonStringEnumMemberName] wins over the policy; a casing collision refuses generation. The emitted string union must equal the runtime wire the
 /// same converter produces — asserted side-by-side here, since the test host
 /// references both the tool and the runtime converters.
 /// </summary>
@@ -199,11 +199,10 @@ public sealed class RivetStringEnumConverterTests
     }
 
     // ---------------------------------------------------------------
-    // Loud degradation
+    // Invalid wire declarations
     // ---------------------------------------------------------------
-
     [Fact]
-    public void Converter_Collision_Warns_And_Emits_Numeric()
+    public void Converter_Collision_Refuses_Generation()
     {
         var source = """
             using System.Text.Json.Serialization;
@@ -226,20 +225,17 @@ public sealed class RivetStringEnumConverterTests
             }
             """;
 
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-        {
-            var (_, walker) = CompilationHelper.WalkContract(source);
-            Assert.IsType<TsType.IntUnion>(walker.Enums["Clash"]);
-        });
-
-        Assert.Contains("warning RIV1106:", stderr);
+        var stderr = Assert
+            .Throws<ContractAnalysisException>(() => CompilationHelper.WalkContract(source))
+            .Message;
+        Assert.Contains("error RIV1106:", stderr);
         Assert.Contains("Clash", stderr);
         Assert.Contains("FooBar", stderr);
         Assert.Contains("fooBar", stderr);
     }
 
     [Fact]
-    public void Duplicate_Member_Pins_Warn_And_Emit_Numeric_Without_A_Policy()
+    public void Duplicate_Member_Pins_Refuse_Generation_Without_A_Policy()
     {
         var source = """
             using System.Text.Json.Serialization;
@@ -264,13 +260,10 @@ public sealed class RivetStringEnumConverterTests
             }
             """;
 
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-        {
-            var (_, walker) = CompilationHelper.WalkContract(source);
-            Assert.IsType<TsType.IntUnion>(walker.Enums["Clash"]);
-        });
-
-        Assert.Contains("warning RIV1106:", stderr);
+        var stderr = Assert
+            .Throws<ContractAnalysisException>(() => CompilationHelper.WalkContract(source))
+            .Message;
+        Assert.Contains("error RIV1106:", stderr);
         Assert.Contains("(First, Second)", stderr);
     }
 
@@ -308,12 +301,13 @@ public sealed class RivetStringEnumConverterTests
 
         var imported = CompilationHelper.Import(json);
         var streetFile = CompilationHelper.FindFile(imported, "StreetClassification.cs");
+        CompilationHelper.CreateCompilation(streetFile);
 
         // The policy re-derives every wire value, so the imported enum keeps the
         // family converter and carries no member pins at all — the round-trip
         // preserves the declaration, not a member-by-member pin echo.
         Assert.Contains(
-            "[JsonConverter(typeof(RivetCamelCaseEnumConverter<StreetClassification>))]",
+            "[JsonConverter(typeof(global::Rivet.RivetCamelCaseEnumConverter<StreetClassification>))]",
             streetFile
         );
         Assert.DoesNotContain("JsonStringEnumMemberName", streetFile);
@@ -362,8 +356,12 @@ public sealed class RivetStringEnumConverterTests
 
         var imported = CompilationHelper.Import(json);
         var statusFile = CompilationHelper.FindFile(imported, "Status.cs");
+        CompilationHelper.CreateCompilation(statusFile);
 
-        Assert.Contains("[JsonConverter(typeof(RivetCamelCaseEnumConverter<Status>))]", statusFile);
+        Assert.Contains(
+            "[JsonConverter(typeof(global::Rivet.RivetCamelCaseEnumConverter<Status>))]",
+            statusFile
+        );
         Assert.Contains("[JsonStringEnumMemberName(\"special-case\")]", statusFile);
         Assert.DoesNotContain("[JsonStringEnumMemberName(\"unknown\")]", statusFile);
     }

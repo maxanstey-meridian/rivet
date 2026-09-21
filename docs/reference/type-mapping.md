@@ -36,8 +36,7 @@ How C# types lower into OpenAPI 3.1 schemas. Property names camelCase by default
   emitted contract values equal the runtime serializer's wire values by
   construction (the same `JsonNamingPolicy` instance drives both). A per-member
   `[JsonStringEnumMemberName]` overrides the converter's casing. When the casing
-  produces the same wire value for two members (`RIV1106`), the enum is emitted
-  as numeric — loudly, never with a wrong string union.
+  produces the same wire value for two members (`RIV1106`), generation fails — loudly, never with a wrong string union.
 - **Nullable members** (`string?`, `int?`) → 3.1 type arrays
   (`"type": ["string", "null"]`); nullable `$ref`s use a null branch.
 - **Collections** (`List<T>`, `IReadOnlyList<T>`, arrays) → `array` with `items`.

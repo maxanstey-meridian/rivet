@@ -1,14 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
-        <!-- net9.0 floor: the string-enum converter family builds on the .NET 9
-             generic JsonStringEnumConverter<TEnum>; net8 consumers cannot opt in
-             to a naming policy at all (attribute args cannot carry it). -->
-        <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+        <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
 
         <PackageId>Rivet.Attributes</PackageId>
-        <Version>0.44.0</Version>
+        <Version>0.44.1</Version>
         <Authors>Max Anstey</Authors>
         <Description>Marker attributes for Rivet — end-to-end .NET to TypeScript type safety</Description>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>

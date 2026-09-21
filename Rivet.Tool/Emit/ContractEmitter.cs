@@ -43,10 +43,7 @@ public static class ContractEmitter
     internal sealed record ContractEnum(
         string Name,
         IReadOnlyList<string>? Values = null,
-        // Decimal member literals carried as strings in the IR so legal enum
-        // constants beyond Int32 survive without truncation; the property converter
-        // below keeps the external contract JSON numeric
-        // (planner-constraint:contract-intvalues-stays-numeric-json).
+        // Strings preserve UInt64 precision internally; contract JSON stays numeric.
         [property: JsonConverter(
             typeof(ContractEnumIntValuesConverter)
         )] IReadOnlyList<string>? IntValues = null,
@@ -55,7 +52,8 @@ public static class ContractEmitter
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             TsTypeMetadata? Metadata = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-            TsScalarMetadata? ScalarMetadata = null
+            TsScalarMetadata? ScalarMetadata = null,
+        string? NamingPolicy = null
     );
 
     internal sealed record ContractQueryAuth(string ParameterName);
@@ -148,7 +146,8 @@ public static class ContractEmitter
                         Format: su.Format,
                         Description: su.Description,
                         Metadata: su.Metadata,
-                        ScalarMetadata: su.ScalarMetadata
+                        ScalarMetadata: su.ScalarMetadata,
+                        NamingPolicy: su.NamingPolicy
                     ),
                     TsType.IntUnion iu => new ContractEnum(
                         kv.Key,
@@ -250,9 +249,7 @@ public static class ContractEmitter
 /// <summary>
 /// Property-level converter for <see cref="ContractEnum.IntValues"/>: the IR carries
 /// decimal member literals as strings so values beyond Int32 survive, but the
-/// external contract JSON stays numeric (rivet-contract-schema.json constrains
-/// intValues items to type integer)
-/// (planner-constraint:contract-intvalues-stays-numeric-json).
+/// external contract JSON stays numeric.
 /// </summary>
 public sealed class ContractEnumIntValuesConverter : JsonConverter<IReadOnlyList<string>?>
 {
@@ -280,15 +277,19 @@ public sealed class ContractEnumIntValuesConverter : JsonConverter<IReadOnlyList
                 throw new JsonException("intValues items must be JSON integers, not strings.");
             }
 
-            // Exact digits: Int64 covers signed/legal ranges; wider unsigned
-            // constants keep their raw text (acceptance:numeric-enums-cover-all-legal-underlying-values).
             if (reader.TryGetInt64(out var signed))
             {
                 values.Add(signed.ToString(CultureInfo.InvariantCulture));
             }
+            else if (reader.TryGetUInt64(out var unsigned))
+            {
+                values.Add(unsigned.ToString(CultureInfo.InvariantCulture));
+            }
             else
             {
-                values.Add(JsonDocument.ParseValue(ref reader).RootElement.GetRawText());
+                throw new JsonException(
+                    "Enum values must be decimal integers in the Int64/UInt64 range."
+                );
             }
         }
 
@@ -310,9 +311,22 @@ public sealed class ContractEnumIntValuesConverter : JsonConverter<IReadOnlyList
         writer.WriteStartArray();
         foreach (var member in value)
         {
-            // The literals are decimal digits produced by the walker; emit them as
-            // raw numeric values so the contract JSON keeps its integer shape.
-            writer.WriteRawValue(member, skipInputValidation: true);
+            if (
+                !decimal.TryParse(
+                    member,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out var number
+                )
+                || number < long.MinValue
+                || number > ulong.MaxValue
+            )
+            {
+                throw new JsonException(
+                    "Enum values must be decimal integer literals in the Int64/UInt64 range."
+                );
+            }
+            writer.WriteNumberValue(number);
         }
         writer.WriteEndArray();
     }

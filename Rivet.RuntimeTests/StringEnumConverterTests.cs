@@ -3,13 +3,6 @@ using System.Text.Json.Serialization;
 
 namespace Rivet.RuntimeTests;
 
-/// <summary>
-/// The Rivet*EnumConverter family at the runtime serializer boundary: the
-/// casing the class name declares drives both write and read; a member-level
-/// [JsonStringEnumMemberName] wins over the policy; a bare built-in converter
-/// keeps CLR names verbatim. Runs on net9.0 and net10.0 — the generic
-/// JsonStringEnumConverter&lt;TEnum&gt; base is a .NET 9 feature.
-/// </summary>
 public sealed class StringEnumConverterTests
 {
     [JsonConverter(typeof(RivetCamelCaseEnumConverter<Colour>))]
@@ -98,6 +91,7 @@ public sealed class StringEnumConverterTests
         );
     }
 
+#if NET9_0_OR_GREATER
     [Fact]
     public void Member_Pin_Wins_Over_The_Policy()
     {
@@ -105,6 +99,7 @@ public sealed class StringEnumConverterTests
         Assert.Equal("\"darkGreen\"", JsonSerializer.Serialize(ColourPinned.DarkGreen));
         Assert.Equal(ColourPinned.Level3, JsonSerializer.Deserialize<ColourPinned>("\"L3\""));
     }
+#endif
 
     [Fact]
     public void Built_In_Converter_Keeps_The_Exact_Member_Names()
@@ -113,6 +108,7 @@ public sealed class StringEnumConverterTests
     }
 }
 
+#if NET9_0_OR_GREATER
 [JsonConverter(typeof(RivetCamelCaseEnumConverter<ColourPinned>))]
 public enum ColourPinned
 {
@@ -121,3 +117,5 @@ public enum ColourPinned
     [JsonStringEnumMemberName("L3")]
     Level3,
 }
+
+#endif

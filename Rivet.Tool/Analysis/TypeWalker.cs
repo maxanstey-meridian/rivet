@@ -1700,6 +1700,20 @@ public sealed class TypeWalker
                     IReadOnlyList<string>? stringMembers = null;
                     if (isStringEnum)
                     {
+                        if (
+                            namedType
+                                .GetAttributes()
+                                .Any(a =>
+                                    a.AttributeClass?.ToDisplayString() == "System.FlagsAttribute"
+                                )
+                            || fields.Select(f => EnumLiteral(f.ConstantValue)).Distinct().Count()
+                                != fields.Count
+                        )
+                        {
+                            throw new ContractAnalysisException(
+                                $"error {Diagnostics.UnsupportedEnumConverter}: string enum '{namedType.Name}' contains flags or aliased values. Use distinct values without Flags, or a numeric enum."
+                            );
+                        }
                         var candidates = fields
                             .Select(f => EnumWireValue(f, enumNamingPolicy))
                             .ToList();
@@ -1719,10 +1733,10 @@ public sealed class TypeWalker
                                     .Where(f => EnumWireValue(f, enumNamingPolicy) == colliding)
                                     .Select(f => f.Name)
                             );
-                            Diagnostics.Warn(
-                                Diagnostics.EnumWireValueCollision,
-                                $"enum '{namedType.Name}' members ({collidingMembers}) produce the same wire value '{colliding}' — "
-                                    + "the string union would not match the emitted wire values; emitted as numeric instead"
+                            throw new ContractAnalysisException(
+                                $"error {Diagnostics.EnumWireValueCollision}: enum '{namedType.Name}' members "
+                                    + $"({collidingMembers}) produce the same wire value '{colliding}'. "
+                                    + "Use distinct member names or explicit wire names."
                             );
                         }
                         else
@@ -1755,7 +1769,10 @@ public sealed class TypeWalker
                                 ?.ConstructorArguments.FirstOrDefault()
                                 .Value as string;
                         _enums[enumName] = new TsType.IntUnion(
-                            fields.Select(field => EnumLiteral(field.ConstantValue)).ToList(),
+                            fields
+                                .Select(field => EnumLiteral(field.ConstantValue))
+                                .Distinct()
+                                .ToList(),
                             format,
                             GetTypeMetadata(namedType),
                             GetTypeDescription(namedType),
@@ -1887,25 +1904,48 @@ public sealed class TypeWalker
         INamedTypeSymbol type
     )
     {
-        var converterType = type.GetAttributes()
-            .Where(a => a.AttributeClass?.Name == "JsonConverterAttribute")
-            .SelectMany(a => a.ConstructorArguments)
-            .Select(argument => argument.Value)
-            .OfType<INamedTypeSymbol>()
-            .FirstOrDefault();
-        if (converterType is null)
+        var converters = type.GetAttributes()
+            .Where(a => IsJsonConverterAttribute(a.AttributeClass))
+            .ToArray();
+        if (converters.Length == 0)
         {
             return (false, null);
         }
-
-        return converterType.Name switch
+        if (
+            converters.Length != 1
+            || converters[0].AttributeClass?.ToDisplayString()
+                != "System.Text.Json.Serialization.JsonConverterAttribute"
+            || converters[0].ConstructorArguments is not [{ Value: INamedTypeSymbol converterType }]
+        )
         {
-            "JsonStringEnumConverter" => (true, null),
-            "RivetLowerCaseEnumConverter" => (true, RivetNamingPolicy.LowerCase),
-            "RivetCamelCaseEnumConverter" => (true, RivetNamingPolicy.CamelCase),
-            "RivetSnakeCaseEnumConverter" => (true, RivetNamingPolicy.SnakeCase),
-            "RivetKebabCaseEnumConverter" => (true, RivetNamingPolicy.KebabCase),
-            _ => (false, null),
+            throw new ContractAnalysisException(
+                $"error {Diagnostics.UnsupportedEnumConverter}: enum '{type.Name}' must use one explicit [JsonConverter(typeof(...))] declaration; custom converter attributes are unsupported."
+            );
+        }
+
+        if (
+            converterType.IsGenericType
+            && (
+                converterType.TypeArguments.Length != 1
+                || !SymbolEqualityComparer.Default.Equals(converterType.TypeArguments[0], type)
+            )
+        )
+        {
+            throw new ContractAnalysisException(
+                $"error {Diagnostics.UnsupportedEnumConverter}: converter for enum '{type.Name}' must target that enum."
+            );
+        }
+        return (converterType.ContainingNamespace.ToDisplayString(), converterType.Name) switch
+        {
+            ("System.Text.Json.Serialization", "JsonStringEnumConverter") => (true, null),
+            ("System.Text.Json.Serialization", "JsonNumberEnumConverter") => (false, null),
+            ("Rivet", "RivetLowerCaseEnumConverter") => (true, RivetNamingPolicy.LowerCase),
+            ("Rivet", "RivetCamelCaseEnumConverter") => (true, RivetNamingPolicy.CamelCase),
+            ("Rivet", "RivetSnakeCaseEnumConverter") => (true, RivetNamingPolicy.SnakeCase),
+            ("Rivet", "RivetKebabCaseEnumConverter") => (true, RivetNamingPolicy.KebabCase),
+            _ => throw new ContractAnalysisException(
+                $"error {Diagnostics.UnsupportedEnumConverter}: enum '{type.Name}' uses unsupported converter '{converterType.ToDisplayString()}'. Use a built-in enum converter or a Rivet enum policy converter."
+            ),
         };
     }
 
@@ -2108,20 +2148,25 @@ public sealed class TypeWalker
         return null;
     }
 
-    /// <summary>
-    /// Detects Value Object convention: a record with exactly one non-implicit
-    /// property named "Value". Returns the inner type symbol, or null.
-    /// </summary>
-    /// <summary>
-    /// Explicit [RivetScalar] opt-in: the annotated type's single eligible Value
-    /// property determines the scalar brand inner type. Unannotated one-property
-    /// types are ordinary object schemas — shape alone is never the decision. An
-    /// attributed type with an invalid shape fails with RIV1103 instead of
-    /// silently falling back to object semantics.
-    /// </summary>
+    private static bool IsJsonConverterAttribute(INamedTypeSymbol? type)
+    {
+        for (; type is not null; type = type.BaseType)
+        {
+            if (type.ToDisplayString() == "System.Text.Json.Serialization.JsonConverterAttribute")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static ITypeSymbol? TryGetScalarInner(INamedTypeSymbol symbol)
     {
-        if (symbol.GetAttributes().All(a => a.AttributeClass?.Name != "RivetScalarAttribute"))
+        if (
+            symbol
+                .GetAttributes()
+                .All(a => a.AttributeClass?.ToDisplayString() != "Rivet.RivetScalarAttribute")
+        )
         {
             return null;
         }
@@ -2129,16 +2174,42 @@ public sealed class TypeWalker
         var props = symbol
             .GetMembers()
             .OfType<IPropertySymbol>()
-            .Where(p => !p.IsStatic && !p.IsIndexer && !p.IsImplicitlyDeclared)
+            .Where(p => !p.IsStatic && p.DeclaredAccessibility == Accessibility.Public)
             .ToList();
 
-        if (symbol.IsGenericType || props.Count != 1 || props[0].Name != "Value")
+        if (
+            symbol.IsGenericType
+            || symbol.IsAbstract
+            || (
+                symbol.BaseType is not null
+                && symbol.BaseType.SpecialType
+                    is not (SpecialType.System_Object or SpecialType.System_ValueType)
+            )
+            || props.Count != 1
+            || props[0].Name != "Value"
+            || props[0].IsIndexer
+            || props[0].GetMethod?.DeclaredAccessibility != Accessibility.Public
+            || props[0]
+                .GetAttributes()
+                .Any(a =>
+                    a.AttributeClass?.ContainingNamespace.ToDisplayString()
+                        == "System.Text.Json.Serialization"
+                    || IsJsonConverterAttribute(a.AttributeClass)
+                )
+            || symbol.GetAttributes().Count(a => IsJsonConverterAttribute(a.AttributeClass)) != 1
+            || !symbol.InstanceConstructors.Any(c =>
+                c.DeclaredAccessibility == Accessibility.Public
+                && c.Parameters.Length == 1
+                && c.Parameters[0].RefKind == RefKind.None
+                && SymbolEqualityComparer.Default.Equals(c.Parameters[0].Type, props[0].Type)
+            )
+        )
         {
             throw new ContractAnalysisException(
                 $"error {Diagnostics.InvalidRivetScalarShape}: [RivetScalar] type "
                     + $"'{symbol.ToDisplayString()}' must be a non-generic class/struct/record "
-                    + "with exactly one eligible non-static, non-indexer, non-implicit property "
-                    + "named 'Value' — the Value type determines the scalar wire representation."
+                    + "with exactly one public readable non-indexer property "
+                    + "named 'Value' and a public constructor accepting its type. Inheritance, competing converters and property-level JSON settings are unsupported."
             );
         }
 

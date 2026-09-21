@@ -989,6 +989,38 @@ public static class OpenApiEmitter
             operation["parameters"] = parameters;
         }
 
+        var formContentType =
+            fileParams.Count > 0 ? "multipart/form-data" : "application/x-www-form-urlencoded";
+        if (
+            ep.RequestContents is null
+            && (fileParams.Count > 0 || formFieldParams.Count > 0 || ep.IsFormEncoded)
+            && ep.RequestContentTypeOverride is { } declaredContentType
+        )
+        {
+            var parsed = System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(
+                declaredContentType,
+                out var mediaType
+            );
+            var multipart = string.Equals(
+                mediaType?.MediaType,
+                "multipart/form-data",
+                StringComparison.OrdinalIgnoreCase
+            );
+            var urlEncoded = string.Equals(
+                mediaType?.MediaType,
+                "application/x-www-form-urlencoded",
+                StringComparison.OrdinalIgnoreCase
+            );
+            if (!parsed || (!multipart && !urlEncoded) || (fileParams.Count > 0 && !multipart))
+            {
+                throw new ContractAnalysisException(
+                    $"error {Diagnostics.UnresolvedBindingSource}: form endpoint '{ep.ControllerName}.{ep.Name}' "
+                        + $"cannot use request content type '{declaredContentType}'. Use a supported form content type."
+                );
+            }
+            formContentType = declaredContentType;
+        }
+
         // Request body
         if (ep.RequestContents is not null)
         {
@@ -1127,7 +1159,7 @@ public static class OpenApiEmitter
                 ["content"] = WithExamples(
                     new Dictionary<string, object>
                     {
-                        ["multipart/form-data"] = new Dictionary<string, object>
+                        [formContentType] = new Dictionary<string, object>
                         {
                             ["schema"] = multipartSchema,
                         },
@@ -1138,10 +1170,6 @@ public static class OpenApiEmitter
         }
         else if (formFieldParams.Count > 0)
         {
-            // Declared form fields without files: the endpoint's [FromForm] surface
-            // stands on its own (planner-constraint:declared-form-fields-always-
-            // represented). The fields-only content is form-urlencoded, matching
-            // the multipart branch's field schema construction.
             var formSchema = new Dictionary<string, object>
             {
                 ["type"] = "object",
@@ -1171,7 +1199,7 @@ public static class OpenApiEmitter
                 ["content"] = WithExamples(
                     new Dictionary<string, object>
                     {
-                        ["application/x-www-form-urlencoded"] = new Dictionary<string, object>
+                        [formContentType] = new Dictionary<string, object>
                         {
                             ["schema"] = formSchema,
                         },
@@ -1183,7 +1211,7 @@ public static class OpenApiEmitter
         else if (bodyParam is not null)
         {
             var bodyContentType = ep.IsFormEncoded
-                ? "application/x-www-form-urlencoded"
+                ? formContentType
                 : ep.RequestContentTypeOverride ?? "application/json";
             operation["requestBody"] = new Dictionary<string, object>
             {
@@ -2373,9 +2401,7 @@ public static class OpenApiEmitter
     }
 
     /// <summary>
-    /// Parses a decimal enum member literal into the widest whole number STJ can
-    /// write exactly: long, then ulong (values above long.MaxValue), else the raw
-    /// digits string so no legal enum constant is truncated or quoted.
+    /// Parses an exact signed or unsigned enum integer; invalid carriers are refused.
     /// </summary>
     private static object ParseEnumLiteral(string literal)
     {
@@ -2403,9 +2429,7 @@ public static class OpenApiEmitter
             return unsigned;
         }
 
-        // Decimal enum digit strings always parse above; keep the raw digits as a
-        // final safety net rather than truncating (packet-constraint:repair-not-redesign).
-        return literal;
+        throw new JsonException($"Invalid integer enum literal '{literal}'.");
     }
 
     private static Dictionary<string, object> MapStringUnion(TsType.StringUnion union)

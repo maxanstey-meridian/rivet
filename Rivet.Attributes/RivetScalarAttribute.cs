@@ -1,33 +1,21 @@
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Rivet;
 
 /// <summary>
-/// Declares that the annotated class/struct/record has a scalar Rivet contract
-/// representation derived from its single <c>Value</c> property: the Value type
-/// determines the wire/schema inner type and the type is emitted as a branded
-/// scalar instead of an object. The attribute is the explicit opt-in for the
-/// scalar decision — an unannotated one-property type is an ordinary object
-/// schema.
-/// Being a <see cref="JsonConverterAttribute"/>, the annotation also makes
-/// ordinary System.Text.Json serialize/deserialize the type as its Value's
-/// scalar representation, so the emitted contract and the runtime wire shape
-/// agree without any application-wide serializer registration
-/// (acceptance:scalar-attribute-makes-stj-wire-shape-true).
+/// Serializes a non-generic wrapper as its single public Value property.
+/// Requires a public constructor accepting the Value type. Property-level JSON
+/// settings are unsupported; configure the inner type instead.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, Inherited = false)]
 public sealed class RivetScalarAttribute : JsonConverterAttribute
 {
     public override JsonConverter? CreateConverter(Type typeToConvert)
     {
-        // Shape validation runs at converter-creation time so an attributed
-        // invalid-shape type fails clearly the first time System.Text.Json
-        // creates the converter, matching the tool-side RIV1103 shape rules
-        // (planner-constraint:converter-shape-validation-at-creation).
         var valueProperty = ResolveValueProperty(typeToConvert);
-
         return (JsonConverter?)
             Activator.CreateInstance(
                 typeof(RivetScalarJsonConverter<>).MakeGenericType(typeToConvert),
@@ -37,81 +25,118 @@ public sealed class RivetScalarAttribute : JsonConverterAttribute
 
     private static PropertyInfo ResolveValueProperty(Type declaringType)
     {
-        var candidates = declaringType
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property =>
-                property.Name == "Value"
-                && property.CanRead
-                && property.GetMethod is { IsStatic: false }
+        var properties = declaringType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        if (
+            declaringType.IsGenericType
+            || declaringType.IsAbstract
+            || (
+                declaringType.BaseType != typeof(object)
+                && declaringType.BaseType != typeof(ValueType)
             )
-            .ToArray();
-
-        return candidates.Length == 1
-            ? candidates[0]
-            : throw new InvalidOperationException(
-                $"[RivetScalar] type '{declaringType.Name}' must declare exactly one eligible "
-                    + "non-static, non-indexer property named 'Value' — the converter cannot "
-                    + "derive the scalar representation without it (RIV1103 shape rules)."
+            || properties.Length != 1
+            || properties[0].Name != "Value"
+            || properties[0].GetMethod is not { IsPublic: true, IsStatic: false }
+            || properties[0].GetIndexParameters().Length != 0
+            || properties[0]
+                .GetCustomAttributesData()
+                .Any(a =>
+                    a.AttributeType.Namespace == "System.Text.Json.Serialization"
+                    || typeof(JsonConverterAttribute).IsAssignableFrom(a.AttributeType)
+                )
+            || declaringType
+                .GetCustomAttributesData()
+                .Count(a => typeof(JsonConverterAttribute).IsAssignableFrom(a.AttributeType)) != 1
+            || !declaringType
+                .GetConstructors()
+                .Any(c =>
+                    c.GetParameters() is [var parameter]
+                    && parameter.ParameterType == properties[0].PropertyType
+                )
+        )
+        {
+            throw new InvalidOperationException(
+                $"[RivetScalar] type '{declaringType.Name}' must be a non-generic concrete wrapper with "
+                    + "exactly one public readable Value property and a public constructor accepting its type. "
+                    + "Inheritance, competing converters and property-level JSON settings are unsupported (RIV1103)."
             );
+        }
+        return properties[0];
     }
 }
 
-/// <summary>
-/// Translates between a [RivetScalar] wrapper and its declared Value type using
-/// normal System.Text.Json: the Value member is read and written with the active
-/// serializer options (so per-property converters and naming policy keep
-/// applying), the wrapper is constructed through its single-argument constructor,
-/// and an invalid [RivetScalar] shape fails clearly instead of guessing. No
-/// registry, no host-specific branches — the attribute-local seam is the whole
-/// mechanism (packet-constraint:no-general-serializer-layer,
-/// acceptance:scalar-runtime-is-bounded).
-/// </summary>
-public sealed class RivetScalarJsonConverter<T>(PropertyInfo valueProperty) : JsonConverter<T>
+internal sealed class RivetScalarJsonConverter<T>(PropertyInfo valueProperty) : JsonConverter<T>
 {
+    private readonly ConstructorInfo _constructor = typeof(T).GetConstructor([
+        valueProperty.PropertyType,
+    ])!;
+
     public override T? Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options
+    ) => Construct(JsonSerializer.Deserialize(ref reader, valueProperty.PropertyType, options));
+
+    public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options) =>
+        JsonSerializer.Serialize(
+            writer,
+            valueProperty.GetValue(value),
+            valueProperty.PropertyType,
+            options
+        );
+
+    public override T ReadAsPropertyName(
         ref Utf8JsonReader reader,
         Type typeToConvert,
         JsonSerializerOptions options
     )
     {
-        if (reader.TokenType == JsonTokenType.Null)
+        if (valueProperty.PropertyType != typeof(string))
         {
-            // STJ invokes the converter for null only on reference-type wrappers;
-            // non-nullable value-type wrappers refuse null like their Value type.
-            if (typeToConvert.IsValueType && Nullable.GetUnderlyingType(typeToConvert) is null)
-            {
-                throw new JsonException($"null is not valid for scalar '{typeof(T).Name}'.");
-            }
-
-            return default;
+            throw new NotSupportedException(
+                "Only string-backed Rivet scalars support dictionary keys."
+            );
         }
-
-        using var document = JsonDocument.ParseValue(ref reader);
-        var value = document.RootElement.Deserialize(valueProperty.PropertyType, options);
-        return Construct(value);
+        var converter = (JsonConverter<string>)options.GetConverter(typeof(string));
+        return Construct(converter.ReadAsPropertyName(ref reader, typeof(string), options));
     }
 
-    public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
+    public override void WriteAsPropertyName(
+        Utf8JsonWriter writer,
+        T value,
+        JsonSerializerOptions options
+    )
     {
-        // The Value member is delegated to System.Text.Json with the active options —
-        // null Value (nullable or reference type) serializes to JSON null.
-        var propertyValue = valueProperty.GetValue(value);
-        JsonSerializer.Serialize(writer, propertyValue, valueProperty.PropertyType, options);
+        if (valueProperty.PropertyType != typeof(string))
+        {
+            throw new NotSupportedException(
+                "Only string-backed Rivet scalars support dictionary keys."
+            );
+        }
+        var key =
+            (string?)valueProperty.GetValue(value)
+            ?? throw new JsonException("A Rivet scalar dictionary key cannot be null.");
+        var converter = (JsonConverter<string>)options.GetConverter(typeof(string));
+        converter.WriteAsPropertyName(writer, key, options);
     }
 
-    private static T Construct(object? value)
+    private T Construct(object? value)
     {
         try
         {
-            return (T)Activator.CreateInstance(typeof(T), value)!;
+            return (T)_constructor.Invoke([value]);
         }
-        catch (MissingMethodException exception)
+        catch (TargetInvocationException exception)
+            when (exception.InnerException is ArgumentException)
         {
-            throw new InvalidOperationException(
-                $"[RivetScalar] type '{typeof(T).Name}' has no single-parameter constructor "
-                    + "accepting the Value type — declare a primary constructor taking Value.",
-                exception
+            throw new JsonException(
+                $"Invalid value for scalar '{typeof(T).Name}'.",
+                exception.InnerException
             );
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+            throw;
         }
     }
 }

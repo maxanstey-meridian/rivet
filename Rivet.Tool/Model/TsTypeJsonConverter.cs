@@ -167,18 +167,22 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
     }
 
     /// <summary>
-    /// Reads a numeric enum literal as its exact decimal string: values inside Int64
-    /// come through GetInt64; larger unsigned values keep their raw digits
-    /// (acceptance:numeric-enums-cover-all-legal-underlying-values).
+    /// Reads an exact signed or unsigned enum integer.
     /// </summary>
     private static string ReadEnumLiteral(JsonElement value)
     {
-        if (value.TryGetInt64(out var signed))
+        if (value.ValueKind == JsonValueKind.Number)
         {
-            return signed.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (value.TryGetInt64(out var signed))
+            {
+                return signed.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            if (value.TryGetUInt64(out var unsigned))
+            {
+                return unsigned.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
         }
-
-        return value.GetRawText();
+        throw new JsonException("Enum values must be decimal integers in the Int64/UInt64 range.");
     }
 
     private static TsTypeMetadata? ReadMetadata(JsonElement root, JsonSerializerOptions options) =>
@@ -300,7 +304,22 @@ public sealed class TsTypeJsonConverter : JsonConverter<TsType>
                 {
                     // Exact decimal digits (long/ulong enums included) — the contract IR
                     // keeps numeric JSON shape while never truncating to Int32.
-                    writer.WriteRawValue(member);
+                    if (
+                        !decimal.TryParse(
+                            member,
+                            System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var number
+                        )
+                        || number < long.MinValue
+                        || number > ulong.MaxValue
+                    )
+                    {
+                        throw new JsonException(
+                            "Enum values must be decimal integer literals in the Int64/UInt64 range."
+                        );
+                    }
+                    writer.WriteNumberValue(number);
                 }
 
                 writer.WriteEndArray();

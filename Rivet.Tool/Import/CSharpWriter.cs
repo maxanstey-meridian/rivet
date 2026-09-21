@@ -577,9 +577,7 @@ internal static class CSharpWriter
     {
         var isIntBacked = enumDef.Members.Any(m => m.IntValue is not null);
 
-        // planner-constraint:generated-enum-underlying-type — a generated enum whose
-        // constants exceed Int32 must declare a wider underlying type so the generated
-        // C# compiles and forward-emits the authored values byte-for-byte.
+        // Choose a CLR enum type wide enough to preserve every declared constant.
         var underlyingSuffix = "";
         if (isIntBacked)
         {
@@ -658,7 +656,9 @@ internal static class CSharpWriter
         }
         else if (familyConverter is not null)
         {
-            sb.AppendLine($"[JsonConverter(typeof({familyConverter}<{enumDef.Name}>))]");
+            sb.AppendLine(
+                $"[JsonConverter(typeof(global::Rivet.{familyConverter}<{enumDef.Name}>))]"
+            );
         }
         else
         {
@@ -691,7 +691,7 @@ internal static class CSharpWriter
                 // differs from it (OriginalName retained by MapEnum) need a pin.
                 if (familyConverter is null || member.OriginalName is not null)
                 {
-                    sb.AppendLine($"    [JsonStringEnumMemberName(\"{wireName}\")]");
+                    sb.AppendLine($"    [JsonStringEnumMemberName(\"{EscapeString(wireName)}\")]");
                 }
             }
             var valueAssignment = member.IntValue is not null ? $" = {member.IntValue}" : "";

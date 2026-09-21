@@ -58,6 +58,7 @@
           "type": "object",
           "properties": {
             "kind": { "const": "stringUnion" },
+            "namingPolicy": { "type": "string" },
             "values": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
             "format": { "type": "string" },
             "description": { "type": "string" },
@@ -285,6 +286,7 @@
           "type": "object",
           "properties": {
             "name": { "type": "string" },
+            "namingPolicy": { "type": "string" },
             "values": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
             "format": { "type": "string" },
             "description": { "type": "string" },
