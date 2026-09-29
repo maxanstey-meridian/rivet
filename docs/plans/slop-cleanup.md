@@ -742,6 +742,22 @@ Explicitly **not** doing:
 - `IProblemDetailsService` for `RivetErrorEnvelope`: the envelope deliberately matches the TS adapter's wire format.
 - A lowercase `JsonNamingPolicy`: the BCL doesn't ship one.
 
+#### W3 — Nullability no longer implies optional
+NEW (added 2026-09-29, runs after W2-4) · behaviour change
+
+**Problem.** `TypeWalker.IsOptional` falls back to `NullableAnnotation.Annotated ⇒ optional`. System.Text.Json writes null properties by default, so a nullable member is always on the wire, yet the schema omits it from `required` and TS clients get `x?: T | null`, which is a type lie. Positional records cannot escape it: the `required` keyword is not allowed on positional parameters, and `[Required]` rejects null during MVC binding. (Real case: casebridge `OperationalStageAssigneeDto? AssignTo` becomes `assignTo?: … | null`.)
+
+**Change.**
+1. **Walker:** a member is optional only with `[RivetOptional]` or `[JsonIgnore(WhenWritingNull|WhenWritingDefault)]`. Otherwise it is required, with nullability still expressed as `T | null`. Delete the nullability fallback, and the `required`-keyword special case if it becomes redundant. Keep `[Required]` handling only where it still means something.
+2. **Importer:** emit `[RivetOptional]` for properties the spec leaves out of `required`, so import → emit round-trips `required` exactly. The corpus round-trip gate must stay green; that is the proof.
+3. **Emitter:** re-check anything else keyed on "nullable ⇒ optional" (the form-field rule, query/header params). Parameters follow binder semantics, so a nullable query param stays optional. Scope the change to object-schema properties and record the decision.
+4. **Contract JSON (`--from`)** carries explicit optional flags and should be unaffected; verify it (rivet-ts depends on it).
+5. **Docs and migration:** update the type-mapping and nullability docs, add a CHANGELOG breaking line and a migration note: nullable properties are now required-and-nullable; add `[RivetOptional]` to keep one omittable.
+
+**Red first.** A positional record with `Foo? X` emits `X` in `required` with a `null` type; `[RivetOptional] Foo? X` stays optional; `[JsonIgnore(WhenWritingNull)] Foo? X` stays optional; an import round trip of a non-required property keeps it non-required.
+
+**Golden.** Emit schemas with nullable properties gain `required` entries (record the scale; nothing else may move). Import output gains `[RivetOptional]` attributes.
+
 ---
 
 ## 7. Subagent brief template
