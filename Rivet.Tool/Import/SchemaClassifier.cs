@@ -20,6 +20,22 @@ internal static class SchemaClassifier
         "uri-reference",
     ];
 
+    /// <summary>The JSON Schema keyword of a single declared type (null ignored).</summary>
+    internal static string? TypeKeyword(JsonSchemaType type) =>
+        (type & ~JsonSchemaType.Null) switch
+        {
+            JsonSchemaType.String => "string",
+            JsonSchemaType.Integer => "integer",
+            JsonSchemaType.Number => "number",
+            JsonSchemaType.Boolean => "boolean",
+            JsonSchemaType.Object => "object",
+            JsonSchemaType.Array => "array",
+            _ => null,
+        };
+
+    internal static string? ScalarTypeKeyword(JsonSchemaType type) =>
+        TypeKeyword(type) is "object" or "array" ? null : TypeKeyword(type);
+
     // --- Predicates ---
 
     internal static bool IsStringEnum(IOpenApiSchema schema)
@@ -72,18 +88,9 @@ internal static class SchemaClassifier
             return false;
         }
 
-        if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Integer))
-        {
-            return schema.Enum.All(v => v is JsonNode node && IsWholeInt64(node));
-        }
-
-        // No explicit type — infer from values
-        if (!schema.Type.HasValue)
-        {
-            return schema.Enum.All(v => v is JsonNode node && IsWholeInt64(node));
-        }
-
-        return false;
+        // An undeclared type is inferred from the values.
+        return (schema.Type is not { } type || type.HasFlag(JsonSchemaType.Integer))
+            && schema.Enum.All(v => v is JsonNode node && IsWholeInt64(node));
     }
 
     /// <summary>
@@ -386,20 +393,14 @@ internal static class SchemaClassifier
         return schema.Extensions is not null && schema.Extensions.ContainsKey(key);
     }
 
-    internal static string? GetExtensionString(IOpenApiSchema schema, string key)
-    {
-        if (schema.Extensions is null || !schema.Extensions.TryGetValue(key, out var ext))
-        {
-            return null;
-        }
-
-        if (ext is JsonNodeExtension jsonExt)
-        {
-            return jsonExt.Node?.GetValue<string>();
-        }
-
-        return null;
-    }
+    internal static string? GetExtensionString(
+        IDictionary<string, IOpenApiExtension>? extensions,
+        string key
+    ) =>
+        extensions?.TryGetValue(key, out var extension) == true
+        && extension is JsonNodeExtension { Node: { } node }
+            ? node.GetValue<string>()
+            : null;
 
     internal static List<string>? GetExtensionStringArray(IOpenApiSchema schema, string key)
     {
@@ -485,30 +486,27 @@ internal static class SchemaClassifier
 
     // --- Naming / dedup ---
 
+    /// <summary>
+    /// The import's one disambiguation scheme: <c>Name</c>, then <c>Name_2</c>, <c>Name_3</c>…
+    /// The separator keeps a suffix from reading as part of a name that already ends in a digit.
+    /// </summary>
+    internal static IEnumerable<string> NameCandidates(string baseName)
+    {
+        yield return baseName;
+        for (var suffix = 2; ; suffix++)
+        {
+            yield return $"{baseName}_{suffix}";
+        }
+    }
+
+    /// <summary>The first free <see cref="NameCandidates"/> entry, claimed in <paramref name="used"/>.</summary>
+    internal static string UniqueName(string baseName, ISet<string> used) =>
+        NameCandidates(baseName).First(used.Add);
+
     internal static List<RecordProperty> DeduplicateProperties(List<RecordProperty> properties)
     {
         var used = new HashSet<string>(StringComparer.Ordinal);
-        var nextSuffix = new Dictionary<string, int>(StringComparer.Ordinal);
-        var result = new List<RecordProperty>(properties.Count);
-
-        foreach (var prop in properties)
-        {
-            var name = prop.Name;
-            if (!used.Add(name))
-            {
-                var suffix = nextSuffix.GetValueOrDefault(name, 2);
-                do
-                {
-                    name = $"{prop.Name}_{suffix++}";
-                } while (!used.Add(name));
-
-                nextSuffix[prop.Name] = suffix;
-            }
-
-            result.Add(prop with { Name = name });
-        }
-
-        return result;
+        return properties.Select(prop => prop with { Name = UniqueName(prop.Name, used) }).ToList();
     }
 
     // --- Enum / Brand builders ---
@@ -521,13 +519,13 @@ internal static class SchemaClassifier
         // from the policy-cased name. An unknown token is ignored (not guessed):
         // the schema then imports through the exact-pin path like any foreign
         // spec.
-        var policyToken = GetExtensionString(schema, "x-rivet-enum-naming-policy");
+        var policyToken = GetExtensionString(schema.Extensions, "x-rivet-enum-naming-policy");
         var policy =
             policyToken is not null && Naming.TryPolicyFromToken(policyToken, out var parsed)
                 ? parsed
                 : (RivetNamingPolicy?)null;
 
-        var seen = new Dictionary<string, int>();
+        var used = new HashSet<string>();
         var members = new List<GeneratedEnumMember>();
         foreach (var member in schema.Enum!)
         {
@@ -538,16 +536,13 @@ internal static class SchemaClassifier
 
             var original = member.ToString();
             var sanitized = Naming.ToPascalCaseFromSegments(original);
-            if (seen.TryGetValue(sanitized, out var count))
+            var memberName = UniqueName(sanitized, used);
+            if (memberName != sanitized)
             {
-                count++;
-                seen[sanitized] = count;
-                var deduped = $"{sanitized}_{count}";
-                members.Add(new GeneratedEnumMember(deduped, original));
+                members.Add(new GeneratedEnumMember(memberName, original));
             }
             else
             {
-                seen[sanitized] = 1;
                 // Pin when the EMITTED wire value would differ from the original.
                 // The emitted casing follows the enum's declared converter: the
                 // policy-cased member name when a policy is declared, otherwise
@@ -579,7 +574,7 @@ internal static class SchemaClassifier
         var varnames = GetExtensionStringArray(schema, "x-enum-varnames");
         var useVarnames = varnames is not null && varnames.Count == schema.Enum!.Count;
 
-        var emitted = new HashSet<string>();
+        var used = new HashSet<string>();
         var members = new List<GeneratedEnumMember>();
         var index = 0;
         foreach (var member in schema.Enum!)
@@ -606,22 +601,12 @@ internal static class SchemaClassifier
                 namingMagnitude = memberNode.ToJsonString().Trim();
             }
 
-            var csharpName =
+            var csharpName = UniqueName(
                 useVarnames ? Naming.ToPascalCaseFromSegments(varnames![index])
-                : namingMagnitude.StartsWith('-') ? $"ValueNeg{namingMagnitude.TrimStart('-')}"
-                : $"Value{namingMagnitude}";
-
-            if (!emitted.Add(csharpName))
-            {
-                var suffix = 2;
-                var deduped = $"{csharpName}_{suffix}";
-                while (!emitted.Add(deduped))
-                {
-                    suffix++;
-                    deduped = $"{csharpName}_{suffix}";
-                }
-                csharpName = deduped;
-            }
+                    : namingMagnitude.StartsWith('-') ? $"ValueNeg{namingMagnitude.TrimStart('-')}"
+                    : $"Value{namingMagnitude}",
+                used
+            );
 
             members.Add(
                 new GeneratedEnumMember(
@@ -640,7 +625,7 @@ internal static class SchemaClassifier
 
     internal static GeneratedBrand MapBrand(string name, IOpenApiSchema schema)
     {
-        var brandName = GetExtensionString(schema, "x-rivet-brand") ?? name;
+        var brandName = GetExtensionString(schema.Extensions, "x-rivet-brand") ?? name;
         var innerType = ResolvePrimitiveType(schema) ?? "string";
         return new GeneratedBrand(brandName, innerType, schema.Format, schema.Description);
     }

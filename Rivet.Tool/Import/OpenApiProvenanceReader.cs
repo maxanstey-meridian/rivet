@@ -23,18 +23,6 @@ internal static class OpenApiProvenanceReader
         "x-visibility",
     ];
 
-    private static readonly string[] _methods =
-    [
-        "get",
-        "put",
-        "post",
-        "delete",
-        "options",
-        "head",
-        "patch",
-        "trace",
-    ];
-
     public static ImportedOpenApiProvenance Read(JsonElement root, List<string> warnings)
     {
         var swagger2 =
@@ -99,7 +87,7 @@ internal static class OpenApiProvenanceReader
         foreach (var path in paths.EnumerateObject())
         {
             var pathServers = swagger2 ? null : ReadServersProperty(path.Value);
-            foreach (var method in _methods)
+            foreach (var method in OpenApiImporter.OperationMethods)
             {
                 if (!path.Value.TryGetProperty(method, out var operation))
                 {
@@ -659,7 +647,7 @@ internal static class OpenApiProvenanceReader
         {
             return tokens.Length == 5 && tokens[4] == "schema";
         }
-        if (!_methods.Contains(tokens[2], StringComparer.Ordinal))
+        if (!OpenApiImporter.OperationMethods.Contains(tokens[2], StringComparer.Ordinal))
         {
             return false;
         }

@@ -3311,13 +3311,13 @@ public sealed class OpenApiImporterTests
         Assert.Contains("long Page", componentContent);
         Assert.Contains("long Limit", componentContent);
 
-        var synthesizedContent = CompilationHelper.FindFile(result, "Types/ListItemsInput2.cs");
+        var synthesizedContent = CompilationHelper.FindFile(result, "Types/ListItemsInput_2.cs");
         Assert.Contains("long Page", synthesizedContent);
         Assert.DoesNotContain("Limit", synthesizedContent);
 
         // The endpoint references the disambiguated synthesized input, not the component
         var contractContent = CompilationHelper.FindFile(result, "DefaultContract.cs");
-        Assert.Contains("ListItemsInput2", contractContent);
+        Assert.Contains("ListItemsInput_2", contractContent);
 
         CompilationHelper.CompileImportResult(result);
     }
@@ -3327,8 +3327,8 @@ public sealed class OpenApiImporterTests
     {
         // GAP-2 (I3 residual): the spec a previous emit∘import loop produced already
         // contains both the colliding component (ListItemsInput {page, limit}) and the
-        // disambiguated synthesized input (ListItemsInput2 {page}). Re-importing must
-        // reuse ListItemsInput2 — minting ListItemsInput3 every loop makes emit∘import
+        // disambiguated synthesized input (ListItemsInput_2 {page}). Re-importing must
+        // reuse ListItemsInput_2 — minting ListItemsInput_3 every loop makes emit∘import
         // grow a fresh numbered record unboundedly.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -3340,7 +3340,7 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["page", "limit"]
             },
-            "ListItemsInput2": {
+            "ListItemsInput_2": {
                 "type": "object",
                 "properties": {
                     "page": { "type": "integer" }
@@ -3389,10 +3389,10 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
 
         // No third variant is minted — the identically-shaped numbered component is reused.
-        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("ListItemsInput3"));
+        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("ListItemsInput_3"));
 
         var contractContent = CompilationHelper.FindFile(result, "DefaultContract.cs");
-        Assert.Contains("ListItemsInput2", contractContent);
+        Assert.Contains("ListItemsInput_2", contractContent);
 
         CompilationHelper.CompileImportResult(result);
     }
@@ -3475,14 +3475,14 @@ public sealed class OpenApiImporterTests
         var memberInput = CompilationHelper.FindFile(result, "Types/GetByIdInput.cs");
         Assert.Contains("string MemberId", memberInput);
 
-        var orderInput = CompilationHelper.FindFile(result, "Types/GetByIdInput2.cs");
+        var orderInput = CompilationHelper.FindFile(result, "Types/GetByIdInput_2.cs");
         Assert.Contains("long OrderNumber", orderInput);
 
         // Each contract references its own input type
         Assert.Contains("GetByIdInput", CompilationHelper.FindFile(result, "MembersContract.cs"));
-        Assert.Contains("GetByIdInput2", CompilationHelper.FindFile(result, "OrdersContract.cs"));
+        Assert.Contains("GetByIdInput_2", CompilationHelper.FindFile(result, "OrdersContract.cs"));
         Assert.DoesNotContain(
-            "GetByIdInput2",
+            "GetByIdInput_2",
             CompilationHelper.FindFile(result, "MembersContract.cs")
         );
 
@@ -6998,5 +6998,44 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains("\"basicAuth\", \"http\"", security);
         Assert.Contains("\"basic\"", security);
+    }
+
+    [Fact]
+    public void Swagger2_Definition_Alias_Cycle_Is_Broken_With_A_Warning()
+    {
+        const string spec = """
+            {
+              "swagger": "2.0",
+              "info": { "title": "T", "version": "1" },
+              "paths": {},
+              "definitions": {
+                "A": { "$ref": "#/definitions/B" },
+                "B": { "$ref": "#/definitions/A" },
+                "Holder": { "type": "object", "properties": { "thing": { "$ref": "#/definitions/A" } } }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+
+        Assert.Contains(result.Warnings, w => w.StartsWith(Diagnostics.ImportAliasCycleBroken));
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void String_Enum_Dedup_Suffix_Does_Not_Collide_With_An_Authored_Suffix()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Mode": { "type": "string", "enum": ["a", "A", "A_2"] }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        var mode = CompilationHelper.FindFile(result, "Types/Mode.cs");
+
+        Assert.Contains("A_2,", mode);
+        Assert.Contains("A_2_2", mode);
+        CompilationHelper.CompileImportResult(result);
     }
 }

@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Rivet.Tool.Import;
 
 /// <summary>
@@ -9,7 +11,10 @@ internal sealed class ResolutionContext(List<string> warnings)
 
     // Case-insensitive (like ReservedTypeNames): names become Types/{Name}.cs files,
     // and case-insensitive filesystems clobber case-variant siblings at write time.
-    private readonly Dictionary<string, object> _syntheticsByName = new(
+    private readonly Dictionary<string, GeneratedRecord> _syntheticRecords = new(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private readonly Dictionary<string, GeneratedEnum> _syntheticEnums = new(
         StringComparer.OrdinalIgnoreCase
     );
 
@@ -30,9 +35,10 @@ internal sealed class ResolutionContext(List<string> warnings)
     {
         var (name, existingName) = ResolveSyntheticName(
             record.Name,
-            existing => existing is GeneratedRecord other && SameShape(other, record)
+            _syntheticRecords,
+            existing => SameShape(existing, record),
+            existing => existing.Name
         );
-
         if (name is null)
         {
             // Identical shape already registered — reuse ITS name (which may
@@ -42,7 +48,7 @@ internal sealed class ResolutionContext(List<string> warnings)
 
         var toAdd = record.Name == name ? record : record with { Name = name };
         ExtraRecords.Add(toAdd);
-        _syntheticsByName[name] = toAdd;
+        _syntheticRecords[name] = toAdd;
         return name;
     }
 
@@ -54,10 +60,10 @@ internal sealed class ResolutionContext(List<string> warnings)
     {
         var (name, existingName) = ResolveSyntheticName(
             enumDef.Name,
-            existing =>
-                existing is GeneratedEnum other && other.Members.SequenceEqual(enumDef.Members)
+            _syntheticEnums,
+            existing => existing.Members.SequenceEqual(enumDef.Members),
+            existing => existing.Name
         );
-
         if (name is null)
         {
             return existingName!;
@@ -65,7 +71,7 @@ internal sealed class ResolutionContext(List<string> warnings)
 
         var toAdd = enumDef.Name == name ? enumDef : enumDef with { Name = name };
         ExtraEnums.Add(toAdd);
-        _syntheticsByName[name] = toAdd;
+        _syntheticEnums[name] = toAdd;
         return name;
     }
 
@@ -73,41 +79,37 @@ internal sealed class ResolutionContext(List<string> warnings)
     /// Finds the name a new synthetic type must use: (name, null) when free —
     /// the base name or a numeric-suffixed variant when the base is
     /// reserved/claimed by a different shape — or (null, existingName) when an
-    /// identical shape is already registered (caller reuses the REGISTERED
-    /// name, which may differ in case under the IgnoreCase comparer).
+    /// identical shape of the same kind is already registered (caller reuses the
+    /// REGISTERED name, which may differ in case under the IgnoreCase comparer).
     /// </summary>
-    private (string? NewName, string? ExistingName) ResolveSyntheticName(
+    private (string? NewName, string? ExistingName) ResolveSyntheticName<T>(
         string baseName,
-        Func<object, bool> isSameShape
+        Dictionary<string, T> sameKind,
+        Func<T, bool> isSameShape,
+        Func<T, string> nameOf
     )
     {
-        var candidate = baseName;
-        var suffix = 1;
-
-        while (true)
+        foreach (var candidate in SchemaClassifier.NameCandidates(baseName))
         {
-            if (!ReservedTypeNames.Contains(candidate))
+            if (ReservedTypeNames.Contains(candidate))
             {
-                if (!_syntheticsByName.TryGetValue(candidate, out var existing))
-                {
-                    return (candidate, null);
-                }
-
-                if (isSameShape(existing))
-                {
-                    var existingName = existing switch
-                    {
-                        GeneratedRecord record => record.Name,
-                        GeneratedEnum enumDef => enumDef.Name,
-                        _ => candidate,
-                    };
-                    return (null, existingName);
-                }
+                continue;
             }
 
-            suffix++;
-            candidate = $"{baseName}{suffix}";
+            if (sameKind.TryGetValue(candidate, out var existing) && isSameShape(existing))
+            {
+                return (null, nameOf(existing));
+            }
+
+            if (
+                !_syntheticRecords.ContainsKey(candidate) && !_syntheticEnums.ContainsKey(candidate)
+            )
+            {
+                return (candidate, null);
+            }
         }
+
+        throw new UnreachableException();
     }
 
     private static bool SameShape(GeneratedRecord a, GeneratedRecord b)
@@ -150,4 +152,10 @@ internal sealed class ResolutionContext(List<string> warnings)
     public int RecursionDepth { get; set; }
 
     public string NextSyntheticName(string prefix) => $"{prefix}{++SyntheticCounter}";
+
+    /// <summary>The C# name mapped for a component key, or its PascalCase form.</summary>
+    public string TypeName(string componentId) =>
+        SchemaNameMap.TryGetValue(componentId, out var mapped)
+            ? mapped
+            : Naming.ToPascalCaseFromSegments(componentId);
 }

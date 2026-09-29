@@ -15,12 +15,13 @@ public static class OpenApiImporter
     private const string ComponentHeadersPrefix = "#/components/headers/";
     private const string ComponentRequestBodiesPrefix = "#/components/requestBodies/";
     private const string ComponentResponsesPrefix = "#/components/responses/";
-    private const string ImportedParameterReferenceExtension =
+    internal const string ImportedParameterReferenceExtension =
         "x-rivet-imported-parameter-reference";
-    private const string ImportedRequestBodyReferenceExtension =
+    internal const string ImportedRequestBodyReferenceExtension =
         "x-rivet-imported-request-body-reference";
 
-    private static readonly string[] _operationNames =
+    /// <summary>The OpenAPI path-item keys that hold operations.</summary>
+    internal static readonly string[] OperationMethods =
     [
         "get",
         "put",
@@ -568,7 +569,7 @@ public static class OpenApiImporter
         var result = new HashSet<(string Path, string Method, string Status)>();
         foreach (var (path, pathItem) in paths)
         {
-            foreach (var method in _operationNames)
+            foreach (var method in OperationMethods)
             {
                 if (pathItem?[method]?["responses"] is not JsonObject responses)
                 {
@@ -698,7 +699,7 @@ public static class OpenApiImporter
             pathItem["parameters"] = NormalizeParameterArray(pathParameters, root);
         }
 
-        foreach (var method in _operationNames)
+        foreach (var method in OperationMethods)
         {
             if (pathItem[method] is not JsonObject operation)
             {
@@ -936,17 +937,18 @@ public static class OpenApiImporter
             : throw InvalidSpec($"Local JSON reference '{reference}' targets a missing value.");
 
     /// <summary>
-    /// Replaces components/schemas entries that are pure $ref aliases forming a cycle with
-    /// empty placeholder schemas, with a warning per entry.
+    /// Replaces schema components (<c>components/schemas</c>, or Swagger 2
+    /// <c>definitions</c>) that are pure $ref aliases forming a cycle with empty placeholder
+    /// schemas, with a warning per entry.
     /// </summary>
     private static void BreakAliasCycles(JsonObject root, List<string> warnings)
     {
-        if (root["components"]?["schemas"] is not JsonObject schemas)
+        var schemas = (root["components"]?["schemas"] ?? root["definitions"]) as JsonObject;
+        if (schemas is null)
         {
             return;
         }
 
-        const string prefix = "#/components/schemas/";
         var aliasTargets = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (key, node) in schemas)
         {
@@ -954,10 +956,12 @@ public static class OpenApiImporter
                 node is JsonObject obj
                 && obj["$ref"] is JsonValue value
                 && value.TryGetValue<string>(out var refString)
-                && refString.StartsWith(prefix, StringComparison.Ordinal)
+                && JsonPointer.FromUriFragment(refString)
+                    is (["components", "schemas", _] or ["definitions", _])
+                        and [.., var target]
             )
             {
-                aliasTargets[key] = refString[prefix.Length..];
+                aliasTargets[key] = target;
             }
         }
 

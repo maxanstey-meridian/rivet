@@ -348,7 +348,7 @@ internal static class CSharpWriter
         {
             EmitGeneratedSchemaMetadata(sb, metadata, "", "");
         }
-        sb.AppendLine(GeneratedTypeAttribute(record.ComponentId, record.IsSynthetic));
+        sb.AppendLine(GeneratedTypeAttribute(record.ComponentId));
         // Derived polymorphic records are not [RivetType] entry points — the walker
         // reaches them through the base's [JsonDerivedType] registrations; attributing
         // them would emit a second, untagged component alongside the union variant.
@@ -575,63 +575,26 @@ internal static class CSharpWriter
 
     public static string WriteEnum(GeneratedEnum enumDef, string ns)
     {
-        var isIntBacked = enumDef.Members.Any(m => m.IntValue is not null);
-
-        // Choose a CLR enum type wide enough to preserve every declared constant.
-        var underlyingSuffix = "";
-        if (isIntBacked)
-        {
-            var exceedsInt32 = false;
-
-            foreach (var member in enumDef.Members)
-            {
-                if (member.IntValue is null)
-                {
-                    continue;
-                }
-
-                var parsed = long.TryParse(
-                    member.IntValue,
+        // Choose a CLR enum type wide enough to preserve every declared constant:
+        // a constant that does not parse as long is in the ulong range.
+        var intValues = enumDef
+            .Members.Where(m => m.IntValue is not null)
+            .Select(m =>
+                long.TryParse(
+                    m.IntValue,
                     NumberStyles.Integer,
                     CultureInfo.InvariantCulture,
-                    out var signedValue
-                );
-
-                if (!parsed || signedValue is < int.MinValue or > int.MaxValue)
-                {
-                    exceedsInt32 = true;
-                    break;
-                }
-            }
-
-            if (exceedsInt32)
-            {
-                var exceedsInt64 = false;
-
-                foreach (var member in enumDef.Members)
-                {
-                    if (member.IntValue is null)
-                    {
-                        continue;
-                    }
-
-                    if (
-                        !long.TryParse(
-                            member.IntValue,
-                            NumberStyles.Integer,
-                            CultureInfo.InvariantCulture,
-                            out _
-                        )
-                    )
-                    {
-                        exceedsInt64 = true;
-                        break;
-                    }
-                }
-
-                underlyingSuffix = exceedsInt64 ? " : ulong" : " : long";
-            }
-        }
+                    out var value
+                )
+                    ? value
+                    : (long?)null
+            )
+            .ToList();
+        var isIntBacked = intValues.Count > 0;
+        var underlyingSuffix =
+            intValues.Any(value => value is null) ? " : ulong"
+            : intValues.Any(value => value is < int.MinValue or > int.MaxValue) ? " : long"
+            : "";
 
         var sb = new StringBuilder();
         sb.AppendLine("using System.Text.Json.Serialization;");
@@ -674,7 +637,7 @@ internal static class CSharpWriter
         }
 
         sb.AppendLine("[Rivet.RivetType]");
-        sb.AppendLine(GeneratedTypeAttribute(enumDef.ComponentId, enumDef.IsSynthetic, "Rivet."));
+        sb.AppendLine(GeneratedTypeAttribute(enumDef.ComponentId, "Rivet."));
 
         sb.AppendLine($"public enum {enumDef.Name}{underlyingSuffix}");
         sb.AppendLine("{");
@@ -716,7 +679,7 @@ internal static class CSharpWriter
             sb.AppendLine($"[Rivet.RivetFormat(\"{EscapeString(brand.Format)}\")]");
         }
         sb.AppendLine("[Rivet.RivetType]");
-        sb.AppendLine(GeneratedTypeAttribute(brand.ComponentId, brand.IsSynthetic, "Rivet."));
+        sb.AppendLine(GeneratedTypeAttribute(brand.ComponentId, "Rivet."));
         sb.AppendLine("[Rivet.RivetScalar]");
         sb.AppendLine($"public sealed record {brand.Name}({brand.InnerType} Value)");
         sb.AppendLine("{");
@@ -729,14 +692,11 @@ internal static class CSharpWriter
         return sb.ToString();
     }
 
-    private static string GeneratedTypeAttribute(
-        string? componentId,
-        bool synthetic,
-        string prefix = ""
-    )
+    /// <summary>A type with no component id was synthesised by the importer.</summary>
+    private static string GeneratedTypeAttribute(string? componentId, string prefix = "")
     {
         var id = componentId is null ? "null" : $"\"{EscapeString(componentId)}\"";
-        var provenance = synthetic ? "Synthetic" : "Component";
+        var provenance = componentId is null ? "Synthetic" : "Component";
         return $"[{prefix}RivetGeneratedType({id}, {prefix}RivetGeneratedTypeProvenance.{provenance})]";
     }
 
@@ -757,7 +717,8 @@ internal static class CSharpWriter
                     content.TypeName?.Contains("IFormFile", StringComparison.Ordinal) == true
                 )
                 || f.ResponseContents.Any(content =>
-                    content.TypeName?.Contains("IFormFile", StringComparison.Ordinal) == true
+                    content.Content.TypeName?.Contains("IFormFile", StringComparison.Ordinal)
+                    == true
                 )
             )
         )
@@ -1204,21 +1165,21 @@ internal static class CSharpWriter
                 content.StatusCode == 0
                     ? $"\"{EscapeString(content.StatusKey)}\""
                     : content.StatusCode.ToString();
-            var schemaRef = content.SchemaRef is null
+            var schemaRef = content.Content.SchemaRef is null
                 ? ""
-                : $", schemaRef: \"{EscapeString(content.SchemaRef)}\"";
-            var leaf = content.SchemaType is null
+                : $", schemaRef: \"{EscapeString(content.Content.SchemaRef)}\"";
+            var leaf = content.Content.SchemaType is null
                 ? ""
-                : $", schemaType: \"{EscapeString(content.SchemaType)}\", format: \"{EscapeString(content.Format ?? "")}\"";
+                : $", schemaType: \"{EscapeString(content.Content.SchemaType)}\", format: \"{EscapeString(content.Content.Format ?? "")}\"";
             var schemaDescription = content.SchemaDescription is null
                 ? ""
                 : $", schemaDescription: \"{EscapeString(content.SchemaDescription)}\"";
             calls.Add(
-                content.IsBinary
-                    ? $".ResponseBinaryContent({statusArgument}, \"{EscapeString(content.MediaType)}\")"
-                : content.TypeName is null
-                    ? $".ResponseContent({statusArgument}, \"{EscapeString(content.MediaType)}\")"
-                : $".ResponseContent<{content.TypeName}>({statusArgument}, \"{EscapeString(content.MediaType)}\"{schemaRef}{leaf}{schemaDescription})"
+                content.Content.IsBinary
+                    ? $".ResponseBinaryContent({statusArgument}, \"{EscapeString(content.Content.MediaType)}\")"
+                : content.Content.TypeName is null
+                    ? $".ResponseContent({statusArgument}, \"{EscapeString(content.Content.MediaType)}\")"
+                : $".ResponseContent<{content.Content.TypeName}>({statusArgument}, \"{EscapeString(content.Content.MediaType)}\"{schemaRef}{leaf}{schemaDescription})"
             );
         }
 
