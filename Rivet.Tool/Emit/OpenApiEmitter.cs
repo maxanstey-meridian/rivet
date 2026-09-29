@@ -180,7 +180,7 @@ public sealed class OpenApiEmitter
         else
         {
             var tags = endpoints
-                .Select(ep => UpperFirst(ep.ControllerName))
+                .Select(ep => Naming.ToPascalCase(ep.ControllerName))
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(tag => tag, StringComparer.Ordinal)
                 .ToList();
@@ -745,7 +745,7 @@ public sealed class OpenApiEmitter
         else
         {
             operation["operationId"] = operationIds[ep];
-            operation["tags"] = new List<string> { UpperFirst(ep.ControllerName) };
+            operation["tags"] = new List<string> { Naming.ToPascalCase(ep.ControllerName) };
         }
 
         if (ep.Summary is not null)
@@ -768,63 +768,6 @@ public sealed class OpenApiEmitter
         {
             switch (param.Source)
             {
-                case ParamSource.Route:
-                    parameters.Add(
-                        BuildParameter(
-                            param,
-                            "path",
-                            required: true,
-                            $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                        )
-                    );
-                    break;
-
-                case ParamSource.Query:
-                    parameters.Add(
-                        BuildParameter(
-                            param,
-                            "query",
-                            param.Type is not TsType.Nullable && !param.IsOptional,
-                            $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                        )
-                    );
-                    break;
-
-                case ParamSource.Header:
-                    // OpenAPI 3.x: Accept/Content-Type/Authorization are not legal header
-                    // parameters (they belong to content negotiation / securitySchemes) —
-                    // diagnose and skip rather than emit an invalid spec.
-                    if (IsReservedHeaderName(param.Name))
-                    {
-                        Diagnostics.Warn(
-                            Diagnostics.ReservedHeaderParameterSkipped,
-                            $"header param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}' is reserved by OpenAPI "
-                                + "(Accept/Content-Type/Authorization are described by content/securitySchemes) — omitted from the spec"
-                        );
-                        break;
-                    }
-
-                    parameters.Add(
-                        BuildParameter(
-                            param,
-                            "header",
-                            param.Type is not TsType.Nullable && !param.IsOptional,
-                            $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                        )
-                    );
-                    break;
-
-                case ParamSource.Cookie:
-                    parameters.Add(
-                        BuildParameter(
-                            param,
-                            "cookie",
-                            param.Type is not TsType.Nullable && !param.IsOptional,
-                            $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                        )
-                    );
-                    break;
-
                 case ParamSource.Body:
                     bodyParam = param;
                     break;
@@ -835,6 +778,29 @@ public sealed class OpenApiEmitter
 
                 case ParamSource.FormField:
                     formFieldParams.Add(param);
+                    break;
+
+                // OpenAPI 3.x: Accept/Content-Type/Authorization are not legal header
+                // parameters (they belong to content negotiation / securitySchemes) —
+                // diagnose and skip rather than emit an invalid spec.
+                case ParamSource.Header when IsReservedHeaderName(param.Name):
+                    Diagnostics.Warn(
+                        Diagnostics.ReservedHeaderParameterSkipped,
+                        $"header param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}' is reserved by OpenAPI "
+                            + "(Accept/Content-Type/Authorization are described by content/securitySchemes) — omitted from the spec"
+                    );
+                    break;
+
+                default:
+                    parameters.Add(
+                        BuildParameter(
+                            param,
+                            ParameterLocation(param.Source),
+                            param.Source == ParamSource.Route
+                                || (param.Type is not TsType.Nullable && !param.IsOptional),
+                            $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+                        )
+                    );
                     break;
             }
         }
@@ -910,51 +876,26 @@ public sealed class OpenApiEmitter
         // Request body
         if (ep.RequestContents is not null)
         {
-            var content = new Dictionary<string, object>();
-            foreach (var entry in ep.RequestContents)
-            {
-                var media = new Dictionary<string, object>();
-                if (entry.IsBinary)
-                {
-                    media["schema"] = BinarySchema();
-                }
-                else if (entry.Schema is not null)
-                {
-                    media["schema"] = BuildSchemaWithLeafProvenance(
-                        entry.Schema,
-                        entry.SchemaType,
-                        entry.Format,
-                        entry.IsFormatSpecified,
-                        $"request content '{entry.MediaType}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                    );
-                }
-
-                content[entry.MediaType] = media;
-            }
-
             var primaryRequestType = ep.RequestType ?? bodyParam?.Type;
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                ["required"] =
-                    ep.RequestBodyRequired ?? (primaryRequestType is not TsType.Nullable),
-                ["content"] = WithExamples(content, ep.RequestExamples),
-            };
+            operation["requestBody"] = RequestBody(
+                ep.RequestBodyRequired ?? (primaryRequestType is not TsType.Nullable),
+                MediaContent(
+                    ep.RequestContents,
+                    entry =>
+                        $"request content '{entry.MediaType}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+                ),
+                ep.RequestExamples
+            );
         }
         else if (ep.BinaryRequestContentType is not null)
         {
             // .AcceptsBinary(): the body is the raw bytes — never a JSON/multipart schema,
             // even if a Body param somehow survived upstream (the walker prevents it).
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                ["required"] = ep.RequestBodyRequired ?? true,
-                ["content"] = new Dictionary<string, object>
-                {
-                    [ep.BinaryRequestContentType] = new Dictionary<string, object>
-                    {
-                        ["schema"] = BinarySchema(),
-                    },
-                },
-            };
+            operation["requestBody"] = RequestBody(
+                ep.RequestBodyRequired ?? true,
+                MediaContent(ep.BinaryRequestContentType, BinarySchema()),
+                examples: null
+            );
         }
         else if (fileParams.Count > 0)
         {
@@ -969,9 +910,8 @@ public sealed class OpenApiEmitter
             }
             else
             {
-                // BUG-2 (mirrors the E6 generic fallback): the TS lowerer decomposes the
-                // multipart input into params and never ships the input type definition, so
-                // a $ref to ep.InputTypeName would dangle — every consumer rejects that.
+                // The TS lowerer decomposes the multipart input into params and never ships
+                // the input type definition, so a $ref to ep.InputTypeName would dangle.
                 // Build the multipart request schema inline from the endpoint's params instead.
                 if (ep.InputTypeName is not null)
                 {
@@ -983,166 +923,49 @@ public sealed class OpenApiEmitter
                     );
                 }
 
-                // Anonymous file upload — inline the schema. Single files emit the
-                // binary File schema; collection-of-file params (List<IFormFile>,
-                // FABLE_GAPS §7 item 12) emit array-of-binary — both via the File
-                // primitive mapping.
-                var multipartProps = new Dictionary<string, object>();
-                foreach (var fp in fileParams)
-                {
-                    multipartProps[fp.Name] = MapTsTypeToJsonSchema(
-                        fp.Type,
-                        $"file param '{fp.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                    );
-                }
-                foreach (var ff in formFieldParams)
-                {
-                    multipartProps[ff.Name] = MapTsTypeToJsonSchema(
-                        ff.Type,
-                        $"form field '{ff.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                    );
-                }
-
-                var requiredFields = new List<string>();
-                foreach (var fp in fileParams)
-                {
-                    // N1/E8: honour explicit optionality (rivet-ts `file?: Blob`)
-                    if (!fp.IsOptional)
-                    {
-                        requiredFields.Add(fp.Name);
-                    }
-                }
-                foreach (var ff in formFieldParams)
-                {
-                    if (ff.Type is not TsType.Nullable && !ff.IsOptional)
-                    {
-                        requiredFields.Add(ff.Name);
-                    }
-                }
-
-                multipartSchema = new Dictionary<string, object>
-                {
-                    ["type"] = "object",
-                    ["properties"] = multipartProps,
-                };
-
-                if (requiredFields.Count > 0)
-                {
-                    multipartSchema["required"] = requiredFields;
-                }
-
-                // WP-1.1: pin the record name the importer synthesizes for this inline
-                // body — without the extension it falls back to the operationId-derived
-                // {fieldName}Request convention, which breaks under hand-edited ids.
-                // A declared-but-undefined input type name (TS lowerer) takes precedence.
-                multipartSchema["x-rivet-input-type"] =
-                    ep.InputTypeName ?? SynthesizedInputTypeName(ep);
+                multipartSchema = FormSchema(ep, fileParams, formFieldParams);
+                // Pin the record name the importer synthesizes for this inline body; without
+                // the extension it falls back to the operationId-derived {fieldName}Request
+                // convention, which breaks under hand-edited ids.
+                multipartSchema["x-rivet-input-type"] = SynthesizedInputTypeName(ep);
             }
 
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                ["required"] = ep.RequestBodyRequired ?? true,
-                ["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [formContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = multipartSchema,
-                        },
-                    },
-                    ep.RequestExamples
-                ),
-            };
+            operation["requestBody"] = RequestBody(
+                ep.RequestBodyRequired ?? true,
+                MediaContent(formContentType, multipartSchema),
+                ep.RequestExamples
+            );
         }
         else if (formFieldParams.Count > 0)
         {
-            var formSchema = new Dictionary<string, object>
-            {
-                ["type"] = "object",
-                ["properties"] = new Dictionary<string, object>(),
-            };
-            var formProps = (Dictionary<string, object>)formSchema["properties"];
-            var requiredFields = new List<string>();
-            foreach (var ff in formFieldParams)
-            {
-                formProps[ff.Name] = MapTsTypeToJsonSchema(
-                    ff.Type,
-                    $"form field '{ff.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                );
-                if (ff.Type is not TsType.Nullable && !ff.IsOptional)
-                {
-                    requiredFields.Add(ff.Name);
-                }
-            }
-            if (requiredFields.Count > 0)
-            {
-                formSchema["required"] = requiredFields;
-            }
-
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                ["required"] = ep.RequestBodyRequired ?? true,
-                ["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [formContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = formSchema,
-                        },
-                    },
-                    ep.RequestExamples
-                ),
-            };
+            operation["requestBody"] = RequestBody(
+                ep.RequestBodyRequired ?? true,
+                MediaContent(formContentType, FormSchema(ep, [], formFieldParams)),
+                ep.RequestExamples
+            );
         }
-        else if (bodyParam is not null)
+        else if ((bodyParam?.Type ?? ep.RequestType) is { } bodyType)
         {
-            var bodyContentType = ep.IsFormEncoded
-                ? formContentType
-                : ep.RequestContentTypeOverride ?? "application/json";
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                // E11: a Nullable body type means the request body is optional
-                ["required"] = ep.RequestBodyRequired ?? (bodyParam.Type is not TsType.Nullable),
-                ["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [bodyContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = BuildBodySchema(bodyParam.Type, ep),
-                        },
-                    },
-                    ep.RequestExamples
+            operation["requestBody"] = RequestBody(
+                // A Nullable body type means the request body is optional
+                ep.RequestBodyRequired
+                    ?? (bodyType is not TsType.Nullable),
+                MediaContent(
+                    ep.IsFormEncoded
+                        ? formContentType
+                        : ep.RequestContentTypeOverride ?? "application/json",
+                    BuildBodySchema(bodyType, ep)
                 ),
-            };
-        }
-        else if (ep.RequestType is not null)
-        {
-            var requestTypeContentType = ep.IsFormEncoded
-                ? "application/x-www-form-urlencoded"
-                : ep.RequestContentTypeOverride ?? "application/json";
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                // E11: a Nullable body type means the request body is optional
-                ["required"] = ep.RequestBodyRequired ?? (ep.RequestType is not TsType.Nullable),
-                ["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [requestTypeContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = BuildBodySchema(ep.RequestType, ep),
-                        },
-                    },
-                    ep.RequestExamples
-                ),
-            };
+                ep.RequestExamples
+            );
         }
         else if (ep.RequestBodyPresent)
         {
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                ["required"] = ep.RequestBodyRequired ?? false,
-                ["content"] = WithExamples(new Dictionary<string, object>(), ep.RequestExamples),
-            };
+            operation["requestBody"] = RequestBody(
+                ep.RequestBodyRequired ?? false,
+                [],
+                ep.RequestExamples
+            );
         }
 
         if (
@@ -1272,13 +1095,7 @@ public sealed class OpenApiEmitter
                     }
                     if (header.ContentType is not null)
                     {
-                        headerObj["content"] = new Dictionary<string, object>
-                        {
-                            [header.ContentType] = new Dictionary<string, object>
-                            {
-                                ["schema"] = headerSchema,
-                            },
-                        };
+                        headerObj["content"] = MediaContent(header.ContentType, headerSchema);
                     }
                     else
                     {
@@ -1292,34 +1109,14 @@ public sealed class OpenApiEmitter
 
             if (resp.Contents is { Count: > 0 })
             {
-                var content = new Dictionary<string, object>();
-                foreach (var entry in resp.Contents)
-                {
-                    var media = new Dictionary<string, object>();
-                    if (entry.IsBinary)
-                    {
-                        media["schema"] = BinarySchema();
-                    }
-                    else if (entry.Schema is not null)
-                    {
-                        var responseSchema = BuildSchemaWithLeafProvenance(
-                            entry.Schema,
-                            entry.SchemaType,
-                            entry.Format,
-                            entry.IsFormatSpecified,
+                respObj["content"] = WithExamples(
+                    MediaContent(
+                        resp.Contents,
+                        entry =>
                             $"response {resp.StatusCode} content '{entry.MediaType}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                        );
-                        if (entry.SchemaDescription is not null)
-                        {
-                            responseSchema["description"] = entry.SchemaDescription;
-                        }
-                        media["schema"] = responseSchema;
-                    }
-
-                    content[entry.MediaType] = media;
-                }
-
-                respObj["content"] = WithExamples(content, resp.Examples);
+                    ),
+                    resp.Examples
+                );
             }
             else if (resp.DataType is not null && !bodyForbidden)
             {
@@ -1329,16 +1126,13 @@ public sealed class OpenApiEmitter
                     ? ep.ResponseContentTypeOverride ?? "application/json"
                     : "application/json";
                 respObj["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [responseContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = MapTsTypeToJsonSchema(
-                                resp.DataType,
-                                $"response {resp.StatusCode} on endpoint '{ep.ControllerName}.{ep.Name}'"
-                            ),
-                        },
-                    },
+                    MediaContent(
+                        responseContentType,
+                        MapTsTypeToJsonSchema(
+                            resp.DataType,
+                            $"response {resp.StatusCode} on endpoint '{ep.ControllerName}.{ep.Name}'"
+                        )
+                    ),
                     resp.Examples
                 );
             }
@@ -1348,13 +1142,7 @@ public sealed class OpenApiEmitter
             )
             {
                 respObj["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [ep.FileContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = BinarySchema(),
-                        },
-                    },
+                    MediaContent(ep.FileContentType, BinarySchema()),
                     resp.Examples
                 );
             }
@@ -1673,6 +1461,110 @@ public sealed class OpenApiEmitter
     private static Dictionary<string, object> BinarySchema() =>
         new() { ["type"] = "string", ["format"] = "binary" };
 
+    private static string ParameterLocation(ParamSource source) =>
+        source switch
+        {
+            ParamSource.Route => "path",
+            ParamSource.Query => "query",
+            ParamSource.Header => "header",
+            ParamSource.Cookie => "cookie",
+            _ => throw new ArgumentOutOfRangeException(nameof(source), source, null),
+        };
+
+    private static Dictionary<string, object> RequestBody(
+        bool required,
+        Dictionary<string, object> content,
+        IReadOnlyList<TsEndpointExample>? examples
+    ) => new() { ["required"] = required, ["content"] = WithExamples(content, examples) };
+
+    private static Dictionary<string, object> MediaContent(
+        string mediaType,
+        Dictionary<string, object> schema
+    ) => new() { [mediaType] = new Dictionary<string, object> { ["schema"] = schema } };
+
+    private Dictionary<string, object> MediaContent(
+        IReadOnlyList<TsMediaTypeContent> entries,
+        Func<TsMediaTypeContent, string> context
+    )
+    {
+        var content = new Dictionary<string, object>();
+        foreach (var entry in entries)
+        {
+            var media = new Dictionary<string, object>();
+            if (entry.IsBinary)
+            {
+                media["schema"] = BinarySchema();
+            }
+            else if (entry.Schema is not null)
+            {
+                var schema = BuildSchemaWithLeafProvenance(
+                    entry.Schema,
+                    entry.SchemaType,
+                    entry.Format,
+                    entry.IsFormatSpecified,
+                    context(entry)
+                );
+                if (entry.SchemaDescription is not null)
+                {
+                    schema["description"] = entry.SchemaDescription;
+                }
+                media["schema"] = schema;
+            }
+
+            content[entry.MediaType] = media;
+        }
+
+        return content;
+    }
+
+    /// <summary>
+    /// The object schema of a form body: file parts first, then form fields. A file part is
+    /// required unless explicitly optional; a form field also becomes optional when nullable.
+    /// </summary>
+    private Dictionary<string, object> FormSchema(
+        TsEndpointDefinition ep,
+        IReadOnlyList<TsEndpointParam> fileParams,
+        IReadOnlyList<TsEndpointParam> formFieldParams
+    )
+    {
+        var properties = new Dictionary<string, object>();
+        var required = new List<string>();
+        foreach (var file in fileParams)
+        {
+            properties[file.Name] = MapTsTypeToJsonSchema(
+                file.Type,
+                $"file param '{file.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+            );
+            if (!file.IsOptional)
+            {
+                required.Add(file.Name);
+            }
+        }
+        foreach (var field in formFieldParams)
+        {
+            properties[field.Name] = MapTsTypeToJsonSchema(
+                field.Type,
+                $"form field '{field.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+            );
+            if (field.Type is not TsType.Nullable && !field.IsOptional)
+            {
+                required.Add(field.Name);
+            }
+        }
+
+        var schema = new Dictionary<string, object>
+        {
+            ["type"] = "object",
+            ["properties"] = properties,
+        };
+        if (required.Count > 0)
+        {
+            schema["required"] = required;
+        }
+
+        return schema;
+    }
+
     /// <summary>
     /// Maps a request-body type to its schema; inline object bodies get
     /// <c>x-rivet-input-type</c> so the importer synthesizes the same record name
@@ -1680,7 +1572,7 @@ public sealed class OpenApiEmitter
     /// </summary>
     private Dictionary<string, object> BuildBodySchema(TsType bodyType, TsEndpointDefinition ep)
     {
-        if (TryBuildRouteFilteredBodySchema(bodyType, ep, out _, out var filteredSchema))
+        if (BuildRouteFilteredBodySchema(bodyType, ep) is { } filteredSchema)
         {
             if (bodyType is not TsType.Nullable)
             {
@@ -1709,36 +1601,31 @@ public sealed class OpenApiEmitter
         return schema;
     }
 
-    private bool TryBuildRouteFilteredBodySchema(
+    private Dictionary<string, object>? BuildRouteFilteredBodySchema(
         TsType bodyType,
-        TsEndpointDefinition ep,
-        out string inputTypeName,
-        out Dictionary<string, object> schema
+        TsEndpointDefinition ep
     )
     {
-        inputTypeName = null!;
-        schema = null!;
-        if (!TryResolveBodyProperties(bodyType, out _, out var sourceTypeName))
+        if (
+            !TryGetRouteFilteredBodyProperties(
+                bodyType,
+                ep,
+                out var bodyProperties,
+                out var sourceTypeName
+            )
+        )
         {
-            return false;
+            return null;
         }
 
-        if (!TryGetRouteFilteredBodyProperties(bodyType, ep, out var bodyProperties))
-        {
-            return false;
-        }
-
-        var identity = FilteredBodyIdentity(ep, bodyProperties);
-        if (!_filteredBodyNames.TryGetValue(identity, out var assignedName))
+        if (!_filteredBodyNames.ContainsKey(FilteredBodyIdentity(ep, bodyProperties)))
         {
             throw new RivetUserException(
                 $"route-filtered request body name was not allocated for endpoint '{ep.ControllerName}.{ep.Name}'"
             );
         }
 
-        inputTypeName = assignedName;
-        schema = BuildObjectSchema(bodyProperties, typeName: sourceTypeName);
-        return true;
+        return BuildObjectSchema(bodyProperties, typeName: sourceTypeName);
     }
 
     private static string FilteredBodyIdentity(
@@ -1765,11 +1652,12 @@ public sealed class OpenApiEmitter
     private bool TryGetRouteFilteredBodyProperties(
         TsType? bodyType,
         TsEndpointDefinition ep,
-        out IReadOnlyList<TsPropertyDefinition> bodyProperties
+        out IReadOnlyList<TsPropertyDefinition> bodyProperties,
+        out string sourceTypeName
     )
     {
         bodyProperties = [];
-        if (!TryResolveBodyProperties(bodyType, out var sourceProperties, out _))
+        if (!TryResolveBodyProperties(bodyType, out var sourceProperties, out sourceTypeName))
         {
             return false;
         }
@@ -1804,24 +1692,16 @@ public sealed class OpenApiEmitter
         properties = [];
         typeName = null!;
         var unwrapped = bodyType is TsType.Nullable nullable ? nullable.Inner : bodyType;
-        string definitionName;
-        IReadOnlyList<TsType>? typeArguments = null;
-
-        switch (unwrapped)
+        var (definitionName, generic) = unwrapped switch
         {
-            case TsType.TypeRef typeRef:
-                definitionName = typeRef.Name;
-                break;
-            case TsType.Generic generic:
-                definitionName = generic.Name;
-                typeArguments = generic.TypeArguments;
-                break;
-            default:
-                return false;
-        }
+            TsType.TypeRef typeRef => (typeRef.Name, null),
+            TsType.Generic g => (g.Name, g),
+            _ => ((string?)null, (TsType.Generic?)null),
+        };
 
         if (
-            !_definitions.TryGetValue(definitionName, out var definition)
+            definitionName is null
+            || !_definitions.TryGetValue(definitionName, out var definition)
             || definition.Type is not null
         )
         {
@@ -1829,20 +1709,18 @@ public sealed class OpenApiEmitter
         }
 
         typeName = definition.Name;
-        if (typeArguments is null)
+        if (generic is null)
         {
             properties = definition.Properties;
             return true;
         }
 
-        if (definition.TypeParameters.Count != typeArguments.Count)
+        if (definition.TypeParameters.Count != generic.TypeArguments.Count)
         {
             return false;
         }
 
-        var substitutions = definition
-            .TypeParameters.Select((name, index) => (name, typeArguments[index]))
-            .ToDictionary(pair => pair.name, pair => pair.Item2, StringComparer.Ordinal);
+        var substitutions = TypeParameterMap(definition, generic);
         properties = definition
             .Properties.Select(property =>
                 property with
@@ -1919,11 +1797,7 @@ public sealed class OpenApiEmitter
                 content[entry.MediaType] = media;
             }
 
-            var value = new Dictionary<string, object>
-            {
-                ["required"] = requestBody.Required,
-                ["content"] = WithExamples(content, requestBody.Examples),
-            };
+            var value = RequestBody(requestBody.Required, content, requestBody.Examples);
             AddOptionalString(value, "description", requestBody.Description);
             result.Add(requestBody.Name, value);
         }
@@ -2402,7 +2276,8 @@ public sealed class OpenApiEmitter
             else
             {
                 var componentName =
-                    variant.Metadata?.ComponentId ?? $"{baseName}_{UpperFirst(variant.Tag)}";
+                    variant.Metadata?.ComponentId
+                    ?? $"{baseName}_{Naming.ToPascalCase(variant.Tag)}";
                 _extraComponents.TryAdd(componentName, variantSchema);
                 refPath = $"#/components/schemas/{JsonPointer.Escape(componentName)}";
             }
@@ -2674,7 +2549,7 @@ public sealed class OpenApiEmitter
             var bodyType =
                 endpoint.Params.FirstOrDefault(param => param.Source == ParamSource.Body)?.Type
                 ?? endpoint.RequestType;
-            if (!TryGetRouteFilteredBodyProperties(bodyType, endpoint, out var properties))
+            if (!TryGetRouteFilteredBodyProperties(bodyType, endpoint, out var properties, out _))
             {
                 continue;
             }
@@ -2763,26 +2638,24 @@ public sealed class OpenApiEmitter
                 continue;
             }
 
-            var instanceMap = new Dictionary<string, TsType>();
-            for (
-                var i = 0;
-                i < Math.Min(template.TypeParameters.Count, instance.TypeArguments.Count);
-                i++
-            )
-            {
-                instanceMap[template.TypeParameters[i]] = instance.TypeArguments[i];
-            }
+            var instanceMap = TypeParameterMap(template, instance);
 
             var discovered = new Dictionary<string, TsType.Generic>();
             if (template.Type is not null)
             {
-                CollectGenericsFromType(ResolveTypeParams(template.Type, instanceMap), discovered);
+                CollectGenericsFromType(
+                    TsType.ResolveTypeParams(template.Type, instanceMap),
+                    discovered
+                );
             }
             else
             {
                 foreach (var prop in template.Properties)
                 {
-                    CollectGenericsFromType(ResolveTypeParams(prop.Type, instanceMap), discovered);
+                    CollectGenericsFromType(
+                        TsType.ResolveTypeParams(prop.Type, instanceMap),
+                        discovered
+                    );
                 }
             }
 
@@ -2817,18 +2690,23 @@ public sealed class OpenApiEmitter
                 continue;
             }
 
-            // Build a type parameter → concrete type mapping
-            var typeParamMap = new Dictionary<string, TsType>();
-            for (
-                var i = 0;
-                i < Math.Min(genericDef.TypeParameters.Count, generic.TypeArguments.Count);
-                i++
-            )
-            {
-                typeParamMap[genericDef.TypeParameters[i]] = generic.TypeArguments[i];
-            }
-
-            var monoSchema = BuildMonomorphisedSchema(genericDef, typeParamMap);
+            var typeParamMap = TypeParameterMap(genericDef, generic);
+            var monoSchema = genericDef.Type is not null
+                ? MapTsTypeToJsonSchema(
+                    TsType.ResolveTypeParams(genericDef.Type, typeParamMap),
+                    $"type '{genericDef.Name}'"
+                )
+                : BuildObjectSchema(
+                    genericDef
+                        .Properties.Select(prop =>
+                            prop with
+                            {
+                                Type = TsType.ResolveTypeParams(prop.Type, typeParamMap),
+                            }
+                        )
+                        .ToList(),
+                    typeName: genericDef.Name
+                );
             monoSchema["x-rivet-generic"] = new Dictionary<string, object>
             {
                 ["name"] = generic.Name,
@@ -3138,54 +3016,13 @@ public sealed class OpenApiEmitter
         return MapTsTypeToJsonSchema(key, context);
     }
 
-    private Dictionary<string, object> BuildMonomorphisedSchema(
-        TsTypeDefinition genericDef,
-        Dictionary<string, TsType> typeParamMap
-    )
-    {
-        var properties = new Dictionary<string, object>();
-        var required = new List<string>();
-
-        if (genericDef.Type is not null)
-        {
-            return MapTsTypeToJsonSchema(
-                ResolveTypeParams(genericDef.Type, typeParamMap),
-                $"type '{genericDef.Name}'"
-            );
-        }
-
-        foreach (var prop in genericDef.Properties)
-        {
-            var resolvedType = ResolveTypeParams(prop.Type, typeParamMap);
-            var propSchema = MapTsTypeToJsonSchema(
-                resolvedType,
-                $"property '{genericDef.Name}.{prop.Name}'"
-            );
-            SchemaEnricher.EnrichPropertySchema(propSchema, prop);
-            properties[prop.Name] = propSchema;
-
-            if (!prop.IsOptional)
-            {
-                required.Add(prop.Name);
-            }
-        }
-
-        var schema = new Dictionary<string, object>
-        {
-            ["type"] = "object",
-            ["properties"] = properties,
-        };
-
-        if (required.Count > 0)
-        {
-            schema["required"] = required;
-        }
-
-        return schema;
-    }
-
-    private static TsType ResolveTypeParams(TsType type, Dictionary<string, TsType> map) =>
-        TsType.ResolveTypeParams(type, map);
+    private static Dictionary<string, TsType> TypeParameterMap(
+        TsTypeDefinition template,
+        TsType.Generic instance
+    ) =>
+        template
+            .TypeParameters.Zip(instance.TypeArguments)
+            .ToDictionary(pair => pair.First, pair => pair.Second, StringComparer.Ordinal);
 
     private void CollectGenericInstances(
         IReadOnlyList<TsEndpointDefinition> endpoints,
@@ -3288,6 +3125,4 @@ public sealed class OpenApiEmitter
             _ => "object",
         };
     }
-
-    private static string UpperFirst(string s) => Naming.ToPascalCase(s);
 }

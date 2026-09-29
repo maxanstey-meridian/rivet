@@ -3109,6 +3109,67 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void Generic_Instance_Carries_Property_Scalar_Metadata_Like_A_Plain_Record()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Wrapper"] = new(
+                "Wrapper",
+                ["T"],
+                [
+                    new TsPropertyDefinition(
+                        "value",
+                        new TsType.TypeParam("T"),
+                        false,
+                        ScalarMetadata: new TsScalarMetadata(Title: "The value")
+                    ),
+                ]
+            ),
+            ["Empty"] = new("Empty", ["T"], []),
+        };
+
+        using var doc = EmitOpenApiFromModel(
+            [
+                new TsEndpointDefinition(
+                    "probe",
+                    "GET",
+                    "/probe",
+                    [],
+                    null,
+                    "probe",
+                    [
+                        new TsResponseType(
+                            200,
+                            new TsType.Generic("Wrapper", [new TsType.Primitive("string")])
+                        ),
+                        new TsResponseType(
+                            201,
+                            new TsType.Generic("Empty", [new TsType.Primitive("string")])
+                        ),
+                    ]
+                ),
+            ],
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>()
+        );
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.Equal(
+            "The value",
+            schemas
+                .GetProperty("Wrapper_String")
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("title")
+                .GetString()
+        );
+        Assert.True(
+            schemas.GetProperty("Empty_String").GetProperty("x-rivet-empty-record").GetBoolean()
+        );
+    }
+
+    [Fact]
     public void GetTypeNameSuffix_Distinct_Instantiations_Get_Distinct_Names()
     {
         // StringUnion inside a generic should produce a readable suffix
