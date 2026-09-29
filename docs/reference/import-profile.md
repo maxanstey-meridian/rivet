@@ -25,7 +25,7 @@ are listed below rather than being treated as permitted equivalences.
 
 ## Verified corpus inventory
 
-`python3 tools/roundtrip-inventory.py` checks the artifacts against
+`python3 tools/roundtrip_inventory.py` checks the artifacts against
 `corpus/verified-profile.json`. It inventories all observed standard keywords,
 component namespaces, and vendor-extension families and fails on an unknown
 keyword/extension, artifact or profile drift, or changed reviewed disposition.

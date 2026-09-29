@@ -12,10 +12,16 @@ import json
 import os
 import re
 import sys
-import urllib.parse
 
-
-METHODS = ("get", "put", "post", "delete", "patch", "head", "options", "trace")
+from openapi_common import (
+    COMPONENT_NAMESPACES,
+    METHODS,
+    canonical,
+    load_json,
+    pointer_parts,
+    pointer_token,
+    resolve_local_reference,
+)
 
 
 def is_body_forbidden_status(status_key):
@@ -35,18 +41,8 @@ def is_body_forbidden_status(status_key):
         and text[1] in ("X", "x")
         and text[2] in ("X", "x")
     )
-COMPONENT_NAMESPACES = (
-    "schemas",
-    "responses",
-    "parameters",
-    "examples",
-    "requestBodies",
-    "headers",
-    "securitySchemes",
-    "links",
-    "callbacks",
-    "pathItems",
-)
+
+
 SWAGGER_COLLECTION_FORMATS = {
     "multi": ("form", True),
     "csv": ("form", False),
@@ -135,21 +131,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_document(path):
-    try:
-        with open(path, encoding="utf-8") as source:
-            document = json.load(source)
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise ValueError(f"cannot read {path}: {error}") from error
-    if not isinstance(document, dict):
-        raise ValueError(f"{path}: root must be a JSON object")
-    return document
-
-
-def canonical_json(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-
-
 def contact_projection(value):
     if not isinstance(value, dict):
         return value
@@ -171,7 +152,7 @@ def json_value(value):
     if isinstance(value, tuple):
         return [json_value(item) for item in value]
     if isinstance(value, set):
-        return sorted((json_value(item) for item in value), key=canonical_json)
+        return sorted((json_value(item) for item in value), key=canonical)
     if isinstance(value, dict):
         return {key: json_value(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -179,34 +160,10 @@ def json_value(value):
     return value
 
 
-def pointer_parts(reference):
-    if not isinstance(reference, str) or not reference.startswith("#/"):
-        return None
-    return [
-        urllib.parse.unquote(part).replace("~1", "/").replace("~0", "~")
-        for part in reference[2:].split("/")
-    ]
-
-
-def resolve_pointer(document, reference):
-    parts = pointer_parts(reference)
-    if parts is None:
-        return None
-    current = document
-    for part in parts:
-        if isinstance(current, dict) and part in current:
-            current = current[part]
-        elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
-            current = current[int(part)]
-        else:
-            return None
-    return current
-
-
 def resolve_once(document, value):
     if not isinstance(value, dict) or "$ref" not in value:
         return value
-    target = resolve_pointer(document, value["$ref"])
+    target = resolve_local_reference(document, value["$ref"])
     if target is None:
         return value
     siblings = {key: item for key, item in value.items() if key != "$ref"}
@@ -215,10 +172,6 @@ def resolve_once(document, value):
     merged = dict(target)
     merged.update(siblings)
     return merged
-
-
-def pointer_token(value):
-    return str(value).replace("~", "~0").replace("/", "~1")
 
 
 def normalize_owner_pointer(document, pointer):
@@ -468,7 +421,7 @@ def security_projection(security):
     clauses = []
     for clause in security:
         if not isinstance(clause, dict):
-            clauses.append(canonical_json(clause))
+            clauses.append(canonical(clause))
             continue
         projected = []
         for scheme, scopes in clause.items():
@@ -488,18 +441,18 @@ def examples_projection(container):
     if "examples" in container:
         examples = container["examples"]
         if isinstance(examples, list):
-            return tuple(sorted(canonical_json(value) for value in examples))
+            return tuple(sorted(canonical(value) for value in examples))
         if isinstance(examples, dict):
-            return canonical_json(examples)
+            return canonical(examples)
     if "example" in container:
-        return (canonical_json(container["example"]),)
+        return (canonical(container["example"]),)
     return None
 
 
 def servers_projection(servers):
     if not isinstance(servers, list):
         return servers
-    return tuple(canonical_json(server) for server in servers)
+    return tuple(canonical(server) for server in servers)
 
 
 def schema_ref_identity(reference):
@@ -980,7 +933,7 @@ class Comparator:
             "#/externalDocs",
             self.original.get("externalDocs"),
             self.reemitted.get("externalDocs"),
-            canonical_json,
+            canonical,
         )
         self.compare_value(
             "document",
@@ -996,7 +949,7 @@ class Comparator:
             "#/components/securitySchemes",
             self.security_schemes(self.original),
             self.security_schemes(self.reemitted),
-            canonical_json,
+            canonical,
         )
         for identity in self.missing_components:
             self.add("document", "component-missing", "#/components", identity, None)
@@ -1107,7 +1060,7 @@ class Comparator:
                 path,
                 original_extensions,
                 reemitted_extensions,
-                canonical_json,
+                canonical,
             )
             self.compare_parameters(key, original, reemitted)
             self.compare_request_body(key, original, reemitted)
@@ -1368,7 +1321,7 @@ class Comparator:
             f"{path}/links",
             original.get("links", {}),
             reemitted.get("links", {}),
-            canonical_json,
+            canonical,
         )
         # The import preserves the status, its description and its headers
         # bodyless on body-forbidden statuses, so only the content comparison
@@ -1451,7 +1404,7 @@ class Comparator:
                 f"{media_path}/encoding",
                 original_media.get("encoding", {}),
                 reemitted_media.get("encoding", {}),
-                canonical_json,
+                canonical,
             )
             self.compare_schema(
                 original_media.get("schema", {}),
@@ -1466,7 +1419,7 @@ class Comparator:
     def schema_node_key(schema):
         if isinstance(schema, dict) and "$ref" in schema:
             siblings = {key: value for key, value in schema.items() if key != "$ref"}
-            return ("ref", schema.get("$ref"), canonical_json(siblings))
+            return ("ref", schema.get("$ref"), canonical(siblings))
         return ("node", id(schema))
 
     @staticmethod
@@ -1529,7 +1482,7 @@ class Comparator:
     def enum_projection(value):
         if not isinstance(value, list):
             return value
-        return tuple(sorted(canonical_json(item) for item in value))
+        return tuple(sorted(canonical(item) for item in value))
 
     @staticmethod
     def annotation_projection(schema):
@@ -1825,7 +1778,7 @@ class Comparator:
                         path,
                         original,
                         reemitted,
-                        canonical_json,
+                        canonical,
                     )
 
     def compare_reviewed_extensions(self):
@@ -1841,7 +1794,7 @@ class Comparator:
                     original.get(owner_name),
                     reemitted.get(owner_name),
                 )
-            elif canonical_json(original[owner_name]) != canonical_json(reemitted[owner_name]):
+            elif canonical(original[owner_name]) != canonical(reemitted[owner_name]):
                 self.add(
                     extension_scope(owner),
                     "vendor-extension-preserve",
@@ -1851,7 +1804,7 @@ class Comparator:
                 )
 
         for (owner, name), expected in reviewed_extensions(self.original, "map").items():
-            emitted_owner = resolve_pointer(self.reemitted, owner)
+            emitted_owner = resolve_local_reference(self.reemitted, owner)
             actual = None
             matches = False
             if isinstance(emitted_owner, dict):
@@ -1904,7 +1857,7 @@ class Comparator:
             if reference is not None and (
                 not isinstance(reference, str)
                 or not reference.startswith("#/")
-                or resolve_pointer(document, reference) is None
+                or resolve_local_reference(document, reference) is None
             ):
                 self.add("integrity", "unresolved-reference", path, side, reference)
             for key, child in value.items():
@@ -2087,8 +2040,8 @@ def print_report(comparator):
 def main():
     args = parse_args()
     try:
-        original = load_document(args.original)
-        reemitted = load_document(args.reemitted)
+        original = load_json(args.original)
+        reemitted = load_json(args.reemitted)
         comparator = Comparator(original, reemitted, args.generated_source)
         comparator.run()
         summary = comparator.summary()

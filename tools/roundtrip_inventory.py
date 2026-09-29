@@ -13,20 +13,15 @@ import json
 import pathlib
 import sys
 
+from openapi_common import (
+    COMPONENT_NAMESPACES,
+    METHODS,
+    canonical,
+    load_json,
+    pointer_token,
+    resolve_local_reference,
+)
 
-METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
-COMPONENT_NAMESPACES = {
-    "callbacks",
-    "examples",
-    "headers",
-    "links",
-    "parameters",
-    "pathItems",
-    "requestBodies",
-    "responses",
-    "schemas",
-    "securitySchemes",
-}
 
 # OpenAPI 2.0/3.x and the JSON Schema vocabulary exercised by API descriptions.
 # Dynamic map keys and opaque example/default/extension payloads are handled by
@@ -153,14 +148,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-
-
-def pointer_part(value):
-    return value.replace("~", "~0").replace("/", "~1")
-
-
 def value_shape(value):
     if value is None:
         return "null"
@@ -192,16 +179,16 @@ class Walker:
             return
         if mode == "map":
             for name, item in sorted(value.items()):
-                self.walk(item, f"{pointer}/{pointer_part(name)}")
+                self.walk(item, f"{pointer}/{pointer_token(name)}")
             return
         if mode == "security":
             for name, scopes in sorted(value.items()):
                 if not isinstance(scopes, list):
-                    self.unknown.append(f"{pointer}/{pointer_part(name)} (security scopes are not an array)")
+                    self.unknown.append(f"{pointer}/{pointer_token(name)} (security scopes are not an array)")
             return
         if mode == "components":
             for name, item in sorted(value.items()):
-                child_pointer = f"{pointer}/{pointer_part(name)}"
+                child_pointer = f"{pointer}/{pointer_token(name)}"
                 if name.lower().startswith("x-"):
                     self._extension(name, item, child_pointer)
                 elif name not in COMPONENT_NAMESPACES:
@@ -212,7 +199,7 @@ class Walker:
             return
 
         for name, item in sorted(value.items()):
-            child_pointer = f"{pointer}/{pointer_part(name)}"
+            child_pointer = f"{pointer}/{pointer_token(name)}"
             if name.lower().startswith("x-"):
                 self._extension(name, item, child_pointer)
                 continue
@@ -248,18 +235,6 @@ def is_component_schema_root(pointer):
     return (
         len(parts) == 3 and parts[0] == "components" and parts[1] == "schemas"
     ) or (len(parts) == 2 and parts[0] == "definitions")
-
-
-def resolve_local_reference(document, reference):
-    if not isinstance(reference, str) or not reference.startswith("#/"):
-        return None
-    value = document
-    for raw_part in reference[2:].split("/"):
-        part = raw_part.replace("~1", "/").replace("~0", "~")
-        if not isinstance(value, dict) or part not in value:
-            return None
-        value = value[part]
-    return value
 
 
 def additional_properties_status(schema):
@@ -366,7 +341,7 @@ class CarrierWalker:
                 continue
             for name in sorted(values):
                 self.add(
-                    f"/components/{namespace}/{pointer_part(name)}",
+                    f"/components/{namespace}/{pointer_token(name)}",
                     shape,
                     "provenance-only",
                     proof,
@@ -388,7 +363,7 @@ class CarrierWalker:
 
         self._inspect(value, pointer, schema_context, direct_all_of_branch)
         for name, item in sorted(value.items()):
-            child_pointer = f"{pointer}/{pointer_part(name)}"
+            child_pointer = f"{pointer}/{pointer_token(name)}"
             if name.lower().startswith("x-") or name in OPAQUE_KEYS:
                 continue
             if name == "examples":
@@ -405,7 +380,7 @@ class CarrierWalker:
                 for child_name, child in sorted(item.items()):
                     self.walk(
                         child,
-                        f"{child_pointer}/{pointer_part(child_name)}",
+                        f"{child_pointer}/{pointer_token(child_name)}",
                         schema_context=True,
                     )
                 continue
@@ -442,7 +417,7 @@ class CarrierWalker:
         for name, example in sorted(value.items()):
             if isinstance(example, dict) and "externalValue" in example:
                 self.add(
-                    f"{pointer}/{pointer_part(name)}",
+                    f"{pointer}/{pointer_token(name)}",
                     "external-value-example",
                     "provenance-only",
                     EXTERNAL_VALUE_PROOF,
@@ -556,7 +531,7 @@ class CarrierWalker:
             for name, item in sorted(encoding.items()):
                 if isinstance(item, dict):
                     self.add(
-                        f"{pointer}/encoding/{pointer_part(name)}",
+                        f"{pointer}/encoding/{pointer_token(name)}",
                         "encoding-object",
                         "provenance-only",
                         ENCODING_PROOF,
@@ -614,17 +589,6 @@ class CarrierWalker:
         return "scalar"
 
 
-def load_json(path):
-    try:
-        with path.open(encoding="utf-8") as source:
-            value = json.load(source)
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise ValueError(f"cannot read {path}: {error}") from error
-    if not isinstance(value, dict):
-        raise ValueError(f"{path}: root must be a JSON object")
-    return value
-
-
 def parse_overrides(values, corpus_ids):
     overrides = {}
     for value in values:
@@ -651,7 +615,7 @@ def component_counts(document):
     components = document.get("components", {})
     if isinstance(components, dict):
         for namespace, value in components.items():
-            if isinstance(value, dict) and not namespace.lower().startswith("x-"):
+            if namespace in COMPONENT_NAMESPACES and isinstance(value, dict):
                 source_counts[f"components.{namespace}"] = len(value)
                 counts[namespace] += len(value)
     return dict(sorted(source_counts.items())), dict(sorted(counts.items()))

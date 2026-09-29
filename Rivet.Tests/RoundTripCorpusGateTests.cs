@@ -85,7 +85,7 @@ public sealed class RoundTripCorpusGateTests
                 CliRunner.Run(
                     CliRunner.RepoPath(),
                     "python3",
-                    [CliRunner.RepoPath("tools", "roundtrip-inventory.py")]
+                    [CliRunner.RepoPath("tools", "roundtrip_inventory.py")]
                 )
             ),
         LazyThreadSafetyMode.ExecutionAndPublication
@@ -305,7 +305,7 @@ public sealed class RoundTripCorpusGateTests
         {
             report.Add(
                 "inventory",
-                $"roundtrip-inventory.py exited {process.ExitCode}: {string.Join(" | ", Lines(process.StdErr))}"
+                $"roundtrip_inventory.py exited {process.ExitCode}: {string.Join(" | ", Lines(process.StdErr))}"
             );
             return;
         }
@@ -318,14 +318,14 @@ public sealed class RoundTripCorpusGateTests
                 || passed.ValueKind != JsonValueKind.True
             )
             {
-                report.Add("inventory", "roundtrip-inventory.py did not report passed=true");
+                report.Add("inventory", "roundtrip_inventory.py did not report passed=true");
             }
         }
         catch (JsonException exception)
         {
             report.Add(
                 "inventory",
-                $"roundtrip-inventory.py returned invalid JSON: {exception.Message}"
+                $"roundtrip_inventory.py returned invalid JSON: {exception.Message}"
             );
         }
     }

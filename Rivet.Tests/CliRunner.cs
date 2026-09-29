@@ -242,10 +242,10 @@ internal sealed class ServerProcess(Process process, string url) : IAsyncDisposa
     }
 }
 
-/// <summary>Runs <c>tools/roundtrip-diff.py</c>, the comparator the round-trip gate shares.</summary>
+/// <summary>Runs <c>tools/roundtrip_diff.py</c>, the comparator the round-trip gate shares.</summary>
 internal static class RoundTripDiff
 {
-    private static string ScriptPath => CliRunner.RepoPath("tools", "roundtrip-diff.py");
+    private static string ScriptPath => CliRunner.RepoPath("tools", "roundtrip_diff.py");
 
     public static (int ExitCode, string StdOut, string StdErr) Run(
         string workingDirectory,

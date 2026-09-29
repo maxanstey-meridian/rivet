@@ -4,7 +4,6 @@
 import argparse
 import collections
 import hashlib
-import importlib.util
 import json
 import pathlib
 import subprocess
@@ -86,17 +85,8 @@ TWILIO_DEFAULT_EQUIVALENT_PATHS = {
 }
 
 
-def load_roundtrip_diff():
-    path = pathlib.Path(__file__).with_name("roundtrip-diff.py")
-    spec = importlib.util.spec_from_file_location("rivet_roundtrip_diff", path)
-    if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load semantic comparator from {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-ROUNDTRIP_DIFF = load_roundtrip_diff()
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+import roundtrip_diff as ROUNDTRIP_DIFF  # noqa: E402
 
 
 def parse_args():
