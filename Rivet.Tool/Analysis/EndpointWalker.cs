@@ -171,11 +171,7 @@ public static class EndpointWalker
         }
         var requestMediaTypes = consumes
             .SelectMany(a => a.ConstructorArguments)
-            .SelectMany(a =>
-                a.Kind == TypedConstantKind.Array ? a.Values.AsEnumerable() : new[] { a }
-            )
-            .Select(a => a.Value)
-            .OfType<string>()
+            .SelectMany(a => a.Strings())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         if (requestMediaTypes.Length > 1)
@@ -323,46 +319,18 @@ public static class EndpointWalker
     /// Reads the first content type declared via [Produces] on the action, falling
     /// back to the controller. Returns null when MVC metadata declares none.
     /// </summary>
-    private static string? ExtractProducesContentType(WellKnownTypes wkt, IMethodSymbol method)
-    {
-        if (wkt.Produces is null)
-        {
-            return null;
-        }
-
-        foreach (var attr in method.GetAttributes().Concat(method.ContainingType.GetAttributes()))
-        {
-            if (!attr.Is(wkt.Produces))
-            {
-                continue;
-            }
-
-            // ProducesAttribute's constructor is (string contentType,
-            // params string[] additionalContentTypes), so even a single
-            // [Produces("x")] carries two arguments (string + empty array).
-            // Read the first declared content type across every argument:
-            // the string positionals first, then any additional array values.
-            foreach (var value in attr.ConstructorArguments)
-            {
-                if (value.Kind == TypedConstantKind.Array)
-                {
-                    foreach (var item in value.Values)
-                    {
-                        if (item.Value is string arrayContentType && arrayContentType.Length > 0)
-                        {
-                            return arrayContentType;
-                        }
-                    }
-                }
-                else if (value.Value is string contentType && contentType.Length > 0)
-                {
-                    return contentType;
-                }
-            }
-        }
-
-        return null;
-    }
+    /// <remarks>
+    /// ProducesAttribute's constructor is (string contentType, params string[]
+    /// additionalContentTypes), so the string positional is read before the array values.
+    /// </remarks>
+    private static string? ExtractProducesContentType(WellKnownTypes wkt, IMethodSymbol method) =>
+        method
+            .GetAttributes()
+            .Concat(method.ContainingType.GetAttributes())
+            .Where(attr => attr.Is(wkt.Produces))
+            .SelectMany(attr => attr.ConstructorArguments)
+            .SelectMany(argument => argument.Strings())
+            .FirstOrDefault(contentType => contentType.Length > 0);
 
     private static IReadOnlyList<TsEndpointExample>? ExtractRequestExamples(
         WellKnownTypes wkt,

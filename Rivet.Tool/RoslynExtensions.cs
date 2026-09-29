@@ -40,4 +40,10 @@ internal static class RoslynExtensions
     /// <summary>The first constructor argument as a string, or null.</summary>
     public static string? StringArgument(this AttributeData? attribute) =>
         attribute?.ConstructorArguments is [{ Value: string value }, ..] ? value : null;
+
+    /// <summary>The string values of an attribute argument, flattening arrays.</summary>
+    public static IEnumerable<string> Strings(this TypedConstant constant) =>
+        constant.Kind == TypedConstantKind.Array ? constant.Values.SelectMany(Strings)
+        : constant.Value is string value ? [value]
+        : [];
 }

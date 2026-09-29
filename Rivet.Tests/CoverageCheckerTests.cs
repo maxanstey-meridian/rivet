@@ -78,10 +78,9 @@ public sealed class CoverageCheckerTests
 
     private static IReadOnlyList<CoverageWarning> RunCheck(params string[] sources)
     {
-        var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        return CompilationHelper.CheckCoverage(compilation, endpoints);
+        return CompilationHelper.CheckCoverage(
+            CompilationHelper.CreateCompilationFromMultiple(sources)
+        );
     }
 
     [Fact]

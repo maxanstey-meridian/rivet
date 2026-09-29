@@ -6,6 +6,9 @@ using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
 
+/// <summary>A contract endpoint and the field it was read from (null for an abstract method).</summary>
+public sealed record ContractEndpoint(TsEndpointDefinition Endpoint, IFieldSymbol? Field);
+
 /// <summary>
 /// Discovers [RivetContract]-attributed static classes and extracts endpoint definitions
 /// from their static readonly RouteDefinition fields by reading the builder chain via Roslyn operations.
@@ -13,10 +16,11 @@ namespace Rivet.Tool.Analysis;
 public static class ContractWalker
 {
     /// <summary>
-    /// Discovers endpoints from [RivetContract] static classes.
+    /// Discovers endpoints from [RivetContract] classes, each with the endpoint field it
+    /// was read from (null for an abstract-method contract endpoint).
     /// Use SymbolDiscovery.Discover() to obtain the contract type list.
     /// </summary>
-    public static IReadOnlyList<TsEndpointDefinition> Walk(
+    public static IReadOnlyList<ContractEndpoint> Walk(
         Compilation compilation,
         WellKnownTypes wkt,
         TypeWalker typeWalker,
@@ -29,7 +33,7 @@ public static class ContractWalker
             return [];
         }
 
-        var endpoints = new List<TsEndpointDefinition>();
+        var endpoints = new List<ContractEndpoint>();
 
         foreach (var type in contractTypes)
         {
@@ -59,7 +63,7 @@ public static class ContractWalker
                     );
                     if (endpoint is not null)
                     {
-                        endpoints.Add(endpoint);
+                        endpoints.Add(new ContractEndpoint(endpoint, null));
                     }
                 }
 
@@ -96,7 +100,7 @@ public static class ContractWalker
                 );
                 if (endpoint is not null)
                 {
-                    endpoints.Add(endpoint);
+                    endpoints.Add(new ContractEndpoint(endpoint, field));
                 }
             }
         }

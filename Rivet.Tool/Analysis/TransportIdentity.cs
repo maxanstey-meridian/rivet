@@ -2,9 +2,8 @@ namespace Rivet.Tool.Analysis;
 
 /// <summary>
 /// Canonical transport identity for endpoints: (HTTP method, normalized route).
-/// The normalization is the single shared source used by both the endpoint merger
-/// and the OpenAPI emitter, mirroring CoverageChecker's route normalization
-/// (RouteParser.StripRouteConstraints plus slash trim) so the layers cannot drift.
+/// The normalization is the single shared source used by the endpoint merger, the
+/// OpenAPI emitter and the coverage checker, so the layers cannot drift.
 /// (ControllerName, Name) is source identity, never transport identity —
 /// overloaded actions and cross-frontend declarations must not collapse on it.
 /// </summary>
@@ -13,7 +12,7 @@ public static class TransportIdentity
     /// <summary>
     /// Normalizes a route template to its canonical transport form: route constraints
     /// stripped ({id:guid} → {id}) and edge slashes trimmed with a leading slash
-    /// restored — identical to CoverageChecker.NormalizeRoute.
+    /// restored.
     /// </summary>
     public static string NormalizeRoute(string route)
     {

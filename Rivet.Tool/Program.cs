@@ -69,7 +69,8 @@ static async Task<int> Run(string[] args)
         discovered.EndpointMethods,
         discovered.ClientTypes
     );
-    var contractEndpoints = ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
+    var contracts = ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
+    var contractEndpoints = contracts.Select(contract => contract.Endpoint).ToList();
 
     if (options.Check)
     {
@@ -79,7 +80,7 @@ static async Task<int> Run(string[] args)
         var coverageWarnings = CoverageChecker.Check(
             compilation,
             wkt,
-            contractEndpoints,
+            contracts,
             functionsRoutePrefix
         );
         foreach (var w in coverageWarnings)

@@ -1,6 +1,6 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
@@ -38,11 +38,20 @@ public static class CoverageChecker
     public static IReadOnlyList<CoverageWarning> Check(
         Compilation compilation,
         WellKnownTypes wkt,
-        IReadOnlyList<TsEndpointDefinition> contractEndpoints,
+        IReadOnlyList<ContractEndpoint> contractEndpoints,
         string functionsRoutePrefix
     )
     {
-        var fieldMap = BuildContractFieldMap(compilation, contractEndpoints);
+        var fieldMap = new Dictionary<IFieldSymbol, TsEndpointDefinition>(
+            SymbolEqualityComparer.Default
+        );
+        foreach (var (endpoint, field) in contractEndpoints)
+        {
+            if (field is not null)
+            {
+                fieldMap[field] = endpoint;
+            }
+        }
         if (fieldMap.Count == 0)
         {
             return [];
@@ -54,34 +63,33 @@ public static class CoverageChecker
             SymbolEqualityComparer.Default
         );
         var bindings = new List<ContractBinding>();
-        var consumedBindings = new HashSet<InvocationExpressionSyntax>();
+        var consumedBindings = new HashSet<SyntaxNode>();
 
         foreach (var tree in compilation.SyntaxTrees)
         {
             var semanticModel = compilation.GetSemanticModel(tree);
-            var root = tree.GetRoot();
-
-            foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (
+                var syntax in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
+            )
             {
-                if (TryResolveBinding(wkt, invocation, semanticModel, fieldMap, out var binding))
-                {
-                    bindings.Add(binding);
-                }
-
-                if (!IsRivetTerminalInvocation(wkt, invocation, semanticModel))
+                if (semanticModel.GetOperation(syntax) is not IInvocationOperation invocation)
                 {
                     continue;
                 }
 
-                var receiver = ((MemberAccessExpressionSyntax)invocation.Expression).Expression;
-                var contractReference = ResolveContractReference(
-                    wkt,
-                    receiver,
-                    semanticModel,
-                    fieldMap,
-                    new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default)
-                );
-                if (contractReference is null)
+                if (
+                    IsBind(wkt, invocation)
+                    && ResolveContractReference(wkt, invocation.Instance, fieldMap, []) is { } bound
+                )
+                {
+                    bindings.Add(new ContractBinding(bound.Field, syntax));
+                }
+
+                if (
+                    !IsTerminal(wkt, invocation)
+                    || ResolveContractReference(wkt, invocation.Instance, fieldMap, [])
+                        is not { } reference
+                )
                 {
                     continue;
                 }
@@ -90,7 +98,6 @@ public static class CoverageChecker
                     wkt,
                     adapterType,
                     invocation,
-                    semanticModel,
                     functionsRoutePrefix
                 );
                 if (!context.IsEndpoint)
@@ -98,90 +105,28 @@ public static class CoverageChecker
                     continue;
                 }
 
-                if (contractReference.Binding is not null)
+                if (reference.Binding is not null)
                 {
-                    consumedBindings.Add(contractReference.Binding);
+                    consumedBindings.Add(reference.Binding);
                 }
 
-                var field = contractReference.Field;
-                if (!implementations.TryGetValue(field, out var fieldImplementations))
+                if (!implementations.TryGetValue(reference.Field, out var fieldImplementations))
                 {
                     fieldImplementations = [];
-                    implementations[field] = fieldImplementations;
+                    implementations[reference.Field] = fieldImplementations;
                 }
 
-                fieldImplementations.Add(new TerminalImplementation(invocation, context));
+                fieldImplementations.Add(new TerminalImplementation(syntax, context));
             }
         }
 
         return BuildWarnings(fieldMap, implementations, bindings, consumedBindings);
     }
 
-    private static Dictionary<IFieldSymbol, TsEndpointDefinition> BuildContractFieldMap(
-        Compilation compilation,
-        IReadOnlyList<TsEndpointDefinition> contractEndpoints
-    )
-    {
-        var contractAttr = compilation.GetTypeByMetadataName("Rivet.RivetContractAttribute");
-        var defineType = compilation.GetTypeByMetadataName("Rivet.Define");
-        var fieldMap = new Dictionary<IFieldSymbol, TsEndpointDefinition>(
-            SymbolEqualityComparer.Default
-        );
-
-        if (contractAttr is null || defineType is null)
-        {
-            return fieldMap;
-        }
-
-        foreach (var type in RoslynExtensions.GetAllTypes(compilation.Assembly.GlobalNamespace))
-        {
-            if (
-                type.IsAbstract && !type.IsStatic
-                || !type.GetAttributes().Any(a => a.Is(contractAttr))
-            )
-            {
-                continue;
-            }
-
-            var controllerName = ContractWalker.DeriveControllerName(type);
-            foreach (var field in type.GetMembers().OfType<IFieldSymbol>())
-            {
-                if (!ContractWalker.IsRivetEndpointField(field.Type, defineType))
-                {
-                    continue;
-                }
-
-                var fieldName = Naming.ToCamelCase(field.Name);
-                var endpoint = contractEndpoints.FirstOrDefault(e =>
-                    e.ControllerName == controllerName && e.Name == fieldName
-                );
-                if (endpoint is not null)
-                {
-                    fieldMap[field] = endpoint;
-                }
-            }
-        }
-
-        return fieldMap;
-    }
-
-    private static bool IsRivetTerminalInvocation(
-        WellKnownTypes wkt,
-        InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel
-    )
-    {
-        if (
-            invocation.Expression is not MemberAccessExpressionSyntax memberAccess
-            || memberAccess.Name.Identifier.ValueText is not ("Success" or "Error" or "File")
-            || semanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method
-        )
-        {
-            return false;
-        }
-
-        return IsOneOf(
-            method.ContainingType.OriginalDefinition,
+    private static bool IsTerminal(WellKnownTypes wkt, IInvocationOperation invocation) =>
+        invocation is { TargetMethod.Name: "Success" or "Error" or "File", Instance: not null }
+        && IsOneOf(
+            invocation.TargetMethod.ContainingType.OriginalDefinition,
             wkt.RouteDefinition,
             wkt.RouteDefinitionOfT,
             wkt.FileRouteDefinition,
@@ -189,211 +134,147 @@ public static class CoverageChecker
             wkt.BoundRouteDefinitionOfT,
             wkt.BoundFileRouteDefinition
         );
-    }
 
-    private static bool TryResolveBinding(
-        WellKnownTypes wkt,
-        InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel,
-        IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap,
-        out ContractBinding binding
-    )
-    {
-        binding = null!;
-        if (!TryGetRivetBindReceiver(wkt, invocation, semanticModel, out var receiver))
-        {
-            return false;
-        }
-
-        var contractReference = ResolveContractReference(
-            wkt,
-            receiver,
-            semanticModel,
-            fieldMap,
-            new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default)
+    private static bool IsBind(WellKnownTypes wkt, IInvocationOperation invocation) =>
+        invocation is { TargetMethod.Name: "Bind", Instance: not null }
+        && IsOneOf(
+            invocation.TargetMethod.ContainingType.OriginalDefinition,
+            wkt.RouteDefinitionOfTInputTOutput,
+            wkt.InputRouteDefinitionOfT,
+            wkt.FileRouteDefinitionOfT
         );
-        if (contractReference is null)
-        {
-            return false;
-        }
 
-        binding = new ContractBinding(contractReference.Field, invocation);
-        return true;
-    }
-
+    /// <summary>
+    /// The contract field a route-definition value comes from: the field itself, a local
+    /// with a single statically known value, or a .Bind(...) of either (recorded as the
+    /// binding the terminal consumes).
+    /// </summary>
     private static ContractReference? ResolveContractReference(
         WellKnownTypes wkt,
-        ExpressionSyntax expression,
-        SemanticModel semanticModel,
+        IOperation? operation,
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap,
         HashSet<ILocalSymbol> visitedLocals
-    )
-    {
-        expression = Unwrap(expression);
-        var symbol = semanticModel.GetSymbolInfo(expression).Symbol;
-        if (symbol is IFieldSymbol field && fieldMap.ContainsKey(field))
+    ) =>
+        WithoutImplicitConversions(operation) switch
         {
-            return new ContractReference(field, null);
-        }
-
-        if (symbol is ILocalSymbol local)
-        {
-            if (
-                !visitedLocals.Add(local)
-                || !TryGetProvenanceValue(local, expression, semanticModel, out var value)
-            )
-            {
-                return null;
-            }
-
-            return ResolveContractReference(wkt, value, semanticModel, fieldMap, visitedLocals);
-        }
-
-        if (
-            expression is InvocationExpressionSyntax bindInvocation
-            && TryGetRivetBindReceiver(wkt, bindInvocation, semanticModel, out var bindReceiver)
-        )
-        {
-            var contractReference = ResolveContractReference(
+            IFieldReferenceOperation { Field: var field } when fieldMap.ContainsKey(field) =>
+                new ContractReference(field, null),
+            ILocalReferenceOperation local
+                when visitedLocals.Add(local.Local) && ProvenanceValue(local) is { } value =>
+                ResolveContractReference(wkt, value, fieldMap, visitedLocals),
+            IInvocationOperation bind when IsBind(wkt, bind) => ResolveContractReference(
                 wkt,
-                bindReceiver,
-                semanticModel,
+                bind.Instance,
                 fieldMap,
                 visitedLocals
-            );
-            return contractReference is null
-                ? null
-                : contractReference with
-                {
-                    Binding = bindInvocation,
-                };
-        }
-
-        return null;
-    }
-
-    private static bool TryGetRivetBindReceiver(
-        WellKnownTypes wkt,
-        InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel,
-        out ExpressionSyntax receiver
-    )
-    {
-        receiver = null!;
-        if (
-            invocation.Expression is not MemberAccessExpressionSyntax bindAccess
-            || bindAccess.Name.Identifier.ValueText != "Bind"
-            || semanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol bindMethod
-            || !IsOneOf(
-                bindMethod.ContainingType.OriginalDefinition,
-                wkt.RouteDefinitionOfTInputTOutput,
-                wkt.InputRouteDefinitionOfT,
-                wkt.FileRouteDefinitionOfT
             )
-        )
-        {
-            return false;
-        }
+                is { } reference
+                ? reference with
+                {
+                    Binding = bind.Syntax,
+                }
+                : null,
+            _ => null,
+        };
 
-        receiver = bindAccess.Expression;
-        return true;
-    }
-
-    private static bool TryGetProvenanceValue(
-        ILocalSymbol local,
-        ExpressionSyntax use,
-        SemanticModel semanticModel,
-        out ExpressionSyntax value
-    )
+    /// <summary>
+    /// The single value a local holds at <paramref name="use"/>, or null when it cannot
+    /// be known statically: the local is ref, passed by ref/out, or assigned more than
+    /// its initializer. A local declared without an initializer qualifies only through
+    /// one simple assignment statement in the declaring block, between the declaration
+    /// and the statement using it.
+    /// </summary>
+    private static IOperation? ProvenanceValue(ILocalReferenceOperation use)
     {
-        value = null!;
+        var local = use.Local;
         if (
             local.RefKind != RefKind.None
-            || local.DeclaringSyntaxReferences is not [var syntaxReference]
-            || syntaxReference.GetSyntax() is not VariableDeclaratorSyntax declarator
+            || local.DeclaringSyntaxReferences is not [var reference]
+            || reference.GetSyntax() is not VariableDeclaratorSyntax declaratorSyntax
+            || use.SemanticModel is not { } semanticModel
         )
         {
-            return false;
+            return null;
         }
 
-        var scope =
-            declarator.FirstAncestorOrSelf<AnonymousFunctionExpressionSyntax>() as SyntaxNode
-            ?? declarator.FirstAncestorOrSelf<LocalFunctionStatementSyntax>() as SyntaxNode
-            ?? declarator.FirstAncestorOrSelf<BaseMethodDeclarationSyntax>() as SyntaxNode;
-        if (scope is null)
+        var scopeSyntax =
+            declaratorSyntax.FirstAncestorOrSelf<AnonymousFunctionExpressionSyntax>() as SyntaxNode
+            ?? declaratorSyntax.FirstAncestorOrSelf<LocalFunctionStatementSyntax>() as SyntaxNode
+            ?? declaratorSyntax.FirstAncestorOrSelf<BaseMethodDeclarationSyntax>();
+        if (scopeSyntax is null || semanticModel.GetOperation(scopeSyntax) is not { } scope)
         {
-            return false;
+            return null;
         }
 
-        var assignments = scope
-            .DescendantNodes()
-            .OfType<AssignmentExpressionSyntax>()
-            .Where(assignment =>
-                SymbolEqualityComparer.Default.Equals(GetReferencedSymbol(assignment.Left), local)
-            )
-            .ToArray();
-
-        foreach (var argument in scope.DescendantNodes().OfType<ArgumentSyntax>())
-        {
-            if (
-                argument.RefKindKeyword.Kind() is SyntaxKind.RefKeyword or SyntaxKind.OutKeyword
-                && SymbolEqualityComparer.Default.Equals(
-                    GetReferencedSymbol(argument.Expression),
-                    local
-                )
-            )
-            {
-                return false;
-            }
-        }
-
-        if (declarator.Initializer is { Value: var initializer })
-        {
-            if (assignments.Length != 0)
-            {
-                return false;
-            }
-
-            value = initializer;
-            return true;
-        }
-
+        var scopeOperations = scope.Descendants().ToList();
         if (
+            scopeOperations
+                .OfType<IVariableDeclaratorOperation>()
+                .FirstOrDefault(declarator =>
+                    SymbolEqualityComparer.Default.Equals(declarator.Symbol, local)
+                )
+            is not { } declarator
+        )
+        {
+            return null;
+        }
+
+        var assignments = scopeOperations
+            .OfType<IAssignmentOperation>()
+            .Where(assignment => IsLocal(assignment.Target, local))
+            .ToList();
+        if (
+            scopeOperations
+                .OfType<IArgumentOperation>()
+                .Any(argument =>
+                    argument.Parameter?.RefKind is RefKind.Ref or RefKind.Out
+                    && IsLocal(argument.Value, local)
+                )
+        )
+        {
+            return null;
+        }
+
+        if (declarator.GetVariableInitializer() is { Value: var initializer })
+        {
+            return assignments.Count == 0 ? initializer : null;
+        }
+
+        var useStatement = Ancestors(use)
+            .FirstOrDefault(operation =>
+                !operation.IsImplicit && operation.Parent is IBlockOperation { IsImplicit: false }
+            );
+        return
             assignments
-                is not [
+                is [
+                    ISimpleAssignmentOperation
                     {
-                        RawKind: (int)SyntaxKind.SimpleAssignmentExpression,
-                        Right: var assignedValue,
-                        Parent: ExpressionStatementSyntax { Parent: BlockSyntax assignmentBlock },
+                        Parent: IExpressionStatementOperation
+                        {
+                            Parent: IBlockOperation assignmentBlock
+                        },
                     } assignment,
                 ]
-            || declarator.Parent?.Parent
-                is not LocalDeclarationStatementSyntax { Parent: BlockSyntax declarationBlock }
-            || !ReferenceEquals(assignmentBlock, declarationBlock)
-            || use.AncestorsAndSelf()
-                .OfType<StatementSyntax>()
-                .FirstOrDefault(statement => statement.Parent is BlockSyntax)
-                is not { Parent: BlockSyntax useBlock } useStatement
-            || !ReferenceEquals(useBlock, declarationBlock)
-            || assignment.SpanStart <= declarator.Span.End
-            || assignment.Span.End >= useStatement.SpanStart
-        )
-        {
-            return false;
-        }
+            && declarator.Parent?.Parent
+                is IVariableDeclarationGroupOperation { Parent: IBlockOperation declarationBlock }
+            && IsSameSyntax(assignmentBlock.Syntax, declarationBlock.Syntax)
+            && useStatement?.Parent is { } useBlock
+            && IsSameSyntax(useBlock.Syntax, declarationBlock.Syntax)
+            && assignment.Syntax.SpanStart > declarator.Syntax.Span.End
+            && assignment.Syntax.Span.End < useStatement.Syntax.SpanStart
+            ? assignment.Value
+            : null;
 
-        value = assignedValue;
-        return true;
-
-        ISymbol? GetReferencedSymbol(ExpressionSyntax expression) =>
-            semanticModel.GetSymbolInfo(Unwrap(expression)).Symbol;
+        static bool IsLocal(IOperation operation, ILocalSymbol local) =>
+            WithoutImplicitConversions(operation) is ILocalReferenceOperation reference
+            && SymbolEqualityComparer.Default.Equals(reference.Local, local);
     }
 
     private static IReadOnlyList<CoverageWarning> BuildWarnings(
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap,
         IReadOnlyDictionary<IFieldSymbol, List<TerminalImplementation>> implementations,
         IReadOnlyList<ContractBinding> bindings,
-        IReadOnlySet<InvocationExpressionSyntax> consumedBindings
+        IReadOnlySet<SyntaxNode> consumedBindings
     )
     {
         var warnings = new List<CoverageWarning>();
@@ -484,8 +365,7 @@ public static class CoverageChecker
     private static EndpointContext ResolveImplementation(
         WellKnownTypes wkt,
         INamedTypeSymbol? adapterType,
-        InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel,
+        IInvocationOperation terminal,
         string functionsRoutePrefix
     )
     {
@@ -494,52 +374,55 @@ public static class CoverageChecker
             return EndpointContext.None;
         }
 
-        var controller = TryResolveController(wkt, adapterType, invocation, semanticModel);
+        var controller = TryResolveController(wkt, adapterType, terminal);
         if (controller.IsEndpoint)
         {
             return controller;
         }
 
-        var function = TryResolveFunction(
-            wkt,
-            adapterType,
-            invocation,
-            semanticModel,
-            functionsRoutePrefix
-        );
+        var function = TryResolveFunction(wkt, adapterType, terminal, functionsRoutePrefix);
         if (function.IsEndpoint)
         {
             return function;
         }
 
-        return TryResolveMinimalApi(wkt, adapterType, invocation, semanticModel);
+        return TryResolveMinimalApi(wkt, adapterType, terminal);
+    }
+
+    /// <summary>
+    /// The method declaring the terminal and its operation body, when the method returns
+    /// a value built by the named adapter from the terminal.
+    /// </summary>
+    private static IMethodSymbol? ReturningMethod(
+        IInvocationOperation terminal,
+        string adapterName,
+        INamedTypeSymbol adapterType
+    )
+    {
+        var method = terminal.Syntax.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
+        return
+            method is not null
+            && terminal.SemanticModel is { } semanticModel
+            && semanticModel.GetDeclaredSymbol(method)
+                is IMethodSymbol { ReturnsVoid: false } methodSymbol
+            && semanticModel.GetOperation(method) is { } body
+            && IsReturnedThroughAdapter(terminal, body, adapterName, adapterType)
+            ? methodSymbol
+            : null;
     }
 
     private static EndpointContext TryResolveController(
         WellKnownTypes wkt,
         INamedTypeSymbol adapterType,
-        InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel
+        IInvocationOperation terminal
     )
     {
-        var method = invocation.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
-        if (
-            method is null
-            || semanticModel.GetDeclaredSymbol(method) is not IMethodSymbol methodSymbol
-            || methodSymbol.ReturnsVoid
-            || !IsReturnedThroughAdapter(
-                invocation,
-                method,
-                "ToActionResult",
-                adapterType,
-                semanticModel
-            )
-        )
+        if (ReturningMethod(terminal, "ToActionResult", adapterType) is not { } method)
         {
             return EndpointContext.None;
         }
 
-        var (httpMethod, route) = EndpointWalker.ResolveActionRoute(wkt, methodSymbol);
+        var (httpMethod, route) = EndpointWalker.ResolveActionRoute(wkt, method);
         if (httpMethod is null)
         {
             return EndpointContext.None;
@@ -563,36 +446,23 @@ public static class CoverageChecker
     private static EndpointContext TryResolveMinimalApi(
         WellKnownTypes wkt,
         INamedTypeSymbol adapterType,
-        InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel
+        IInvocationOperation terminal
     )
     {
-        var handler = invocation
-            .Ancestors()
-            .OfType<AnonymousFunctionExpressionSyntax>()
-            .FirstOrDefault();
         if (
-            handler is null
-            || !ReferenceEquals(GetContainingFunction(invocation), handler)
-            || !IsReturnedThroughAdapter(
-                invocation,
-                handler,
-                "ToResult",
-                adapterType,
-                semanticModel
-            )
-            || handler.Parent
-                is not ArgumentSyntax
-                {
-                    Parent: ArgumentListSyntax
-                    {
-                        Parent: InvocationExpressionSyntax parentInvocation
-                    },
-                }
-            || parentInvocation.Expression is not MemberAccessExpressionSyntax memberAccess
-            || semanticModel.GetSymbolInfo(parentInvocation).Symbol is not IMethodSymbol method
+            Ancestors(terminal)
+                .FirstOrDefault(operation =>
+                    operation is IAnonymousFunctionOperation or ILocalFunctionOperation
+                )
+                is not IAnonymousFunctionOperation handler
+            || !IsReturnedThroughAdapter(terminal, handler, "ToResult", adapterType)
+            || Ancestors(handler)
+                .FirstOrDefault(operation =>
+                    operation is not (IDelegateCreationOperation or IConversionOperation)
+                )
+                is not IArgumentOperation { Parent: IInvocationOperation mapCall }
             || !SymbolEqualityComparer.Default.Equals(
-                (method.ReducedFrom ?? method).ContainingType,
+                mapCall.TargetMethod.ContainingType,
                 wkt.EndpointRouteBuilderExtensions
             )
         )
@@ -601,22 +471,24 @@ public static class CoverageChecker
         }
 
         IReadOnlyList<string> methods;
-        if (_minimalApiMethodMap.TryGetValue(memberAccess.Name.Identifier.ValueText, out var verb))
+        if (_minimalApiMethodMap.TryGetValue(mapCall.TargetMethod.Name, out var verb))
         {
             methods = [verb];
         }
-        else if (memberAccess.Name.Identifier.ValueText == "MapMethods")
+        else if (mapCall.TargetMethod.Name == "MapMethods")
         {
             // Constraint: only the MapMethods nonconstant branch may leave the method
             // axis unresolved — Functions triggers legitimately declare no methods
             // (any-method), so they must not produce an unresolved-method state.
-            var constantMethods =
-                parentInvocation.ArgumentList.Arguments.Count > 1
-                    ? ExtractConstantStrings(
-                        parentInvocation.ArgumentList.Arguments[1].Expression,
-                        semanticModel
-                    )
-                    : [];
+            var constantMethods = Argument(mapCall, "httpMethods") is { } httpMethods
+                ? httpMethods
+                    .DescendantsAndSelf()
+                    .Select(operation => operation.ConstantValue)
+                    .Where(constant => constant is { HasValue: true, Value: string })
+                    .Select(constant => (string)constant.Value!)
+                    .Distinct()
+                    .ToList()
+                : [];
             if (constantMethods.Count == 0)
             {
                 return new EndpointContext(
@@ -634,32 +506,30 @@ public static class CoverageChecker
             return EndpointContext.None;
         }
 
-        var route = ExtractMinimalRoute(parentInvocation, semanticModel, out var routeError);
-        if (route is null && routeError is null)
+        string? route = null;
+        string? routeError;
+        if (Argument(mapCall, "pattern") is not { } pattern)
+        {
+            routeError = "unresolved route: Map* call has no route argument";
+        }
+        else if (pattern.ConstantValue is not { HasValue: true, Value: string template })
         {
             // An unresolvable receiver or nonconstant route stays unresolved rather
             // than inventing a prefix.
             routeError = "unresolved route: route template is not a compile-time constant";
         }
-        else if (route is not null)
+        else
         {
             // Constant MapGroup receiver chains: prepend accumulated group prefixes
             // (nested groups accumulate). Unresolvable receivers keep the route
             // unresolved rather than inventing a prefix.
-            var groupPrefix = ResolveMapGroupPrefix(
-                ((MemberAccessExpressionSyntax)parentInvocation.Expression).Expression,
-                semanticModel
-            );
-            if (groupPrefix.Unresolved)
-            {
-                routeError =
-                    "unresolved route: receiver chain does not resolve to constant MapGroup prefixes";
-                route = null;
-            }
-            else if (groupPrefix.Prefix.Length > 0)
-            {
-                route = NormalizeRoute($"{groupPrefix.Prefix.Trim('/')}/{route.Trim('/')}");
-            }
+            var groupPrefix = ResolveMapGroupPrefix(wkt, mapCall.Arguments[0].Value, []);
+            routeError = groupPrefix.Unresolved
+                ? "unresolved route: receiver chain does not resolve to constant MapGroup prefixes"
+                : null;
+            route = groupPrefix.Unresolved
+                ? null
+                : TransportIdentity.NormalizeRoute($"{groupPrefix.Prefix}/{template.Trim('/')}");
         }
 
         return new EndpointContext(
@@ -680,438 +550,229 @@ public static class CoverageChecker
     private readonly record struct MapGroupPrefix(string Prefix, bool Unresolved);
 
     private static MapGroupPrefix ResolveMapGroupPrefix(
-        ExpressionSyntax receiver,
-        SemanticModel semanticModel
-    ) =>
-        ResolveMapGroupPrefix(
-            receiver,
-            semanticModel,
-            new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default)
-        );
-
-    private static MapGroupPrefix ResolveMapGroupPrefix(
-        ExpressionSyntax receiver,
-        SemanticModel semanticModel,
+        WellKnownTypes wkt,
+        IOperation receiver,
         HashSet<ILocalSymbol> visitedLocals
     )
     {
-        receiver = Unwrap(receiver);
-
-        // A local provenance hop: var group = ...; group.MapGet(...)
-        if (semanticModel.GetSymbolInfo(receiver).Symbol is ILocalSymbol local)
+        switch (WithoutImplicitConversions(receiver))
         {
-            if (
-                !visitedLocals.Add(local)
-                || !TryGetProvenanceValue(local, receiver, semanticModel, out var value)
-            )
-            {
-                return new MapGroupPrefix(Prefix: "", Unresolved: true);
-            }
+            // A local provenance hop: var group = ...; group.MapGet(...)
+            case ILocalReferenceOperation local:
+                return visitedLocals.Add(local.Local) && ProvenanceValue(local) is { } value
+                    ? ResolveMapGroupPrefix(wkt, value, visitedLocals)
+                    : new MapGroupPrefix(Prefix: "", Unresolved: true);
 
-            return ResolveMapGroupPrefix(value, semanticModel, visitedLocals);
-        }
-
-        // Direct chained group: inner.MapGroup("/v3") — recurse into its receiver.
-        if (
-            receiver
-                is InvocationExpressionSyntax
-                {
-                    Expression: MemberAccessExpressionSyntax groupAccess,
-                    ArgumentList: { Arguments: [var patternArgument, ..] },
-                } groupInvocation
-            && groupAccess.Name.Identifier.ValueText == "MapGroup"
-            && semanticModel.GetSymbolInfo(receiver).Symbol is IMethodSymbol groupMethod
-            && SymbolEqualityComparer.Default.Equals(
-                (groupMethod.ReducedFrom ?? groupMethod).ContainingType,
-                semanticModel.Compilation.GetTypeByMetadataName(
-                    "Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions"
+            // Chained group: inner.MapGroup("/v3") — its prefix follows the receiver's.
+            case IInvocationOperation { TargetMethod.Name: "MapGroup" } group
+                when SymbolEqualityComparer.Default.Equals(
+                    group.TargetMethod.ContainingType,
+                    wkt.EndpointRouteBuilderExtensions
+                ):
+                if (
+                    Argument(group, "prefix")?.ConstantValue
+                    is not { HasValue: true, Value: string prefix }
                 )
-            )
-        )
-        {
-            var ownPrefix = semanticModel.GetConstantValue(patternArgument.Expression);
-            if (ownPrefix is not { HasValue: true, Value: string prefixText })
-            {
-                return new MapGroupPrefix(Prefix: "", Unresolved: true);
-            }
+                {
+                    return new MapGroupPrefix(Prefix: "", Unresolved: true);
+                }
 
-            var outer = ResolveMapGroupPrefix(groupAccess.Expression, semanticModel, visitedLocals);
-            if (outer.Unresolved)
-            {
-                return outer;
-            }
+                var outer = ResolveMapGroupPrefix(wkt, group.Arguments[0].Value, visitedLocals);
+                return outer.Unresolved
+                    ? outer
+                    : new MapGroupPrefix(
+                        TransportIdentity.NormalizeRoute($"{outer.Prefix}/{prefix.Trim('/')}"),
+                        Unresolved: false
+                    );
 
-            return new MapGroupPrefix(
-                Prefix: NormalizeRoute($"{outer.Prefix.Trim('/')}/{prefixText.Trim('/')}"),
-                Unresolved: false
-            );
+            // Root receiver (app / IEndpointRouteBuilder, or any other base): no prefix.
+            default:
+                return new MapGroupPrefix(Prefix: "", Unresolved: false);
         }
-
-        // Root receiver (app / IEndpointRouteBuilder variable, or any other base) —
-        // no prefix contribution; treat the chain as resolved at this point.
-        return new MapGroupPrefix(Prefix: "", Unresolved: false);
     }
 
     private static EndpointContext TryResolveFunction(
         WellKnownTypes wkt,
         INamedTypeSymbol adapterType,
-        InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel,
+        IInvocationOperation terminal,
         string functionsRoutePrefix
     )
     {
-        var method = invocation.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
         if (
-            method is null
-            || semanticModel.GetDeclaredSymbol(method) is not IMethodSymbol methodSymbol
-            || wkt.HttpTrigger is null
-            || methodSymbol.ReturnsVoid
-            || !IsReturnedThroughAdapter(
-                invocation,
-                method,
-                "ToActionResult",
-                adapterType,
-                semanticModel
-            )
+            wkt.HttpTrigger is null
+            || ReturningMethod(terminal, "ToActionResult", adapterType) is not { } method
         )
         {
             return EndpointContext.None;
         }
 
-        var trigger = methodSymbol
+        var trigger = method
             .Parameters.SelectMany(parameter => parameter.GetAttributes())
             .FirstOrDefault(attribute => attribute.Is(wkt.HttpTrigger));
-        var function = methodSymbol
-            .GetAttributes()
-            .FirstOrDefault(attribute => attribute.Is(wkt.Function));
+        var function = method.GetAttribute(wkt.Function);
         if (trigger is null || function is null)
         {
             return EndpointContext.None;
         }
 
         var methods = trigger
-            .ConstructorArguments.SelectMany(ExtractStrings)
+            .ConstructorArguments.SelectMany(argument => argument.Strings())
             .Select(value => value.ToUpperInvariant())
             .ToArray();
         var route =
             trigger.NamedArguments.FirstOrDefault(argument => argument.Key == "Route").Value.Value
-            as string;
-        if (route is null)
-        {
-            route =
-                function.ConstructorArguments.FirstOrDefault().Value as string ?? methodSymbol.Name;
-        }
+                as string
+            ?? function.StringArgument()
+            ?? method.Name;
 
         return new EndpointContext(
             true,
             methods,
-            NormalizeRoute($"{functionsRoutePrefix.Trim('/')}/{route.Trim('/')}"),
+            TransportIdentity.NormalizeRoute($"{functionsRoutePrefix.Trim('/')}/{route.Trim('/')}"),
             route.StartsWith('/')
                 ? $"Invalid Functions trigger route '{route}': remove the leading slash"
                 : null
         );
     }
 
+    /// <summary>
+    /// True when <paramref name="function"/> returns, from a reachable return of its own,
+    /// the named Rivet adapter applied to <paramref name="terminal"/> (directly or through
+    /// a local holding it). The adapter call may be the returned value itself, a switch
+    /// expression arm or a conditional branch.
+    /// </summary>
     private static bool IsReturnedThroughAdapter(
-        InvocationExpressionSyntax terminal,
-        SyntaxNode function,
+        IInvocationOperation terminal,
+        IOperation function,
         string adapterName,
-        INamedTypeSymbol adapterType,
-        SemanticModel semanticModel
+        INamedTypeSymbol adapterType
     )
     {
-        foreach (
-            var adapterInvocation in function.DescendantNodes().OfType<InvocationExpressionSyntax>()
-        )
+        foreach (var returned in OwnDescendants(function).OfType<IReturnOperation>())
         {
             if (
-                !ReferenceEquals(GetContainingFunction(adapterInvocation), function)
-                || !TryGetRivetAdapterReceiver(
-                    adapterInvocation,
-                    adapterName,
-                    adapterType,
-                    semanticModel,
-                    out var receiver
-                )
-                || !ReceiverResolvesToTerminal(receiver, terminal, semanticModel)
-                || !IsReturnedFromFunction(adapterInvocation, function, semanticModel)
+                returned.Kind != OperationKind.Return
+                || !returned.IsImplicit
+                    && returned.SemanticModel?.AnalyzeControlFlow(returned.Syntax)
+                        is not { Succeeded: true, StartPointIsReachable: true }
             )
             {
                 continue;
             }
 
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool TryGetRivetAdapterReceiver(
-        InvocationExpressionSyntax invocation,
-        string adapterName,
-        INamedTypeSymbol adapterType,
-        SemanticModel semanticModel,
-        out ExpressionSyntax receiver
-    )
-    {
-        receiver = null!;
-        if (
-            invocation.Expression is not MemberAccessExpressionSyntax memberAccess
-            || memberAccess.Name.Identifier.ValueText != adapterName
-            || semanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method
-            || !SymbolEqualityComparer.Default.Equals(
-                (method.ReducedFrom ?? method).ContainingType,
-                adapterType
-            )
-        )
-        {
-            return false;
-        }
-
-        if (method.ReducedFrom is not null)
-        {
-            receiver = memberAccess.Expression;
-            return true;
-        }
-
-        if (
-            method.IsExtensionMethod
-            && invocation.ArgumentList.Arguments is [{ Expression: var value }, ..]
-        )
-        {
-            receiver = value;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool ReceiverResolvesToTerminal(
-        ExpressionSyntax receiver,
-        InvocationExpressionSyntax terminal,
-        SemanticModel semanticModel
-    )
-    {
-        receiver = Unwrap(receiver);
-        if (IsSameExpression(receiver, terminal))
-        {
-            return true;
-        }
-
-        return semanticModel.GetSymbolInfo(receiver).Symbol is ILocalSymbol local
-            && TryGetProvenanceValue(local, receiver, semanticModel, out var value)
-            && IsSameExpression(Unwrap(value), terminal);
-    }
-
-    private static bool IsSameExpression(ExpressionSyntax left, ExpressionSyntax right) =>
-        ReferenceEquals(left.SyntaxTree, right.SyntaxTree) && left.Span.Equals(right.Span);
-
-    private static bool IsReturnedFromFunction(
-        InvocationExpressionSyntax invocation,
-        SyntaxNode function,
-        SemanticModel semanticModel
-    ) =>
-        function switch
-        {
-            MethodDeclarationSyntax method => IsReturnedFromMethod(
-                invocation,
-                method,
-                semanticModel
-            ),
-            AnonymousFunctionExpressionSyntax anonymous => IsReturnedFromAnonymousFunction(
-                invocation,
-                anonymous,
-                semanticModel
-            ),
-            _ => false,
-        };
-
-    private static bool IsReturnedFromMethod(
-        InvocationExpressionSyntax invocation,
-        MethodDeclarationSyntax method,
-        SemanticModel semanticModel
-    )
-    {
-        if (!ReferenceEquals(GetContainingFunction(invocation), method))
-        {
-            return false;
-        }
-
-        return IsReturnedExpression(method.ExpressionBody?.Expression, invocation, semanticModel)
-            || IsReturnedFromBlock(invocation, method, semanticModel);
-    }
-
-    private static bool IsReturnedFromAnonymousFunction(
-        InvocationExpressionSyntax invocation,
-        AnonymousFunctionExpressionSyntax function,
-        SemanticModel semanticModel
-    ) =>
-        IsReturnedExpression(function.ExpressionBody, invocation, semanticModel)
-        || IsReturnedFromBlock(invocation, function, semanticModel);
-
-    private static bool IsReturnedFromBlock(
-        InvocationExpressionSyntax invocation,
-        SyntaxNode function,
-        SemanticModel semanticModel
-    )
-    {
-        var returnStatement = invocation
-            .Ancestors()
-            .OfType<ReturnStatementSyntax>()
-            .FirstOrDefault();
-        return returnStatement is not null
-            && IsReturnedExpression(returnStatement.Expression, invocation, semanticModel)
-            && ReferenceEquals(GetContainingFunction(returnStatement), function)
-            && semanticModel.AnalyzeControlFlow(returnStatement)
-                is { Succeeded: true, StartPointIsReachable: true };
-    }
-
-    private static bool IsReturnedExpression(
-        ExpressionSyntax? returned,
-        InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel
-    )
-    {
-        if (returned is null)
-        {
-            return false;
-        }
-
-        returned = Unwrap(returned);
-        if (IsSameExpression(returned, invocation))
-        {
-            return true;
-        }
-
-        if (returned is SwitchExpressionSyntax switchExpression)
-        {
-            return switchExpression.Arms.Any(arm =>
-                IsSameExpression(Unwrap(arm.Expression), invocation)
-            );
-        }
-
-        if (returned is ConditionalExpressionSyntax conditional)
-        {
-            return IsSameExpression(Unwrap(conditional.WhenTrue), invocation)
-                || IsSameExpression(Unwrap(conditional.WhenFalse), invocation);
-        }
-
-        return semanticModel.GetSymbolInfo(returned).Symbol is ILocalSymbol local
-            && TryGetProvenanceValue(local, returned, semanticModel, out var value)
-            && IsReturnedExpression(value, invocation, semanticModel);
-    }
-
-    private static SyntaxNode? GetContainingFunction(SyntaxNode node) =>
-        node.Ancestors()
-            .FirstOrDefault(ancestor =>
-                ancestor
-                    is AnonymousFunctionExpressionSyntax
-                        or LocalFunctionStatementSyntax
-                        or BaseMethodDeclarationSyntax
-            );
-
-    private static IEnumerable<string> ExtractStrings(TypedConstant constant)
-    {
-        if (constant.Kind == TypedConstantKind.Array)
-        {
-            return constant.Values.SelectMany(ExtractStrings);
-        }
-
-        return constant.Value is string value ? [value] : [];
-    }
-
-    private static IReadOnlyList<string> ExtractConstantStrings(
-        ExpressionSyntax expression,
-        SemanticModel semanticModel
-    )
-    {
-        var values = new List<string>();
-        foreach (var candidate in expression.DescendantNodesAndSelf().OfType<ExpressionSyntax>())
-        {
-            var constant = semanticModel.GetConstantValue(candidate);
-            if (constant is { HasValue: true, Value: string value } && !values.Contains(value))
+            foreach (var candidate in ReturnedValues(returned.ReturnedValue))
             {
-                values.Add(value);
+                if (
+                    candidate is IInvocationOperation { Arguments: [var receiver, ..] } adapter
+                    && adapter.TargetMethod.Name == adapterName
+                    && SymbolEqualityComparer.Default.Equals(
+                        adapter.TargetMethod.ContainingType,
+                        adapterType
+                    )
+                    && ResolvesTo(receiver.Value, terminal)
+                )
+                {
+                    return true;
+                }
             }
         }
 
-        return values;
+        return false;
+
+        static bool ResolvesTo(IOperation receiver, IInvocationOperation terminal) =>
+            WithoutImplicitConversions(receiver) switch
+            {
+                { } value when IsSameSyntax(value.Syntax, terminal.Syntax) => true,
+                ILocalReferenceOperation local => WithoutImplicitConversions(ProvenanceValue(local))
+                    is { } value
+                    && IsSameSyntax(value.Syntax, terminal.Syntax),
+                _ => false,
+            };
     }
 
-    private static string? ExtractMinimalRoute(
-        InvocationExpressionSyntax invocation,
-        SemanticModel semanticModel,
-        out string? routeError
-    )
+    private static IEnumerable<IOperation> ReturnedValues(IOperation? returned)
     {
-        routeError = null;
-        if (invocation.ArgumentList.Arguments.Count == 0)
+        switch (WithoutImplicitConversions(returned))
         {
-            routeError = "unresolved route: Map* call has no route argument";
-            return null;
+            case null:
+                yield break;
+            case ISwitchExpressionOperation switchExpression:
+                yield return switchExpression;
+                foreach (var arm in switchExpression.Arms)
+                {
+                    yield return WithoutImplicitConversions(arm.Value)!;
+                }
+                break;
+            case IConditionalOperation conditional:
+                yield return conditional;
+                yield return WithoutImplicitConversions(conditional.WhenTrue)!;
+                if (conditional.WhenFalse is { } whenFalse)
+                {
+                    yield return WithoutImplicitConversions(whenFalse)!;
+                }
+                break;
+            case var value:
+                yield return value;
+                break;
         }
-
-        var route = semanticModel.GetConstantValue(invocation.ArgumentList.Arguments[0].Expression);
-        if (route is { HasValue: true, Value: string value })
-        {
-            return NormalizeRoute(value);
-        }
-
-        routeError = "unresolved route: route template is not a compile-time constant";
-        return null;
     }
+
+    /// <summary>Descendants of a function body, excluding nested functions' bodies.</summary>
+    private static IEnumerable<IOperation> OwnDescendants(IOperation operation)
+    {
+        foreach (var child in operation.ChildOperations)
+        {
+            yield return child;
+            if (child is not (IAnonymousFunctionOperation or ILocalFunctionOperation))
+            {
+                foreach (var descendant in OwnDescendants(child))
+                {
+                    yield return descendant;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<IOperation> Ancestors(IOperation operation)
+    {
+        for (var parent = operation.Parent; parent is not null; parent = parent.Parent)
+        {
+            yield return parent;
+        }
+    }
+
+    /// <summary>
+    /// Operations from separate GetOperation calls are separate trees, so identity is
+    /// compared through the syntax they were bound from.
+    /// </summary>
+    private static bool IsSameSyntax(SyntaxNode left, SyntaxNode right) =>
+        left.SyntaxTree == right.SyntaxTree && left.Span == right.Span;
+
+    private static IOperation? Argument(IInvocationOperation invocation, string parameter) =>
+        invocation
+            .Arguments.FirstOrDefault(argument => argument.Parameter?.Name == parameter)
+            ?.Value;
+
+    private static IOperation? WithoutImplicitConversions(IOperation? operation) =>
+        operation is IConversionOperation { IsImplicit: true } conversion
+            ? WithoutImplicitConversions(conversion.Operand)
+            : operation;
 
     private static bool IsOneOf(INamedTypeSymbol actual, params INamedTypeSymbol?[] candidates) =>
         candidates.Any(candidate => SymbolEqualityComparer.Default.Equals(actual, candidate));
 
-    private static ExpressionSyntax Unwrap(ExpressionSyntax expression)
-    {
-        while (true)
-        {
-            switch (expression)
-            {
-                case ParenthesizedExpressionSyntax parenthesized:
-                    expression = parenthesized.Expression;
-                    break;
-                case PostfixUnaryExpressionSyntax
-                {
-                    RawKind: (int)SyntaxKind.SuppressNullableWarningExpression,
-                } suppressed:
-                    expression = suppressed.Operand;
-                    break;
-                default:
-                    return expression;
-            }
-        }
-    }
-
     private static bool RoutesMatch(string contractRoute, string implRoute) =>
         string.Equals(
-            NormalizeRoute(contractRoute),
-            NormalizeRoute(implRoute),
+            TransportIdentity.NormalizeRoute(contractRoute),
+            TransportIdentity.NormalizeRoute(implRoute),
             StringComparison.OrdinalIgnoreCase
         );
 
-    private static string NormalizeRoute(string route)
-    {
-        route = RouteParser.StripRouteConstraints(route);
-        return "/" + route.Trim('/');
-    }
+    private sealed record TerminalImplementation(SyntaxNode Invocation, EndpointContext Context);
 
-    private sealed record TerminalImplementation(
-        InvocationExpressionSyntax Invocation,
-        EndpointContext Context
-    );
+    private sealed record ContractBinding(IFieldSymbol Field, SyntaxNode Invocation);
 
-    private sealed record ContractBinding(
-        IFieldSymbol Field,
-        InvocationExpressionSyntax Invocation
-    );
-
-    private sealed record ContractReference(
-        IFieldSymbol Field,
-        InvocationExpressionSyntax? Binding
-    );
+    private sealed record ContractReference(IFieldSymbol Field, SyntaxNode? Binding);
 
     private sealed record EndpointContext(
         bool IsEndpoint,
