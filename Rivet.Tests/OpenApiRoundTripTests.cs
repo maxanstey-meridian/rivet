@@ -3366,4 +3366,173 @@ public sealed class OpenApiRoundTripTests
         var importedQualityParam = Assert.Single(importedEp.Params, p => p.Name == "quality");
         Assert.Equal(ParamSource.Query, importedQualityParam.Source);
     }
+
+    // ========== Inherited properties ==========
+
+    [Fact]
+    public void RoundTrip_FlattenedShape_SurvivesImport()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record BaseDto
+            {
+                public Guid Id { get; init; }
+            }
+
+            [RivetType]
+            public sealed record TaskDto : BaseDto
+            {
+                public string Name { get; init; } = "";
+            }
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask = Define.Get<TaskDto>("/api/tasks/{id}");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var importResult = CompilationHelper.Import(doc.RootElement.GetRawText());
+
+        var taskDto = CompilationHelper.FindFile(importResult, "TaskDto.cs");
+        Assert.Contains("Id", taskDto);
+        Assert.Contains("Name", taskDto);
+
+        // Importer output compiles (flattened shape is self-contained)
+        CompilationHelper.CompileImportResult(importResult);
+    }
+
+    // ========== Import fidelity ==========
+
+    [Fact]
+    public void ParamOnly_Post_Import_Wires_Input_For_RoundTrip()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/api/items/{id}/archive": {
+                "post": {
+                    "operationId": "items_archiveItem",
+                    "tags": ["Items"],
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "responses": {
+                        "200": { "description": "Success" }
+                    }
+                }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(result, "ItemsContract.cs");
+
+        // Input type should be wired so the type survives round-trip
+        // (POST with path-only params uses .Accepts<T>() since there's no output type)
+        Assert.Contains("Accepts<ArchiveItemInput>", content);
+        Assert.Contains("Define.Post(\"/api/items/{id}/archive\")", content);
+    }
+
+    [Fact]
+    public void EmptyRecord_Survives_OpenApi_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record EmptyMarker();
+
+            [RivetType]
+            public sealed record ItemDto(string Id, EmptyMarker Marker);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly Define GetItem =
+                    Define.Get<ItemDto>("/api/items/{id}");
+            }
+            """;
+
+        // Forward: C# → OpenAPI
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
+
+        // Verify extension is emitted
+        var doc = JsonSerializer.Deserialize<JsonElement>(json);
+        var emptySchema = doc.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("EmptyMarker");
+        Assert.True(
+            emptySchema.TryGetProperty("x-rivet-empty-record", out var ext),
+            "EmptyMarker should have x-rivet-empty-record extension"
+        );
+        Assert.True(ext.GetBoolean());
+
+        // Reverse: OpenAPI → import → compile → walk
+        var importResult = CompilationHelper.Import(json);
+        var recompilation = CompilationHelper.CreateCompilationFromMultiple(
+            importResult.Files.Select(f => f.Content).ToArray()
+        );
+        var (reDiscovered, rewalker) = CompilationHelper.DiscoverAndWalk(recompilation);
+
+        // EmptyMarker should survive as a definition (not collapsed to Dictionary)
+        Assert.True(
+            rewalker.Definitions.ContainsKey("EmptyMarker"),
+            "EmptyMarker should survive round-trip as a type definition"
+        );
+        var emptyDef = rewalker.Definitions["EmptyMarker"];
+        Assert.Empty(emptyDef.Properties);
+
+        // ItemDto should reference EmptyMarker, not Dictionary<string, JsonElement>
+        var itemDef = rewalker.Definitions["ItemDto"];
+        var markerProp = itemDef.Properties.First(p => p.Name == "marker");
+        Assert.True(
+            markerProp.Type is TsType.TypeRef { Name: "EmptyMarker" },
+            $"ItemDto.marker should be TypeRef(EmptyMarker), got {markerProp.Type}"
+        );
+    }
+
+    [Fact]
+    public void NullableCSharpType_Survives_Import()
+    {
+        // Verify that nullable: true + x-rivet-csharp-type works for pure null type schemas
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "FlexDto": {
+                "type": "object",
+                "properties": {
+                    "required": { "x-rivet-csharp-type": "JsonNode" },
+                    "optional": { "nullable": true, "x-rivet-csharp-type": "JsonNode" }
+                },
+                "required": ["required"]
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        var content = result.Files.First(f => f.FileName.EndsWith("FlexDto.cs")).Content;
+
+        Assert.Contains("System.Text.Json.Nodes.JsonNode Required", content);
+        Assert.Contains("System.Text.Json.Nodes.JsonNode? Optional", content);
+    }
 }

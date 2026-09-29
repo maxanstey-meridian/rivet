@@ -6942,4 +6942,123 @@ public sealed class OpenApiImporterTests
             }
         }
     }
+
+    // ========== Component $ref aliases ==========
+
+    [Fact]
+    public void RefAliasSchema_ConsumerResolvesToTarget_AndCompiles()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Real": {
+                "type": "object",
+                "properties": { "value": { "type": "string" } },
+                "required": ["value"]
+            },
+            "Alias": { "$ref": "#/components/schemas/Real" },
+            "Holder": {
+                "type": "object",
+                "properties": { "thing": { "$ref": "#/components/schemas/Alias" } }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+
+        // No Alias type is generated…
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("Alias.cs"));
+
+        // …and the consumer references the target type, not the dangling alias name
+        var holder = CompilationHelper.FindFile(result, "Holder.cs");
+        Assert.Contains("Real", holder);
+        Assert.DoesNotContain("Alias", holder);
+
+        // WouldGenerateType-agreement oracle: generated C# compiles
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void AliasChain_ChasesToFinalTarget()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Real": {
+                "type": "object",
+                "properties": { "value": { "type": "string" } }
+            },
+            "Middle": { "$ref": "#/components/schemas/Real" },
+            "Outer": { "$ref": "#/components/schemas/Middle" },
+            "Holder": {
+                "type": "object",
+                "properties": { "thing": { "$ref": "#/components/schemas/Outer" } }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+
+        var holder = CompilationHelper.FindFile(result, "Holder.cs");
+        Assert.Contains("Real", holder);
+        Assert.DoesNotContain("Outer", holder);
+        Assert.DoesNotContain("Middle", holder);
+
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void AliasToEnum_ConsumerResolvesToEnum()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Status": {
+                "type": "string",
+                "enum": ["active", "closed"]
+            },
+            "StatusAlias": { "$ref": "#/components/schemas/Status" },
+            "Holder": {
+                "type": "object",
+                "properties": { "status": { "$ref": "#/components/schemas/StatusAlias" } }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+
+        var holder = CompilationHelper.FindFile(result, "Holder.cs");
+        Assert.Contains("Status", holder);
+        Assert.Contains("[RivetSchemaRef(\"StatusAlias\")]", holder);
+        Assert.Contains(
+            "[assembly: RivetGeneratedSchema(\"StatusAlias\", \"StatusAlias\"",
+            CompilationHelper.FindFile(result, "RivetScalarSchemas.cs")
+        );
+
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void AliasCycle_DoesNotHang_WarnsLoudly()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "A": { "$ref": "#/components/schemas/B" },
+            "B": { "$ref": "#/components/schemas/A" },
+            "Holder": {
+                "type": "object",
+                "properties": { "thing": { "$ref": "#/components/schemas/A" } }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+
+        // Cycle is diagnosed, not silently dropped (and the import must terminate)
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.Contains("cycle", StringComparison.OrdinalIgnoreCase)
+                || w.Contains("circular", StringComparison.OrdinalIgnoreCase)
+        );
+
+        CompilationHelper.CompileImportResult(result);
+    }
 }

@@ -4738,4 +4738,281 @@ public sealed class OpenApiEmitterTests
         // 5. The declared input-type name survives for the importer.
         Assert.Equal("UploadAvatarInput", schema.GetProperty("x-rivet-input-type").GetString());
     }
+
+    // ========== Inherited properties ==========
+
+    [Fact]
+    public void OpenApiSchema_IncludesInheritedProperties_AndRequiredArray()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record BaseDto
+            {
+                public Guid Id { get; init; }
+                public string? Note { get; init; }
+            }
+
+            [RivetType]
+            public sealed record TaskDto : BaseDto
+            {
+                public string Name { get; init; } = "";
+            }
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define GetTask = Define.Get<TaskDto>("/api/tasks/{id}");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+
+        var schema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("TaskDto");
+        var properties = schema.GetProperty("properties");
+
+        Assert.True(properties.TryGetProperty("id", out _));
+        Assert.True(properties.TryGetProperty("note", out _));
+        Assert.True(properties.TryGetProperty("name", out _));
+
+        var required = schema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
+        Assert.Contains("id", required);
+        Assert.Contains("name", required);
+        Assert.DoesNotContain("note", required); // nullable → optional
+    }
+
+    // ========== Optional parameters and bodies ==========
+
+    [Fact]
+    public void RivetOptional_NonNullableQueryProperty_EmitsRequiredFalse()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record ListQuery
+            {
+                [RivetOptional]
+                public int Page { get; init; }
+            }
+
+            public sealed record TaskDto(string Name);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define List = Define.Get<ListQuery, TaskDto[]>("/api/tasks");
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkContract(source);
+        var page = Assert.Single(Assert.Single(endpoints).Params, p => p.Name == "page");
+        Assert.True(
+            page.IsOptional,
+            "[RivetOptional] non-nullable query property must set IsOptional (E8)"
+        );
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var parameters = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/tasks")
+            .GetProperty("get")
+            .GetProperty("parameters")
+            .EnumerateArray()
+            .ToList();
+
+        var pageParam = Assert.Single(parameters, p => p.GetProperty("name").GetString() == "page");
+        Assert.False(pageParam.GetProperty("required").GetBoolean());
+    }
+
+    [Fact]
+    public void NullableRequestBody_EmitsRequiredFalse()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record PatchRequest(string? Note);
+            public sealed record TaskDto(string Name);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define Patch = Define.Patch<PatchRequest?, TaskDto>("/api/tasks/{id}");
+                public static readonly Define Update = Define.Put<PatchRequest, TaskDto>("/api/tasks/{id}");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var path = doc.RootElement.GetProperty("paths").GetProperty("/api/tasks/{id}");
+
+        // Nullable body → required: false
+        var patchBody = path.GetProperty("patch").GetProperty("requestBody");
+        Assert.False(patchBody.GetProperty("required").GetBoolean());
+
+        // Non-nullable body keeps required: true
+        var putBody = path.GetProperty("put").GetProperty("requestBody");
+        Assert.True(putBody.GetProperty("required").GetBoolean());
+    }
+
+    // ========== Nullability and required ==========
+
+    [Fact]
+    public void OpenApi_Nullable_Unknown_Does_Not_Emit_Type_Unknown()
+    {
+        var source = """
+            using System.Text.Json;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record FlexDto(JsonElement? Payload);
+
+            [RivetContract]
+            public static class FlexContract
+            {
+                public static readonly Define Get =
+                    Define.Get<FlexDto>("/api/flex");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var payload = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("FlexDto")
+            .GetProperty("properties")
+            .GetProperty("payload");
+
+        // 3.1: the empty schema already admits null — no 'nullable', no 'type' (and
+        // never { "type": "unknown" }, which is not a valid JSON Schema type).
+        Assert.False(payload.TryGetProperty("nullable", out _), "3.1 must not emit nullable: true");
+        Assert.False(
+            payload.TryGetProperty("type", out _),
+            "Nullable unknown should not emit a 'type' field — 'unknown' is not a valid OpenAPI type"
+        );
+    }
+
+    [Fact]
+    public void OpenApi_InlineObject_Nullable_Field_Not_Required()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record WithNullableTuple((string Key, int? Value) Pair);
+
+            [RivetContract]
+            public static class TestContract
+            {
+                public static readonly Define Get =
+                    Define.Get<WithNullableTuple>("/api/test");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+
+        // Tuple elements remain structurally required even when their values are nullable.
+        var pairProp = schemas
+            .GetProperty("WithNullableTuple")
+            .GetProperty("properties")
+            .GetProperty("pair");
+        var required = pairProp.GetProperty("required");
+        var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("key", requiredNames);
+        Assert.Contains("value", requiredNames);
+    }
+
+    [Fact]
+    public void OpenApi_Nullable_Field_Is_Not_Required()
+    {
+        // Nullable properties without [Required] should NOT be in the required array
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Name, string? Description);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly Define GetItem =
+                    Define.Get<ItemDto>("/api/items/{id}");
+            }
+            """;
+
+        var doc = CompilationHelper.EmitOpenApi(source);
+        var schema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ItemDto");
+        var required = schema.GetProperty("required");
+        var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
+
+        Assert.Contains("name", requiredNames);
+        Assert.DoesNotContain("description", requiredNames);
+    }
+
+    [Fact]
+    public void OpenApi_Monomorphised_Generic_Nullable_TypeArg_Is_Required()
+    {
+        // When a generic type parameter resolves to a nullable type,
+        // the monomorphised schema should not mark that field as required
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Wrapper<T>(T Value, string Label);
+
+            [RivetType]
+            public sealed record OptionalWrapper(Wrapper<string?> Wrapped);
+
+            [RivetContract]
+            public static class WrapperContract
+            {
+                public static readonly Define GetWrapper =
+                    Define.Get<OptionalWrapper>("/api/wrapper");
+            }
+            """;
+
+        var doc = CompilationHelper.EmitOpenApi(source);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+
+        // Both fields are required — Value is nullable but still a required constructor param
+        var monoName = "WrapperOfNullableString";
+        if (!schemas.TryGetProperty(monoName, out var monoSchema))
+        {
+            monoName = schemas
+                .EnumerateObject()
+                .First(p => p.Name.Contains("Wrapper") && p.Name != "OptionalWrapper")
+                .Name;
+            monoSchema = schemas.GetProperty(monoName);
+        }
+
+        var required = monoSchema.GetProperty("required");
+        var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
+
+        Assert.Contains("label", requiredNames);
+        Assert.Contains("value", requiredNames);
+    }
 }

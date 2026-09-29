@@ -3,10 +3,10 @@ using System.Text.Json;
 namespace Rivet.Tests;
 
 /// <summary>
-/// Diagnostic tests that measure actual data loss when importing real-world OpenAPI specs.
-/// Not structural round-trip checks — these count what the input spec had vs what Rivet captured.
+/// The endpoint-example fidelity metric: counts the examples a spec declared against the
+/// examples Rivet re-emitted after import, split by request/response and by kind.
 /// </summary>
-public sealed class GapAnalysisTests
+public sealed class ExampleFidelityMetricTests
 {
     [Fact]
     public void Endpoint_Example_Fidelity_Distinguishes_Request_And_Response_Loss()
@@ -480,33 +480,6 @@ public sealed class GapAnalysisTests
     {
         Request,
         Response,
-    }
-
-    private static void CollectAllRefs(JsonElement element, List<string> refs)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                foreach (var prop in element.EnumerateObject())
-                {
-                    if (prop.Name == "$ref" && prop.Value.ValueKind == JsonValueKind.String)
-                    {
-                        refs.Add(prop.Value.GetString()!);
-                    }
-                    else
-                    {
-                        CollectAllRefs(prop.Value, refs);
-                    }
-                }
-                break;
-            case JsonValueKind.Array:
-                foreach (var item in element.EnumerateArray())
-                {
-                    CollectAllRefs(item, refs);
-                }
-
-                break;
-        }
     }
 
     private static Dictionary<string, JsonElement> ExtractSchemas(JsonElement doc)

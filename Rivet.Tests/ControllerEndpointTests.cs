@@ -997,4 +997,256 @@ public sealed class ControllerEndpointTests
         Assert.Equal(404, endpoint.Responses[1].StatusCode);
         Assert.Null(endpoint.Responses[1].DataType);
     }
+
+    // ========== Route tokens, generic ProducesResponseType, header and service parameters ==========
+
+    [Fact]
+    public void ControllerToken_IsSubstituted()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record TaskDto(string Name);
+
+            [ApiController]
+            [Route("api/[controller]")]
+            public class TasksController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpGet("{id}")]
+                [ProducesResponseType(typeof(TaskDto), 200)]
+                public IActionResult GetTask(string id) => Ok(new TaskDto("x"));
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
+
+        var ep = Assert.Single(endpoints);
+        Assert.Equal("/api/Tasks/{id}", ep.RouteTemplate);
+    }
+
+    [Fact]
+    public void ActionToken_IsSubstituted()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record TaskDto(string Name);
+
+            [ApiController]
+            [Route("api/[controller]/[action]")]
+            public class TasksController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpGet]
+                [ProducesResponseType(typeof(TaskDto), 200)]
+                public IActionResult Latest() => Ok(new TaskDto("x"));
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
+
+        var ep = Assert.Single(endpoints);
+        Assert.Equal("/api/Tasks/Latest", ep.RouteTemplate);
+    }
+
+    [Fact]
+    public void GenericProducesResponseType_IsRecognized()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record TaskDto(string Name);
+            public sealed record ErrorDto(string Message);
+
+            [ApiController]
+            [Route("api/tasks")]
+            public class TasksController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpGet("{id}")]
+                [ProducesResponseType<TaskDto>(200)]
+                [ProducesResponseType<ErrorDto>(404)]
+                public IActionResult GetTask(string id) => Ok(new TaskDto("x"));
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
+
+        var ep = Assert.Single(endpoints);
+
+        // Success return type resolved from the generic attribute
+        var ret = Assert.IsType<TsType.TypeRef>(ep.ReturnType);
+        Assert.Equal("TaskDto", ret.Name);
+
+        // Both responses present with their body types
+        Assert.Equal(2, ep.Responses.Count);
+        var ok = Assert.Single(ep.Responses, r => r.StatusCode == 200);
+        Assert.Equal("TaskDto", Assert.IsType<TsType.TypeRef>(ok.DataType).Name);
+        var notFound = Assert.Single(ep.Responses, r => r.StatusCode == 404);
+        Assert.Equal("ErrorDto", Assert.IsType<TsType.TypeRef>(notFound.DataType).Name);
+    }
+
+    [Fact]
+    public void FromServices_IsExcludedFromContract()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record TaskDto(string Name);
+            public sealed class TaskService { }
+
+            [ApiController]
+            [Route("api/tasks")]
+            public class TasksController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpGet("{id}")]
+                [ProducesResponseType(typeof(TaskDto), 200)]
+                public IActionResult GetTask(string id, [FromServices] TaskService service)
+                    => Ok(new TaskDto("x"));
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
+
+        var ep = Assert.Single(endpoints);
+        var param = Assert.Single(ep.Params);
+        Assert.Equal("id", param.Name);
+        Assert.Equal(ParamSource.Route, param.Source);
+    }
+
+    [Fact]
+    public void FromHeader_MapsToHeaderParam_KeepingWireCasing()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record TaskDto(string Name);
+
+            [ApiController]
+            [Route("api/tasks")]
+            public class TasksController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpGet]
+                [ProducesResponseType(typeof(TaskDto), 200)]
+                public IActionResult List([FromHeader(Name = "X-Api-Key")] string apiKey)
+                    => Ok(new TaskDto("x"));
+            }
+            """;
+
+        IReadOnlyList<TsEndpointDefinition> endpoints = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+        {
+            (endpoints, _) = CompilationHelper.WalkMerged(source);
+        });
+
+        // The wire name keeps the attribute's casing, and no warning is raised.
+        var ep = Assert.Single(endpoints);
+        var param = Assert.Single(ep.Params);
+        Assert.Equal("X-Api-Key", param.Name);
+        Assert.Equal(ParamSource.Header, param.Source);
+        Assert.DoesNotContain("RIV1005", stderr);
+    }
+
+    [Fact]
+    public void FromHeaderAndServices_InMixedUpload_NotTurnedIntoFormFields()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed class AuditService { }
+
+            [ApiController]
+            [Route("api/files")]
+            public class FilesController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpPost]
+                [ProducesResponseType(typeof(void), 200)]
+                public IActionResult Upload(
+                    IFormFile file,
+                    [FromForm] string title,
+                    [FromHeader(Name = "X-Trace")] string trace,
+                    [FromServices] AuditService audit)
+                    => Ok();
+            }
+            """;
+
+        IReadOnlyList<TsEndpointDefinition> endpoints = null!;
+        CompilationHelper.CaptureStdErr(() =>
+        {
+            (endpoints, _) = CompilationHelper.WalkMerged(source);
+        });
+
+        var ep = Assert.Single(endpoints);
+
+        // Headers and concrete DI services must never become form fields.
+        Assert.DoesNotContain(ep.Params, p => p.Name is "trace" or "audit");
+        Assert.Single(ep.Params, p => p.Name == "X-Trace" && p.Source == ParamSource.Header);
+        Assert.Single(ep.Params, p => p.Name == "file" && p.Source == ParamSource.File);
+        Assert.Single(ep.Params, p => p.Name == "title");
+    }
+
+    [Fact]
+    public void DefaultValuedActionParam_SetsIsOptional_AndEmitsRequiredFalse()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record TaskDto(string Name);
+
+            [ApiController]
+            [Route("api/tasks")]
+            public class TasksController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpGet]
+                [ProducesResponseType(typeof(TaskDto), 200)]
+                public IActionResult List([FromQuery] int page = 1, [FromQuery] string? filter = null)
+                    => Ok(new TaskDto("x"));
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkMerged(source);
+        var ep = Assert.Single(endpoints);
+
+        var page = Assert.Single(ep.Params, p => p.Name == "page");
+        Assert.True(page.IsOptional, "C# default-valued param must set IsOptional (E8)");
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var parameters = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/tasks")
+            .GetProperty("get")
+            .GetProperty("parameters")
+            .EnumerateArray()
+            .ToList();
+
+        var pageParam = Assert.Single(parameters, p => p.GetProperty("name").GetString() == "page");
+        Assert.False(pageParam.GetProperty("required").GetBoolean());
+    }
 }

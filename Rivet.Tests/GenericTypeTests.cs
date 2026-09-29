@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -226,5 +227,138 @@ public sealed class GenericTypeTests
         var element = Assert.IsType<TsType.Primitive>(array.Element);
         Assert.Equal("unknown", element.Name);
         Assert.Equal("JsonArray", element.CSharpType);
+    }
+
+    // ========== Type parameters and templates ==========
+
+    [Fact]
+    public void NullableTypeParameter_LowersAsNullableTypeParam()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Wrapper<T>(T? Value);
+            """;
+
+        var (_, walker) = CompilationHelper.WalkContract(source);
+
+        var value = Assert.Single(walker.Definitions["Wrapper"].Properties);
+        var nullable = Assert.IsType<TsType.Nullable>(value.Type);
+        Assert.Equal("T", Assert.IsType<TsType.TypeParam>(nullable.Inner).Name);
+    }
+
+    [Fact]
+    public void GenericTemplateReferencingGeneric_EmitsNoGarbageTemplateSchemas()
+    {
+        var source = """
+            using System.Collections.Generic;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record PagedResult<T>(List<T> Items, int Total);
+
+            [RivetType]
+            public sealed record Wrapper<T>(PagedResult<T> Page, string Label);
+
+            public sealed record MessageDto(string Text);
+
+            [RivetContract]
+            public static class MessagesContract
+            {
+                public static readonly Define Get = Define.Get<Wrapper<MessageDto>>("/api/messages");
+            }
+            """;
+
+        string json = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+        {
+            using var emitted = CompilationHelper.EmitOpenApi(source);
+            json = emitted.RootElement.GetRawText();
+        });
+
+        using var doc = JsonDocument.Parse(json);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        var schemaNames = schemas.EnumerateObject().Select(p => p.Name).ToList();
+
+        // Templates emit as templates only — never as bogus monomorphised *_T schemas
+        Assert.DoesNotContain(schemaNames, n => n.EndsWith("_T", StringComparison.Ordinal));
+        Assert.DoesNotContain("unresolved type parameter", stderr);
+
+        // The concrete instantiations exist, including the nested one introduced by resolution
+        Assert.Contains("Wrapper_MessageDto", schemaNames);
+        Assert.Contains("PagedResult_MessageDto", schemaNames);
+
+        // No dangling $refs anywhere in the document
+        foreach (
+            var match in System
+                .Text.RegularExpressions.Regex.Matches(
+                    json,
+                    "\"\\$ref\":\\s*\"#/components/schemas/([^\"]+)\""
+                )
+                .Cast<System.Text.RegularExpressions.Match>()
+        )
+        {
+            Assert.Contains(match.Groups[1].Value, schemaNames);
+        }
+    }
+
+    // ========== Monomorphised type arguments ==========
+
+    [Theory]
+    [InlineData("long", "long")]
+    [InlineData("double", "double")]
+    [InlineData("float", "float")]
+    [InlineData("decimal", "decimal")]
+    [InlineData("Guid", "Guid")]
+    [InlineData("DateTime", "DateTime")]
+    [InlineData("DateOnly", "DateOnly")]
+    [InlineData("TimeOnly", "TimeOnly")]
+    [InlineData("Uri", "Uri")]
+    public void Monomorphised_Generic_Records_The_CSharp_Type_Argument(
+        string csharpType,
+        string expectedArg
+    )
+    {
+        // Every numeric primitive shares one schema suffix, so the recorded C# argument
+        // is what distinguishes Wrapper<long> from Wrapper<double>.
+        var source = $$"""
+            using System;
+            using System.Collections.Generic;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Wrapper<T>(List<T> Items, int Total);
+
+            [RivetContract]
+            public static class WrapperContract
+            {
+                public static readonly Define Get =
+                    Define.Get<Wrapper<{{csharpType}}>>("/api/wrapped");
+            }
+            """;
+
+        var doc = CompilationHelper.EmitOpenApi(source);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+
+        // GetNameSuffix uses p.Name capitalised (e.g. "Number", "String")
+        // All numeric types share "Number", all string types share "String"
+        var suffix = csharpType switch
+        {
+            "long" or "double" or "float" or "decimal" => "Number",
+            "Guid" or "DateTime" or "DateOnly" or "TimeOnly" or "Uri" => "String",
+            _ => throw new ArgumentException(csharpType),
+        };
+
+        var schema = schemas.GetProperty($"Wrapper_{suffix}");
+        var args = schema.GetProperty("x-rivet-generic").GetProperty("args");
+        var tArg = args.GetProperty("T").GetString();
+        Assert.Equal(expectedArg, tArg);
     }
 }

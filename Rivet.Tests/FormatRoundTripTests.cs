@@ -857,4 +857,72 @@ public sealed class FormatRoundTripTests
         Assert.Equal(expectedName, prim.Name);
         Assert.Equal(expectedFormat, prim.Format);
     }
+
+    // ========== Emitted scalar formats ==========
+
+    [Fact]
+    public void OpenApi_Numeric_Types_Emit_Correct_Formats()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record PriceDto(int Quantity, long Total, decimal Amount, double Rate, float Score);
+
+            [RivetContract]
+            public static class PricesContract
+            {
+                public static readonly Define GetPrice =
+                    Define.Get<PriceDto>("/api/prices/{id}");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var props = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("PriceDto")
+            .GetProperty("properties");
+
+        Assert.Equal("int32", props.GetProperty("quantity").GetProperty("format").GetString());
+        Assert.Equal("int64", props.GetProperty("total").GetProperty("format").GetString());
+        Assert.Equal("decimal", props.GetProperty("amount").GetProperty("format").GetString());
+        Assert.Equal("double", props.GetProperty("rate").GetProperty("format").GetString());
+        Assert.Equal("float", props.GetProperty("score").GetProperty("format").GetString());
+    }
+
+    [Fact]
+    public void SmallIntegers_EmitAsInteger_NotNumber()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record SensorDto(short Temp, ushort Voltage, byte Channel, sbyte Offset);
+
+            [RivetContract]
+            public static class SensorContract
+            {
+                public static readonly Define Get =
+                    Define.Get<SensorDto>("/api/sensor");
+            }
+            """;
+
+        var doc = CompilationHelper.EmitOpenApi(source);
+        var schema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("SensorDto");
+        var props = schema.GetProperty("properties");
+
+        Assert.Equal("integer", props.GetProperty("temp").GetProperty("type").GetString());
+        Assert.Equal("integer", props.GetProperty("voltage").GetProperty("type").GetString());
+        Assert.Equal("integer", props.GetProperty("channel").GetProperty("type").GetString());
+        Assert.Equal("integer", props.GetProperty("offset").GetProperty("type").GetString());
+    }
 }

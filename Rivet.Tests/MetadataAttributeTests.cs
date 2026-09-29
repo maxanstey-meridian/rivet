@@ -813,5 +813,99 @@ public sealed class MetadataAttributeTests
         Assert.Equal(100, prop.GetProperty("maximum").GetDouble());
     }
 
-    // ========== Helpers ==========
+    // ========== [Range] bounds ==========
+
+    [Fact]
+    public void RangeTypeStringOverload_ParsesInvariant_NoCrash()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record PriceDto
+            {
+                [Range(typeof(decimal), "0.1", "100")]
+                public decimal Amount { get; init; }
+            }
+            """;
+
+        var (_, walker) = CompilationHelper.WalkContract(source);
+
+        var amount = Assert.Single(walker.Definitions["PriceDto"].Properties);
+        Assert.NotNull(amount.Constraints);
+        Assert.Equal(0.1, amount.Constraints!.Minimum);
+        Assert.Equal(100, amount.Constraints.Maximum);
+    }
+
+    [Fact]
+    public void RangeUnparseableBound_SkipsConstraintWithWarning()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record PriceDto
+            {
+                [Range(typeof(decimal), "not-a-number", "100")]
+                public decimal Amount { get; init; }
+            }
+            """;
+
+        Rivet.Tool.Analysis.TypeWalker walker = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+        {
+            (_, walker) = CompilationHelper.WalkContract(source);
+        });
+
+        var amount = Assert.Single(walker.Definitions["PriceDto"].Properties);
+        Assert.True(
+            amount.Constraints is null
+                || (amount.Constraints.Minimum is null && amount.Constraints.Maximum is null)
+        );
+        Assert.Contains("Range", stderr);
+    }
+
+    // ========== Attribute identity ==========
+
+    [Fact]
+    public void User_Attribute_Named_JsonExtensionData_Does_Not_Hide_A_Property()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            [AttributeUsage(AttributeTargets.Property)]
+            public sealed class JsonExtensionDataAttribute : Attribute;
+
+            [RivetType]
+            public sealed record Input(
+                [property: JsonExtensionData] string Value,
+                string Other);
+
+            [RivetType]
+            public sealed record Result(string Id);
+
+            [RivetContract]
+            public static class TestContract
+            {
+                public static readonly Define Create = Define.Post<Input, Result>("/api/items");
+            }
+            """;
+
+        using var document = CompilationHelper.EmitOpenApi(source);
+        var input = document
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Input");
+
+        Assert.True(input.GetProperty("properties").TryGetProperty("value", out _));
+    }
 }

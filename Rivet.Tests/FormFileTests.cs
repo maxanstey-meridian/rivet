@@ -607,4 +607,120 @@ public sealed class FormFileTests
                 .GetString()
         );
     }
+
+    // ========== Multipart schema ==========
+
+    [Fact]
+    public void OpenApi_Multipart_Includes_Required_Array()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadInput(IFormFile Document, string Title);
+
+            [RivetType]
+            public sealed record UploadResult(string Url);
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly Define Upload =
+                    Define.Post<UploadInput, UploadResult>("/api/files");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+
+        // Multipart with named input type emits $ref to component schema
+        var multipart = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/files")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("multipart/form-data")
+            .GetProperty("schema");
+        Assert.True(
+            multipart.TryGetProperty("$ref", out var refVal),
+            "Named multipart input should emit as $ref"
+        );
+        Assert.Equal("#/components/schemas/UploadInput", refVal.GetString());
+
+        // The component schema has the required array
+        var uploadSchema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("UploadInput");
+        Assert.True(
+            uploadSchema.TryGetProperty("required", out var required),
+            "UploadInput schema should include a 'required' array"
+        );
+
+        var requiredFields = required.EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("document", requiredFields);
+        Assert.Contains("title", requiredFields);
+    }
+
+    [Fact]
+    public void Multipart_RouteParam_Not_Duplicated_As_FormField()
+    {
+        var source = """
+            using System;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadInput(Guid TaskId, IFormFile Document, string Title);
+
+            [RivetType]
+            public sealed record UploadResult(string Url);
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly Define Upload =
+                    Define.Post<UploadInput, UploadResult>("/api/tasks/{taskId}/files");
+            }
+            """;
+
+        var endpoints = CompilationHelper.WalkContract(source).Endpoints;
+        var ep = Assert.Single(endpoints);
+
+        // taskId should appear exactly once as Route
+        var routeParams = ep.Params.Where(p => p.Source == ParamSource.Route).ToList();
+        Assert.Single(routeParams);
+        Assert.Equal("taskId", routeParams[0].Name);
+
+        // taskId should NOT appear as a FormField
+        var formFields = ep.Params.Where(p => p.Source == ParamSource.FormField).ToList();
+        Assert.DoesNotContain(
+            formFields,
+            f => string.Equals(f.Name, "taskId", StringComparison.OrdinalIgnoreCase)
+        );
+
+        // document is File, title is FormField
+        Assert.Single(ep.Params, p => p.Source == ParamSource.File);
+        Assert.Single(formFields, f => f.Name == "title");
+
+        using var document = CompilationHelper.EmitOpenApi(source);
+        var bodySchema = document
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/tasks/{taskId}/files")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("multipart/form-data")
+            .GetProperty("schema");
+        Assert.False(bodySchema.TryGetProperty("$ref", out _));
+        var bodyProperties = bodySchema.GetProperty("properties");
+        Assert.False(bodyProperties.TryGetProperty("taskId", out _));
+        Assert.True(bodyProperties.TryGetProperty("document", out _));
+        Assert.True(bodyProperties.TryGetProperty("title", out _));
+    }
 }

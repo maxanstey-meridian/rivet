@@ -2799,4 +2799,602 @@ public sealed class ContractEndpointTests
             operation.GetProperty("description").GetString()
         );
     }
+
+    // ========== Inherited properties ==========
+
+    [Fact]
+    public void WalkedDto_WithBaseClass_IncludesInheritedProperties()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record BaseDto
+            {
+                public Guid Id { get; init; }
+                public DateTime CreatedAt { get; init; }
+            }
+
+            [RivetType]
+            public sealed record TaskDto : BaseDto
+            {
+                public string Name { get; init; } = "";
+            }
+            """;
+
+        var (_, walker) = CompilationHelper.WalkContract(source);
+
+        var taskDto = walker.Definitions["TaskDto"];
+        var names = taskDto.Properties.Select(p => p.Name).ToList();
+
+        Assert.Contains("id", names);
+        Assert.Contains("createdAt", names);
+        Assert.Contains("name", names);
+        // Records' synthesized members (EqualityContract) must not leak in
+        Assert.DoesNotContain("equalityContract", names);
+        Assert.Equal(3, taskDto.Properties.Count);
+
+        // Inherited property types map correctly
+        var id = Assert.Single(taskDto.Properties, p => p.Name == "id");
+        Assert.Equal("uuid", Assert.IsType<TsType.Primitive>(id.Type).Format);
+    }
+
+    [Fact]
+    public void MultiLevelBaseChain_FlattensAllLevels()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record Level0
+            {
+                public string A { get; init; } = "";
+            }
+
+            public abstract record Level1 : Level0
+            {
+                public string B { get; init; } = "";
+            }
+
+            [RivetType]
+            public sealed record Level2 : Level1
+            {
+                public string C { get; init; } = "";
+            }
+            """;
+
+        var (_, walker) = CompilationHelper.WalkContract(source);
+
+        var names = walker.Definitions["Level2"].Properties.Select(p => p.Name).ToList();
+        Assert.Equal(3, names.Count);
+        Assert.Contains("a", names);
+        Assert.Contains("b", names);
+        Assert.Contains("c", names);
+    }
+
+    [Fact]
+    public void DerivedOverride_WinsOverBaseProperty()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record BaseDto
+            {
+                public virtual string? Label { get; init; }
+            }
+
+            [RivetType]
+            public sealed record DerivedDto : BaseDto
+            {
+                // Override tightens nullability — derived declaration must win
+                public override string Label { get; init; } = "";
+            }
+            """;
+
+        var (_, walker) = CompilationHelper.WalkContract(source);
+
+        var label = Assert.Single(
+            walker.Definitions["DerivedDto"].Properties,
+            p => p.Name == "label"
+        );
+        // Derived (non-nullable) wins; base (nullable) would be TsType.Nullable
+        Assert.IsType<TsType.Primitive>(label.Type);
+        Assert.False(label.IsOptional);
+    }
+
+    [Fact]
+    public void DerivedShadowing_NewProperty_Wins()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            public record BaseDto
+            {
+                public string Code { get; init; } = "";
+            }
+
+            [RivetType]
+            public sealed record DerivedDto : BaseDto
+            {
+                public new int Code { get; init; }
+            }
+            """;
+
+        var (_, walker) = CompilationHelper.WalkContract(source);
+
+        var props = walker.Definitions["DerivedDto"].Properties;
+        var code = Assert.Single(props, p => p.Name == "code");
+        Assert.Equal("number", Assert.IsType<TsType.Primitive>(code.Type).Name);
+    }
+
+    [Fact]
+    public void PositionalRecordInheritance_IncludesBasePositionalParams()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record AuditedDto(Guid Id, DateTime CreatedAt);
+
+            [RivetType]
+            public sealed record OrderDto(Guid Id, DateTime CreatedAt, string Number)
+                : AuditedDto(Id, CreatedAt);
+            """;
+
+        var (_, walker) = CompilationHelper.WalkContract(source);
+
+        var names = walker.Definitions["OrderDto"].Properties.Select(p => p.Name).ToList();
+        Assert.Equal(3, names.Count);
+        Assert.Contains("id", names);
+        Assert.Contains("createdAt", names);
+        Assert.Contains("number", names);
+    }
+
+    [Fact]
+    public void GenericBase_SubstitutesTypeArguments()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record Envelope<T>
+            {
+                public T Payload { get; init; } = default!;
+                public int Version { get; init; }
+            }
+
+            [RivetType]
+            public sealed record MessageDto : Envelope<string>
+            {
+                public string Topic { get; init; } = "";
+            }
+            """;
+
+        var (_, walker) = CompilationHelper.WalkContract(source);
+
+        var props = walker.Definitions["MessageDto"].Properties;
+        Assert.Equal(3, props.Count);
+
+        // T is substituted with the concrete type argument from the base instantiation
+        var payload = Assert.Single(props, p => p.Name == "payload");
+        Assert.Equal("string", Assert.IsType<TsType.Primitive>(payload.Type).Name);
+    }
+
+    [Fact]
+    public void ContractInput_WithBaseQuery_InheritedQueryParamsSurvive()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record PagedQuery
+            {
+                public int Page { get; init; }
+                public int PageSize { get; init; }
+            }
+
+            public sealed record ListTasksQuery : PagedQuery
+            {
+                public string? Filter { get; init; }
+            }
+
+            public sealed record TaskDto(string Name);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define List = Define.Get<ListTasksQuery, TaskDto[]>("/api/tasks");
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkContract(source);
+
+        var list = Assert.Single(endpoints);
+        var queryParams = list
+            .Params.Where(p => p.Source == ParamSource.Query)
+            .Select(p => p.Name)
+            .ToList();
+
+        Assert.Contains("page", queryParams);
+        Assert.Contains("pageSize", queryParams);
+        Assert.Contains("filter", queryParams);
+    }
+
+    [Fact]
+    public void ContractInput_WithBaseRouteProperty_BindsAsRouteParam()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record ByIdQuery
+            {
+                public Guid Id { get; init; }
+            }
+
+            public sealed record GetTaskQuery : ByIdQuery
+            {
+                public bool IncludeDetails { get; init; }
+            }
+
+            public sealed record TaskDto(string Name);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define Get = Define.Get<GetTaskQuery, TaskDto>("/api/tasks/{id}");
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkContract(source);
+
+        var get = Assert.Single(endpoints);
+        var id = Assert.Single(get.Params, p => p.Name == "id");
+        Assert.Equal(ParamSource.Route, id.Source);
+        // Typed from the inherited property, not the string fallback
+        Assert.Equal("uuid", Assert.IsType<TsType.Primitive>(id.Type).Format);
+    }
+
+    [Fact]
+    public void MixedUploadInput_WithBaseFormFields_InheritedFieldsSurvive()
+    {
+        var source = """
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record UploadMetadata
+            {
+                public string Category { get; init; } = "";
+            }
+
+            public sealed record UploadRequest : UploadMetadata
+            {
+                public IFormFile File { get; init; } = default!;
+            }
+
+            [RivetContract]
+            public static class FilesContract
+            {
+                public static readonly Define Upload = Define.Post<UploadRequest, string>("/api/files");
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkContract(source);
+
+        var upload = Assert.Single(endpoints);
+        Assert.Single(upload.Params, p => p.Name == "file" && p.Source == ParamSource.File);
+        Assert.Single(
+            upload.Params,
+            p => p.Name == "category" && p.Source == ParamSource.FormField
+        );
+    }
+
+    // ========== Type name collisions ==========
+
+    [Fact]
+    public void SameLastSegment_DifferentNamespaces_BothEmitted_WithLoudDiagnostic()
+    {
+        var sources = new[]
+        {
+            """
+                using Rivet;
+                namespace Foo.Models
+                {
+                    [RivetType]
+                    public sealed record Item(string Name);
+
+                    [RivetType]
+                    public sealed record FooWrapper(Item Item);
+                }
+                """,
+            """
+                using Rivet;
+                namespace Bar.Models
+                {
+                    [RivetType]
+                    public sealed record Item(int Count);
+
+                    [RivetType]
+                    public sealed record BarWrapper(Item Item);
+                }
+                """,
+        };
+
+        var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
+        Rivet.Tool.Analysis.TypeWalker walker = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+        {
+            var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
+            walker = Rivet.Tool.Analysis.TypeWalker.Create(compilation, discovered.RivetTypes);
+        });
+
+        // Loud diagnostic — never a silent merge
+        Assert.Contains("collision", stderr);
+        Assert.Contains("Item", stderr);
+
+        // Both shapes emitted under deterministic distinct names; first-walked keeps the short name
+        Assert.Single(walker.Definitions["Item"].Properties, p => p.Name == "name");
+        Assert.Single(walker.Definitions["Item2"].Properties, p => p.Name == "count");
+
+        // References point at the right disambiguated schema
+        var fooRef = Assert.IsType<TsType.TypeRef>(
+            Assert.Single(walker.Definitions["FooWrapper"].Properties).Type
+        );
+        Assert.Equal("Item", fooRef.Name);
+
+        var barRef = Assert.IsType<TsType.TypeRef>(
+            Assert.Single(walker.Definitions["BarWrapper"].Properties).Type
+        );
+        Assert.Equal("Item2", barRef.Name);
+    }
+
+    [Fact]
+    public void EnumCollision_BothEmitted_WithLoudDiagnostic()
+    {
+        var sources = new[]
+        {
+            """
+                using Rivet;
+                using System.Text.Json.Serialization;
+                namespace Foo.Models
+                {
+                    [JsonConverter(typeof(JsonStringEnumConverter<Status>))]
+                    public enum Status { Active, Closed }
+
+                    [RivetType]
+                    public sealed record FooDto(Status Status);
+                }
+                """,
+            """
+                using Rivet;
+                using System.Text.Json.Serialization;
+                namespace Bar.Models
+                {
+                    [JsonConverter(typeof(JsonStringEnumConverter<Status>))]
+                    public enum Status { Draft, Published, Archived }
+
+                    [RivetType]
+                    public sealed record BarDto(Status Status);
+                }
+                """,
+        };
+
+        var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
+        Rivet.Tool.Analysis.TypeWalker walker = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+        {
+            var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
+            walker = Rivet.Tool.Analysis.TypeWalker.Create(compilation, discovered.RivetTypes);
+        });
+
+        Assert.Contains("collision", stderr);
+
+        // Enums used to be keyed by simple name with TryAdd — second silently dropped
+        var first = Assert.IsType<TsType.StringUnion>(walker.Enums["Status"]);
+        Assert.Equal(2, first.Members.Count);
+        var second = Assert.IsType<TsType.StringUnion>(walker.Enums["Status2"]);
+        Assert.Equal(3, second.Members.Count);
+
+        // Each DTO references its own enum
+        var fooRef = Assert.IsType<TsType.TypeRef>(
+            Assert.Single(walker.Definitions["FooDto"].Properties).Type
+        );
+        Assert.Equal("Status", fooRef.Name);
+        var barRef = Assert.IsType<TsType.TypeRef>(
+            Assert.Single(walker.Definitions["BarDto"].Properties).Type
+        );
+        Assert.Equal("Status2", barRef.Name);
+    }
+
+    [Fact]
+    public void GenericArity_DistinctTypes_BothEmitted()
+    {
+        // Result and Result<T> are distinct types — the old keying shared "Result"
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Result(bool Ok);
+
+            [RivetType]
+            public sealed record Result<T>(bool Ok, T Value);
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        Rivet.Tool.Analysis.TypeWalker walker = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+        {
+            var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
+            walker = Rivet.Tool.Analysis.TypeWalker.Create(compilation, discovered.RivetTypes);
+        });
+
+        Assert.Contains("collision", stderr);
+        Assert.Single(walker.Definitions["Result"].Properties);
+        Assert.Equal(2, walker.Definitions["Result2"].Properties.Count);
+        Assert.Equal(["T"], walker.Definitions["Result2"].TypeParameters);
+    }
+
+    // ========== Route-bound property naming ==========
+
+    [Fact]
+    public void RouteBoundProperty_WithJsonPropertyName_KeepsRouteName_AndDiagnoses()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed record GetTaskQuery
+            {
+                [JsonPropertyName("renamed")]
+                public string Id { get; init; } = "";
+
+                public bool Verbose { get; init; }
+            }
+
+            public sealed record TaskDto(string Name);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly Define Get = Define.Get<GetTaskQuery, TaskDto>("/api/tasks/{id}");
+            }
+            """;
+
+        IReadOnlyList<TsEndpointDefinition> endpoints = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+        {
+            (endpoints, _) = CompilationHelper.WalkContract(source);
+        });
+
+        var ep = Assert.Single(endpoints);
+
+        // Route param keeps the route-template name, not the JSON rename
+        var route = Assert.Single(ep.Params, p => p.Source == ParamSource.Route);
+        Assert.Equal("id", route.Name);
+        Assert.DoesNotContain(ep.Params, p => p.Name == "renamed");
+
+        // Loud diagnostic on the rename/route mismatch
+        Assert.Contains("renamed", stderr);
+
+        // Non-route props keep JSON naming behavior
+        Assert.Single(ep.Params, p => p.Name == "verbose" && p.Source == ParamSource.Query);
+    }
+
+    // ========== Input property naming and types ==========
+
+    [Fact]
+    public void ContractWalker_Respects_JsonPropertyName_On_QueryParam()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record SearchInput(
+                [property: JsonPropertyName("q")] string Query,
+                int Limit);
+
+            [RivetType]
+            public sealed record ResultDto(string Id);
+
+            [RivetContract]
+            public static class SearchContract
+            {
+                public static readonly Define Search =
+                    Define.Get<SearchInput, ResultDto>("/api/search");
+            }
+            """;
+
+        var endpoints = CompilationHelper.WalkContract(source).Endpoints;
+        var search = Assert.Single(endpoints);
+
+        var queryParam = Assert.Single(search.Params, p => p.Name == "q");
+        Assert.Equal(ParamSource.Query, queryParam.Source);
+    }
+
+    [Fact]
+    public void ContractWalker_Skips_JsonIgnore_On_InputProperty()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record SearchInput(
+                string Query,
+                [property: JsonIgnore] string InternalToken);
+
+            [RivetType]
+            public sealed record ResultDto(string Id);
+
+            [RivetContract]
+            public static class SearchContract
+            {
+                public static readonly Define Search =
+                    Define.Get<SearchInput, ResultDto>("/api/search");
+            }
+            """;
+
+        var endpoints = CompilationHelper.WalkContract(source).Endpoints;
+        var search = Assert.Single(endpoints);
+
+        // Only 'query' should be emitted; 'internalToken' is ignored
+        Assert.Single(search.Params);
+        Assert.Equal("query", search.Params[0].Name);
+    }
+
+    [Fact]
+    public void Post_Route_Param_Uses_TInput_Property_Type()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UpdateInput(int Id, string Title);
+
+            [RivetType]
+            public sealed record ItemDto(int Id, string Title);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly Define UpdateItem =
+                    Define.Post<UpdateInput, ItemDto>("/api/items/{id}");
+            }
+            """;
+
+        var endpoints = CompilationHelper.WalkContract(source).Endpoints;
+        var update = Assert.Single(endpoints);
+
+        var routeParam = Assert.Single(update.Params, p => p.Source == ParamSource.Route);
+        Assert.Equal("id", routeParam.Name);
+        // Should be number (from int Id), not string
+        Assert.IsType<TsType.Primitive>(routeParam.Type);
+        Assert.Equal("number", ((TsType.Primitive)routeParam.Type).Name);
+    }
 }
