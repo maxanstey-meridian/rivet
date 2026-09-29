@@ -116,7 +116,6 @@ public sealed class OpenApiDocumentInfoTests
         using var tempDir = new TempDir();
         var spec = await RunPipeline(
             new RivetOptions(
-                "ignored",
                 tempDir.FullName,
                 [],
                 Quiet: true,
@@ -140,9 +139,7 @@ public sealed class OpenApiDocumentInfoTests
     public async Task Pipeline_Without_Flags_Matches_Direct_Default_Emit()
     {
         using var tempDir = new TempDir();
-        var spec = await RunPipeline(
-            new RivetOptions("ignored", tempDir.FullName, [], Quiet: true)
-        );
+        var spec = await RunPipeline(new RivetOptions(tempDir.FullName, [], Quiet: true));
 
         // The pipeline's no-flags output must be byte-identical to the
         // emitter's pre-flag default output.

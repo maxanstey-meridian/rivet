@@ -66,7 +66,7 @@ public sealed class EmitPipelineTests : IDisposable
     public async Task ExtractedInlineTypes_Become_Component_Schemas_In_OpenApi()
     {
         var input = BuildEmitInput(DuplicateInlineEndpoints());
-        var options = new RivetOptions(".", _output.FullName, []);
+        var options = new RivetOptions(_output.FullName, []);
 
         var result = await EmitPipeline.RunAsync(input, options);
 
@@ -164,7 +164,7 @@ public sealed class EmitPipelineTests : IDisposable
         };
 
         var input = BuildEmitInput(endpoints, [existingDef]);
-        var options = new RivetOptions(".", _output.FullName, []);
+        var options = new RivetOptions(_output.FullName, []);
 
         await EmitPipeline.RunAsync(input, options);
 
@@ -194,17 +194,14 @@ public sealed class EmitPipelineTests : IDisposable
     public async Task Verify_Passes_When_Spec_Matches_And_Writes_Nothing()
     {
         var input = BuildEmitInput(DuplicateInlineEndpoints());
-        Assert.Equal(
-            0,
-            await EmitPipeline.RunAsync(input, new RivetOptions(".", _output.FullName, []))
-        );
+        Assert.Equal(0, await EmitPipeline.RunAsync(input, new RivetOptions(_output.FullName, [])));
 
         var specPath = Path.Combine(_output.FullName, "openapi.json");
         var writtenAt = File.GetLastWriteTimeUtc(specPath);
 
         var result = await EmitPipeline.RunAsync(
             input,
-            new RivetOptions(".", _output.FullName, [], Verify: true)
+            new RivetOptions(_output.FullName, [], Verify: true)
         );
 
         Assert.Equal(0, result);
@@ -215,7 +212,7 @@ public sealed class EmitPipelineTests : IDisposable
     public async Task Verify_Fails_On_Stale_Spec_Without_Overwriting_It()
     {
         var input = BuildEmitInput(DuplicateInlineEndpoints());
-        await EmitPipeline.RunAsync(input, new RivetOptions(".", _output.FullName, []));
+        await EmitPipeline.RunAsync(input, new RivetOptions(_output.FullName, []));
 
         var specPath = Path.Combine(_output.FullName, "openapi.json");
         var tampered = (await File.ReadAllTextAsync(specPath)).Replace("\"age\"", "\"years\"");
@@ -224,7 +221,7 @@ public sealed class EmitPipelineTests : IDisposable
         int result = -1;
         var stderr = CompilationHelper.CaptureStdErr(() =>
             result = EmitPipeline
-                .RunAsync(input, new RivetOptions(".", _output.FullName, [], Verify: true))
+                .RunAsync(input, new RivetOptions(_output.FullName, [], Verify: true))
                 .GetAwaiter()
                 .GetResult()
         );
@@ -242,7 +239,7 @@ public sealed class EmitPipelineTests : IDisposable
         int result = -1;
         var stderr = CompilationHelper.CaptureStdErr(() =>
             result = EmitPipeline
-                .RunAsync(input, new RivetOptions(".", _output.FullName, [], Verify: true))
+                .RunAsync(input, new RivetOptions(_output.FullName, [], Verify: true))
                 .GetAwaiter()
                 .GetResult()
         );
@@ -270,7 +267,7 @@ public sealed class EmitPipelineTests : IDisposable
         var exception = await Assert.ThrowsAsync<RivetUserException>(() =>
             EmitPipeline.RunAsync(
                 input,
-                new RivetOptions(".", _output.FullName, [], SecuritySchemes: securitySchemes)
+                new RivetOptions(_output.FullName, [], SecuritySchemes: securitySchemes)
             )
         );
 
@@ -286,7 +283,6 @@ public sealed class EmitPipelineTests : IDisposable
         var overridePath = Path.Combine(specDir, "api-spec.json");
         var input = BuildEmitInput(DuplicateInlineEndpoints());
         var options = new RivetOptions(
-            ".",
             Path.Combine(_output.FullName, "rivet"),
             [],
             OpenApiPath: overridePath
@@ -313,7 +309,6 @@ public sealed class EmitPipelineTests : IDisposable
         var outputDir = Path.Combine(_output.FullName, "client", "generated", "rivet");
         var input = BuildEmitInput(DuplicateInlineEndpoints());
         var options = new RivetOptions(
-            ".",
             outputDir,
             [],
             OpenApiPath: Path.Combine("..", "openapi.json")

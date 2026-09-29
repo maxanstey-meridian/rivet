@@ -211,7 +211,27 @@ public sealed class CliParserTests
 
         Assert.NotNull(options);
         Assert.Equal(new[] { "Contracts.cs", "Types.cs" }, options!.Files);
-        Assert.Equal("Contracts.cs", options.ProjectPath);
+        Assert.Null(options.ProjectPath);
+    }
+
+    [Theory]
+    [InlineData(new[] { "--project", "Api.csproj" }, "Api.csproj", null, null)]
+    [InlineData(new[] { "Api.csproj" }, "Api.csproj", null, null)]
+    [InlineData(new[] { "--from", "contract.json" }, null, "contract.json", null)]
+    [InlineData(new[] { "--from-openapi", "spec.json" }, null, null, "spec.json")]
+    public void ParseArgs_Each_Mode_Sets_Only_Its_Own_Input_Path(
+        string[] args,
+        string? project,
+        string? contract,
+        string? spec
+    )
+    {
+        var options = CliParser.ParseArgs(args);
+
+        Assert.NotNull(options);
+        Assert.Equal(project, options!.ProjectPath);
+        Assert.Equal(contract, options.FromContractPath);
+        Assert.Equal(spec, options.FromOpenApiPath);
     }
 
     // ════════ --title / --version / --server (spec metadata plumbing) ════════

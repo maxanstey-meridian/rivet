@@ -4,7 +4,7 @@ namespace Rivet.Tool.Analysis;
 
 internal static class FunctionsHostConfiguration
 {
-    public static string LoadRoutePrefix(string projectPath)
+    public static string LoadRoutePrefix(string? projectPath)
     {
         var configured = Environment.GetEnvironmentVariable(
             "AzureFunctionsJobHost__extensions__http__routePrefix"
@@ -14,7 +14,7 @@ internal static class FunctionsHostConfiguration
             return configured;
         }
 
-        if (!projectPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+        if (projectPath is null)
         {
             return "api";
         }

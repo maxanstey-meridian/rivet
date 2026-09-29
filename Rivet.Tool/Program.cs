@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Rivet.Tool;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
@@ -37,19 +36,9 @@ static async Task<int> Run(string[] args)
         return RunImport(options);
     }
 
-    var sw = Stopwatch.StartNew();
-    var (projectPath, outputDir) = (options.ProjectPath, options.OutputDir);
-
-    Microsoft.CodeAnalysis.Compilation? compilation;
-
-    if (projectPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
-    {
-        compilation = await CompilationLoader.LoadProjectAsync(projectPath);
-    }
-    else
-    {
-        compilation = CompilationLoader.CompileFromFiles(options.Files);
-    }
+    var compilation = options.ProjectPath is { } projectPath
+        ? await CompilationLoader.LoadProjectAsync(projectPath)
+        : CompilationLoader.CompileFromFiles([.. options.Files]);
 
     if (compilation is null)
     {
@@ -76,7 +65,7 @@ static async Task<int> Run(string[] args)
     {
         var functionsRoutePrefix = wkt.HttpTrigger is null
             ? "api"
-            : FunctionsHostConfiguration.LoadRoutePrefix(projectPath);
+            : FunctionsHostConfiguration.LoadRoutePrefix(options.ProjectPath);
         var coverageWarnings = CoverageChecker.Check(
             compilation,
             wkt,
