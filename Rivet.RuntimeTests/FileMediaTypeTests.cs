@@ -121,38 +121,6 @@ public sealed class FileMediaTypeTests
         );
     }
 
-    [Fact]
-    public void Existing_five_argument_signatures_remain_available()
-    {
-        Type[] owners =
-        [
-            typeof(RouteDefinition),
-            typeof(RouteDefinition<string>),
-            typeof(FileRouteDefinition),
-            typeof(BoundRouteDefinition),
-            typeof(BoundRouteDefinition<string>),
-            typeof(BoundFileRouteDefinition),
-        ];
-        foreach (var owner in owners)
-        {
-            foreach (var source in new[] { typeof(byte[]), typeof(Stream), typeof(string) })
-            {
-                Assert.NotNull(
-                    owner.GetMethod(
-                        "File",
-                        [
-                            source,
-                            typeof(string),
-                            typeof(bool),
-                            typeof(DateTimeOffset?),
-                            typeof(string),
-                        ]
-                    )
-                );
-            }
-        }
-    }
-
     private static async Task<DefaultHttpContext> ExecuteAsync(RivetResult result, bool mvc)
     {
         var services = new ServiceCollection();

@@ -49,23 +49,6 @@ public sealed class BoundRouteDefinition<TOutput>
     public RivetResult Error<TError>(int statusCode, TError payload) =>
         RivetTerminal.Error(_contract, statusCode, payload);
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        byte[] content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         byte[] content,
         string? downloadName = null,
@@ -84,23 +67,6 @@ public sealed class BoundRouteDefinition<TOutput>
             contentType
         );
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        Stream content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         Stream content,
         string? downloadName = null,
@@ -117,23 +83,6 @@ public sealed class BoundRouteDefinition<TOutput>
             lastModified,
             entityTag,
             contentType
-        );
-
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.PhysicalFile(
-            _contract,
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
         );
 
     public RivetResult File(
@@ -168,23 +117,6 @@ public sealed class BoundRouteDefinition
     public RivetResult Error<TError>(int statusCode, TError payload) =>
         RivetTerminal.Error(_contract, statusCode, payload);
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        byte[] content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         byte[] content,
         string? downloadName = null,
@@ -203,23 +135,6 @@ public sealed class BoundRouteDefinition
             contentType
         );
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        Stream content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         Stream content,
         string? downloadName = null,
@@ -236,23 +151,6 @@ public sealed class BoundRouteDefinition
             lastModified,
             entityTag,
             contentType
-        );
-
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.PhysicalFile(
-            _contract,
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
         );
 
     public RivetResult File(
@@ -285,23 +183,6 @@ public sealed class BoundFileRouteDefinition
     public RivetResult Error<TError>(int statusCode, TError payload) =>
         RivetTerminal.Error(_contract, statusCode, payload);
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        byte[] content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         byte[] content,
         string? downloadName = null,
@@ -320,23 +201,6 @@ public sealed class BoundFileRouteDefinition
             contentType
         );
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        Stream content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         Stream content,
         string? downloadName = null,
@@ -353,23 +217,6 @@ public sealed class BoundFileRouteDefinition
             lastModified,
             entityTag,
             contentType
-        );
-
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.PhysicalFile(
-            _contract,
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
         );
 
     public RivetResult File(
@@ -447,7 +294,7 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType = null
+        string? contentType
     )
     {
         if (content is null)
@@ -473,7 +320,7 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType = null
+        string? contentType
     )
     {
         if (content is null)
@@ -509,7 +356,7 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType = null
+        string? contentType
     )
     {
         if (string.IsNullOrWhiteSpace(physicalPath))
@@ -540,7 +387,7 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType = null
+        string? contentType
     )
     {
         var response = RequireSuccess(contract);

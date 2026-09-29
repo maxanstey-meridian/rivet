@@ -1076,23 +1076,6 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
     public RivetResult Error<TError>(int statusCode, TError payload) =>
         RivetTerminal.Error(Publish(typeof(TOutput)), statusCode, payload);
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        byte[] content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            Publish(typeof(TOutput)),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         byte[] content,
         string? downloadName = null,
@@ -1111,23 +1094,6 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
             contentType
         );
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        Stream content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            Publish(typeof(TOutput)),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         Stream content,
         string? downloadName = null,
@@ -1144,23 +1110,6 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
             lastModified,
             entityTag,
             contentType
-        );
-
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.PhysicalFile(
-            Publish(typeof(TOutput)),
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
         );
 
     public RivetResult File(
@@ -1217,23 +1166,6 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
     public RivetResult Error<TError>(int statusCode, TError payload) =>
         RivetTerminal.Error(Publish(null), statusCode, payload);
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        byte[] content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            Publish(null),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         byte[] content,
         string? downloadName = null,
@@ -1252,23 +1184,6 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
             contentType
         );
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        Stream content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            Publish(null),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         Stream content,
         string? downloadName = null,
@@ -1285,23 +1200,6 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
             lastModified,
             entityTag,
             contentType
-        );
-
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.PhysicalFile(
-            Publish(null),
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
         );
 
     public RivetResult File(
@@ -1347,23 +1245,6 @@ public sealed class FileRouteDefinition : RouteDefinitionBase<FileRouteDefinitio
     public RivetResult Error<TError>(int statusCode, TError payload) =>
         RivetTerminal.Error(Publish(null), statusCode, payload);
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        byte[] content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            Publish(null),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         byte[] content,
         string? downloadName = null,
@@ -1382,23 +1263,6 @@ public sealed class FileRouteDefinition : RouteDefinitionBase<FileRouteDefinitio
             contentType
         );
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        Stream content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            Publish(null),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         Stream content,
         string? downloadName = null,
@@ -1415,23 +1279,6 @@ public sealed class FileRouteDefinition : RouteDefinitionBase<FileRouteDefinitio
             lastModified,
             entityTag,
             contentType
-        );
-
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.PhysicalFile(
-            Publish(null),
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
         );
 
     public RivetResult File(
