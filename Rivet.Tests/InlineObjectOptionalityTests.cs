@@ -28,19 +28,20 @@ public sealed class InlineObjectOptionalityTests
             ),
         ]);
 
-        var schema = OpenApiEmitter.MapTsTypeToJsonSchema(type);
-        var required = Assert.IsType<List<string>>(schema["required"]);
+        var schema = OpenApiEmitterTests.ResponseSchemaOf(type);
 
-        Assert.Equal(["required", "requiredNullable"], required);
+        Assert.Equal(
+            ["required", "requiredNullable"],
+            schema.GetProperty("required").EnumerateArray().Select(value => value.GetString())
+        );
         Assert.Equal(
             ["string", "null"],
-            Assert.IsType<List<string>>(
-                Assert.IsType<Dictionary<string, object>>(
-                    Assert.IsType<Dictionary<string, object>>(schema["properties"])[
-                        "requiredNullable"
-                    ]
-                )["type"]
-            )
+            schema
+                .GetProperty("properties")
+                .GetProperty("requiredNullable")
+                .GetProperty("type")
+                .EnumerateArray()
+                .Select(value => value.GetString())
         );
     }
 
