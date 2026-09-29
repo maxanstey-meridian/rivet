@@ -192,7 +192,7 @@ internal static class CliRunner
         }
         catch
         {
-            process.Kill();
+            process.Kill(entireProcessTree: true);
             process.Dispose();
             throw;
         }
@@ -230,7 +230,7 @@ internal sealed class ServerProcess(Process process, string url) : IAsyncDisposa
     {
         try
         {
-            process.Kill();
+            process.Kill(entireProcessTree: true);
             await process.WaitForExitAsync();
         }
         catch (InvalidOperationException)
