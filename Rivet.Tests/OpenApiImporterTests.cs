@@ -6951,4 +6951,30 @@ public sealed class OpenApiImporterTests
         Assert.DoesNotContain("unresolved-ref", contract);
         Assert.Contains("\"ex/one~two\"", contract);
     }
+
+    // ========== Inline schema identity ==========
+
+    [Fact]
+    public void Inline_Objects_Differing_Only_In_A_Nested_OneOf_Get_Distinct_Records()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Cat": { "type": "object", "properties": { "meow": { "type": "string" } } },
+            "Dog": { "type": "object", "properties": { "bark": { "type": "string" } } },
+            "Holder": {
+              "type": "object",
+              "properties": {
+                "first": { "type": "object", "properties": { "pet": { "oneOf": [ { "$ref": "#/components/schemas/Cat" } ] } } },
+                "second": { "type": "object", "properties": { "pet": { "oneOf": [ { "$ref": "#/components/schemas/Dog" } ] } } }
+              }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        var holder = CompilationHelper.FindFile(result, "Types/Holder.cs");
+
+        Assert.Contains("HolderFirst First", holder);
+        Assert.Contains("HolderSecond Second", holder);
+    }
 }

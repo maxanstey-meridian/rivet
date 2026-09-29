@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -674,147 +673,62 @@ internal static class SchemaClassifier
         return result;
     }
 
-    // --- Structural fingerprinting ---
+    private static readonly HashSet<string> _schemaNameMaps =
+    [
+        "properties",
+        "patternProperties",
+        "$defs",
+        "dependentSchemas",
+        "mapping",
+    ];
+
+    private static readonly HashSet<string> _schemaDataKeywords =
+    [
+        "const",
+        "default",
+        "enum",
+        "example",
+        "examples",
+    ];
 
     /// <summary>
-    /// Computes a structural fingerprint for an inline schema.
+    /// Identity of an inline schema for synthetic-type reuse: its OpenAPI 3.1 serialisation
+    /// (<c>$ref</c>s kept as references), canonicalised so that key order and
+    /// <c>required</c> order do not split one shape into two types. Vendor extensions are
+    /// left out: they do not change the generated type.
     /// </summary>
     internal static string ComputeSchemaFingerprint(IOpenApiSchema schema)
     {
-        var sb = new StringBuilder();
-        AppendSchemaFingerprint(sb, schema, 0);
-        return sb.ToString();
-    }
-
-    private static void AppendSchemaFingerprint(StringBuilder sb, IOpenApiSchema schema, int depth)
-    {
-        if (depth > 10)
-        {
-            sb.Append("...");
-            return;
-        }
-
-        sb.Append('{');
-        sb.Append("t:").Append(schema.Type.HasValue ? (int)schema.Type.Value : -1);
-        sb.Append(",apa:").Append(schema.AdditionalPropertiesAllowed);
-
-        if (schema.Format is not null)
-        {
-            sb.Append(",f:").Append(schema.Format);
-        }
-
-        AppendSemanticFacets(sb, schema);
-
-        if (schema.Properties is { Count: > 0 })
-        {
-            sb.Append(",p:{");
-            foreach (var (k, v) in schema.Properties.OrderBy(p => p.Key))
-            {
-                sb.Append(k).Append(':');
-                if (v is OpenApiSchemaReference propRef)
-                {
-                    sb.Append("$ref:").Append(propRef.Reference.Id);
-                }
-                else
-                {
-                    AppendSchemaFingerprint(sb, v, depth + 1);
-                }
-
-                sb.Append(',');
-            }
-
-            sb.Append('}');
-        }
-
-        if (schema.Required is { Count: > 0 })
-        {
-            sb.Append(",r:").Append(string.Join(",", schema.Required.OrderBy(r => r)));
-        }
-
-        if (schema.Items is not null)
-        {
-            sb.Append(",i:");
-            if (schema.Items is OpenApiSchemaReference itemRef)
-            {
-                sb.Append("$ref:").Append(itemRef.Reference.Id);
-            }
-            else
-            {
-                AppendSchemaFingerprint(sb, schema.Items, depth + 1);
-            }
-        }
-
-        if (schema.Enum is { Count: > 0 })
-        {
-            sb.Append(",e:").Append(string.Join(",", schema.Enum.Select(e => e?.ToString())));
-        }
-
-        if (schema.AdditionalProperties is not null)
-        {
-            sb.Append(",ap:");
-            if (schema.AdditionalProperties is OpenApiSchemaReference apRef)
-            {
-                sb.Append("$ref:").Append(apRef.Reference.Id);
-            }
-            else
-            {
-                AppendSchemaFingerprint(sb, schema.AdditionalProperties, depth + 1);
-            }
-        }
-
-        sb.Append('}');
-    }
-
-    private static void AppendSemanticFacets(StringBuilder sb, IOpenApiSchema schema)
-    {
-        void Append(string name, object? value)
-        {
-            if (value is not null)
-            {
-                sb.Append(',').Append(name).Append(':').Append(value);
-            }
-        }
-
-        Append("title", schema.Title);
-        Append("description", schema.Description);
-        Append("default", schema.Default?.ToJsonString());
-        Append(
-            "example",
-            schema.Example is null ? null : OpenApiJsonNodeSerializer.Serialize(schema.Example)
+        using var writer = new StringWriter(CultureInfo.InvariantCulture);
+        schema.SerializeAsV31(
+            new OpenApiJsonWriter(writer, new OpenApiJsonWriterSettings { Terse = true })
         );
-        if (schema.Examples is { Count: > 0 })
-        {
-            Append(
-                "examples",
-                string.Join(
-                    "|",
-                    schema.Examples.Select(example =>
-                        example is null ? null : OpenApiJsonNodeSerializer.Serialize(example)
-                    )
-                )
-            );
-        }
-        Append("deprecated", schema.Deprecated ? true : null);
-        Append("readOnly", schema.ReadOnly ? true : null);
-        Append("writeOnly", schema.WriteOnly ? true : null);
-        Append("minLength", schema.MinLength);
-        Append("maxLength", schema.MaxLength);
-        Append("pattern", schema.Pattern);
-        Append("minimum", schema.Minimum);
-        Append("maximum", schema.Maximum);
-        Append("exclusiveMinimum", schema.ExclusiveMinimum);
-        Append("exclusiveMaximum", schema.ExclusiveMaximum);
-        Append("multipleOf", schema.MultipleOf);
-        Append("minItems", schema.MinItems);
-        Append("maxItems", schema.MaxItems);
-        Append("uniqueItems", schema.UniqueItems == true ? true : null);
-        if (schema.Xml is { } xml)
-        {
-            Append("xml.name", xml.Name);
-            Append("xml.namespace", xml.Namespace);
-            Append("xml.prefix", xml.Prefix);
-            Append("xml.attribute", xml.Attribute ? true : null);
-            Append("xml.wrapped", xml.Wrapped ? true : null);
-        }
+        return Canonical(JsonNode.Parse(writer.ToString()), null)?.ToJsonString() ?? "null";
+
+        static JsonNode? Canonical(JsonNode? node, string? key) =>
+            node switch
+            {
+                _ when key is not null && _schemaDataKeywords.Contains(key) => node?.DeepClone(),
+                JsonObject obj => new JsonObject(
+                    obj.Where(entry =>
+                            key is not null && _schemaNameMaps.Contains(key)
+                            || !entry.Key.StartsWith("x-", StringComparison.Ordinal)
+                        )
+                        .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                        .Select(entry =>
+                            KeyValuePair.Create(entry.Key, Canonical(entry.Value, entry.Key))
+                        )
+                ),
+                JsonArray array when key == "required" => new JsonArray(
+                    array
+                        .Select(item => item?.DeepClone())
+                        .OrderBy(item => item?.ToJsonString(), StringComparer.Ordinal)
+                        .ToArray()
+                ),
+                JsonArray array => new JsonArray(
+                    array.Select(item => Canonical(item, null)).ToArray()
+                ),
+                _ => node?.DeepClone(),
+            };
     }
 }
