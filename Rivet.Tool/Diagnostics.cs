@@ -64,6 +64,7 @@ public static class Diagnostics
     public const string EnumWireValueCollision = "RIV1106";
     public const string UnsupportedEnumConverter = "RIV1108";
     public const string ConflictingResponseDeclaration = "RIV1107";
+    public const string DuplicateResponseHeader = "RIV1109";
 
     // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
     // rivet/php sibling runtime. Native Rivet diagnostics must not use them.
@@ -156,6 +157,8 @@ public static class Diagnostics
             "Route token has no matching property on the endpoint's input type (after normalized matching: case-insensitive, '_'/'-' stripped) — emitted as an untyped string path param.",
         [InputTypeNotParamLowerable] =
             "The input type on a bodyless method (GET/DELETE/.AcceptsBinary) is a dictionary, collection or scalar — it has no property surface to lower to query params, so the input is dropped (route tokens still emit as untyped path params).",
+        [DuplicateResponseHeader] =
+            "A contract endpoint declares the same response header name (case-insensitively) more than once for one status; generation fails instead of emitting both spellings.",
         [DuplicateResponseStatus] =
             "An authored contract declares the same response status more than once; generation fails because the contract cannot execute as declared.",
         [InvalidRequestBodyProvenance] =

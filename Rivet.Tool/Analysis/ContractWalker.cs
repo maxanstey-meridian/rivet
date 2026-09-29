@@ -657,7 +657,7 @@ public static class ContractWalker
     }
 
     /// <summary>
-    /// P2 wave 5: attaches .WithResponseHeader(...) declarations to their responses.
+    /// Attaches .WithResponseHeader(...) declarations to their responses.
     /// A null status (convenience overload) targets the success status. Headers on a
     /// status no .Returns()/.Status() declared are ignored LOUDLY (RIV1017), mirroring
     /// the response-example policy.
@@ -709,6 +709,20 @@ public static class ContractWalker
                 var mergedHeaders = response.Headers is null
                     ? headers
                     : response.Headers.Concat(headers).ToList();
+
+                // HTTP header names are case-insensitive, so ETag and etag are one header.
+                if (
+                    mergedHeaders
+                        .GroupBy(header => header.Name, StringComparer.OrdinalIgnoreCase)
+                        .FirstOrDefault(names => names.Count() > 1) is
+                    { } duplicate
+                )
+                {
+                    throw new RivetUserException(
+                        $"error {Diagnostics.DuplicateResponseHeader}: endpoint '{endpointName}' declares response header '{duplicate.Key}' more than once for status {group.Key}"
+                    );
+                }
+
                 responses[responseIndex] = response with { Headers = mergedHeaders };
                 continue;
             }

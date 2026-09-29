@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -186,6 +187,71 @@ public sealed class HeaderSupportTests
         Assert.Equal("Retry-After", retryAfter.Name);
         Assert.Null(retryAfter.Description);
         Assert.False(retryAfter.Required, "required must be opt-in only");
+    }
+
+    [Theory]
+    [InlineData(".WithResponseHeader(\"ETag\").WithResponseHeader(\"etag\")", "200")]
+    [InlineData(
+        ".Returns(429).WithResponseHeader(429, \"Retry-After\").WithResponseHeader(429, \"retry-after\")",
+        "429"
+    )]
+    public void WithResponseHeader_Duplicate_Name_On_One_Status_Is_Refused(
+        string chain,
+        string status
+    )
+    {
+        var source = $$"""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}"){{chain}};
+            }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
+
+        Assert.Contains("RIV1109", exception.Message);
+        Assert.Contains($"status {status}", exception.Message);
+    }
+
+    [Fact]
+    public void WithResponseHeader_Same_Name_On_Different_Statuses_Is_Allowed()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .WithResponseHeader("ETag")
+                        .Returns(429)
+                        .WithResponseHeader(429, "etag");
+            }
+            """;
+
+        var (endpoints, _) = CompilationHelper.WalkContract(source);
+
+        Assert.All(
+            Assert.Single(endpoints).Responses,
+            response => Assert.Single(response.Headers!)
+        );
     }
 
     [Fact]

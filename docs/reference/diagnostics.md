@@ -11,7 +11,7 @@ error RIV2002: <message>
 IDs are stable across releases — grep, baseline, or suppress by ID, never by
 message text. Most diagnostics are **warnings** and allow processing to continue.
 Diagnostics marked **Error** are fatal and exit `1`; currently this applies to
-`RIV1006`, `RIV1021`, `RIV1022`, `RIV1023`, `RIV1100`, `RIV1102`, `RIV1103`, `RIV1104`, `RIV1106`, `RIV1107`, `RIV1108`, `RIV2002`, `RIV2011`, and `RIV2012`. Coverage
+`RIV1006`, `RIV1021`, `RIV1022`, `RIV1023`, `RIV1100`, `RIV1102`, `RIV1103`, `RIV1104`, `RIV1106`, `RIV1107`, `RIV1108`, `RIV1109`, `RIV2002`, `RIV2011`, and `RIV2012`. Coverage
 warnings also exit `1` whenever `--check` is used, with or without `--output`; other
 warnings do not change the exit code.
 
@@ -68,6 +68,7 @@ must have a row here, and every row here must be a registered ID.
 | `RIV1106` | Error | Two enum members produce the same wire value (via the declared converter's casing or duplicate `[JsonStringEnumMemberName]` pins) — generation fails instead of emitting an incorrect numeric schema. | Rename one of the colliding members (or fix its `[JsonStringEnumMemberName]`) so the wire values are distinct. |
 | `RIV1108` | Error | Unsupported enum converter, wrong generic enum target, or string flags/aliases. | Use a built-in or Rivet enum converter with distinct values; use numeric serialization for flags. |
 | `RIV1107` | Error | An endpoint declares the same response status twice with different bodies — a `[ProducesResponseType]`/`.Returns(...)` declaration and a mapped `Results<>` branch disagree on the payload type, or one declares a body where the other declares none. One status carries exactly one shape; generation fails instead of silently letting the attribute win. | Align the attribute declaration and the `Results<>` branch (same payload type, or both bodyless), or drop the redundant declaration. |
+| `RIV1109` | Error | A contract endpoint declares the same response header more than once for one status. Header names are case-insensitive, so `.WithResponseHeader("ETag").WithResponseHeader("etag")` is a duplicate; generation fails instead of emitting both spellings. | Keep one `.WithResponseHeader(...)` per header name and status. |
 
 `RIV1024`-`RIV1099` are documented by `rivet/php`; this repository reserves the
 block but does not register those sibling-runtime diagnostics as native Rivet
