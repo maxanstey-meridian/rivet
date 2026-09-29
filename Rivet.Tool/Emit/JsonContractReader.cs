@@ -60,6 +60,7 @@ public static class JsonContractReader
 
         var endpoints = contract.Endpoints?.Select(ToEndpointDefinition).ToList() ?? [];
         var types = contract.Types.Select(ToTypeDefinition).ToList();
+        RequireTypes(types, endpoints);
 
         // BUG-1: the contract JSON has no top-level brands dictionary — brands exist
         // only as inline kind:"brand" nodes (the TS lowerer emits them that way). The
@@ -70,140 +71,72 @@ public static class JsonContractReader
         return (types, enums, endpoints, brands);
     }
 
+    /// <summary>
+    /// The schema requires <c>type</c> on params, response headers and properties; the
+    /// deserializer leaves a missing one null behind a non-nullable member.
+    /// </summary>
+    private static void RequireTypes(
+        IReadOnlyList<TsTypeDefinition> types,
+        IReadOnlyList<TsEndpointDefinition> endpoints
+    )
+    {
+        var missing = types
+            .SelectMany(type =>
+                type.Properties.Where(prop => prop.Type is null)
+                    .Select(prop => $"property '{type.Name}.{prop.Name}'")
+            )
+            .Concat(
+                endpoints.SelectMany(endpoint =>
+                    endpoint
+                        .Params.Where(param => param.Type is null)
+                        .Select(param => $"param '{param.Name}' on endpoint '{endpoint.Name}'")
+                        .Concat(
+                            endpoint
+                                .Responses.SelectMany(response => response.Headers ?? [])
+                                .Where(header => header.Type is null)
+                                .Select(header =>
+                                    $"response header '{header.Name}' on endpoint '{endpoint.Name}'"
+                                )
+                        )
+                )
+            )
+            .FirstOrDefault();
+        if (missing is not null)
+        {
+            throw new JsonException($"{missing} has no type.");
+        }
+    }
+
     private static Dictionary<string, TsType.Brand> CollectBrands(
         IReadOnlyList<TsTypeDefinition> types,
         IReadOnlyList<TsEndpointDefinition> endpoints
     )
     {
+        var roots = types
+            .SelectMany(type =>
+                type.Type is null
+                    ? type.Properties.Select(prop => prop.Type)
+                    : type.Properties.Select(prop => prop.Type).Prepend(type.Type)
+            )
+            .Concat(
+                endpoints.SelectMany(endpoint => endpoint.AllTypes().Select(site => site.Type))
+            );
+
         var brands = new Dictionary<string, TsType.Brand>();
-
-        foreach (var type in types)
+        foreach (
+            var brand in roots.SelectMany(root => root.SelfAndDescendants()).OfType<TsType.Brand>()
+        )
         {
-            if (type.Type is not null)
+            if (!brands.TryAdd(brand.Name, brand) && brands[brand.Name] != brand)
             {
-                WalkForBrands(type.Type, brands);
-            }
-
-            foreach (var prop in type.Properties)
-            {
-                WalkForBrands(prop.Type, brands);
-            }
-        }
-
-        foreach (var endpoint in endpoints)
-        {
-            foreach (var param in endpoint.Params)
-            {
-                WalkForBrands(param.Type, brands);
-            }
-
-            if (endpoint.ReturnType is not null)
-            {
-                WalkForBrands(endpoint.ReturnType, brands);
-            }
-
-            if (endpoint.RequestType is not null)
-            {
-                WalkForBrands(endpoint.RequestType, brands);
-            }
-
-            foreach (var content in endpoint.RequestContents ?? [])
-            {
-                if (content.Schema is not null)
-                {
-                    WalkForBrands(content.Schema, brands);
-                }
-            }
-
-            foreach (var response in endpoint.Responses)
-            {
-                if (response.DataType is not null)
-                {
-                    WalkForBrands(response.DataType, brands);
-                }
-
-                foreach (var content in response.Contents ?? [])
-                {
-                    if (content.Schema is not null)
-                    {
-                        WalkForBrands(content.Schema, brands);
-                    }
-                }
-
-                foreach (var header in response.Headers ?? [])
-                {
-                    WalkForBrands(header.Type, brands);
-                }
+                Diagnostics.Warn(
+                    Diagnostics.BrandConflictingUnderlyingTypes,
+                    $"brand '{brand.Name}' declared with conflicting underlying types — first declaration wins"
+                );
             }
         }
 
         return brands;
-    }
-
-    private static void WalkForBrands(TsType type, Dictionary<string, TsType.Brand> brands)
-    {
-        switch (type)
-        {
-            case TsType.Brand b:
-                if (brands.TryGetValue(b.Name, out var existing))
-                {
-                    if (existing != b)
-                    {
-                        Diagnostics.Warn(
-                            Diagnostics.BrandConflictingUnderlyingTypes,
-                            $"brand '{b.Name}' declared with conflicting underlying types — first declaration wins"
-                        );
-                    }
-                }
-                else
-                {
-                    brands[b.Name] = b;
-                }
-
-                WalkForBrands(b.Inner, brands);
-                break;
-            case TsType.Nullable n:
-                WalkForBrands(n.Inner, brands);
-                break;
-            case TsType.Array a:
-                WalkForBrands(a.Element, brands);
-                break;
-            case TsType.Dictionary d:
-                WalkForBrands(d.Value, brands);
-                if (d.Key is not null)
-                {
-                    WalkForBrands(d.Key, brands);
-                }
-                break;
-            case TsType.Generic g:
-                foreach (var arg in g.TypeArguments)
-                {
-                    WalkForBrands(arg, brands);
-                }
-
-                break;
-            case TsType.InlineObject obj:
-                foreach (var field in obj.Fields)
-                {
-                    WalkForBrands(field.Type, brands);
-                }
-
-                break;
-            case TsType.TaggedUnion tu:
-                foreach (var variant in tu.Variants)
-                {
-                    WalkForBrands(variant.Type, brands);
-                }
-
-                break;
-            case TsType.Union u:
-                foreach (var variant in u.Variants)
-                {
-                    WalkForBrands(variant, brands);
-                }
-
-                break;
-        }
     }
 
     private static TsEndpointDefinition ToEndpointDefinition(

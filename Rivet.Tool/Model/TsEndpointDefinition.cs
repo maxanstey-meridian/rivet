@@ -49,7 +49,64 @@ public sealed record TsEndpointDefinition(
         bool RequestBodyPresent = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         OpenApiOperationProvenance? Provenance = null
-);
+)
+{
+    /// <summary>
+    /// Every type on the endpoint surface, each with its site relative to the endpoint
+    /// ("return", "response.200", "param.id", ...): the return type, each response's data
+    /// type, content schemas and headers, then the params, request type and request contents.
+    /// </summary>
+    public IEnumerable<(string Site, TsType Type)> AllTypes()
+    {
+        if (ReturnType is not null)
+        {
+            yield return ("return", ReturnType);
+        }
+
+        foreach (var response in Responses)
+        {
+            if (response.DataType is not null)
+            {
+                yield return ($"response.{response.StatusCode}", response.DataType);
+            }
+            foreach (var content in response.Contents ?? [])
+            {
+                if (content.Schema is not null)
+                {
+                    yield return (
+                        $"response.{response.EffectiveStatusKey}.content.{content.MediaType}",
+                        content.Schema
+                    );
+                }
+            }
+            foreach (var header in response.Headers ?? [])
+            {
+                yield return (
+                    $"response.{response.EffectiveStatusKey}.header.{header.Name}",
+                    header.Type
+                );
+            }
+        }
+
+        foreach (var param in Params)
+        {
+            yield return ($"param.{param.Name}", param.Type);
+        }
+
+        if (RequestType is not null)
+        {
+            yield return ("requestType", RequestType);
+        }
+
+        foreach (var content in RequestContents ?? [])
+        {
+            if (content.Schema is not null)
+            {
+                yield return ($"requestContent.{content.MediaType}", content.Schema);
+            }
+        }
+    }
+}
 
 /// <summary>
 /// Security metadata for an endpoint. null = inherit CLI default.

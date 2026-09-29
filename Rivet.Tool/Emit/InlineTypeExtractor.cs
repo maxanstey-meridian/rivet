@@ -73,52 +73,11 @@ public static class InlineTypeExtractor
     )
     {
         var results = new List<(TsType.InlineObject, string)>();
-
-        foreach (var e in endpoints)
+        foreach (var endpoint in endpoints)
         {
-            CollectFromType(e.ReturnType, $"{e.ControllerName}.{e.Name}.return", results);
-
-            foreach (var r in e.Responses)
+            foreach (var (site, type) in endpoint.AllTypes())
             {
-                CollectFromType(
-                    r.DataType,
-                    $"{e.ControllerName}.{e.Name}.response.{r.StatusCode}",
-                    results
-                );
-                foreach (var content in r.Contents ?? [])
-                {
-                    CollectFromType(
-                        content.Schema,
-                        $"{e.ControllerName}.{e.Name}.response.{r.EffectiveStatusKey}.content.{content.MediaType}",
-                        results
-                    );
-                }
-                foreach (var header in r.Headers ?? [])
-                {
-                    CollectFromType(
-                        header.Type,
-                        $"{e.ControllerName}.{e.Name}.response.{r.EffectiveStatusKey}.header.{header.Name}",
-                        results
-                    );
-                }
-            }
-
-            foreach (var p in e.Params)
-            {
-                CollectFromType(p.Type, $"{e.ControllerName}.{e.Name}.param.{p.Name}", results);
-            }
-
-            if (e.RequestType is not null)
-            {
-                CollectFromType(e.RequestType, $"{e.ControllerName}.{e.Name}.requestType", results);
-            }
-            foreach (var content in e.RequestContents ?? [])
-            {
-                CollectFromType(
-                    content.Schema,
-                    $"{e.ControllerName}.{e.Name}.requestContent.{content.MediaType}",
-                    results
-                );
+                CollectFromType(type, $"{endpoint.ControllerName}.{endpoint.Name}.{site}", results);
             }
         }
 
@@ -503,224 +462,70 @@ public static class InlineTypeExtractor
         Dictionary<string, TsType.TypeRef> replacements
     )
     {
-        var returnType = endpoint.ReturnType is not null
-            ? ReplaceInType(endpoint.ReturnType, replacements)
-            : null;
-
-        var responses = endpoint
-            .Responses.Select(r =>
-                r with
-                {
-                    DataType = r.DataType is null ? null : ReplaceInType(r.DataType, replacements),
-                    Contents = r
-                        .Contents?.Select(content =>
-                            content with
-                            {
-                                Schema = content.Schema is null
-                                    ? null
-                                    : ReplaceInType(content.Schema, replacements),
-                            }
-                        )
-                        .ToList(),
-                    Headers = r
-                        .Headers?.Select(header =>
-                            header with
-                            {
-                                Type = ReplaceInType(header.Type, replacements),
-                            }
-                        )
-                        .ToList(),
-                }
-            )
-            .ToList();
-
-        var parameters = endpoint
-            .Params.Select(p => p with { Type = ReplaceInType(p.Type, replacements) })
-            .ToList();
-
-        var requestType = endpoint.RequestType is not null
-            ? ReplaceInType(endpoint.RequestType, replacements)
-            : null;
-        var requestContents = endpoint
-            .RequestContents?.Select(content =>
-                content with
-                {
-                    Schema = content.Schema is null
-                        ? null
-                        : ReplaceInType(content.Schema, replacements),
-                }
-            )
-            .ToList();
+        TsType Replace(TsType type) => ReplaceInType(type, replacements);
 
         return endpoint with
         {
-            ReturnType = returnType,
-            Responses = responses,
-            Params = parameters,
-            RequestType = requestType,
-            RequestContents = requestContents,
+            ReturnType = endpoint.ReturnType is null ? null : Replace(endpoint.ReturnType),
+            Responses = endpoint
+                .Responses.Select(response =>
+                    response with
+                    {
+                        DataType = response.DataType is null ? null : Replace(response.DataType),
+                        Contents = response
+                            .Contents?.Select(content =>
+                                content with
+                                {
+                                    Schema = content.Schema is null
+                                        ? null
+                                        : Replace(content.Schema),
+                                }
+                            )
+                            .ToList(),
+                        Headers = response
+                            .Headers?.Select(header => header with { Type = Replace(header.Type) })
+                            .ToList(),
+                    }
+                )
+                .ToList(),
+            Params = endpoint.Params.Select(p => p with { Type = Replace(p.Type) }).ToList(),
+            RequestType = endpoint.RequestType is null ? null : Replace(endpoint.RequestType),
+            RequestContents = endpoint
+                .RequestContents?.Select(content =>
+                    content with
+                    {
+                        Schema = content.Schema is null ? null : Replace(content.Schema),
+                    }
+                )
+                .ToList(),
         };
     }
 
     private static TsType ReplaceInType(
         TsType type,
         Dictionary<string, TsType.TypeRef> replacements
-    )
-    {
-        switch (type)
-        {
-            case TsType.InlineObject io:
-                var hash = CanonicalHash(io);
-                if (replacements.TryGetValue(hash, out var typeRef))
-                {
-                    return typeRef;
-                }
-
-                var replacedFields = io
-                    .Fields.Select(f => new TsType.InlineObjectField(
-                        f.Name,
-                        ReplaceInType(f.Type, replacements),
-                        f.Optional,
-                        f.Surface
-                    ))
-                    .ToList();
-                return new TsType.InlineObject(replacedFields);
-
-            case TsType.Array a:
-                return new TsType.Array(ReplaceInType(a.Element, replacements), a.ElementMetadata);
-
-            case TsType.Nullable n:
-                return new TsType.Nullable(ReplaceInType(n.Inner, replacements));
-
-            case TsType.Dictionary d:
-                return new TsType.Dictionary(
-                    ReplaceInType(d.Value, replacements),
-                    d.Key,
-                    d.ValueMetadata
-                );
-
-            case TsType.Generic g:
-                var replacedArgs = g
-                    .TypeArguments.Select(a => ReplaceInType(a, replacements))
-                    .ToList();
-                return new TsType.Generic(g.Name, replacedArgs);
-
-            case TsType.Brand b:
-                return new TsType.Brand(b.Name, ReplaceInType(b.Inner, replacements), b.Metadata);
-
-            case TsType.TaggedUnion tu:
-                return new TsType.TaggedUnion(
-                    tu.Discriminator,
-                    tu.Variants.Select(v => new TsType.TaggedUnionVariant(
-                            v.Tag,
-                            ReplaceInType(v.Type, replacements),
-                            v.Metadata
-                        ))
-                        .ToList()
-                );
-
-            case TsType.Union u:
-                return new TsType.Union(
-                    u.Variants.Select(v => ReplaceInType(v, replacements)).ToList()
-                );
-
-            default:
-                return type;
-        }
-    }
+    ) =>
+        type.Rewrite(node =>
+            node is TsType.InlineObject inline
+            && replacements.TryGetValue(CanonicalHash(inline), out var typeRef)
+                ? typeRef
+                : null
+        );
 
     private static HashSet<string> CollectArrayElementHashes(
         IReadOnlyList<TsEndpointDefinition> endpoints
-    )
-    {
-        var hashes = new HashSet<string>();
-        foreach (var e in endpoints)
-        {
-            CollectArrayElements(e.ReturnType, hashes);
-            foreach (var r in e.Responses)
-            {
-                CollectArrayElements(r.DataType, hashes);
-                foreach (var content in r.Contents ?? [])
-                {
-                    CollectArrayElements(content.Schema, hashes);
-                }
-                foreach (var header in r.Headers ?? [])
-                {
-                    CollectArrayElements(header.Type, hashes);
-                }
-            }
-
-            foreach (var p in e.Params)
-            {
-                CollectArrayElements(p.Type, hashes);
-            }
-
-            if (e.RequestType is not null)
-            {
-                CollectArrayElements(e.RequestType, hashes);
-            }
-            foreach (var content in e.RequestContents ?? [])
-            {
-                CollectArrayElements(content.Schema, hashes);
-            }
-        }
-        return hashes;
-    }
-
-    private static void CollectArrayElements(TsType? type, HashSet<string> hashes)
-    {
-        switch (type)
-        {
-            case TsType.Array a:
-                if (a.Element is TsType.InlineObject io)
-                {
-                    hashes.Add(CanonicalHash(io));
-                }
-
-                CollectArrayElements(a.Element, hashes);
-                break;
-            case TsType.InlineObject obj:
-                foreach (var field in obj.Fields)
-                {
-                    CollectArrayElements(field.Type, hashes);
-                }
-
-                break;
-            case TsType.Nullable n:
-                CollectArrayElements(n.Inner, hashes);
-                break;
-            case TsType.Dictionary d:
-                CollectArrayElements(d.Value, hashes);
-                break;
-            case TsType.Generic g:
-                foreach (var arg in g.TypeArguments)
-                {
-                    CollectArrayElements(arg, hashes);
-                }
-
-                break;
-            case TsType.Brand b:
-                CollectArrayElements(b.Inner, hashes);
-                break;
-            case TsType.TaggedUnion tu:
-                foreach (var variant in tu.Variants)
-                {
-                    CollectArrayElements(variant.Type, hashes);
-                }
-
-                break;
-            case TsType.Union u:
-                foreach (var variant in u.Variants)
-                {
-                    CollectArrayElements(variant, hashes);
-                }
-
-                break;
-        }
-    }
+    ) =>
+        endpoints
+            .SelectMany(endpoint => endpoint.AllTypes())
+            .SelectMany(site => site.Type.SelfAndDescendants())
+            .OfType<TsType.Array>()
+            .Select(array => array.Element)
+            .OfType<TsType.InlineObject>()
+            .Select(CanonicalHash)
+            .ToHashSet();
 
     private static void CollectFromType(
-        TsType? type,
+        TsType type,
         string context,
         List<(TsType.InlineObject, string)> results
     )
@@ -735,25 +540,6 @@ public static class InlineTypeExtractor
                 }
 
                 break;
-            case TsType.Array a:
-                CollectFromType(a.Element, context, results);
-                break;
-            case TsType.Nullable n:
-                CollectFromType(n.Inner, context, results);
-                break;
-            case TsType.Dictionary d:
-                CollectFromType(d.Value, context, results);
-                break;
-            case TsType.Generic g:
-                foreach (var arg in g.TypeArguments)
-                {
-                    CollectFromType(arg, context, results);
-                }
-
-                break;
-            case TsType.Brand b:
-                CollectFromType(b.Inner, context, results);
-                break;
             case TsType.TaggedUnion tu:
                 foreach (var variant in tu.Variants)
                 {
@@ -765,6 +551,13 @@ public static class InlineTypeExtractor
                 for (var index = 0; index < u.Variants.Count; index++)
                 {
                     CollectFromType(u.Variants[index], $"{context}.variant{index}", results);
+                }
+
+                break;
+            default:
+                foreach (var child in type.Children())
+                {
+                    CollectFromType(child, context, results);
                 }
 
                 break;

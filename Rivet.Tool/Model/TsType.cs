@@ -170,46 +170,85 @@ public abstract record TsType
     }
 
     /// <summary>
-    /// Recursively resolves type parameters in a TsType tree using the given map.
+    /// Replaces every unresolved type parameter found in <paramref name="map"/>.
     /// </summary>
-    public static TsType ResolveTypeParams(TsType type, Dictionary<string, TsType> map)
-    {
-        return type switch
+    public static TsType ResolveTypeParams(TsType type, Dictionary<string, TsType> map) =>
+        type.Rewrite(node =>
+            node is TypeParam tp && map.TryGetValue(tp.Name, out var resolved) ? resolved : null
+        );
+
+    /// <summary>The directly nested types, in declaration order (dictionary value before key).</summary>
+    public IEnumerable<TsType> Children() =>
+        this switch
         {
-            TypeParam tp when map.TryGetValue(tp.Name, out var resolved) => resolved,
-            Array a => new Array(ResolveTypeParams(a.Element, map), a.ElementMetadata),
-            Nullable n => new Nullable(ResolveTypeParams(n.Inner, map)),
-            Dictionary d => new Dictionary(
-                ResolveTypeParams(d.Value, map),
-                d.Key is null ? null : ResolveTypeParams(d.Key, map),
-                d.ValueMetadata
-            ),
-            Generic g => new Generic(
-                g.Name,
-                g.TypeArguments.Select(a => ResolveTypeParams(a, map)).ToList()
-            ),
-            InlineObject obj => new InlineObject(
-                obj.Fields.Select(f => new InlineObjectField(
-                        f.Name,
-                        ResolveTypeParams(f.Type, map),
-                        f.Optional,
-                        f.Surface
-                    ))
-                    .ToList()
-            ),
-            TaggedUnion tu => new TaggedUnion(
-                tu.Discriminator,
-                tu.Variants.Select(v => new TaggedUnionVariant(
-                        v.Tag,
-                        ResolveTypeParams(v.Type, map),
-                        v.Metadata
-                    ))
-                    .ToList()
-            ),
-            Union u => new Union(u.Variants.Select(v => ResolveTypeParams(v, map)).ToList()),
-            _ => type,
+            Nullable n => [n.Inner],
+            Array a => [a.Element],
+            Dictionary d => d.Key is null ? [d.Value] : [d.Value, d.Key],
+            Generic g => g.TypeArguments,
+            Brand b => [b.Inner],
+            InlineObject obj => obj.Fields.Select(field => field.Type),
+            TaggedUnion tu => tu.Variants.Select(variant => variant.Type),
+            Union u => u.Variants,
+            _ => [],
         };
+
+    /// <summary>This type followed by every nested type, pre-order.</summary>
+    public IEnumerable<TsType> SelfAndDescendants()
+    {
+        yield return this;
+        foreach (var child in Children())
+        {
+            foreach (var descendant in child.SelfAndDescendants())
+            {
+                yield return descendant;
+            }
+        }
     }
+
+    /// <summary>
+    /// Rebuilds the tree top-down. Where <paramref name="replace"/> returns a type, that type
+    /// is used as-is; otherwise the node is copied with its children rewritten, so every
+    /// other record member (metadata, descriptions) is preserved.
+    /// </summary>
+    public TsType Rewrite(Func<TsType, TsType?> replace) =>
+        replace(this)
+        ?? this switch
+        {
+            Nullable n => n with { Inner = n.Inner.Rewrite(replace) },
+            Array a => a with { Element = a.Element.Rewrite(replace) },
+            Dictionary d => d with
+            {
+                Value = d.Value.Rewrite(replace),
+                Key = d.Key?.Rewrite(replace),
+            },
+            Generic g => g with
+            {
+                TypeArguments = g.TypeArguments.Select(arg => arg.Rewrite(replace)).ToList(),
+            },
+            Brand b => b with { Inner = b.Inner.Rewrite(replace) },
+            InlineObject obj => obj with
+            {
+                Fields = obj
+                    .Fields.Select(field => field with { Type = field.Type.Rewrite(replace) })
+                    .ToList(),
+            },
+            TaggedUnion tu => tu with
+            {
+                Variants = tu
+                    .Variants.Select(variant =>
+                        variant with
+                        {
+                            Type = variant.Type.Rewrite(replace),
+                        }
+                    )
+                    .ToList(),
+            },
+            Union u => u with
+            {
+                Variants = u.Variants.Select(variant => variant.Rewrite(replace)).ToList(),
+            },
+            _ => this,
+        };
 
     private static string LiteralNameSuffix(JsonElement value) =>
         value.ValueKind switch

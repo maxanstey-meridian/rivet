@@ -636,6 +636,32 @@ public sealed class InlineTypeExtractorTests
     }
 
     [Fact]
+    public void Brand_Description_Survives_Extraction()
+    {
+        var email = new TsType.Brand(
+            "Email",
+            new TsType.Primitive("string"),
+            Description: "An email"
+        );
+        var inline = new TsType.InlineObject([
+            ("id", new TsType.Primitive("number")),
+            ("email", email),
+        ]);
+        var endpoints = new[]
+        {
+            MakeEndpoint("Buyers", "find", returnType: inline),
+            MakeEndpoint("Buyers", "list", returnType: inline),
+            MakeEndpoint("Buyers", "contact", returnType: email),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        var extracted = Assert.Single(result.ExtractedTypes);
+        Assert.Equal(email, extracted.Properties.Single(p => p.Name == "email").Type);
+        Assert.Equal(email, result.Endpoints[2].ReturnType);
+    }
+
+    [Fact]
     public void LargeInlineObject_ExtractedEvenIfSingle()
     {
         var inline = new TsType.InlineObject([

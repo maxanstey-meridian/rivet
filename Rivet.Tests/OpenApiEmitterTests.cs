@@ -3002,6 +3002,112 @@ public sealed class OpenApiEmitterTests
         Assert.True(schemas.TryGetProperty("PagedResult_AB", out _));
     }
 
+    private static Dictionary<string, TsTypeDefinition> WrapperDefinitions() =>
+        new()
+        {
+            ["Wrapper"] = new(
+                "Wrapper",
+                ["T"],
+                [new TsPropertyDefinition("value", new TsType.TypeParam("T"), false)]
+            ),
+        };
+
+    private static JsonElement EmitSchemasFor(params TsResponseType[] responses)
+    {
+        using var doc = EmitOpenApiFromModel(
+            [new TsEndpointDefinition("probe", "GET", "/probe", [], null, "probe", responses)],
+            WrapperDefinitions(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>()
+        );
+        return doc.RootElement.GetProperty("components").GetProperty("schemas").Clone();
+    }
+
+    [Fact]
+    public void Generic_Used_Only_Inside_A_Union_Gets_Its_Component()
+    {
+        var firstEnum = new TsType.StringUnion(["A", "B", "C", "D"]);
+        var secondEnum = new TsType.StringUnion(["E", "F", "G", "H"]);
+
+        var schemas = EmitSchemasFor(
+            new TsResponseType(200, new TsType.Generic("Wrapper", [firstEnum])),
+            new TsResponseType(
+                201,
+                new TsType.Union([
+                    new TsType.Generic("Wrapper", [secondEnum]),
+                    new TsType.Primitive("string"),
+                ])
+            )
+        );
+
+        // Both instantiations share the lossy pure name "Wrapper_Enum", so the one reached
+        // only through the union must still be registered to get its own name and schema.
+        Assert.Equal(
+            ["A", "B", "C", "D"],
+            schemas
+                .GetProperty("Wrapper_Enum")
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(value => value.GetString())
+        );
+        Assert.Equal(
+            ["E", "F", "G", "H"],
+            schemas
+                .GetProperty("Wrapper_Enum2")
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(value => value.GetString())
+        );
+    }
+
+    [Fact]
+    public void Generic_Used_Only_In_Response_Content_Or_Header_Gets_Its_Component()
+    {
+        var schemas = EmitSchemasFor(
+            new TsResponseType(
+                200,
+                null,
+                Headers:
+                [
+                    new TsResponseHeader(
+                        "X-Page",
+                        new TsType.Generic("Wrapper", [new TsType.Primitive("number")])
+                    ),
+                ],
+                Contents:
+                [
+                    new TsMediaTypeContent(
+                        "application/json",
+                        new TsType.Generic("Wrapper", [new TsType.Primitive("string")])
+                    ),
+                ]
+            )
+        );
+
+        Assert.Equal(
+            "string",
+            schemas
+                .GetProperty("Wrapper_String")
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("type")
+                .GetString()
+        );
+        Assert.Equal(
+            "number",
+            schemas
+                .GetProperty("Wrapper_Number")
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("type")
+                .GetString()
+        );
+    }
+
     [Fact]
     public void GetTypeNameSuffix_Distinct_Instantiations_Get_Distinct_Names()
     {

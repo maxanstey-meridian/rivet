@@ -2604,94 +2604,28 @@ public sealed class OpenApiEmitter
     /// </summary>
     private void AssignComponentNames(IReadOnlyList<TsEndpointDefinition> endpoints)
     {
+        var roots = endpoints
+            .SelectMany(endpoint => endpoint.AllTypes().Select(site => site.Type))
+            .Concat(
+                _definitions.Values.SelectMany(def =>
+                    def.Type is not null ? [def.Type] : def.Properties.Select(prop => prop.Type)
+                )
+            )
+            .Concat(_brands.Values.Select(brand => brand.Inner))
+            .Concat(_enums.Values);
         var generics = new List<TsType.Generic>();
         var taggedUnions = new List<TsType.TaggedUnion>();
-
-        void Walk(TsType? type)
+        foreach (var type in roots.SelectMany(root => root.SelfAndDescendants()))
         {
             switch (type)
             {
                 case TsType.Generic g:
                     generics.Add(g);
-                    foreach (var arg in g.TypeArguments)
-                    {
-                        Walk(arg);
-                    }
-
                     break;
                 case TsType.TaggedUnion tu:
                     taggedUnions.Add(tu);
-                    foreach (var v in tu.Variants)
-                    {
-                        Walk(v.Type);
-                    }
-
-                    break;
-                case TsType.Array a:
-                    Walk(a.Element);
-                    break;
-                case TsType.Nullable n:
-                    Walk(n.Inner);
-                    break;
-                case TsType.Dictionary d:
-                    Walk(d.Value);
-                    if (d.Key is not null)
-                    {
-                        Walk(d.Key);
-                    }
-
-                    break;
-                case TsType.Brand b:
-                    Walk(b.Inner);
-                    break;
-                case TsType.InlineObject obj:
-                    foreach (var field in obj.Fields)
-                    {
-                        Walk(field.Type);
-                    }
-
                     break;
             }
-        }
-
-        foreach (var ep in endpoints)
-        {
-            foreach (var p in ep.Params)
-            {
-                Walk(p.Type);
-            }
-
-            Walk(ep.ReturnType);
-            foreach (var r in ep.Responses)
-            {
-                Walk(r.DataType);
-            }
-
-            Walk(ep.RequestType);
-        }
-
-        foreach (var (_, def) in _definitions)
-        {
-            if (def.Type is not null)
-            {
-                Walk(def.Type);
-                continue;
-            }
-
-            foreach (var prop in def.Properties)
-            {
-                Walk(prop.Type);
-            }
-        }
-
-        foreach (var (_, brand) in _brands)
-        {
-            Walk(brand.Inner);
-        }
-
-        foreach (var (_, enumType) in _enums)
-        {
-            Walk(enumType);
         }
 
         // Names already claimed by emitted definition/brand/enum schemas
@@ -3258,29 +3192,12 @@ public sealed class OpenApiEmitter
         Dictionary<string, TsType.Generic> genericInstances
     )
     {
-        // Walk endpoint params and responses for Generic type usages
-        foreach (var ep in endpoints)
+        foreach (var (_, type) in endpoints.SelectMany(endpoint => endpoint.AllTypes()))
         {
-            foreach (var param in ep.Params)
-            {
-                CollectGenericsFromType(param.Type, genericInstances);
-            }
-
-            foreach (var resp in ep.Responses)
-            {
-                if (resp.DataType is not null)
-                {
-                    CollectGenericsFromType(resp.DataType, genericInstances);
-                }
-            }
-
-            if (ep.RequestType is not null)
-            {
-                CollectGenericsFromType(ep.RequestType, genericInstances);
-            }
+            CollectGenericsFromType(type, genericInstances);
         }
 
-        // Walk all definitions' properties (all schemas are emitted, so all generics must be monomorphised)
+        // Every definition schema is emitted, so every generic it uses must be monomorphised.
         foreach (var (_, def) in _definitions)
         {
             // E6: skip generic TEMPLATE definitions — their Generic refs still contain
@@ -3306,43 +3223,9 @@ public sealed class OpenApiEmitter
 
     private void CollectGenericsFromType(TsType type, Dictionary<string, TsType.Generic> instances)
     {
-        switch (type)
+        foreach (var generic in type.SelfAndDescendants().OfType<TsType.Generic>())
         {
-            case TsType.Generic g:
-                instances.TryAdd(MonomorphisedName(g), g);
-                foreach (var arg in g.TypeArguments)
-                {
-                    CollectGenericsFromType(arg, instances);
-                }
-                break;
-            case TsType.Array a:
-                CollectGenericsFromType(a.Element, instances);
-                break;
-            case TsType.Nullable n:
-                CollectGenericsFromType(n.Inner, instances);
-                break;
-            case TsType.Dictionary d:
-                CollectGenericsFromType(d.Value, instances);
-                if (d.Key is not null)
-                {
-                    CollectGenericsFromType(d.Key, instances);
-                }
-                break;
-            case TsType.InlineObject obj:
-                foreach (var field in obj.Fields)
-                {
-                    CollectGenericsFromType(field.Type, instances);
-                }
-                break;
-            case TsType.TaggedUnion tu:
-                foreach (var variant in tu.Variants)
-                {
-                    CollectGenericsFromType(variant.Type, instances);
-                }
-                break;
-            case TsType.Brand b:
-                CollectGenericsFromType(b.Inner, instances);
-                break;
+            instances.TryAdd(MonomorphisedName(generic), generic);
         }
     }
 
