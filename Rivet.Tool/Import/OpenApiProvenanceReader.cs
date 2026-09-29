@@ -35,10 +35,8 @@ internal static class OpenApiProvenanceReader
         "trace",
     ];
 
-    public static ImportedOpenApiProvenance Read(string json, List<string> warnings)
+    public static ImportedOpenApiProvenance Read(JsonElement root, List<string> warnings)
     {
-        using var parsed = JsonDocument.Parse(json);
-        var root = parsed.RootElement;
         var swagger2 =
             root.TryGetProperty("swagger", out var swagger)
             && swagger.GetString()?.StartsWith("2.", StringComparison.Ordinal) == true;
@@ -607,7 +605,8 @@ internal static class OpenApiProvenanceReader
                 }
             }
             else if (
-                !(exampleObject && property.Name == "value") && !IsOpaqueOpenApiValue(property.Name)
+                !(exampleObject && property.Name == "value")
+                && !OpenApiImporter.IsOpaqueOpenApiValue(property.Name)
             )
             {
                 ReadVendorExtensions(
@@ -621,10 +620,6 @@ internal static class OpenApiProvenanceReader
             }
         }
     }
-
-    private static bool IsOpaqueOpenApiValue(string name) =>
-        name is "const" or "default" or "enum" or "example" or "examples"
-        || name.StartsWith("x-", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsOpaqueProvenanceRoot(
         string pointer,
@@ -718,7 +713,7 @@ internal static class OpenApiProvenanceReader
             var externalValue = ReadOptionalString(example.Value, "externalValue");
             if (hasValue == (externalValue is not null))
             {
-                throw new InvalidOperationException(
+                throw OpenApiImporter.InvalidSpec(
                     $"Component example '{example.Name}' requires exactly one of value or externalValue."
                 );
             }
@@ -940,7 +935,7 @@ internal static class OpenApiProvenanceReader
         }
         if (!references.Add(reference))
         {
-            throw new InvalidOperationException(
+            throw OpenApiImporter.InvalidSpec(
                 $"Cyclic request body reference '{reference}' for {context}."
             );
         }
@@ -961,7 +956,7 @@ internal static class OpenApiProvenanceReader
             return target;
         }
 
-        throw new InvalidOperationException(
+        throw OpenApiImporter.InvalidSpec(
             $"Local request body reference '{reference}' targets a missing value."
         );
     }
@@ -1006,7 +1001,7 @@ internal static class OpenApiProvenanceReader
     {
         if (!owner.TryGetProperty(property, out var value))
         {
-            throw new InvalidOperationException($"Missing required {context}.{property} value.");
+            throw OpenApiImporter.InvalidSpec($"Missing required {context}.{property} value.");
         }
 
         return ReadRequiredString(value, $"{context}.{property}");
@@ -1016,7 +1011,7 @@ internal static class OpenApiProvenanceReader
     {
         return value.ValueKind == JsonValueKind.String
             ? value.GetString()!
-            : throw new InvalidOperationException($"{context} must be a string.");
+            : throw OpenApiImporter.InvalidSpec($"{context} must be a string.");
     }
 
     private static string? ReadOptionalString(JsonElement owner, string property)

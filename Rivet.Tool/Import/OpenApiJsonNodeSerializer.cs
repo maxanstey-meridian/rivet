@@ -11,21 +11,11 @@ internal static class OpenApiJsonNodeSerializer
     private const string EscapePrefix =
         "rivet-openapi-json-null-sentinel-literal-7A8FD841-72EC-49C9-8C69-7AFA214B51A3-";
 
-    public static string EscapeLiteralSentinels(string json)
-    {
-        if (
-            !json.Contains(NullSentinel, StringComparison.Ordinal)
-            && !json.Contains(EscapePrefix, StringComparison.Ordinal)
-        )
-        {
-            return json;
-        }
-
-        var root = JsonNode.Parse(json)!;
-        var changed = false;
-        EscapeExampleProperties(root, ref changed);
-        return changed ? root.ToJsonString() : json;
-    }
+    /// <summary>
+    /// Microsoft.OpenApi reads a JSON null inside an example as its null sentinel string, so
+    /// escape any authored string that collides with the sentinel or with the escape prefix.
+    /// </summary>
+    public static void EscapeLiteralSentinels(JsonNode root) => EscapeExampleProperties(root);
 
     public static string Serialize(JsonNode node)
     {
@@ -49,13 +39,13 @@ internal static class OpenApiJsonNodeSerializer
 
     public static JsonNode? Clone(JsonNode node) => JsonNode.Parse(Serialize(node));
 
-    private static void EscapeExampleProperties(JsonNode? node, ref bool changed)
+    private static void EscapeExampleProperties(JsonNode? node)
     {
         if (node is JsonArray array)
         {
             foreach (var item in array)
             {
-                EscapeExampleProperties(item, ref changed);
+                EscapeExampleProperties(item);
             }
             return;
         }
@@ -69,26 +59,26 @@ internal static class OpenApiJsonNodeSerializer
         {
             if (name == "example")
             {
-                EscapePayload(value, ref changed);
+                EscapePayload(value);
             }
             else if (name == "examples")
             {
-                EscapeExamples(value, ref changed);
+                EscapeExamples(value);
             }
             else
             {
-                EscapeExampleProperties(value, ref changed);
+                EscapeExampleProperties(value);
             }
         }
     }
 
-    private static void EscapeExamples(JsonNode? node, ref bool changed)
+    private static void EscapeExamples(JsonNode? node)
     {
         if (node is JsonArray schemaExamples)
         {
             foreach (var example in schemaExamples.ToArray())
             {
-                EscapePayload(example, ref changed);
+                EscapePayload(example);
             }
             return;
         }
@@ -102,12 +92,12 @@ internal static class OpenApiJsonNodeSerializer
         {
             if (example.TryGetPropertyValue("value", out var value))
             {
-                EscapePayload(value, ref changed);
+                EscapePayload(value);
             }
         }
     }
 
-    private static void EscapePayload(JsonNode? node, ref bool changed)
+    private static void EscapePayload(JsonNode? node)
     {
         switch (node)
         {
@@ -115,19 +105,18 @@ internal static class OpenApiJsonNodeSerializer
                 if (text == NullSentinel || text.StartsWith(EscapePrefix, StringComparison.Ordinal))
                 {
                     value.ReplaceWith(EscapePrefix + text);
-                    changed = true;
                 }
                 break;
             case JsonArray array:
                 foreach (var item in array.ToArray())
                 {
-                    EscapePayload(item, ref changed);
+                    EscapePayload(item);
                 }
                 break;
             case JsonObject obj:
                 foreach (var child in obj.Select(entry => entry.Value).ToArray())
                 {
-                    EscapePayload(child, ref changed);
+                    EscapePayload(child);
                 }
                 break;
         }

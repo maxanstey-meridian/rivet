@@ -407,4 +407,27 @@ public sealed class CliExitCodeTests
             DeleteWork(work);
         }
     }
+
+    [Theory]
+    [InlineData("{")]
+    [InlineData("""{ "openapi": "3.1.0", "info": { "version": "1" }, "paths": {} }""")]
+    public async Task Malformed_OpenApi_Spec_Exits_1_Without_Stack_Trace(string spec)
+    {
+        var (work, specPath) = await WriteSourceAsync("openapi.json", spec);
+        try
+        {
+            var result = CliRunner.RunCli(
+                work,
+                ["--from-openapi", specPath, "--output", Path.Combine(work, "out")]
+            );
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("error", result.StdErr);
+            Assert.DoesNotContain("   at ", result.StdErr);
+        }
+        finally
+        {
+            DeleteWork(work);
+        }
+    }
 }

@@ -1555,7 +1555,7 @@ internal sealed class SchemaMapper
         return false;
     }
 
-    private static string? DecodeComponentId(string? value) =>
+    internal static string? DecodeComponentId(string? value) =>
         value is null ? null : JsonPointer.Unescape(Uri.UnescapeDataString(value));
 
     private bool TryResolveNullableType(IOpenApiSchema schema, string? context, out string result)

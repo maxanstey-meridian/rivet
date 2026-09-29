@@ -15,6 +15,10 @@ internal static class ContractBuilder
         "x-rivet-imported-parameter-reference";
     private const string ImportedRequestBodyReferenceExtension =
         "x-rivet-imported-request-body-reference";
+    private static readonly JsonSerializerOptions _omitNulls = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
     private static readonly HashSet<HttpMethod> _supportedMethods =
     [
         HttpMethod.Get,
@@ -1098,19 +1102,13 @@ internal static class ContractBuilder
         }
         if (includeSchemaMetadata && schema.Default is not null)
         {
-            metadata["default"] = JsonNode.Parse(schema.Default.ToJsonString());
+            metadata["default"] = schema.Default.DeepClone();
         }
         if (
             includeSchemaMetadata && RecordSynthesizer.ExtractConstraints(schema) is { } constraints
         )
         {
-            metadata["constraints"] = JsonSerializer.SerializeToNode(
-                constraints,
-                new JsonSerializerOptions
-                {
-                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-                }
-            );
+            metadata["constraints"] = JsonSerializer.SerializeToNode(constraints, _omitNulls);
         }
         if (includeSchemaMetadata && BuildSchemaExamplesNode(schema) is { } schemaExamples)
         {
@@ -1977,7 +1975,9 @@ internal static class ContractBuilder
     {
         return example switch
         {
-            OpenApiExampleReference exampleReference => exampleReference.Reference?.Id,
+            OpenApiExampleReference exampleReference => SchemaMapper.DecodeComponentId(
+                exampleReference.Reference?.Id
+            ),
             _ => null,
         };
     }

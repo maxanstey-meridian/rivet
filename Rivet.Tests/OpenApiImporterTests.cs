@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.CodeAnalysis;
+using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
 using Rivet.Tool.Model;
@@ -6881,5 +6882,73 @@ public sealed class OpenApiImporterTests
 
         var parameter = Assert.Single(parameters);
         Assert.Equal("limit", parameter!["name"]!.GetValue<string>());
+    }
+
+    // ========== Malformed specs are user errors ==========
+
+    [Theory]
+    [InlineData("{")]
+    [InlineData("""{ "openapi": "3.1.0", "info": { "version": "1" }, "paths": {} }""")]
+    [InlineData(
+        """{ "openapi": "3.1.0", "info": { "title": "T", "version": "1" }, "paths": {}, "components": { "examples": { "Both": { "value": 1, "externalValue": "https://x" } } } }"""
+    )]
+    [InlineData(
+        """{ "openapi": "3.1.0", "info": { "title": "T", "version": "1" }, "paths": {}, "components": { "securitySchemes": { "odd": { "type": "magic" } } } }"""
+    )]
+    public void Malformed_Spec_Is_A_User_Error(string spec)
+    {
+        Assert.Throws<RivetUserException>(() => CompilationHelper.Import(spec));
+    }
+
+    // ========== Escaped component names ==========
+
+    [Fact]
+    public void Component_Refs_With_Escaped_Slash_And_Tilde_Resolve()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "T", "version": "1" },
+              "paths": {
+                "/items": {
+                  "get": {
+                    "operationId": "getItem",
+                    "responses": {
+                      "200": { "$ref": "#/components/responses/item~1ok" },
+                      "201": {
+                        "description": "created",
+                        "content": {
+                          "application/json": {
+                            "schema": { "$ref": "#/components/schemas/Item" },
+                            "examples": { "default": { "$ref": "#/components/examples/ex~1one~0two" } }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "components": {
+                "schemas": {
+                  "Item": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } }
+                },
+                "examples": { "ex/one~two": { "value": { "id": "1" } } },
+                "responses": {
+                  "item/ok": {
+                    "description": "the item",
+                    "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "DefaultContract.cs");
+
+        Assert.Contains("the item", contract);
+        Assert.Contains(".ResponseContent<Item>(200, \"application/json\")", contract);
+        Assert.DoesNotContain("unresolved-ref", contract);
+        Assert.Contains("\"ex/one~two\"", contract);
     }
 }

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
+using Microsoft.OpenApi.Reader;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Import;
@@ -34,22 +35,32 @@ public static class OpenApiImporter
     public static ImportResult Import(string json, ImportOptions options)
     {
         var warnings = new List<string>();
+        var root = ParseJson(json);
 
-        // I1: cyclic component-alias chains ("A": {$ref: B}, "B": {$ref: A}) overflow the
+        // Cyclic component-alias chains ("A": {$ref: B}, "B": {$ref: A}) overflow the
         // stack inside the OpenApi library's reference proxies on ANY member access, so
-        // they must be broken at the raw-JSON level before parsing.
-        json = BreakAliasCycles(json, warnings);
-        json = NormalizeMappedVendorExtensions(json);
-        var provenance = OpenApiProvenanceReader.Read(json, warnings);
-        json = NormalizeLocalPathReferences(json);
-        json = NormalizeSchemaReferenceMetadataSiblings(json);
-        var swaggerSchemaLessResponses = ReadSwaggerSchemaLessResponses(json);
-        json = OpenApiJsonNodeSerializer.EscapeLiteralSentinels(json);
+        // they must be broken before the library sees the document.
+        BreakAliasCycles(root, warnings);
+        NormalizeMappedVendorExtensions(root, root["swagger"] is not null, exampleObject: false);
+        var view = JsonSerializer.SerializeToElement(root);
+        var provenance = OpenApiProvenanceReader.Read(view, warnings);
+        var securityMetadata = ReadSecurityMetadata(view);
+        NormalizeLocalPathReferences(root);
+        NormalizeSchemaReferenceMetadataSiblings(root);
+        var swaggerSchemaLessResponses = ReadSwaggerSchemaLessResponses(root);
+        OpenApiJsonNodeSerializer.EscapeLiteralSentinels(root);
 
-        var readResult = OpenApiDocument.Parse(json, "json");
+        var readResult = new OpenApiJsonReader().Read(
+            root,
+            new Uri("https://openapi.net/"),
+            new OpenApiReaderSettings()
+        );
         var doc =
             readResult.Document
-            ?? throw new InvalidOperationException("Failed to parse OpenAPI document.");
+            ?? throw InvalidSpec(
+                string.Join("; ", readResult.Diagnostic?.Errors.Select(e => e.Message) ?? [])
+            );
+        RegisterEscapedComponentIds(doc);
         RemoveConvertedSwaggerProducesContent(doc, swaggerSchemaLessResponses);
         var files = new List<GeneratedFile>();
         var mapper = new SchemaMapper(warnings);
@@ -71,7 +82,6 @@ public static class OpenApiImporter
             );
         }
 
-        var securityMetadata = ReadSecurityMetadata(json);
         if (securityMetadata.Schemes.Count > 0 || securityMetadata.GlobalRequirements is not null)
         {
             files.Add(
@@ -273,23 +283,59 @@ public static class OpenApiImporter
         }
     }
 
-    private static string NormalizeSchemaReferenceMetadataSiblings(string json)
+    private static JsonObject ParseJson(string json)
     {
-        var root = JsonNode.Parse(json)!;
-        NormalizeSchemaReferenceMetadataSiblings(root);
-        return root.ToJsonString();
+        try
+        {
+            return JsonNode.Parse(json) as JsonObject
+                ?? throw InvalidSpec("the document root must be a JSON object.");
+        }
+        catch (JsonException exception)
+        {
+            throw InvalidSpec(exception.Message);
+        }
     }
 
-    private static string NormalizeMappedVendorExtensions(string json)
+    internal static RivetUserException InvalidSpec(string message) =>
+        new($"error: invalid OpenAPI document: {message}");
+
+    /// <summary>
+    /// Microsoft.OpenApi registers components under their raw names but looks references up
+    /// by the still-escaped pointer token, so a component named <c>a/b</c> or <c>a~b</c> is
+    /// unreachable through <c>#/components/…/a~1b</c>. Register the escaped token as an alias.
+    /// </summary>
+    private static void RegisterEscapedComponentIds(OpenApiDocument doc)
     {
-        var root = JsonNode.Parse(json)!;
-        var swagger2 = root["swagger"] is not null;
-        return NormalizeMappedVendorExtensions(root, swagger2, exampleObject: false)
-            ? root.ToJsonString()
-            : json;
+        if (doc.Components is not { } components || doc.Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        Register(components.Schemas);
+        Register(components.Responses);
+        Register(components.Parameters);
+        Register(components.Examples);
+        Register(components.RequestBodies);
+        Register(components.Headers);
+        Register(components.SecuritySchemes);
+        Register(components.Links);
+        Register(components.Callbacks);
+        Register(components.PathItems);
+
+        void Register<T>(IDictionary<string, T>? entries)
+        {
+            foreach (var (name, component) in entries ?? new Dictionary<string, T>())
+            {
+                var escaped = JsonPointer.Escape(name);
+                if (escaped != name && component is not null)
+                {
+                    workspace.RegisterComponentForDocument(doc, component, escaped);
+                }
+            }
+        }
     }
 
-    private static bool NormalizeMappedVendorExtensions(
+    private static void NormalizeMappedVendorExtensions(
         JsonNode node,
         bool swagger2,
         bool exampleObject
@@ -297,39 +343,31 @@ public static class OpenApiImporter
     {
         if (node is JsonArray array)
         {
-            var changed = false;
             foreach (var child in array)
             {
                 if (child is not null)
                 {
-                    changed |= NormalizeMappedVendorExtensions(
-                        child,
-                        swagger2,
-                        exampleObject: false
-                    );
+                    NormalizeMappedVendorExtensions(child, swagger2, exampleObject: false);
                 }
             }
-            return changed;
+            return;
         }
 
         if (node is not JsonObject obj)
         {
-            return false;
+            return;
         }
 
-        var result = false;
         if (
             obj["deprecated"] is null
             && obj["x-is-deprecated"]?.GetValueKind() is JsonValueKind.True
         )
         {
             obj["deprecated"] = true;
-            result = true;
         }
         if (obj["readOnly"] is null && obj["x-read-only"]?.GetValueKind() is JsonValueKind.True)
         {
             obj["readOnly"] = true;
-            result = true;
         }
         if (obj["description"] is null)
         {
@@ -340,7 +378,6 @@ public static class OpenApiImporter
                 if (obj[extensionName] is JsonValue extension)
                 {
                     obj["description"] = extension.GetValue<string>();
-                    result = true;
                     break;
                 }
             }
@@ -354,11 +391,7 @@ public static class OpenApiImporter
                 {
                     if (example is not null)
                     {
-                        result |= NormalizeMappedVendorExtensions(
-                            example,
-                            swagger2,
-                            exampleObject: true
-                        );
+                        NormalizeMappedVendorExtensions(example, swagger2, exampleObject: true);
                     }
                 }
             }
@@ -368,17 +401,12 @@ public static class OpenApiImporter
                 && !IsOpaqueOpenApiValue(child.Key)
             )
             {
-                result |= NormalizeMappedVendorExtensions(
-                    child.Value,
-                    swagger2,
-                    exampleObject: false
-                );
+                NormalizeMappedVendorExtensions(child.Value, swagger2, exampleObject: false);
             }
         }
-        return result;
     }
 
-    private static bool IsOpaqueOpenApiValue(string name) =>
+    internal static bool IsOpaqueOpenApiValue(string name) =>
         name is "const" or "default" or "enum" or "example" or "examples"
         || name.StartsWith("x-", StringComparison.OrdinalIgnoreCase);
 
@@ -447,10 +475,8 @@ public static class OpenApiImporter
         "xml",
     ];
 
-    private static ContractSecurityMetadata ReadSecurityMetadata(string json)
+    private static ContractSecurityMetadata ReadSecurityMetadata(JsonElement root)
     {
-        using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
         var schemes = new Dictionary<string, SecuritySchemeDefinition>(StringComparer.Ordinal);
         JsonElement securitySchemes = default;
         var hasSecuritySchemes =
@@ -504,9 +530,7 @@ public static class OpenApiImporter
                 description
             ),
             "mutualTLS" => new MutualTlsSecurityScheme(description),
-            _ => throw new InvalidOperationException(
-                $"Security scheme '{name}' has unsupported type '{type}'."
-            ),
+            _ => throw InvalidSpec($"Security scheme '{name}' has unsupported type '{type}'."),
         };
     }
 
@@ -566,7 +590,7 @@ public static class OpenApiImporter
 
     private static string RequiredString(JsonElement owner, string property, string context) =>
         OptionalString(owner, property)
-        ?? throw new InvalidOperationException($"{context} is missing required '{property}'.");
+        ?? throw InvalidSpec($"{context} is missing required '{property}'.");
 
     private static string? OptionalString(JsonElement owner, string property) =>
         owner.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
@@ -579,7 +603,7 @@ public static class OpenApiImporter
             "query" => SecurityApiKeyLocation.Query,
             "header" => SecurityApiKeyLocation.Header,
             "cookie" => SecurityApiKeyLocation.Cookie,
-            _ => throw new InvalidOperationException(
+            _ => throw InvalidSpec(
                 $"apiKey security scheme '{schemeName}' has unsupported location '{value}'."
             ),
         };
@@ -591,7 +615,7 @@ public static class OpenApiImporter
             "password" => OAuth2FlowType.Password,
             "clientCredentials" or "application" => OAuth2FlowType.ClientCredentials,
             "authorizationCode" or "accessCode" => OAuth2FlowType.AuthorizationCode,
-            _ => throw new InvalidOperationException(
+            _ => throw InvalidSpec(
                 $"OAuth2 security scheme '{schemeName}' has unsupported flow '{value}'."
             ),
         };
@@ -600,42 +624,37 @@ public static class OpenApiImporter
         string Path,
         string Method,
         string Status
-    )> ReadSwaggerSchemaLessResponses(string json)
+    )> ReadSwaggerSchemaLessResponses(JsonObject root)
     {
-        using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
         if (
-            !root.TryGetProperty("swagger", out var version)
-            || version.GetString() is not { } versionText
+            root["swagger"] is not JsonValue version
+            || !version.TryGetValue<string>(out var versionText)
             || !versionText.StartsWith("2.", StringComparison.Ordinal)
-            || !root.TryGetProperty("paths", out var paths)
+            || root["paths"] is not JsonObject paths
         )
         {
             return [];
         }
 
         var result = new HashSet<(string Path, string Method, string Status)>();
-        foreach (var path in paths.EnumerateObject())
+        foreach (var (path, pathItem) in paths)
         {
             foreach (var method in _operationNames)
             {
-                if (
-                    !path.Value.TryGetProperty(method, out var operation)
-                    || !operation.TryGetProperty("responses", out var responses)
-                )
+                if (pathItem?[method]?["responses"] is not JsonObject responses)
                 {
                     continue;
                 }
 
-                foreach (var response in responses.EnumerateObject())
+                foreach (var (status, response) in responses)
                 {
                     if (
-                        response.Value.ValueKind == JsonValueKind.Object
-                        && !response.Value.TryGetProperty("schema", out _)
-                        && !response.Value.TryGetProperty("$ref", out _)
+                        response is JsonObject responseObject
+                        && !responseObject.ContainsKey("schema")
+                        && !responseObject.ContainsKey("$ref")
                     )
                     {
-                        result.Add((path.Name, method, response.Name));
+                        result.Add((path, method, status));
                     }
                 }
             }
@@ -667,123 +686,30 @@ public static class OpenApiImporter
         }
     }
 
-    private static string NormalizeLocalPathReferences(string json)
+    /// <summary>
+    /// Microsoft.OpenApi does not reliably resolve non-component references, so inline them on
+    /// operation surfaces (path items, parameters, request bodies, responses, headers and
+    /// examples). Schema nodes stay opaque.
+    /// </summary>
+    private static void NormalizeLocalPathReferences(JsonObject root)
     {
-        // Microsoft.OpenApi does not reliably resolve these non-component references.
-        // Keep the rewrite on operation object surfaces; schema nodes stay opaque.
-        JsonNode? parsed;
-        try
+        if (root["paths"] is not JsonObject paths)
         {
-            parsed = JsonNode.Parse(json);
-        }
-        catch (JsonException)
-        {
-            return json;
-        }
-
-        if (parsed is not JsonObject root || root["paths"] is not JsonObject paths)
-        {
-            return json;
-        }
-
-        if (!paths.Any(entry => entry.Value is JsonObject item && RequiresNormalization(item)))
-        {
-            return json;
+            return;
         }
 
         foreach (var (path, node) in paths.ToList())
         {
             if (node is JsonObject pathItem)
             {
-                paths[path] = ResolvePathItem(pathItem, root, new HashSet<string>());
+                paths[path] = ResolvePathItem(pathItem, root, []);
             }
         }
-
-        return root.ToJsonString();
     }
 
-    private static bool RequiresNormalization(JsonObject pathItem)
-    {
-        if (GetLocalReference(pathItem) is not null || HasLocalParameterReference(pathItem))
-        {
-            return true;
-        }
-
-        return _operationNames.Any(method =>
-            pathItem[method] is JsonObject operation && OperationRequiresNormalization(operation)
-        );
-    }
-
-    private static bool OperationRequiresNormalization(JsonObject operation)
-    {
-        return HasLocalParameterReference(operation)
-            || operation["requestBody"] is JsonObject requestBody
-                && (
-                    ShouldNormalizeReference(requestBody, ComponentRequestBodiesPrefix)
-                    || ContentHasLocalExampleReference(requestBody)
-                )
-            || operation["responses"] is JsonObject responses
-                && responses.Any(response =>
-                    response.Value is JsonObject responseObject
-                    && ResponseRequiresNormalization(responseObject)
-                );
-    }
-
-    private static bool ResponseRequiresNormalization(JsonObject response)
-    {
-        return ShouldNormalizeReference(response, ComponentResponsesPrefix)
-            || ContentHasLocalExampleReference(response)
-            || response["headers"] is JsonObject headers
-                && headers.Any(header =>
-                    header.Value is JsonObject headerObject
-                    && (
-                        ShouldNormalizeReference(headerObject, ComponentHeadersPrefix)
-                        || HasLocalExampleReference(headerObject)
-                        || ContentHasLocalExampleReference(headerObject)
-                    )
-                );
-    }
-
-    private static bool ContentHasLocalExampleReference(JsonObject owner)
-    {
-        return owner["content"] is JsonObject content
-            && content.Any(media =>
-                media.Value is JsonObject mediaObject && HasLocalExampleReference(mediaObject)
-            );
-    }
-
-    private static bool HasLocalExampleReference(JsonObject owner)
-    {
-        return owner["examples"] is JsonObject examples
-            && examples.Any(example =>
-                example.Value is JsonObject exampleObject
-                && ShouldNormalizeExampleReference(exampleObject)
-            );
-    }
-
-    private static bool ShouldNormalizeExampleReference(JsonObject example)
-    {
-        return ShouldNormalizeReference(example, ComponentExamplesPrefix);
-    }
-
-    private static bool ShouldNormalizeReference(JsonObject value, string componentPrefix)
-    {
-        return GetLocalReference(value) is { } reference
-            && !reference.StartsWith(componentPrefix, StringComparison.Ordinal);
-    }
-
-    private static bool HasLocalParameterReference(JsonObject owner)
-    {
-        return owner["parameters"] is JsonArray parameters
-            && parameters.Any(parameter =>
-                parameter is JsonObject parameterObject
-                && (
-                    GetLocalReference(parameterObject) is not null
-                    || HasLocalExampleReference(parameterObject)
-                    || ContentHasLocalExampleReference(parameterObject)
-                )
-            );
-    }
+    private static bool ShouldNormalizeReference(JsonObject value, string componentPrefix) =>
+        GetLocalReference(value) is { } reference
+        && !reference.StartsWith(componentPrefix, StringComparison.Ordinal);
 
     private static JsonObject ResolvePathItem(
         JsonObject pathItem,
@@ -796,14 +722,12 @@ public static class OpenApiImporter
         {
             if (!referenceChain.Add(reference))
             {
-                throw new InvalidOperationException(
-                    $"Cyclic local path-item reference detected at '{reference}'."
-                );
+                throw InvalidSpec($"Cyclic local path-item reference detected at '{reference}'.");
             }
 
             referenced =
                 ResolvePointer(root, reference) as JsonObject
-                ?? throw new InvalidOperationException(
+                ?? throw InvalidSpec(
                     $"Local path-item reference '{reference}' does not target an object."
                 );
             referenced = ResolvePathItem(referenced, root, referenceChain);
@@ -949,7 +873,7 @@ public static class OpenApiImporter
         {
             if (example is JsonObject exampleObject)
             {
-                examples[name] = ShouldNormalizeExampleReference(exampleObject)
+                examples[name] = ShouldNormalizeReference(exampleObject, ComponentExamplesPrefix)
                     ? ResolveReferenceObject(exampleObject, root, "example")
                     : exampleObject.DeepClone();
             }
@@ -996,14 +920,12 @@ public static class OpenApiImporter
         referenceChain ??= new HashSet<string>();
         if (!referenceChain.Add(reference))
         {
-            throw new InvalidOperationException(
-                $"Cyclic local {kind} reference detected at '{reference}'."
-            );
+            throw InvalidSpec($"Cyclic local {kind} reference detected at '{reference}'.");
         }
 
         var target =
             ResolvePointer(root, reference) as JsonObject
-            ?? throw new InvalidOperationException(
+            ?? throw InvalidSpec(
                 $"Local {kind} reference '{reference}' does not target an object."
             );
         var resolved = ResolveReferenceObject(target, root, kind, referenceChain);
@@ -1082,30 +1004,17 @@ public static class OpenApiImporter
     private static JsonNode ResolvePointer(JsonObject root, string reference) =>
         JsonPointer.TryResolve(root, reference, out var target)
             ? target
-            : throw new InvalidOperationException(
-                $"Local JSON reference '{reference}' targets a missing value."
-            );
+            : throw InvalidSpec($"Local JSON reference '{reference}' targets a missing value.");
 
     /// <summary>
-    /// I1: detects components/schemas entries that are pure $ref aliases forming a cycle
-    /// and replaces them with empty placeholder schemas, with a loud warning per entry.
-    /// Returns the input unchanged when no cycle exists (the common case).
+    /// Replaces components/schemas entries that are pure $ref aliases forming a cycle with
+    /// empty placeholder schemas, with a warning per entry.
     /// </summary>
-    private static string BreakAliasCycles(string json, List<string> warnings)
+    private static void BreakAliasCycles(JsonObject root, List<string> warnings)
     {
-        System.Text.Json.Nodes.JsonNode? root;
-        try
+        if (root["components"]?["schemas"] is not JsonObject schemas)
         {
-            root = System.Text.Json.Nodes.JsonNode.Parse(json);
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            return json; // let the real parser produce its own error
-        }
-
-        if (root?["components"]?["schemas"] is not System.Text.Json.Nodes.JsonObject schemas)
-        {
-            return json;
+            return;
         }
 
         const string prefix = "#/components/schemas/";
@@ -1113,20 +1022,14 @@ public static class OpenApiImporter
         foreach (var (key, node) in schemas)
         {
             if (
-                node is System.Text.Json.Nodes.JsonObject obj
-                && obj.TryGetPropertyValue("$ref", out var refNode)
-                && refNode is System.Text.Json.Nodes.JsonValue value
+                node is JsonObject obj
+                && obj["$ref"] is JsonValue value
                 && value.TryGetValue<string>(out var refString)
                 && refString.StartsWith(prefix, StringComparison.Ordinal)
             )
             {
                 aliasTargets[key] = refString[prefix.Length..];
             }
-        }
-
-        if (aliasTargets.Count == 0)
-        {
-            return json;
         }
 
         var cyclic = new HashSet<string>(StringComparer.Ordinal);
@@ -1147,11 +1050,6 @@ public static class OpenApiImporter
             }
         }
 
-        if (cyclic.Count == 0)
-        {
-            return json;
-        }
-
         foreach (var key in cyclic.OrderBy(k => k, StringComparer.Ordinal))
         {
             warnings.Add(
@@ -1160,13 +1058,11 @@ public static class OpenApiImporter
                     $"Alias schema '{key}' is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object."
                 )
             );
-            schemas[key] = new System.Text.Json.Nodes.JsonObject
+            schemas[key] = new JsonObject
             {
                 ["description"] = "[rivet:unsupported] cyclic $ref alias",
             };
         }
-
-        return root.ToJsonString();
     }
 }
 
