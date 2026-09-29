@@ -239,12 +239,10 @@ public sealed class AcceptsBinaryTests
 
     // ----- OpenApiEmitter -----
 
-    private static JsonDocument EmitOpenApi(string source) => CompilationHelper.EmitOpenApi(source);
-
     [Fact]
     public void Emitter_AcceptsBinary_Emits_Binary_RequestBody_No_Json_Content()
     {
-        using var doc = EmitOpenApi(ChunkUploadSource);
+        using var doc = CompilationHelper.EmitOpenApi(ChunkUploadSource);
 
         var operation = doc
             .RootElement.GetProperty("paths")
@@ -289,7 +287,7 @@ public sealed class AcceptsBinaryTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
 
         var content = doc
             .RootElement.GetProperty("paths")

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -12,29 +11,17 @@ namespace Rivet.Tests;
 /// </summary>
 [Trait("Category", "Local")]
 [Collection("Repository builds")]
-public sealed class SampleProjectTests : IDisposable
+public sealed class SampleProjectTests
 {
-    private static readonly string _repoRoot = FindRepoRoot();
+    private static readonly string _repoRoot = CliRunner.RepoRoot;
     private static readonly string _sampleDir = Path.Combine(_repoRoot, "samples", "ContractApi");
-    private readonly string _tempDir = Path.Combine(
-        Path.GetTempPath(),
-        $"rivet-sample-test-{Guid.NewGuid():N}"
-    );
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_tempDir))
-        {
-            Directory.Delete(_tempDir, recursive: true);
-        }
-    }
 
     // ========== Tier 1: Build + Roslyn round-trip ==========
 
     [Fact]
     public async Task SampleProject_Builds()
     {
-        var (exitCode, output) = await RunProcessAsync(
+        var (exitCode, output) = await CliRunner.RunAsync(
             "dotnet",
             $"build \"{Path.Combine(_sampleDir, "ContractApi.csproj")}\" --verbosity quiet"
         );
@@ -46,7 +33,7 @@ public sealed class SampleProjectTests : IDisposable
     public async Task ImportDemo_Builds()
     {
         var importDemoDir = Path.Combine(_repoRoot, "samples", "ImportDemo");
-        var (exitCode, output) = await RunProcessAsync(
+        var (exitCode, output) = await CliRunner.RunAsync(
             "dotnet",
             $"build \"{Path.Combine(importDemoDir, "ImportDemo.csproj")}\" --verbosity quiet"
         );
@@ -116,7 +103,10 @@ public sealed class SampleProjectTests : IDisposable
     public async Task SampleProject_Api_Endpoints_Respond_Correctly()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var server = await StartSampleServer(cts.Token);
+        await using var server = await CliRunner.StartServerAsync(
+            Path.Combine(_sampleDir, "ContractApi.csproj"),
+            cts.Token
+        );
 
         using var http = new HttpClient { BaseAddress = new Uri(server.Url) };
 
@@ -161,7 +151,10 @@ public sealed class SampleProjectTests : IDisposable
     public async Task SampleProject_Api_Rejects_Invalid_Requests_With_422_ValidationErrorDto()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var server = await StartSampleServer(cts.Token);
+        await using var server = await CliRunner.StartServerAsync(
+            Path.Combine(_sampleDir, "ContractApi.csproj"),
+            cts.Token
+        );
 
         using var http = new HttpClient { BaseAddress = new Uri(server.Url) };
 
@@ -277,157 +270,5 @@ public sealed class SampleProjectTests : IDisposable
                     Path.Combine(_sampleDir, "Contracts", "Members", "MembersContract.cs")
                 ),
         ];
-    }
-
-    private static string FindRepoRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        while (dir is not null && !File.Exists(Path.Combine(dir, "Rivet.slnx")))
-        {
-            dir = Path.GetDirectoryName(dir);
-        }
-
-        return dir ?? throw new InvalidOperationException("Could not find repo root (Rivet.slnx)");
-    }
-
-    /// <summary>
-    /// Child dotnet builds must not share MSBuild node-reuse workers or the Roslyn
-    /// compiler server with the outer `dotnet test` (itself an MSBuild build) —
-    /// sharing them deadlocked the testhost under load (hangdumps fingered
-    /// SampleProject_Builds / ImportDemo_Builds, which pass instantly in isolation).
-    /// MSBuild reads environment variables as global properties, so this covers
-    /// `dotnet build` and `dotnet run` alike without argument-parsing risk.
-    /// </summary>
-    internal static void MakeBuildHermetic(ProcessStartInfo psi)
-    {
-        psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
-        psi.Environment["UseSharedCompilation"] = "false";
-    }
-
-    private static async Task<(int ExitCode, string Output)> RunProcessAsync(
-        string fileName,
-        string arguments,
-        string? workingDir = null,
-        CancellationToken ct = default
-    )
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            WorkingDirectory = workingDir ?? _repoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        MakeBuildHermetic(psi);
-
-        using var process =
-            Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start {fileName}");
-
-        // Drain both pipes CONCURRENTLY: reading stdout to EOF before touching
-        // stderr deadlocks when the child fills the stderr pipe buffer and blocks
-        // on write — stdout then never EOFs (CliPipelineTests' flake, same family).
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
-        var stderrTask = process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-
-        var output = string.Join(
-            "\n",
-            new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s))
-        );
-
-        return (process.ExitCode, output);
-    }
-
-    private static async Task<AsyncServerHandle> StartSampleServer(CancellationToken ct)
-    {
-        // Port 0 asks the OS for a free ephemeral port: two live-host proofs (or an
-        // unrelated process) can no longer collide on a pre-drawn random port and
-        // kill Kestrel before the test asserts anything. The actually bound URL is
-        // read back from the "Now listening on:" line below.
-        var psi = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            Arguments =
-                $"run --project \"{Path.Combine(_sampleDir, "ContractApi.csproj")}\" --urls http://127.0.0.1:0",
-            WorkingDirectory = _repoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        MakeBuildHermetic(psi);
-
-        var process =
-            Process.Start(psi)
-            ?? throw new InvalidOperationException("Failed to start sample server");
-
-        const string listeningMarker = "Now listening on:";
-        string? boundUrl = null;
-        var output = new StringBuilder();
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                var line = await process.StandardOutput.ReadLineAsync(ct);
-                if (line is null)
-                {
-                    break;
-                }
-
-                output.AppendLine(line);
-
-                var markerIndex = line.IndexOf(listeningMarker, StringComparison.Ordinal);
-                if (markerIndex >= 0)
-                {
-                    boundUrl = line[(markerIndex + listeningMarker.Length)..].Trim();
-                    break;
-                }
-            }
-
-            if (boundUrl is null)
-            {
-                var stderr = await process.StandardError.ReadToEndAsync(ct);
-                throw new InvalidOperationException(
-                    $"Server did not start. Output:\n{output}\nStderr:\n{stderr}"
-                );
-            }
-        }
-        catch
-        {
-            process.Kill();
-            process.Dispose();
-            throw;
-        }
-
-        return new AsyncServerHandle(process, boundUrl);
-    }
-
-    private sealed class AsyncServerHandle(Process process, string boundUrl) : IAsyncDisposable
-    {
-        // The URL the server actually bound — for --urls http://127.0.0.1:0 the OS
-        // assigns a free ephemeral port.
-        public string Url { get; } = boundUrl;
-
-        public async ValueTask DisposeAsync()
-        {
-            try
-            {
-                process.Kill();
-                await process.WaitForExitAsync();
-            }
-            catch
-            {
-                // Best effort
-            }
-
-            process.Dispose();
-        }
     }
 }

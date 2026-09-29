@@ -198,23 +198,16 @@ public sealed class ExplicitContractTests
     [Trait("Category", "Local")]
     public void Cli_Reports_Eager_Scalar_Validation_Without_An_Unhandled_Exception()
     {
-        var directory = Directory.CreateTempSubdirectory("rivet-scalar-validation-");
-        try
-        {
-            var path = Path.Combine(directory.FullName, "Types.cs");
-            File.WriteAllText(
-                path,
-                "using Rivet; [RivetScalar] public sealed record Bad(string Other); [RivetType] public sealed record Holder(Bad Value);"
-            );
-            var result = CliRunner.RunCli(directory.FullName, [path, "--openapi"]);
-            Assert.Equal(1, result.ExitCode);
-            Assert.Contains("RIV1103", result.StdErr);
-            Assert.DoesNotContain("Unhandled exception", result.StdErr);
-        }
-        finally
-        {
-            directory.Delete(true);
-        }
+        using var directory = new TempDir();
+        var path = Path.Combine(directory.FullName, "Types.cs");
+        File.WriteAllText(
+            path,
+            "using Rivet; [RivetScalar] public sealed record Bad(string Other); [RivetType] public sealed record Holder(Bad Value);"
+        );
+        var result = CliRunner.RunCli(directory.FullName, [path, "--openapi"]);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("RIV1103", result.StdErr);
+        Assert.DoesNotContain("Unhandled exception", result.StdErr);
     }
 
     [Theory]

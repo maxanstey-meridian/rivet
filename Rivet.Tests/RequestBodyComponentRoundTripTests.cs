@@ -144,60 +144,46 @@ public sealed class RequestBodyComponentRoundTripTests
             }
             """;
 
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-request-bodies-");
-        try
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+
+        var firstPass = RealCliOpenApiPass.ImportEmitAndReadGeneratedSource(
+            workDirectory.FullName,
+            sourcePath,
+            "first"
+        );
+        var first = firstPass.Document;
+        Assert.Contains("RivetDocumentRequestBody(0, \"Used/Body\"", firstPass.GeneratedSource);
+        Assert.Contains("RivetDocumentRequestBody(2, \"Unused~Body\"", firstPass.GeneratedSource);
+        AssertRequestBodyComponents(first);
+
+        var secondPath = Path.Combine(workDirectory.FullName, "first.json");
+        File.WriteAllText(secondPath, first.ToJsonString());
+        var second = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, secondPath, "second");
+        AssertRequestBodyComponents(second);
+
+        Assert.True(
+            JsonNode.DeepEquals(
+                first["components"]!["requestBodies"],
+                second["components"]!["requestBodies"]
+            )
+        );
+        foreach (
+            var (path, method) in new[]
+            {
+                ("/pets", "post"),
+                ("/shared/one", "post"),
+                ("/shared/two", "put"),
+            }
+        )
         {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-
-            var firstPass = RealCliOpenApiPass.ImportEmitAndReadGeneratedSource(
-                workDirectory.FullName,
-                sourcePath,
-                "first"
-            );
-            var first = firstPass.Document;
-            Assert.Contains("RivetDocumentRequestBody(0, \"Used/Body\"", firstPass.GeneratedSource);
-            Assert.Contains(
-                "RivetDocumentRequestBody(2, \"Unused~Body\"",
-                firstPass.GeneratedSource
-            );
-            AssertRequestBodyComponents(first);
-
-            var secondPath = Path.Combine(workDirectory.FullName, "first.json");
-            File.WriteAllText(secondPath, first.ToJsonString());
-            var second = RealCliOpenApiPass.ImportAndEmit(
-                workDirectory.FullName,
-                secondPath,
-                "second"
-            );
-            AssertRequestBodyComponents(second);
-
             Assert.True(
                 JsonNode.DeepEquals(
-                    first["components"]!["requestBodies"],
-                    second["components"]!["requestBodies"]
+                    first["paths"]![path]![method]!["requestBody"],
+                    second["paths"]![path]![method]!["requestBody"]
                 )
             );
-            foreach (
-                var (path, method) in new[]
-                {
-                    ("/pets", "post"),
-                    ("/shared/one", "post"),
-                    ("/shared/two", "put"),
-                }
-            )
-            {
-                Assert.True(
-                    JsonNode.DeepEquals(
-                        first["paths"]![path]![method]!["requestBody"],
-                        second["paths"]![path]![method]!["requestBody"]
-                    )
-                );
-            }
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
         }
     }
 
@@ -226,45 +212,30 @@ public sealed class RequestBodyComponentRoundTripTests
             }
             """;
 
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-empty-object-request-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
 
-            var first = RealCliOpenApiPass.ImportAndEmit(
-                workDirectory.FullName,
-                sourcePath,
-                "first"
-            );
-            var firstSchema = first["paths"]!["/empty"]!["post"]!["requestBody"]!["content"]![
-                "application/json"
-            ]!["schema"]!;
-            Assert.Equal("object", firstSchema["type"]!.GetValue<string>());
-            Assert.Empty(firstSchema["properties"]!.AsObject());
-            Assert.Null(firstSchema["additionalProperties"]);
-            Assert.Null(firstSchema["x-rivet-csharp-type"]);
+        var first = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first");
+        var firstSchema = first["paths"]!["/empty"]!["post"]!["requestBody"]!["content"]![
+            "application/json"
+        ]!["schema"]!;
+        Assert.Equal("object", firstSchema["type"]!.GetValue<string>());
+        Assert.Empty(firstSchema["properties"]!.AsObject());
+        Assert.Null(firstSchema["additionalProperties"]);
+        Assert.Null(firstSchema["x-rivet-csharp-type"]);
 
-            var secondPath = Path.Combine(workDirectory.FullName, "first.json");
-            File.WriteAllText(secondPath, first.ToJsonString());
-            var second = RealCliOpenApiPass.ImportAndEmit(
-                workDirectory.FullName,
-                secondPath,
-                "second"
-            );
-            var secondSchema = second["paths"]!["/empty"]!["post"]!["requestBody"]!["content"]![
-                "application/json"
-            ]!["schema"]!;
+        var secondPath = Path.Combine(workDirectory.FullName, "first.json");
+        File.WriteAllText(secondPath, first.ToJsonString());
+        var second = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, secondPath, "second");
+        var secondSchema = second["paths"]!["/empty"]!["post"]!["requestBody"]!["content"]![
+            "application/json"
+        ]!["schema"]!;
 
-            Assert.True(
-                JsonNode.DeepEquals(firstSchema, secondSchema),
-                $"Request schema did not reach a fixed point.\nFirst: {firstSchema}\nSecond: {secondSchema}"
-            );
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        Assert.True(
+            JsonNode.DeepEquals(firstSchema, secondSchema),
+            $"Request schema did not reach a fixed point.\nFirst: {firstSchema}\nSecond: {secondSchema}"
+        );
     }
 
     [Fact]
@@ -292,44 +263,29 @@ public sealed class RequestBodyComponentRoundTripTests
             }
             """;
 
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-unconstrained-array-request-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
 
-            var first = RealCliOpenApiPass.ImportAndEmit(
-                workDirectory.FullName,
-                sourcePath,
-                "first"
-            );
-            var firstSchema = first["paths"]!["/array"]!["post"]!["requestBody"]!["content"]![
-                "application/json"
-            ]!["schema"]!;
-            Assert.Equal("array", firstSchema["type"]!.GetValue<string>());
-            Assert.Empty(firstSchema["items"]!.AsObject());
-            Assert.Null(firstSchema["x-rivet-csharp-type"]);
+        var first = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first");
+        var firstSchema = first["paths"]!["/array"]!["post"]!["requestBody"]!["content"]![
+            "application/json"
+        ]!["schema"]!;
+        Assert.Equal("array", firstSchema["type"]!.GetValue<string>());
+        Assert.Empty(firstSchema["items"]!.AsObject());
+        Assert.Null(firstSchema["x-rivet-csharp-type"]);
 
-            var secondPath = Path.Combine(workDirectory.FullName, "first.json");
-            File.WriteAllText(secondPath, first.ToJsonString());
-            var second = RealCliOpenApiPass.ImportAndEmit(
-                workDirectory.FullName,
-                secondPath,
-                "second"
-            );
-            var secondSchema = second["paths"]!["/array"]!["post"]!["requestBody"]!["content"]![
-                "application/json"
-            ]!["schema"]!;
+        var secondPath = Path.Combine(workDirectory.FullName, "first.json");
+        File.WriteAllText(secondPath, first.ToJsonString());
+        var second = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, secondPath, "second");
+        var secondSchema = second["paths"]!["/array"]!["post"]!["requestBody"]!["content"]![
+            "application/json"
+        ]!["schema"]!;
 
-            Assert.True(
-                JsonNode.DeepEquals(firstSchema, secondSchema),
-                $"Request schema did not reach a fixed point.\nFirst: {firstSchema}\nSecond: {secondSchema}"
-            );
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        Assert.True(
+            JsonNode.DeepEquals(firstSchema, secondSchema),
+            $"Request schema did not reach a fixed point.\nFirst: {firstSchema}\nSecond: {secondSchema}"
+        );
     }
 
     private static void AssertRequestBodyComponents(JsonObject document)

@@ -615,170 +615,6 @@ public sealed class OpenApiImporterTests
 
     // ========== Fixture-based round-trip tests ==========
 
-    private static string LoadFixture(string name = "openapi-import.json")
-    {
-        return File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
-    }
-
-    private static JsonObject CreateFixtureSliceDocument(string fixtureName)
-    {
-        var root = JsonNode.Parse(LoadFixture(fixtureName))!.AsObject();
-
-        return new JsonObject
-        {
-            ["openapi"] = root["openapi"]!.DeepClone(),
-            ["info"] = root["info"]!.DeepClone(),
-            ["paths"] = new JsonObject(),
-        };
-    }
-
-    private static JsonObject GetOrAddComponents(JsonObject document)
-    {
-        document["components"] ??= new JsonObject();
-        return (JsonObject)document["components"]!;
-    }
-
-    private static void CopyComponentEntries(
-        JsonObject sourceDocument,
-        JsonObject targetDocument,
-        string sectionName,
-        params string[] keys
-    )
-    {
-        var sourceSection = sourceDocument["components"]?[sectionName] as JsonObject;
-        Assert.NotNull(sourceSection);
-
-        var components = GetOrAddComponents(targetDocument);
-        components[sectionName] ??= new JsonObject();
-        var targetSection = (JsonObject)components[sectionName]!;
-
-        foreach (var key in keys)
-        {
-            targetSection[key] = sourceSection[key]!.DeepClone();
-        }
-    }
-
-    private static string BuildTwilioCreateAccountFixtureSpec()
-    {
-        var source = JsonNode.Parse(LoadFixture("openapi-twilio.json"))!.AsObject();
-        var document = CreateFixtureSliceDocument("openapi-twilio.json");
-        var paths = (JsonObject)document["paths"]!;
-        var sourcePath = source["paths"]?["/2010-04-01/Accounts.json"] as JsonObject;
-
-        Assert.NotNull(sourcePath);
-        paths["/2010-04-01/Accounts.json"] = new JsonObject
-        {
-            ["post"] = sourcePath["post"]!.DeepClone(),
-        };
-
-        return document.ToJsonString();
-    }
-
-    private static string BuildGitHubUpdateBudgetFixtureSpec()
-    {
-        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
-        var document = CreateFixtureSliceDocument("openapi-github.json");
-        var paths = (JsonObject)document["paths"]!;
-        var sourcePath =
-            source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"]
-            as JsonObject;
-
-        Assert.NotNull(sourcePath);
-
-        var patch = sourcePath["patch"]!.DeepClone()!.AsObject();
-        patch["responses"] = new JsonObject { ["404"] = patch["responses"]!["404"]!.DeepClone() };
-
-        paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
-        {
-            ["patch"] = patch,
-        };
-
-        CopyComponentEntries(source, document, "parameters", "org", "budget");
-        CopyComponentEntries(source, document, "schemas", "basic-error");
-
-        return document.ToJsonString();
-    }
-
-    private static string BuildGitHubDeleteBudgetFixtureSpec()
-    {
-        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
-        var document = CreateFixtureSliceDocument("openapi-github.json");
-        var paths = (JsonObject)document["paths"]!;
-        var sourcePath =
-            source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"]
-            as JsonObject;
-
-        Assert.NotNull(sourcePath);
-
-        var delete = sourcePath["delete"]!.DeepClone()!.AsObject();
-        delete["responses"] = new JsonObject { ["200"] = delete["responses"]!["200"]!.DeepClone() };
-
-        paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
-        {
-            ["delete"] = delete,
-        };
-
-        CopyComponentEntries(source, document, "parameters", "org", "budget");
-        CopyComponentEntries(source, document, "responses", "delete-budget");
-        CopyComponentEntries(source, document, "examples", "delete-budget");
-        CopyComponentEntries(source, document, "schemas", "delete-budget");
-
-        return document.ToJsonString();
-    }
-
-    private static string BuildGitHubSetActionsCacheRetentionLimitFixtureSpec()
-    {
-        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
-        var document = CreateFixtureSliceDocument("openapi-github.json");
-        var paths = (JsonObject)document["paths"]!;
-        var sourcePath =
-            source["paths"]?["/enterprises/{enterprise}/actions/cache/retention-limit"]
-            as JsonObject;
-
-        Assert.NotNull(sourcePath);
-
-        var put = sourcePath["put"]!.DeepClone()!.AsObject();
-        put["responses"] = new JsonObject { ["204"] = put["responses"]!["204"]!.DeepClone() };
-
-        paths["/enterprises/{enterprise}/actions/cache/retention-limit"] = new JsonObject
-        {
-            ["put"] = put,
-        };
-
-        CopyComponentEntries(source, document, "parameters", "enterprise");
-        CopyComponentEntries(
-            source,
-            document,
-            "schemas",
-            "actions-cache-retention-limit-for-enterprise"
-        );
-        CopyComponentEntries(source, document, "examples", "actions-cache-retention-limit");
-
-        return document.ToJsonString();
-    }
-
-    private static string BuildGitHubUpdateImportFixtureSpec()
-    {
-        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
-        var document = CreateFixtureSliceDocument("openapi-github.json");
-        var paths = (JsonObject)document["paths"]!;
-        var sourcePath = source["paths"]?["/repos/{owner}/{repo}/import"] as JsonObject;
-
-        Assert.NotNull(sourcePath);
-
-        var patch = sourcePath["patch"]!.DeepClone()!.AsObject();
-        patch["responses"] = new JsonObject
-        {
-            ["204"] = new JsonObject { ["description"] = "No Content" },
-        };
-
-        paths["/repos/{owner}/{repo}/import"] = new JsonObject { ["patch"] = patch };
-
-        CopyComponentEntries(source, document, "parameters", "owner", "repo");
-
-        return document.ToJsonString();
-    }
-
     private static (
         ImportResult Result,
         IReadOnlyList<TsEndpointDefinition> Endpoints
@@ -794,7 +630,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_Generated_CSharp_Compiles()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(
+            Fixture.Text("openapi-import.json"),
+            "TaskBoard.Contracts"
+        );
         Assert.Empty(result.Warnings);
 
         var errors = CompilationHelper
@@ -808,7 +647,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_Contracts_Survive_Roslyn_RoundTrip()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(
+            Fixture.Text("openapi-import.json"),
+            "TaskBoard.Contracts"
+        );
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
@@ -847,7 +689,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_Types_Survive_Roslyn_RoundTrip()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(
+            Fixture.Text("openapi-import.json"),
+            "TaskBoard.Contracts"
+        );
         var compilation = CompilationHelper.CompileImportResult(result);
         var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
@@ -873,7 +718,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_TaskDto_Properties_Match_OpenAPI_Schema()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(
+            Fixture.Text("openapi-import.json"),
+            "TaskBoard.Contracts"
+        );
         var (_, walker) = CompilationHelper.DiscoverAndWalk(
             CompilationHelper.CompileImportResult(result)
         );
@@ -897,7 +745,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Fixture_Endpoint_Responses_Survive_RoundTrip()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(
+            Fixture.Text("openapi-import.json"),
+            "TaskBoard.Contracts"
+        );
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
@@ -924,7 +775,7 @@ public sealed class OpenApiImporterTests
     public void Twilio_CreateAccount_FormUrlEncoded_RequestExample_Survives_Import_RoundTrip()
     {
         var (_, endpoints) = ImportSpecAndWalkContracts(
-            BuildTwilioCreateAccountFixtureSpec(),
+            FixtureSlices.TwilioCreateAccount(),
             "Twilio.Contracts"
         );
 
@@ -946,7 +797,7 @@ public sealed class OpenApiImporterTests
     public void GitHub_UpdateBudgetOrg_404_Named_ResponseExamples_Survive_Import_RoundTrip()
     {
         var (_, endpoints) = ImportSpecAndWalkContracts(
-            BuildGitHubUpdateBudgetFixtureSpec(),
+            FixtureSlices.GitHubUpdateBudget(),
             "GitHub.Contracts"
         );
 
@@ -988,7 +839,7 @@ public sealed class OpenApiImporterTests
     public void GitHub_DeleteBudgetOrg_RefBacked_ResponseExample_Preserves_Ref_And_ResolvedJson()
     {
         var (_, endpoints) = ImportSpecAndWalkContracts(
-            BuildGitHubDeleteBudgetFixtureSpec(),
+            FixtureSlices.GitHubDeleteBudget(),
             "GitHub.Contracts"
         );
 
@@ -1014,7 +865,7 @@ public sealed class OpenApiImporterTests
     public void GitHub_SetActionsCacheRetentionLimit_Request_RefExample_Preserves_Ref_And_ResolvedJson()
     {
         var (_, endpoints) = ImportSpecAndWalkContracts(
-            BuildGitHubSetActionsCacheRetentionLimitFixtureSpec(),
+            FixtureSlices.GitHubSetActionsCacheRetentionLimit(),
             "GitHub.Contracts"
         );
 
@@ -1034,7 +885,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void GitHub_UpdateImport_Exampleless_RequestEntry_Is_Explicit_Not_Silent()
     {
-        var spec = BuildGitHubUpdateImportFixtureSpec();
+        var spec = FixtureSlices.GitHubUpdateImport();
         var result = CompilationHelper.Import(spec, "GitHub.Contracts");
         var content = CompilationHelper.FindFile(result, "MigrationsContract.cs");
         var compilation = CompilationHelper.CompileImportResult(result);
@@ -1507,7 +1358,7 @@ public sealed class OpenApiImporterTests
     public void Fixture_Covers_All_Supported_Type_Mappings()
     {
         var content = CompilationHelper.FindFile(
-            CompilationHelper.Import(LoadFixture(), "Test"),
+            CompilationHelper.Import(Fixture.Text("openapi-import.json"), "Test"),
             "TaskDto.cs"
         );
 
@@ -1528,7 +1379,7 @@ public sealed class OpenApiImporterTests
         Assert.Contains(
             "Priority?",
             CompilationHelper.FindFile(
-                CompilationHelper.Import(LoadFixture(), "Test"),
+                CompilationHelper.Import(Fixture.Text("openapi-import.json"), "Test"),
                 "PatchTaskRequest.cs"
             )
         );
@@ -1538,7 +1389,7 @@ public sealed class OpenApiImporterTests
     public void Fixture_Covers_All_HTTP_Methods()
     {
         var content = CompilationHelper.FindFile(
-            CompilationHelper.Import(LoadFixture(), "Test"),
+            CompilationHelper.Import(Fixture.Text("openapi-import.json"), "Test"),
             "TasksContract.cs"
         );
         Assert.Contains("Define.Get<", content);
@@ -1553,7 +1404,7 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Multipart_FormData_Binary_Property_Maps_To_IFormFile()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "Test");
+        var result = CompilationHelper.Import(Fixture.Text("openapi-import.json"), "Test");
         var content = CompilationHelper.FindFile(result, "AttachFileRequest.cs");
 
         Assert.Contains("IFormFile File", content);
@@ -1566,7 +1417,7 @@ public sealed class OpenApiImporterTests
     public void Multipart_Endpoint_Uses_Request_As_InputType()
     {
         var content = CompilationHelper.FindFile(
-            CompilationHelper.Import(LoadFixture(), "Test"),
+            CompilationHelper.Import(Fixture.Text("openapi-import.json"), "Test"),
             "TasksContract.cs"
         );
 
@@ -1580,7 +1431,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Multipart_RoundTrip_Produces_File_Param()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(
+            Fixture.Text("openapi-import.json"),
+            "TaskBoard.Contracts"
+        );
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
@@ -1652,7 +1506,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Importer_Output_Is_V1_Static_Class_With_Typed_Builder_Fields()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(
+            Fixture.Text("openapi-import.json"),
+            "TaskBoard.Contracts"
+        );
 
         foreach (var file in result.Files.Where(f => f.FileName.StartsWith("Contracts/")))
         {
@@ -1671,7 +1528,10 @@ public sealed class OpenApiImporterTests
     public void Importer_Output_Uses_RouteDefinition_Not_Bare_Define()
     {
         // Fields should be RouteDefinition<T> not Define, so Invoke is available
-        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(
+            Fixture.Text("openapi-import.json"),
+            "TaskBoard.Contracts"
+        );
         var content = CompilationHelper.FindFile(result, "TasksContract.cs");
 
         Assert.Contains("public static readonly RouteDefinition<", content);
@@ -1681,7 +1541,10 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Importer_Security_And_Description_Preserved_In_Builder_Chain()
     {
-        var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
+        var result = CompilationHelper.Import(
+            Fixture.Text("openapi-import.json"),
+            "TaskBoard.Contracts"
+        );
 
         // Health endpoint has an explicit empty requirement list.
         Assert.Contains(".Anonymous()", CompilationHelper.FindFile(result, "HealthContract.cs"));

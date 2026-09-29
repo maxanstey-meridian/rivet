@@ -105,46 +105,31 @@ public sealed class ReusableComponentIdentityRoundTripTests
             }
             """;
 
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-reusable-components-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
 
-            var first = RealCliOpenApiPass.ImportAndEmit(
-                workDirectory.FullName,
-                sourcePath,
-                "first"
-            );
-            AssertReusableComponents(first);
+        var first = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first");
+        AssertReusableComponents(first);
 
-            var secondPath = Path.Combine(workDirectory.FullName, "first.json");
-            File.WriteAllText(secondPath, first.ToJsonString());
-            var second = RealCliOpenApiPass.ImportAndEmit(
-                workDirectory.FullName,
-                secondPath,
-                "second"
-            );
-            AssertReusableComponents(second);
+        var secondPath = Path.Combine(workDirectory.FullName, "first.json");
+        File.WriteAllText(secondPath, first.ToJsonString());
+        var second = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, secondPath, "second");
+        AssertReusableComponents(second);
 
-            Assert.True(
-                JsonNode.DeepEquals(
-                    first["components"]!["parameters"],
-                    second["components"]!["parameters"]
-                )
-            );
-            Assert.True(
-                JsonNode.DeepEquals(
-                    first["components"]!["responses"],
-                    second["components"]!["responses"]
-                )
-            );
-            Assert.True(JsonNode.DeepEquals(first["paths"], second["paths"]));
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        Assert.True(
+            JsonNode.DeepEquals(
+                first["components"]!["parameters"],
+                second["components"]!["parameters"]
+            )
+        );
+        Assert.True(
+            JsonNode.DeepEquals(
+                first["components"]!["responses"],
+                second["components"]!["responses"]
+            )
+        );
+        Assert.True(JsonNode.DeepEquals(first["paths"], second["paths"]));
     }
 
     [Fact]
@@ -178,62 +163,55 @@ public sealed class ReusableComponentIdentityRoundTripTests
             }
             """;
 
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-component-fallback-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
-            var import = CliRunner.RunCli(
-                workDirectory.FullName,
-                [
-                    "--from-openapi",
-                    sourcePath,
-                    "--output",
-                    generatedDirectory,
-                    "--namespace",
-                    "Generated",
-                ]
-            );
-            Assert.True(import.ExitCode == 0, import.StdErr);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
+        var import = CliRunner.RunCli(
+            workDirectory.FullName,
+            [
+                "--from-openapi",
+                sourcePath,
+                "--output",
+                generatedDirectory,
+                "--namespace",
+                "Generated",
+            ]
+        );
+        Assert.True(import.ExitCode == 0, import.StdErr);
 
-            var documentPath = Path.Combine(generatedDirectory, "RivetDocument.cs");
-            File.WriteAllLines(
-                documentPath,
-                File.ReadAllLines(documentPath)
-                    .Where(line =>
-                        !line.Contains("RivetDocumentParameter", StringComparison.Ordinal)
-                        && !line.Contains("RivetDocumentResponse", StringComparison.Ordinal)
-                    )
-            );
+        var documentPath = Path.Combine(generatedDirectory, "RivetDocument.cs");
+        File.WriteAllLines(
+            documentPath,
+            File.ReadAllLines(documentPath)
+                .Where(line =>
+                    !line.Contains("RivetDocumentParameter", StringComparison.Ordinal)
+                    && !line.Contains("RivetDocumentResponse", StringComparison.Ordinal)
+                )
+        );
 
-            var outputDirectory = Path.Combine(workDirectory.FullName, "output");
-            var emit = CliRunner.RunCli(
-                workDirectory.FullName,
-                [generatedDirectory, "--openapi", "--output", outputDirectory]
-            );
-            Assert.True(emit.ExitCode == 0, emit.StdErr);
-            var document = JsonNode
-                .Parse(File.ReadAllText(Path.Combine(outputDirectory, "openapi.json")))!
-                .AsObject();
+        var outputDirectory = Path.Combine(workDirectory.FullName, "output");
+        var emit = CliRunner.RunCli(
+            workDirectory.FullName,
+            [generatedDirectory, "--openapi", "--output", outputDirectory]
+        );
+        Assert.True(emit.ExitCode == 0, emit.StdErr);
+        var document = JsonNode
+            .Parse(File.ReadAllText(Path.Combine(outputDirectory, "openapi.json")))!
+            .AsObject();
 
-            var operation = document["paths"]!["/jobs"]!["get"]!;
-            Assert.Equal("limit", operation["parameters"]![0]!["name"]!.GetValue<string>());
-            Assert.Equal(
-                "integer",
-                operation["parameters"]![0]!["schema"]!["type"]!.GetValue<string>()
-            );
-            Assert.Equal(
-                "Accepted for processing",
-                operation["responses"]!["202"]!["description"]!.GetValue<string>()
-            );
-            Assert.Null(document["components"]?["parameters"]);
-            Assert.Null(document["components"]?["responses"]);
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        var operation = document["paths"]!["/jobs"]!["get"]!;
+        Assert.Equal("limit", operation["parameters"]![0]!["name"]!.GetValue<string>());
+        Assert.Equal(
+            "integer",
+            operation["parameters"]![0]!["schema"]!["type"]!.GetValue<string>()
+        );
+        Assert.Equal(
+            "Accepted for processing",
+            operation["responses"]!["202"]!["description"]!.GetValue<string>()
+        );
+        Assert.Null(document["components"]?["parameters"]);
+        Assert.Null(document["components"]?["responses"]);
     }
 
     [Fact]
@@ -276,45 +254,38 @@ public sealed class ReusableComponentIdentityRoundTripTests
             }
             """;
 
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-named-array-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
 
-            var firstPass = RealCliOpenApiPass.ImportEmitAndReadGeneratedSource(
-                workDirectory.FullName,
-                sourcePath,
-                "array-first"
-            );
-            var first = firstPass.Document;
-            Assert.Contains(
-                "RivetGeneratedSchema(\"PetList\", \"Pet/List\"",
-                firstPass.GeneratedSource
-            );
-            Assert.Contains("ResponseContent<List<Pet>>", firstPass.GeneratedSource);
-            Assert.Contains("schemaRef: \"PetList\"", firstPass.GeneratedSource);
-            AssertNamedArray(first);
+        var firstPass = RealCliOpenApiPass.ImportEmitAndReadGeneratedSource(
+            workDirectory.FullName,
+            sourcePath,
+            "array-first"
+        );
+        var first = firstPass.Document;
+        Assert.Contains(
+            "RivetGeneratedSchema(\"PetList\", \"Pet/List\"",
+            firstPass.GeneratedSource
+        );
+        Assert.Contains("ResponseContent<List<Pet>>", firstPass.GeneratedSource);
+        Assert.Contains("schemaRef: \"PetList\"", firstPass.GeneratedSource);
+        AssertNamedArray(first);
 
-            var secondPath = Path.Combine(workDirectory.FullName, "array-first.json");
-            File.WriteAllText(secondPath, first.ToJsonString());
-            var second = RealCliOpenApiPass.ImportAndEmit(
-                workDirectory.FullName,
-                secondPath,
-                "array-second"
-            );
-            AssertNamedArray(second);
-            Assert.True(
-                JsonNode.DeepEquals(
-                    first["components"]!["schemas"]!["Pet/List"],
-                    second["components"]!["schemas"]!["Pet/List"]
-                )
-            );
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        var secondPath = Path.Combine(workDirectory.FullName, "array-first.json");
+        File.WriteAllText(secondPath, first.ToJsonString());
+        var second = RealCliOpenApiPass.ImportAndEmit(
+            workDirectory.FullName,
+            secondPath,
+            "array-second"
+        );
+        AssertNamedArray(second);
+        Assert.True(
+            JsonNode.DeepEquals(
+                first["components"]!["schemas"]!["Pet/List"],
+                second["components"]!["schemas"]!["Pet/List"]
+            )
+        );
     }
 
     [Fact]
@@ -396,31 +367,24 @@ public sealed class ReusableComponentIdentityRoundTripTests
                 && warning.Contains("Constrained/Id", StringComparison.Ordinal)
         );
 
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-fallback-identities-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var emitted = RealCliOpenApiPass.ImportAndEmit(
-                workDirectory.FullName,
-                sourcePath,
-                "fallback-identities"
-            );
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var emitted = RealCliOpenApiPass.ImportAndEmit(
+            workDirectory.FullName,
+            sourcePath,
+            "fallback-identities"
+        );
 
-            Assert.NotNull(emitted["components"]!["schemas"]!["Constrained/Id"]);
-            Assert.Equal(
-                "#/components/schemas/Constrained~1Id",
-                emitted["components"]!["schemas"]!["IdList"]!["items"]!["$ref"]!.GetValue<string>()
-            );
-            Assert.Equal(
-                "#/components/schemas/Constrained~1Id",
-                emitted["components"]!["parameters"]!["Id"]!["schema"]!["$ref"]!.GetValue<string>()
-            );
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        Assert.NotNull(emitted["components"]!["schemas"]!["Constrained/Id"]);
+        Assert.Equal(
+            "#/components/schemas/Constrained~1Id",
+            emitted["components"]!["schemas"]!["IdList"]!["items"]!["$ref"]!.GetValue<string>()
+        );
+        Assert.Equal(
+            "#/components/schemas/Constrained~1Id",
+            emitted["components"]!["parameters"]!["Id"]!["schema"]!["$ref"]!.GetValue<string>()
+        );
     }
 
     [Fact]
@@ -450,29 +414,20 @@ public sealed class ReusableComponentIdentityRoundTripTests
             }
             """;
 
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-missing-schema-fallback-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var emitted = RealCliOpenApiPass.ImportAndEmit(
-                workDirectory.FullName,
-                sourcePath,
-                "missing-schema"
-            );
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var emitted = RealCliOpenApiPass.ImportAndEmit(
+            workDirectory.FullName,
+            sourcePath,
+            "missing-schema"
+        );
 
-            Assert.NotNull(emitted["components"]!["schemas"]!["MissingFilter"]);
-            Assert.Equal(
-                "#/components/schemas/MissingFilter",
-                emitted["components"]!["parameters"]!["Filter"]!["schema"]![
-                    "$ref"
-                ]!.GetValue<string>()
-            );
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        Assert.NotNull(emitted["components"]!["schemas"]!["MissingFilter"]);
+        Assert.Equal(
+            "#/components/schemas/MissingFilter",
+            emitted["components"]!["parameters"]!["Filter"]!["schema"]!["$ref"]!.GetValue<string>()
+        );
     }
 
     private static void AssertNamedArray(JsonObject document)

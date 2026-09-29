@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using static Rivet.Tests.RoundTripDiffReport;
 
 namespace Rivet.Tests;
 
@@ -8,9 +9,9 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Identical_Fixture_Has_No_Findings()
     {
-        var fixture = LoadFixture();
+        var fixture = Fixture.Json("roundtrip-probe.json");
 
-        var result = RunDiff(fixture, fixture.DeepClone().AsObject());
+        var result = RoundTripDiff.Run(fixture, fixture.DeepClone().AsObject());
 
         Assert.Equal(0, result.ExitCode);
         Assert.Empty(result.DocumentFindings.EnumerateObject());
@@ -29,7 +30,7 @@ public sealed class RoundTripDiffTests
         string reemittedStatus
     )
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         var originalResponses = original["paths"]!["/wildcard"]!["get"]!["responses"]!.AsObject();
         var response = originalResponses["2XX"]!.DeepClone();
         originalResponses.Remove("2XX");
@@ -39,7 +40,7 @@ public sealed class RoundTripDiffTests
         reemittedResponses[reemittedStatus] = reemittedResponses[sourceStatus]!.DeepClone();
         reemittedResponses.Remove(sourceStatus);
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.OperationFindings, "response-key-missing"));
@@ -55,14 +56,14 @@ public sealed class RoundTripDiffTests
     [InlineData("license")]
     public void Document_Info_Mutations_Are_Reported(string field)
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         AddDocumentMetadata(original);
         var reemitted = original.DeepClone().AsObject();
         reemitted["info"]![field] = field is "contact" or "license"
             ? new JsonObject { ["name"] = "Changed" }
             : "Changed";
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.DocumentFindings, "info"));
@@ -71,13 +72,13 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Contact_Presentation_Extensions_Are_Excluded_From_Standard_Info_Comparison()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         AddDocumentMetadata(original);
         original["info"]!["contact"]!["x-twitter"] = "firebase";
         var reemitted = original.DeepClone().AsObject();
         reemitted["info"]!["contact"]!.AsObject().Remove("x-twitter");
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(0, FindingCount(result.DocumentFindings, "info"));
@@ -90,13 +91,13 @@ public sealed class RoundTripDiffTests
     [InlineData("email")]
     public void Standard_Contact_Mutations_Remain_Drift(string field)
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         AddDocumentMetadata(original);
         original["info"]!["contact"]!["url"] = "https://example.test/support";
         var reemitted = original.DeepClone().AsObject();
         reemitted["info"]!["contact"]![field] = "changed";
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.DocumentFindings, "info"));
@@ -105,13 +106,13 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Reviewed_Contact_Extensions_Remain_Compared_By_Extension_Mechanism()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         AddDocumentMetadata(original);
         original["info"]!["contact"]!["x-twilio"] = "authored";
         var reemitted = original.DeepClone().AsObject();
         reemitted["info"]!["contact"]!["x-twilio"] = "changed";
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(0, FindingCount(result.DocumentFindings, "info"));
@@ -126,7 +127,7 @@ public sealed class RoundTripDiffTests
     [InlineData("securitySchemes", "security-schemes")]
     public void Document_Metadata_Mutations_Are_Reported(string mutation, string category)
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         AddDocumentMetadata(original);
         var reemitted = original.DeepClone().AsObject();
         switch (mutation)
@@ -148,7 +149,7 @@ public sealed class RoundTripDiffTests
                 break;
         }
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.DocumentFindings, category));
@@ -157,13 +158,13 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Excluded_Tag_Extensions_Do_Not_Count_As_Standard_Tag_Drift()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         AddDocumentMetadata(original);
         original["tags"]![0]!["x-displayName"] = "Things";
         var reemitted = original.DeepClone().AsObject();
         reemitted["tags"]![0]!.AsObject().Remove("x-displayName");
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(0, FindingCount(result.DocumentFindings, "tags"));
@@ -180,7 +181,7 @@ public sealed class RoundTripDiffTests
     [InlineData("extension", "operation-extensions")]
     public void Operation_Metadata_Mutations_Are_Reported(string mutation, string category)
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         AddOperationMetadata(original);
         var reemitted = original.DeepClone().AsObject();
         var operation = reemitted["paths"]!["/things/{thing_id}"]!["get"]!;
@@ -212,7 +213,7 @@ public sealed class RoundTripDiffTests
                 break;
         }
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.OperationFindings, category));
@@ -270,7 +271,7 @@ public sealed class RoundTripDiffTests
                 break;
         }
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.True(
@@ -314,7 +315,7 @@ public sealed class RoundTripDiffTests
                 break;
         }
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.True(
@@ -391,7 +392,7 @@ public sealed class RoundTripDiffTests
                 break;
         }
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.True(
@@ -417,7 +418,7 @@ public sealed class RoundTripDiffTests
         var reemitted = original.DeepClone().AsObject();
         reemitted["components"]![componentNamespace]!.AsObject().Clear();
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(10, result.Summary.GetProperty("originalComponents").GetInt32());
@@ -466,7 +467,7 @@ public sealed class RoundTripDiffTests
                 break;
         }
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.DocumentFindings, category));
@@ -491,7 +492,7 @@ public sealed class RoundTripDiffTests
                 ? new JsonObject { ["$ref"] = "#/components/requestBodies/EquivalentBody" }
                 : reemitted["components"]!["requestBodies"]!["NamedBody"]!.DeepClone();
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.OperationFindings, "request-body-ref-identity"));
@@ -554,7 +555,7 @@ public sealed class RoundTripDiffTests
                 break;
         }
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.OperationFindings, category));
@@ -563,13 +564,13 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Schema_Reference_Replaced_By_Equivalent_Inline_Shape_Is_Reported()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         var reemitted = original.DeepClone().AsObject();
         reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["owner"] = reemitted[
             "components"
         ]!["schemas"]!["nullable-owner"]!.DeepClone();
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.SchemaFindings, "schema-ref-identity"));
@@ -584,7 +585,7 @@ public sealed class RoundTripDiffTests
     [InlineData("xml", "schema-annotations")]
     public void Recursive_Schema_Mutations_Are_Reported(string mutation, string category)
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         AddRecursiveSchemaSurface(original);
         var reemitted = original.DeepClone().AsObject();
         var thing = reemitted["components"]!["schemas"]!["Thing"]!;
@@ -610,7 +611,7 @@ public sealed class RoundTripDiffTests
                 break;
         }
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.True(FindingCount(result.SchemaFindings, category) > 0, result.Summary.ToString());
@@ -619,7 +620,7 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Recursive_Ref_Cycle_Uses_Visited_Node_Pairs_And_Finds_A_Deep_Mutation()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         var schemas = original["components"]!["schemas"]!.AsObject();
         for (var index = 0; index < 30; index++)
         {
@@ -640,7 +641,7 @@ public sealed class RoundTripDiffTests
         reemitted["components"]!["schemas"]!["Deep29"]!["properties"]!["value"]!["type"] =
             "integer";
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.True(FindingCount(result.SchemaFindings, "schema-type") > 0);
@@ -649,7 +650,7 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Pure_Ref_Chains_Are_Not_Depth_Truncated()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         var schemas = original["components"]!["schemas"]!.AsObject();
         for (var index = 0; index < 30; index++)
         {
@@ -662,7 +663,7 @@ public sealed class RoundTripDiffTests
         var reemitted = original.DeepClone().AsObject();
         reemitted["components"]!["schemas"]!["Link30"]!["type"] = "integer";
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.True(FindingCount(result.SchemaFindings, "schema-type") > 0);
@@ -671,7 +672,7 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Changed_Public_Ref_Identity_Is_Reported_Even_When_Targets_Are_Equivalent()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         original["components"]!["schemas"]!["equivalent-owner"] = original["components"]![
             "schemas"
         ]!["nullable-owner"]!.DeepClone();
@@ -679,7 +680,7 @@ public sealed class RoundTripDiffTests
         reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["owner"]!["$ref"] =
             "#/components/schemas/equivalent-owner";
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.True(FindingCount(result.SchemaFindings, "schema-ref-identity") > 0);
@@ -688,14 +689,14 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Materialized_Ref_Target_Annotations_And_Required_Are_Not_Use_Site_Drift()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         AddRecursiveOwnerSchema(original);
         var reemitted = original.DeepClone().AsObject();
         var ownerUseSite = reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["owner"]!;
         ownerUseSite["description"] = "Owner schema";
         ownerUseSite["required"] = new JsonArray("id");
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -703,14 +704,14 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Ref_And_Inline_Target_With_Annotations_Required_And_Cycle_Are_Equivalent()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         AddRecursiveOwnerSchema(original);
         var reemitted = original.DeepClone().AsObject();
         reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["owner"] = reemitted[
             "components"
         ]!["schemas"]!["nullable-owner"]!.DeepClone();
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.SchemaFindings, "schema-ref-identity"));
@@ -722,7 +723,7 @@ public sealed class RoundTripDiffTests
     [InlineData("cycle-target", "schema-type")]
     public void Ref_And_Inline_Target_Mutations_Remain_Real_Drift(string mutation, string category)
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         AddRecursiveOwnerSchema(original);
         var reemitted = original.DeepClone().AsObject();
         var inlineOwner = reemitted["components"]!["schemas"]!["nullable-owner"]!
@@ -742,7 +743,7 @@ public sealed class RoundTripDiffTests
                 break;
         }
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.True(FindingCount(result.SchemaFindings, category) > 0, result.Summary.ToString());
@@ -751,7 +752,7 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Inferred_Int64_Is_Not_Equivalent_To_Absent_Source_Format()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         original["components"]!["schemas"]!["Thing"]!["properties"]!["count"] = new JsonObject
         {
             ["type"] = "integer",
@@ -759,7 +760,7 @@ public sealed class RoundTripDiffTests
         var reemitted = original.DeepClone().AsObject();
         reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["count"]!["format"] = "int64";
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.SchemaFindings, "schema-format"));
@@ -768,13 +769,13 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Lost_Nullability_Remains_Real_Drift()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         var reemitted = original.DeepClone().AsObject();
         reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["name"]!
             .AsObject()
             .Remove("nullable");
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, FindingCount(result.SchemaFindings, "schema-nullable"));
@@ -783,7 +784,7 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Nullable_30_And_31_Spellings_Are_Normalized()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         var reemitted = original.DeepClone().AsObject();
         reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["name"] = new JsonObject
         {
@@ -791,7 +792,7 @@ public sealed class RoundTripDiffTests
             ["writeOnly"] = true,
         };
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -799,12 +800,12 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Additional_Properties_True_And_Empty_Schema_Are_Normalized()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         original["components"]!["schemas"]!["Thing"]!["additionalProperties"] = true;
         var reemitted = original.DeepClone().AsObject();
         reemitted["components"]!["schemas"]!["Thing"]!["additionalProperties"] = new JsonObject();
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -812,7 +813,7 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Non_Object_Additional_Properties_Is_Ignored_Without_Hiding_Valid_Scalar_Drift()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         original["components"]!["schemas"]!["Thing"]!["properties"]!["sourceDefect"] =
             JsonNode.Parse("""{"type":"string","additionalProperties":{"type":"string"}}""");
         var equivalent = original.DeepClone().AsObject();
@@ -820,14 +821,14 @@ public sealed class RoundTripDiffTests
             "additionalProperties"
         ] = true;
 
-        var equivalentResult = RunDiff(original, equivalent);
+        var equivalentResult = RoundTripDiff.Run(original, equivalent);
 
         Assert.Equal(0, equivalentResult.ExitCode);
         Assert.Equal(0, equivalentResult.Summary.GetProperty("sourceDefects").GetInt32());
 
         equivalent["components"]!["schemas"]!["Thing"]!["properties"]!["sourceDefect"]!["type"] =
             "integer";
-        var changedResult = RunDiff(original, equivalent);
+        var changedResult = RoundTripDiff.Run(original, equivalent);
 
         Assert.Equal(1, changedResult.ExitCode);
         Assert.Equal(1, FindingCount(changedResult.SchemaFindings, "schema-type"));
@@ -836,7 +837,7 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Null_Only_Additional_Properties_Is_Also_A_No_Op()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         original["components"]!["schemas"]!["Thing"]!["properties"]!["sourceDefect"] =
             JsonNode.Parse("""{"type":["null"],"additionalProperties":{"type":"string"}}""");
         var reemitted = original.DeepClone().AsObject();
@@ -844,7 +845,7 @@ public sealed class RoundTripDiffTests
             "additionalProperties"
         ] = true;
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
@@ -859,7 +860,7 @@ public sealed class RoundTripDiffTests
         );
         var reemitted = original.DeepClone().AsObject();
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
@@ -875,7 +876,7 @@ public sealed class RoundTripDiffTests
         var reemitted = original.DeepClone().AsObject();
         reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(1, result.Summary.GetProperty("sourceDefects").GetInt32());
@@ -901,7 +902,7 @@ public sealed class RoundTripDiffTests
         var reemitted = original.DeepClone().AsObject();
         reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
@@ -922,7 +923,7 @@ public sealed class RoundTripDiffTests
         var reemitted = original.DeepClone().AsObject();
         reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(1, result.Summary.GetProperty("sourceDefects").GetInt32());
@@ -950,7 +951,7 @@ public sealed class RoundTripDiffTests
                 )
             );
 
-        var result = RunDiff(original, original.DeepClone().AsObject());
+        var result = RoundTripDiff.Run(original, original.DeepClone().AsObject());
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(1, result.Summary.GetProperty("sourceDefects").GetInt32());
@@ -983,7 +984,7 @@ public sealed class RoundTripDiffTests
         reemittedContent.Clear();
         reemittedContent["application/x-tar"] = media;
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, result.Summary.GetProperty("sourceDefects").GetInt32());
@@ -1005,7 +1006,7 @@ public sealed class RoundTripDiffTests
         var reemitted = original.DeepClone().AsObject();
         reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
@@ -1030,7 +1031,7 @@ public sealed class RoundTripDiffTests
         var reemitted = original.DeepClone().AsObject();
         reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
@@ -1050,7 +1051,7 @@ public sealed class RoundTripDiffTests
         var reemitted = original.DeepClone().AsObject();
         reemitted["paths"]!["/surface"]!["post"]!["parameters"]!.AsArray().RemoveAt(2);
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(0, result.Summary.GetProperty("sourceDefects").GetInt32());
@@ -1069,7 +1070,7 @@ public sealed class RoundTripDiffTests
         var reemitted = original.DeepClone().AsObject();
         reemitted["paths"]!["/surface"]!.AsObject().Remove("parameters");
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(1, result.Summary.GetProperty("sourceDefects").GetInt32());
@@ -1079,14 +1080,14 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Explicit_Null_Default_Is_Not_An_Absent_Default()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         original["components"]!["schemas"]!["Thing"]!["properties"]!["name"]!["default"] = null;
         var reemitted = original.DeepClone().AsObject();
         reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["name"]!
             .AsObject()
             .Remove("default");
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.True(FindingCount(result.SchemaFindings, "schema-annotations") > 0);
@@ -1095,7 +1096,7 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Swagger_Projection_Is_A_Normalization_Control()
     {
-        var result = RunDiff(CreateSwaggerDocument(), CreateEquivalentOpenApiDocument());
+        var result = RoundTripDiff.Run(CreateSwaggerDocument(), CreateEquivalentOpenApiDocument());
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -1114,10 +1115,10 @@ public sealed class RoundTripDiffTests
         var original = CreateSwaggerCollectionDocument(collectionFormat);
         var reemitted = CreateOpenApiCollectionDocument(style, explode);
 
-        Assert.Equal(0, RunDiff(original, reemitted).ExitCode);
+        Assert.Equal(0, RoundTripDiff.Run(original, reemitted).ExitCode);
 
         reemitted["paths"]!["/search"]!["get"]!["parameters"]![0]!["explode"] = !explode;
-        var mutation = RunDiff(original, reemitted);
+        var mutation = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, mutation.ExitCode);
         Assert.Equal(1, FindingCount(mutation.OperationFindings, "parameter-metadata"));
@@ -1126,7 +1127,7 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Unsupported_Swagger_Tsv_Collection_Format_Is_Not_Guessed_As_Equivalent()
     {
-        var result = RunDiff(
+        var result = RoundTripDiff.Run(
             CreateSwaggerCollectionDocument("tsv"),
             CreateOpenApiCollectionDocument("form", false)
         );
@@ -1141,12 +1142,12 @@ public sealed class RoundTripDiffTests
         var original = CreateSwaggerFormDocument();
         var reemitted = CreateEquivalentOpenApiFormDocument();
 
-        Assert.Equal(0, RunDiff(original, reemitted).ExitCode);
+        Assert.Equal(0, RoundTripDiff.Run(original, reemitted).ExitCode);
 
         reemitted["paths"]!["/pets/{id}"]!["post"]!["requestBody"]!["content"]![
             "application/x-www-form-urlencoded"
         ]!["schema"]!["properties"]!["name"]!["description"] = "Changed description";
-        var mutation = RunDiff(original, reemitted);
+        var mutation = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, mutation.ExitCode);
         Assert.Equal(1, FindingCount(mutation.OperationFindings, "request-schema-annotations"));
@@ -1155,13 +1156,13 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Operation_Parameter_Overrides_Path_Parameter()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         var reemitted = original.DeepClone().AsObject();
         var pathParameter = reemitted["paths"]!["/things/{thing_id}"]!["parameters"]![0]!;
         pathParameter["required"] = true;
         pathParameter["schema"]!["type"] = "boolean";
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -1169,11 +1170,11 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Findings_Are_Structured_Json()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         var reemitted = original.DeepClone().AsObject();
         reemitted["paths"]!["/wildcard"]!["get"]!["responses"]!.AsObject().Remove("2XX");
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         var finding = Assert.Single(
             result
@@ -1190,7 +1191,7 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Integrity_Findings_Include_Refs_Security_Path_Parameters_And_Operation_Ids()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         var reemitted = original.DeepClone().AsObject();
         reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["owner"]!["$ref"] =
             "#/components/schemas/missing";
@@ -1199,7 +1200,7 @@ public sealed class RoundTripDiffTests
             "other";
         reemitted["paths"]!["/echo"]!["post"]!["operationId"] = "getThing";
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.True(FindingCount(result.IntegrityFindings, "unresolved-reference") > 0);
@@ -1211,30 +1212,31 @@ public sealed class RoundTripDiffTests
     [Fact]
     public void Generated_Source_Unsupported_Markers_Are_Integrity_Findings()
     {
-        var sourceDirectory = Directory.CreateTempSubdirectory("rivet-roundtrip-source-");
-        try
-        {
-            var sourcePath = Path.Combine(sourceDirectory.FullName, "Contract.cs");
-            File.WriteAllText(sourcePath, "// [rivet:unsupported body content-type=text/plain]\n");
-            var fixture = LoadFixture();
+        using var sourceDirectory = new TempDir();
+        var sourcePath = Path.Combine(sourceDirectory.FullName, "Contract.cs");
+        File.WriteAllText(sourcePath, "// [rivet:unsupported body content-type=text/plain]\n");
+        var fixture = Fixture.Json("roundtrip-probe.json");
 
-            var result = RunDiff(fixture, fixture.DeepClone().AsObject(), sourceDirectory.FullName);
+        var result = RoundTripDiff.Run(
+            fixture,
+            fixture.DeepClone().AsObject(),
+            sourceDirectory.FullName
+        );
 
-            Assert.Equal(1, result.ExitCode);
-            Assert.Equal(1, FindingCount(result.IntegrityFindings, "unsupported-marker"));
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(1, FindingCount(result.IntegrityFindings, "unsupported-marker"));
 
-            File.WriteAllText(
-                sourcePath,
-                "const string description = \"[rivet:unsupported quoted data\";\n"
-            );
-            var quoted = RunDiff(fixture, fixture.DeepClone().AsObject(), sourceDirectory.FullName);
-            Assert.Equal(0, quoted.ExitCode);
-            Assert.Equal(0, FindingCount(quoted.IntegrityFindings, "unsupported-marker"));
-        }
-        finally
-        {
-            sourceDirectory.Delete(recursive: true);
-        }
+        File.WriteAllText(
+            sourcePath,
+            "const string description = \"[rivet:unsupported quoted data\";\n"
+        );
+        var quoted = RoundTripDiff.Run(
+            fixture,
+            fixture.DeepClone().AsObject(),
+            sourceDirectory.FullName
+        );
+        Assert.Equal(0, quoted.ExitCode);
+        Assert.Equal(0, FindingCount(quoted.IntegrityFindings, "unsupported-marker"));
     }
 
     [Theory]
@@ -1243,37 +1245,26 @@ public sealed class RoundTripDiffTests
     [InlineData("non-object-json")]
     public void Invalid_Arguments_And_Input_Exit_Two(string scenario)
     {
-        var workDir = Directory.CreateTempSubdirectory("rivet-roundtrip-invalid-");
-        try
-        {
-            var input = Path.Combine(workDir.FullName, "input.json");
-            File.WriteAllText(input, scenario == "non-object-json" ? "[]" : "{");
-            var arguments =
-                scenario == "missing-arguments" ? Array.Empty<string>() : new[] { input, input };
+        using var workDir = new TempDir();
+        var input = Path.Combine(workDir.FullName, "input.json");
+        File.WriteAllText(input, scenario == "non-object-json" ? "[]" : "{");
+        var arguments =
+            scenario == "missing-arguments" ? Array.Empty<string>() : new[] { input, input };
 
-            var process = CliRunner.Run(
-                workDir.FullName,
-                "python3",
-                [CliRunner.RepoPath("tools", "roundtrip-diff.py"), .. arguments]
-            );
+        var process = RoundTripDiff.Run(workDir.FullName, arguments);
 
-            Assert.Equal(2, process.ExitCode);
-        }
-        finally
-        {
-            workDir.Delete(recursive: true);
-        }
+        Assert.Equal(2, process.ExitCode);
     }
 
     [Fact]
     public void Missing_Operation_And_Schema_Are_Reported()
     {
-        var original = LoadFixture();
+        var original = Fixture.Json("roundtrip-probe.json");
         var reemitted = original.DeepClone().AsObject();
         reemitted["paths"]!["/things/{thing_id}"]!.AsObject().Remove("put");
         reemitted["components"]!["schemas"]!.AsObject().Remove("nullable-owner");
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(1, result.Summary.GetProperty("missingOperations").GetInt32());
@@ -1281,18 +1272,6 @@ public sealed class RoundTripDiffTests
         Assert.Single(result.Details.GetProperty("missingOperations").EnumerateArray());
         Assert.Single(result.Details.GetProperty("unmatchedOriginalSchemas").EnumerateArray());
     }
-
-    private static int FindingCount(JsonElement findings, string category) =>
-        findings.TryGetProperty(category, out var count) ? count.GetInt32() : 0;
-
-    private static JsonObject LoadFixture() =>
-        JsonNode
-            .Parse(
-                File.ReadAllText(
-                    Path.Combine(AppContext.BaseDirectory, "Fixtures", "roundtrip-probe.json")
-                )
-            )!
-            .AsObject();
 
     private static void AddDocumentMetadata(JsonObject document)
     {
@@ -1464,69 +1443,4 @@ public sealed class RoundTripDiffTests
                 """
             )!
             .AsObject();
-
-    private static DiffResult RunDiff(
-        JsonObject original,
-        JsonObject reemitted,
-        string? generatedSource = null
-    )
-    {
-        var workDir = Directory.CreateTempSubdirectory("rivet-roundtrip-diff-");
-        try
-        {
-            var originalPath = Path.Combine(workDir.FullName, "original.json");
-            var reemittedPath = Path.Combine(workDir.FullName, "reemitted.json");
-            var summaryPath = Path.Combine(workDir.FullName, "summary.json");
-            var detailsPath = Path.Combine(workDir.FullName, "details.json");
-            File.WriteAllText(originalPath, original.ToJsonString());
-            File.WriteAllText(reemittedPath, reemitted.ToJsonString());
-            var arguments = new List<string>
-            {
-                CliRunner.RepoPath("tools", "roundtrip-diff.py"),
-                originalPath,
-                reemittedPath,
-                "--summary-json",
-                summaryPath,
-                "--details-json",
-                detailsPath,
-            };
-            if (generatedSource is not null)
-            {
-                arguments.Add("--generated-source");
-                arguments.Add(generatedSource);
-            }
-
-            var process = CliRunner.Run(workDir.FullName, "python3", arguments);
-            Assert.True(
-                File.Exists(summaryPath),
-                $"Comparator did not write summary. Exit: {process.ExitCode}; stderr: {process.StdErr}"
-            );
-            using var summaryDocument = JsonDocument.Parse(File.ReadAllText(summaryPath));
-            using var detailsDocument = JsonDocument.Parse(File.ReadAllText(detailsPath));
-            var summary = summaryDocument.RootElement.Clone();
-            return new DiffResult(
-                process.ExitCode,
-                summary,
-                detailsDocument.RootElement.Clone(),
-                summary.GetProperty("documentFindings"),
-                summary.GetProperty("opFindings"),
-                summary.GetProperty("schemaFindings"),
-                summary.GetProperty("integrityFindings")
-            );
-        }
-        finally
-        {
-            workDir.Delete(recursive: true);
-        }
-    }
-
-    private sealed record DiffResult(
-        int ExitCode,
-        JsonElement Summary,
-        JsonElement Details,
-        JsonElement DocumentFindings,
-        JsonElement OperationFindings,
-        JsonElement SchemaFindings,
-        JsonElement IntegrityFindings
-    );
 }

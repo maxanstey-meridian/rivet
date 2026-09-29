@@ -13,149 +13,6 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class OpenApiRoundTripTests
 {
-    private static string LoadFixture(string name)
-    {
-        return File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
-    }
-
-    private static JsonObject CreateFixtureSliceDocument(string fixtureName)
-    {
-        var root = JsonNode.Parse(LoadFixture(fixtureName))!.AsObject();
-
-        return new JsonObject
-        {
-            ["openapi"] = root["openapi"]!.DeepClone(),
-            ["info"] = root["info"]!.DeepClone(),
-            ["paths"] = new JsonObject(),
-        };
-    }
-
-    private static JsonObject GetOrAddComponents(JsonObject document)
-    {
-        document["components"] ??= new JsonObject();
-        return (JsonObject)document["components"]!;
-    }
-
-    private static void CopyComponentEntries(
-        JsonObject sourceDocument,
-        JsonObject targetDocument,
-        string sectionName,
-        params string[] keys
-    )
-    {
-        var sourceSection = sourceDocument["components"]?[sectionName] as JsonObject;
-        Assert.NotNull(sourceSection);
-
-        var components = GetOrAddComponents(targetDocument);
-        components[sectionName] ??= new JsonObject();
-        var targetSection = (JsonObject)components[sectionName]!;
-
-        foreach (var key in keys)
-        {
-            targetSection[key] = sourceSection[key]!.DeepClone();
-        }
-    }
-
-    private static string BuildTwilioCreateAccountFixtureSpec()
-    {
-        var source = JsonNode.Parse(LoadFixture("openapi-twilio.json"))!.AsObject();
-        var document = CreateFixtureSliceDocument("openapi-twilio.json");
-        var paths = (JsonObject)document["paths"]!;
-        var sourcePath = source["paths"]?["/2010-04-01/Accounts.json"] as JsonObject;
-
-        Assert.NotNull(sourcePath);
-        paths["/2010-04-01/Accounts.json"] = new JsonObject
-        {
-            ["post"] = sourcePath["post"]!.DeepClone(),
-        };
-        CopyComponentEntries(source, document, "securitySchemes", "accountSid_authToken");
-
-        return document.ToJsonString();
-    }
-
-    private static string BuildGitHubUpdateBudgetFixtureSpec()
-    {
-        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
-        var document = CreateFixtureSliceDocument("openapi-github.json");
-        var paths = (JsonObject)document["paths"]!;
-        var sourcePath =
-            source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"]
-            as JsonObject;
-
-        Assert.NotNull(sourcePath);
-
-        var patch = sourcePath["patch"]!.DeepClone()!.AsObject();
-        patch["responses"] = new JsonObject { ["404"] = patch["responses"]!["404"]!.DeepClone() };
-
-        paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
-        {
-            ["patch"] = patch,
-        };
-
-        CopyComponentEntries(source, document, "parameters", "org", "budget");
-        CopyComponentEntries(source, document, "schemas", "basic-error");
-
-        return document.ToJsonString();
-    }
-
-    private static string BuildGitHubDeleteBudgetFixtureSpec()
-    {
-        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
-        var document = CreateFixtureSliceDocument("openapi-github.json");
-        var paths = (JsonObject)document["paths"]!;
-        var sourcePath =
-            source["paths"]?["/organizations/{org}/settings/billing/budgets/{budget_id}"]
-            as JsonObject;
-
-        Assert.NotNull(sourcePath);
-
-        var delete = sourcePath["delete"]!.DeepClone()!.AsObject();
-        delete["responses"] = new JsonObject { ["200"] = delete["responses"]!["200"]!.DeepClone() };
-
-        paths["/organizations/{org}/settings/billing/budgets/{budget_id}"] = new JsonObject
-        {
-            ["delete"] = delete,
-        };
-
-        CopyComponentEntries(source, document, "parameters", "org", "budget");
-        CopyComponentEntries(source, document, "responses", "delete-budget");
-        CopyComponentEntries(source, document, "examples", "delete-budget");
-        CopyComponentEntries(source, document, "schemas", "delete-budget");
-
-        return document.ToJsonString();
-    }
-
-    private static string BuildGitHubSetActionsCacheRetentionLimitFixtureSpec()
-    {
-        var source = JsonNode.Parse(LoadFixture("openapi-github.json"))!.AsObject();
-        var document = CreateFixtureSliceDocument("openapi-github.json");
-        var paths = (JsonObject)document["paths"]!;
-        var sourcePath =
-            source["paths"]?["/enterprises/{enterprise}/actions/cache/retention-limit"]
-            as JsonObject;
-
-        Assert.NotNull(sourcePath);
-
-        var put = sourcePath["put"]!.DeepClone()!.AsObject();
-        put["responses"] = new JsonObject { ["204"] = put["responses"]!["204"]!.DeepClone() };
-
-        paths["/enterprises/{enterprise}/actions/cache/retention-limit"] = new JsonObject
-        {
-            ["put"] = put,
-        };
-
-        CopyComponentEntries(source, document, "parameters", "enterprise");
-        CopyComponentEntries(
-            source,
-            document,
-            "schemas",
-            "actions-cache-retention-limit-for-enterprise"
-        );
-        CopyComponentEntries(source, document, "examples", "actions-cache-retention-limit");
-
-        return document.ToJsonString();
-    }
-
     private static JsonElement ImportCompileWalkAndEmit(string spec, string ns)
     {
         var result = CompilationHelper.Import(spec, ns);
@@ -1027,7 +884,7 @@ public sealed class OpenApiRoundTripTests
     public void Twilio_CreateAccount_Request_Example_Survives_Import_Compile_Walk_Emit()
     {
         var emitted = ImportCompileWalkAndEmit(
-            BuildTwilioCreateAccountFixtureSpec(),
+            FixtureSlices.TwilioCreateAccount(),
             "TwilioRoundTrip"
         );
 
@@ -1048,7 +905,7 @@ public sealed class OpenApiRoundTripTests
     public void GitHub_UpdateBudget_404_Named_Response_Examples_Survive_Import_Compile_Walk_Emit()
     {
         var emitted = ImportCompileWalkAndEmit(
-            BuildGitHubUpdateBudgetFixtureSpec(),
+            FixtureSlices.GitHubUpdateBudget(),
             "GitHubRoundTrip"
         );
 
@@ -1084,7 +941,7 @@ public sealed class OpenApiRoundTripTests
     public void GitHub_DeleteBudget_RefBacked_Response_Example_Survives_Import_Compile_Walk_Emit()
     {
         var emitted = ImportCompileWalkAndEmit(
-            BuildGitHubDeleteBudgetFixtureSpec(),
+            FixtureSlices.GitHubDeleteBudget(),
             "GitHubRoundTrip"
         );
 
@@ -1118,7 +975,7 @@ public sealed class OpenApiRoundTripTests
     public void GitHub_SetActionsCacheRetentionLimit_Request_RefExample_Survives_Import_Compile_Walk_Emit()
     {
         var emitted = ImportCompileWalkAndEmit(
-            BuildGitHubSetActionsCacheRetentionLimitFixtureSpec(),
+            FixtureSlices.GitHubSetActionsCacheRetentionLimit(),
             "GitHubRoundTrip"
         );
 
@@ -1751,35 +1608,6 @@ public sealed class OpenApiRoundTripTests
 
         var userEndpoint = endpoints.First(e => e.RouteTemplate == "/api/users");
         Assert.IsType<TsType.Generic>(userEndpoint.ReturnType);
-    }
-
-    private static void CollectRefs(System.Text.Json.JsonElement element, List<string> refs)
-    {
-        switch (element.ValueKind)
-        {
-            case System.Text.Json.JsonValueKind.Object:
-                foreach (var prop in element.EnumerateObject())
-                {
-                    if (
-                        prop.Name == "$ref"
-                        && prop.Value.ValueKind == System.Text.Json.JsonValueKind.String
-                    )
-                    {
-                        refs.Add(prop.Value.GetString()!);
-                    }
-                    else
-                    {
-                        CollectRefs(prop.Value, refs);
-                    }
-                }
-                break;
-            case System.Text.Json.JsonValueKind.Array:
-                foreach (var item in element.EnumerateArray())
-                {
-                    CollectRefs(item, refs);
-                }
-                break;
-        }
     }
 
     // ========== x-rivet-csharp-type round-trips ==========
@@ -2535,8 +2363,7 @@ public sealed class OpenApiRoundTripTests
 
         // ───── Assertion group 12: All $refs resolve ─────
 
-        var allRefs = new List<string>();
-        CollectRefs(doc2, allRefs);
+        var allRefs = JsonRefs.Collect(doc2).Select(r => r.Reference).ToList();
         var components = doc2.GetProperty("components");
         foreach (var refValue in allRefs)
         {

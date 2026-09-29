@@ -170,7 +170,10 @@ public static class CompilationHelper
     /// Compiles source, walks both walkers (merged like Program.cs), and emits OpenAPI
     /// as a parsed JSON document — the canonical emission-side oracle post-pivot.
     /// </summary>
-    public static System.Text.Json.JsonDocument EmitOpenApi(string source)
+    public static System.Text.Json.JsonDocument EmitOpenApi(
+        string source,
+        ContractSecurityMetadata? security = null
+    )
     {
         var (endpoints, walker) = WalkMerged(source);
         var json = OpenApiEmitter.Emit(
@@ -178,7 +181,7 @@ public static class CompilationHelper
             walker.Definitions,
             walker.Brands,
             walker.Enums,
-            null
+            security
         );
         return System.Text.Json.JsonDocument.Parse(json);
     }

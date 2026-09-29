@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
@@ -12,8 +11,6 @@ namespace Rivet.Tests;
 public sealed class MetadataAttributeTests
 {
     // ========== Helpers ==========
-
-    private static JsonDocument EmitOpenApi(string source) => CompilationHelper.EmitOpenApi(source);
 
     private static (TypeWalker Walker, IReadOnlyList<TsEndpointDefinition> Endpoints) WalkSource(
         string source
@@ -43,7 +40,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var schema = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -77,7 +74,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var schema = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -103,7 +100,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var prop = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -135,7 +132,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var props = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -173,7 +170,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var props = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -203,7 +200,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var prop = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -238,7 +235,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var props = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -270,7 +267,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var prop = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -347,7 +344,7 @@ public sealed class MetadataAttributeTests
         var unbound = Assert.IsType<TsType.IntUnion>(walker.Enums["Unbound"]);
         Assert.Equal(["5000000000", "18446744073709551615"], unbound.Members);
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
         var largeValues = schemas
             .GetProperty("Large")
@@ -434,7 +431,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var enumSchema = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -474,7 +471,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var responses = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/items/{id}")
@@ -520,7 +517,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var requestBody = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/auth/login")
@@ -574,7 +571,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var schema = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -637,7 +634,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var prop = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -680,7 +677,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
         // Find the monomorphised schema
@@ -716,7 +713,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var prop = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -752,7 +749,7 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var prop = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")

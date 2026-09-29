@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using Rivet.Tool;
 using Rivet.Tool.Emit;
@@ -12,89 +11,66 @@ public sealed class VendorExtensionProvenanceTests
     public void Preserved_extensions_survive_the_public_disk_pipeline_and_fixed_point()
     {
         var source = JsonNode.Parse(PreservationSpec)!.AsObject();
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-vendor-extension-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, PreservationSpec);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, PreservationSpec);
 
-            var firstSource = Path.Combine(workDirectory.FullName, "first-source");
-            Import(workDirectory.FullName, sourcePath, firstSource);
-            Assert.Contains(
-                "RivetVendorExtension",
-                File.ReadAllText(Path.Combine(firstSource, "RivetDocument.cs"))
-            );
-            var first = Emit(workDirectory.FullName, firstSource, "first-output");
-            AssertPreservedExtensions(source, first);
+        var firstSource = Path.Combine(workDirectory.FullName, "first-source");
+        Import(workDirectory.FullName, sourcePath, firstSource);
+        Assert.Contains(
+            "RivetVendorExtension",
+            File.ReadAllText(Path.Combine(firstSource, "RivetDocument.cs"))
+        );
+        var first = Emit(workDirectory.FullName, firstSource, "first-output");
+        AssertPreservedExtensions(source, first);
 
-            var firstPath = Path.Combine(workDirectory.FullName, "first-output", "openapi.json");
-            var secondSource = Path.Combine(workDirectory.FullName, "second-source");
-            Import(workDirectory.FullName, firstPath, secondSource);
-            var second = Emit(workDirectory.FullName, secondSource, "second-output");
-            AssertPreservedExtensions(source, second);
-            AssertPreservedExtensions(first, second);
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        var firstPath = Path.Combine(workDirectory.FullName, "first-output", "openapi.json");
+        var secondSource = Path.Combine(workDirectory.FullName, "second-source");
+        Import(workDirectory.FullName, firstPath, secondSource);
+        var second = Emit(workDirectory.FullName, secondSource, "second-output");
+        AssertPreservedExtensions(source, second);
+        AssertPreservedExtensions(first, second);
     }
 
     [Fact]
     public void Opaque_component_schema_owns_its_preserved_extensions()
     {
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-opaque-extension-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, OpaqueSchemaPreservationSpec);
-            var generated = Path.Combine(workDirectory.FullName, "generated");
-            Import(workDirectory.FullName, sourcePath, generated);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, OpaqueSchemaPreservationSpec);
+        var generated = Path.Combine(workDirectory.FullName, "generated");
+        Import(workDirectory.FullName, sourcePath, generated);
 
-            var documentSource = File.ReadAllText(Path.Combine(generated, "RivetDocument.cs"));
-            Assert.Contains("RivetDocumentSchema", documentSource);
-            Assert.DoesNotContain("RivetVendorExtension", documentSource);
+        var documentSource = File.ReadAllText(Path.Combine(generated, "RivetDocument.cs"));
+        Assert.Contains("RivetDocumentSchema", documentSource);
+        Assert.DoesNotContain("RivetVendorExtension", documentSource);
 
-            var emitted = Emit(workDirectory.FullName, generated, "output");
-            Assert.True(
-                emitted["components"]!["schemas"]!["Payload"]!["x-is-beta"]!.GetValue<bool>()
-            );
-            Assert.Equal(
-                "standard",
-                emitted["paths"]!["/payload"]!["get"]!["responses"]!["200"]!["content"]![
-                    "application/json"
-                ]!["schema"]!["items"]!["x-twilio"]!["pii"]!["handling"]!.GetValue<string>()
-            );
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        var emitted = Emit(workDirectory.FullName, generated, "output");
+        Assert.True(emitted["components"]!["schemas"]!["Payload"]!["x-is-beta"]!.GetValue<bool>());
+        Assert.Equal(
+            "standard",
+            emitted["paths"]!["/payload"]!["get"]!["responses"]!["200"]!["content"]![
+                "application/json"
+            ]!["schema"]!["items"]!["x-twilio"]!["pii"]!["handling"]!.GetValue<string>()
+        );
     }
 
     [Fact]
     public void Reviewed_map_extensions_are_projected_to_standard_semantics()
     {
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-vendor-map-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, MapProjectionSpec);
-            var generated = Path.Combine(workDirectory.FullName, "generated");
-            Import(workDirectory.FullName, sourcePath, generated);
-            var emitted = Emit(workDirectory.FullName, generated, "output");
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, MapProjectionSpec);
+        var generated = Path.Combine(workDirectory.FullName, "generated");
+        Import(workDirectory.FullName, sourcePath, generated);
+        var emitted = Emit(workDirectory.FullName, generated, "output");
 
-            var operation = emitted["paths"]!["/mapped"]!["get"]!;
-            Assert.True(operation["deprecated"]!.GetValue<bool>());
-            Assert.True(operation["parameters"]![0]!["deprecated"]!.GetValue<bool>());
-            var schema = emitted["components"]!["schemas"]!["Mapped"]!;
-            Assert.True(schema["deprecated"]!.GetValue<bool>());
-            Assert.True(schema["properties"]!["value"]!["readOnly"]!.GetValue<bool>());
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        var operation = emitted["paths"]!["/mapped"]!["get"]!;
+        Assert.True(operation["deprecated"]!.GetValue<bool>());
+        Assert.True(operation["parameters"]![0]!["deprecated"]!.GetValue<bool>());
+        var schema = emitted["components"]!["schemas"]!["Mapped"]!;
+        Assert.True(schema["deprecated"]!.GetValue<bool>());
+        Assert.True(schema["properties"]!["value"]!["readOnly"]!.GetValue<bool>());
     }
 
     [Fact]
@@ -124,26 +100,19 @@ public sealed class VendorExtensionProvenanceTests
               }
             }
             """;
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-vendor-payload-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var generated = Path.Combine(workDirectory.FullName, "generated");
-            Import(workDirectory.FullName, sourcePath, generated);
-            var emitted = Emit(workDirectory.FullName, generated, "output");
-            var example = emitted["paths"]!["/payload"]!["post"]!["requestBody"]!["content"]![
-                "application/json"
-            ]!["example"]!;
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generated = Path.Combine(workDirectory.FullName, "generated");
+        Import(workDirectory.FullName, sourcePath, generated);
+        var emitted = Emit(workDirectory.FullName, generated, "output");
+        var example = emitted["paths"]!["/payload"]!["post"]!["requestBody"]!["content"]![
+            "application/json"
+        ]!["example"]!;
 
-            Assert.Equal("payload value", example["x-desc"]!.GetValue<string>());
-            Assert.Equal("payload metadata", example["x-twilio"]!["pii"]!.GetValue<string>());
-            Assert.Null(example["description"]);
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        Assert.Equal("payload value", example["x-desc"]!.GetValue<string>());
+        Assert.Equal("payload metadata", example["x-twilio"]!["pii"]!.GetValue<string>());
+        Assert.Null(example["description"]);
     }
 
     [Fact]
@@ -168,26 +137,19 @@ public sealed class VendorExtensionProvenanceTests
               }
             }
             """;
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-vendor-named-example-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var generated = Path.Combine(workDirectory.FullName, "generated");
-            Import(workDirectory.FullName, sourcePath, generated);
-            var emitted = Emit(workDirectory.FullName, generated, "output");
-            var example = emitted["components"]!["examples"]!["Named"]!;
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generated = Path.Combine(workDirectory.FullName, "generated");
+        Import(workDirectory.FullName, sourcePath, generated);
+        var emitted = Emit(workDirectory.FullName, generated, "output");
+        var example = emitted["components"]!["examples"]!["Named"]!;
 
-            Assert.Equal("Example description", example["description"]!.GetValue<string>());
-            Assert.True(example["x-twilio"]!["owner"]!.GetValue<bool>());
-            Assert.Equal("payload value", example["value"]!["x-desc"]!.GetValue<string>());
-            Assert.False(example["value"]!["x-twilio"]!["owner"]!.GetValue<bool>());
-            Assert.Null(example["value"]!["description"]);
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        Assert.Equal("Example description", example["description"]!.GetValue<string>());
+        Assert.True(example["x-twilio"]!["owner"]!.GetValue<bool>());
+        Assert.Equal("payload value", example["value"]!["x-desc"]!.GetValue<string>());
+        Assert.False(example["value"]!["x-twilio"]!["owner"]!.GetValue<bool>());
+        Assert.Null(example["value"]!["description"]);
     }
 
     [Fact]
@@ -218,48 +180,32 @@ public sealed class VendorExtensionProvenanceTests
               }
             }
             """;
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-vendor-swagger-example-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var generated = Path.Combine(workDirectory.FullName, "generated");
-            Import(workDirectory.FullName, sourcePath, generated);
-            var emitted = Emit(workDirectory.FullName, generated, "output");
-            var example = emitted["paths"]!["/payload"]!["get"]!["responses"]!["200"]!["content"]![
-                "application/json"
-            ]!["example"]!;
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generated = Path.Combine(workDirectory.FullName, "generated");
+        Import(workDirectory.FullName, sourcePath, generated);
+        var emitted = Emit(workDirectory.FullName, generated, "output");
+        var example = emitted["paths"]!["/payload"]!["get"]!["responses"]!["200"]!["content"]![
+            "application/json"
+        ]!["example"]!;
 
-            Assert.Equal("payload value", example["x-desc"]!.GetValue<string>());
-            Assert.Equal("payload metadata", example["x-twilio"]!["pii"]!.GetValue<string>());
-            Assert.Null(example["description"]);
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        Assert.Equal("payload value", example["x-desc"]!.GetValue<string>());
+        Assert.Equal("payload metadata", example["x-twilio"]!["pii"]!.GetValue<string>());
+        Assert.Null(example["description"]);
     }
 
     [Fact]
     public void Swagger_component_extension_owner_is_normalized_to_the_emitted_Oas_pointer()
     {
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-vendor-swagger-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, SwaggerPreservationSpec);
-            var generated = Path.Combine(workDirectory.FullName, "generated");
-            Import(workDirectory.FullName, sourcePath, generated);
-            var emitted = Emit(workDirectory.FullName, generated, "output");
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, SwaggerPreservationSpec);
+        var generated = Path.Combine(workDirectory.FullName, "generated");
+        Import(workDirectory.FullName, sourcePath, generated);
+        var emitted = Emit(workDirectory.FullName, generated, "output");
 
-            Assert.True(
-                emitted["components"]!["schemas"]!["Payload"]!["x-is-beta"]!.GetValue<bool>()
-            );
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        Assert.True(emitted["components"]!["schemas"]!["Payload"]!["x-is-beta"]!.GetValue<bool>());
     }
 
     [Fact]
@@ -302,7 +248,7 @@ public sealed class VendorExtensionProvenanceTests
         var reemitted = original.DeepClone().AsObject();
         RemoveReviewedExtensions(reemitted);
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -324,10 +270,10 @@ public sealed class VendorExtensionProvenanceTests
             extensionOwner["x-is-beta"] = false;
         }
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
-        Assert.True(result.VendorPreserveFindings > 0);
+        Assert.True(result.FindingCount("vendor-extension-preserve") > 0);
     }
 
     [Theory]
@@ -360,10 +306,10 @@ public sealed class VendorExtensionProvenanceTests
                 break;
         }
 
-        var result = RunDiff(original, reemitted);
+        var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(1, result.ExitCode);
-        Assert.True(result.VendorMapFindings > 0);
+        Assert.True(result.FindingCount("vendor-extension-map") > 0);
     }
 
     private static void AssertPreservedExtensions(JsonObject expected, JsonObject actual)
@@ -492,53 +438,6 @@ public sealed class VendorExtensionProvenanceTests
         alias["description"] = alias["x-desc"]!.DeepClone();
         alias.Remove("x-desc");
     }
-
-    private static DiffResult RunDiff(JsonObject original, JsonObject reemitted)
-    {
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-vendor-diff-");
-        try
-        {
-            var originalPath = Path.Combine(workDirectory.FullName, "original.json");
-            var reemittedPath = Path.Combine(workDirectory.FullName, "reemitted.json");
-            var summaryPath = Path.Combine(workDirectory.FullName, "summary.json");
-            File.WriteAllText(originalPath, original.ToJsonString());
-            File.WriteAllText(reemittedPath, reemitted.ToJsonString());
-            var process = CliRunner.Run(
-                workDirectory.FullName,
-                "python3",
-                [
-                    CliRunner.RepoPath("tools", "roundtrip-diff.py"),
-                    originalPath,
-                    reemittedPath,
-                    "--summary-json",
-                    summaryPath,
-                ]
-            );
-            using var summary = JsonDocument.Parse(File.ReadAllText(summaryPath));
-            return new DiffResult(
-                process.ExitCode,
-                FindingCount(summary.RootElement, "vendor-extension-preserve"),
-                FindingCount(summary.RootElement, "vendor-extension-map")
-            );
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
-    }
-
-    private static int FindingCount(JsonElement summary, string category) =>
-        new[] { "documentFindings", "opFindings", "schemaFindings" }
-            .Select(scope => summary.GetProperty(scope))
-            .Sum(findings =>
-                findings.TryGetProperty(category, out var count) ? count.GetInt32() : 0
-            );
-
-    private sealed record DiffResult(
-        int ExitCode,
-        int VendorPreserveFindings,
-        int VendorMapFindings
-    );
 
     private const string PreservationSpec = """
         {

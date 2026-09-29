@@ -359,59 +359,49 @@ public sealed class SchemaFidelitySurfaceTests
             }
             """
         );
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-schema-surface-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
-            var import = CliRunner.RunCli(
-                workDirectory.FullName,
-                [
-                    "--from-openapi",
-                    sourcePath,
-                    "--output",
-                    generatedDirectory,
-                    "--namespace",
-                    "Generated",
-                ]
-            );
-            Assert.True(import.ExitCode == 0, import.StdErr);
-            Assert.DoesNotContain("warning RIV", import.StdErr);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
+        var import = CliRunner.RunCli(
+            workDirectory.FullName,
+            [
+                "--from-openapi",
+                sourcePath,
+                "--output",
+                generatedDirectory,
+                "--namespace",
+                "Generated",
+            ]
+        );
+        Assert.True(import.ExitCode == 0, import.StdErr);
+        Assert.DoesNotContain("warning RIV", import.StdErr);
 
-            var compile = CliRunner.RunCli(
-                workDirectory.FullName,
-                [generatedDirectory, "--routes"]
-            );
-            Assert.True(compile.ExitCode == 0, compile.StdErr);
+        var compile = CliRunner.RunCli(workDirectory.FullName, [generatedDirectory, "--routes"]);
+        Assert.True(compile.ExitCode == 0, compile.StdErr);
 
-            var outputDirectory = Path.Combine(workDirectory.FullName, "output");
-            var emit = CliRunner.RunCli(
-                workDirectory.FullName,
-                [generatedDirectory, "--openapi", "--output", outputDirectory]
-            );
-            Assert.True(emit.ExitCode == 0, emit.StdErr);
-            Assert.DoesNotContain("warning RIV", emit.StdErr);
+        var outputDirectory = Path.Combine(workDirectory.FullName, "output");
+        var emit = CliRunner.RunCli(
+            workDirectory.FullName,
+            [generatedDirectory, "--openapi", "--output", outputDirectory]
+        );
+        Assert.True(emit.ExitCode == 0, emit.StdErr);
+        Assert.DoesNotContain("warning RIV", emit.StdErr);
 
-            using var emitted = JsonDocument.Parse(
-                File.ReadAllText(Path.Combine(outputDirectory, "openapi.json"))
-            );
-            var schema = emitted
-                .RootElement.GetProperty("components")
-                .GetProperty("schemas")
-                .GetProperty("DiskSurface");
-            Assert.Equal("Disk surface", schema.GetProperty("title").GetString());
-            Assert.Single(schema.GetProperty("examples").EnumerateArray());
-            var item = schema.GetProperty("properties").GetProperty("values").GetProperty("items");
-            Assert.Equal("aa", item.GetProperty("default").GetString());
-            Assert.Equal(2, item.GetProperty("examples").GetArrayLength());
-            Assert.Equal(2, item.GetProperty("minLength").GetInt32());
-            Assert.Equal("value", item.GetProperty("xml").GetProperty("name").GetString());
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        using var emitted = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(outputDirectory, "openapi.json"))
+        );
+        var schema = emitted
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("DiskSurface");
+        Assert.Equal("Disk surface", schema.GetProperty("title").GetString());
+        Assert.Single(schema.GetProperty("examples").EnumerateArray());
+        var item = schema.GetProperty("properties").GetProperty("values").GetProperty("items");
+        Assert.Equal("aa", item.GetProperty("default").GetString());
+        Assert.Equal(2, item.GetProperty("examples").GetArrayLength());
+        Assert.Equal(2, item.GetProperty("minLength").GetInt32());
+        Assert.Equal("value", item.GetProperty("xml").GetProperty("name").GetString());
     }
 
     private static JsonDocument CompileWalkContractJsonAndEmit(ImportResult imported)

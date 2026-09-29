@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace Rivet.Tests;
@@ -35,7 +34,7 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     {
         Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
 
-        var (exitCode, output) = await PublishFixture.RunProcessAsync(_fixture.BinaryPath, "");
+        var (exitCode, output) = await CliRunner.RunAsync(_fixture.BinaryPath, "");
 
         Assert.Equal(1, exitCode);
         Assert.Contains("--from-openapi", output);
@@ -46,10 +45,10 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     {
         Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
 
-        var repoRoot = PublishFixture.FindRepoRoot();
+        var repoRoot = CliRunner.RepoRoot;
         var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "openapi-petstore-v3.json");
 
-        var (exitCode, output) = await PublishFixture.RunProcessAsync(
+        var (exitCode, output) = await CliRunner.RunAsync(
             _fixture.BinaryPath,
             $"--from-openapi \"{fixture}\" --namespace PetStore"
         );
@@ -64,35 +63,29 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     {
         Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
 
-        var repoRoot = PublishFixture.FindRepoRoot();
+        var repoRoot = CliRunner.RepoRoot;
         var fixtureFile = Path.Combine(
             repoRoot,
             "Rivet.Tests",
             "Fixtures",
             "openapi-petstore-v3.json"
         );
-        var outputDir = Path.Combine(Path.GetTempPath(), $"rivet-output-test-{Guid.NewGuid():N}");
+        using var outputDir = new TempDir();
 
-        try
-        {
-            var (exitCode, output) = await PublishFixture.RunProcessAsync(
-                _fixture.BinaryPath,
-                $"--from-openapi \"{fixtureFile}\" --namespace PetStore --output \"{outputDir}\""
-            );
+        var (exitCode, output) = await CliRunner.RunAsync(
+            _fixture.BinaryPath,
+            $"--from-openapi \"{fixtureFile}\" --namespace PetStore --output \"{outputDir.FullName}\""
+        );
 
-            Assert.True(exitCode == 0, $"Import with --output failed (exit {exitCode}):\n{output}");
+        Assert.True(exitCode == 0, $"Import with --output failed (exit {exitCode}):\n{output}");
 
-            var generatedFiles = Directory.GetFiles(outputDir, "*.cs", SearchOption.AllDirectories);
-            Assert.NotEmpty(generatedFiles);
-            Assert.Contains("Generated", output);
-        }
-        finally
-        {
-            if (Directory.Exists(outputDir))
-            {
-                Directory.Delete(outputDir, recursive: true);
-            }
-        }
+        var generatedFiles = Directory.GetFiles(
+            outputDir.FullName,
+            "*.cs",
+            SearchOption.AllDirectories
+        );
+        Assert.NotEmpty(generatedFiles);
+        Assert.Contains("Generated", output);
     }
 
     [Fact]
@@ -100,10 +93,10 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     {
         Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
 
-        var repoRoot = PublishFixture.FindRepoRoot();
+        var repoRoot = CliRunner.RepoRoot;
         var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
 
-        var (exitCode, output) = await PublishFixture.RunProcessAsync(
+        var (exitCode, output) = await CliRunner.RunAsync(
             _fixture.BinaryPath,
             $"--from \"{fixture}\""
         );
@@ -118,34 +111,21 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     {
         Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
 
-        var repoRoot = PublishFixture.FindRepoRoot();
+        var repoRoot = CliRunner.RepoRoot;
         var fixture = Path.Combine(repoRoot, "Rivet.Tests", "Fixtures", "contract-sample.json");
-        var outputDir = Path.Combine(
-            Path.GetTempPath(),
-            $"rivet-from-publish-test-{Guid.NewGuid():N}"
+        using var outputDir = new TempDir();
+
+        var (exitCode, output) = await CliRunner.RunAsync(
+            _fixture.BinaryPath,
+            $"--from \"{fixture}\" --output \"{outputDir.FullName}\""
         );
 
-        try
-        {
-            var (exitCode, output) = await PublishFixture.RunProcessAsync(
-                _fixture.BinaryPath,
-                $"--from \"{fixture}\" --output \"{outputDir}\""
-            );
+        Assert.True(exitCode == 0, $"--from --output failed (exit {exitCode}):\n{output}");
 
-            Assert.True(exitCode == 0, $"--from --output failed (exit {exitCode}):\n{output}");
-
-            var specPath = Path.Combine(outputDir, "openapi.json");
-            Assert.True(File.Exists(specPath), $"expected OpenAPI spec at {specPath}");
-            Assert.Contains("\"openapi\": \"3.1.0\"", await File.ReadAllTextAsync(specPath));
-            Assert.Contains("Generated", output);
-        }
-        finally
-        {
-            if (Directory.Exists(outputDir))
-            {
-                Directory.Delete(outputDir, recursive: true);
-            }
-        }
+        var specPath = Path.Combine(outputDir.FullName, "openapi.json");
+        Assert.True(File.Exists(specPath), $"expected OpenAPI spec at {specPath}");
+        Assert.Contains("\"openapi\": \"3.1.0\"", await File.ReadAllTextAsync(specPath));
+        Assert.Contains("Generated", output);
     }
 
     [Fact]
@@ -153,7 +133,7 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     {
         Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
 
-        var (exitCode, output) = await PublishFixture.RunProcessAsync(
+        var (exitCode, output) = await CliRunner.RunAsync(
             _fixture.BinaryPath,
             "--from-openapi /nonexistent/path/spec.json --namespace Ns"
         );
@@ -165,10 +145,10 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     [Fact]
     public async Task DotnetPack_StillSucceeds_WithSingleFileConditional()
     {
-        var repoRoot = PublishFixture.FindRepoRoot();
+        var repoRoot = CliRunner.RepoRoot;
         var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
 
-        var (exitCode, output) = await PublishFixture.RunProcessAsync(
+        var (exitCode, output) = await CliRunner.RunAsync(
             "dotnet",
             $"pack \"{csproj}\" -c Release --no-restore",
             repoRoot
@@ -180,44 +160,34 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     [Fact]
     public async Task CrossCompile_ForRid_ProducesSingleFile()
     {
-        var repoRoot = PublishFixture.FindRepoRoot();
+        var repoRoot = CliRunner.RepoRoot;
         var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
-        var outDir = Path.Combine(Path.GetTempPath(), $"rivet-cross-test-{Guid.NewGuid():N}");
+        using var outDir = new TempDir();
 
-        try
-        {
-            var (exitCode, output) = await PublishFixture.RunProcessAsync(
-                "dotnet",
-                $"publish \"{csproj}\" -c Release -r linux-x64 --self-contained -o \"{outDir}\"",
-                repoRoot
-            );
+        var (exitCode, output) = await CliRunner.RunAsync(
+            "dotnet",
+            $"publish \"{csproj}\" -c Release -r linux-x64 --self-contained -o \"{outDir.FullName}\"",
+            repoRoot
+        );
 
-            Assert.True(exitCode == 0, $"Cross-compile failed (exit {exitCode}):\n{output}");
+        Assert.True(exitCode == 0, $"Cross-compile failed (exit {exitCode}):\n{output}");
 
-            var files = Directory
-                .GetFiles(outDir)
-                .Where(f => !f.EndsWith(".pdb") && !f.EndsWith(".json"))
-                .ToArray();
+        var files = Directory
+            .GetFiles(outDir.FullName)
+            .Where(f => !f.EndsWith(".pdb") && !f.EndsWith(".json"))
+            .ToArray();
 
-            Assert.True(
-                files.Length <= 3,
-                $"Expected single-file output (≤3 non-pdb/json files) but found {files.Length}:\n"
-                    + string.Join("\n", files.Select(Path.GetFileName))
-            );
-        }
-        finally
-        {
-            if (Directory.Exists(outDir))
-            {
-                Directory.Delete(outDir, recursive: true);
-            }
-        }
+        Assert.True(
+            files.Length <= 3,
+            $"Expected single-file output (≤3 non-pdb/json files) but found {files.Length}:\n"
+                + string.Join("\n", files.Select(Path.GetFileName))
+        );
     }
 }
 
 public sealed class PublishFixture : IAsyncLifetime
 {
-    private string _tempDir = null!;
+    private readonly TempDir _publishDir = new();
 
     public int PublishExitCode { get; private set; } = -1;
     public string PublishOutput { get; private set; } = "";
@@ -225,16 +195,13 @@ public sealed class PublishFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), $"rivet-publish-test-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_tempDir);
-
-        var repoRoot = FindRepoRoot();
+        var repoRoot = CliRunner.RepoRoot;
         var rid = RuntimeInformation.RuntimeIdentifier;
         var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
 
-        var (exitCode, output) = await RunProcessAsync(
+        var (exitCode, output) = await CliRunner.RunAsync(
             "dotnet",
-            $"publish \"{csproj}\" -c Release -r {rid} --self-contained -p:PublishSingleFile=true -o \"{_tempDir}\"",
+            $"publish \"{csproj}\" -c Release -r {rid} --self-contained -p:PublishSingleFile=true -o \"{_publishDir.FullName}\"",
             repoRoot
         );
 
@@ -244,67 +211,12 @@ public sealed class PublishFixture : IAsyncLifetime
         var binaryName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
             ? "Rivet.Tool.exe"
             : "Rivet.Tool";
-        BinaryPath = Path.Combine(_tempDir, binaryName);
+        BinaryPath = Path.Combine(_publishDir.FullName, binaryName);
     }
 
     public Task DisposeAsync()
     {
-        if (Directory.Exists(_tempDir))
-        {
-            Directory.Delete(_tempDir, recursive: true);
-        }
-
+        _publishDir.Dispose();
         return Task.CompletedTask;
-    }
-
-    internal static string FindRepoRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        while (dir is not null && !File.Exists(Path.Combine(dir, "Rivet.slnx")))
-        {
-            dir = Path.GetDirectoryName(dir);
-        }
-
-        return dir ?? throw new InvalidOperationException("Could not find repo root (Rivet.slnx)");
-    }
-
-    internal static async Task<(int ExitCode, string Output)> RunProcessAsync(
-        string fileName,
-        string arguments,
-        string? workingDir = null,
-        CancellationToken ct = default
-    )
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            WorkingDirectory = workingDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        SampleProjectTests.MakeBuildHermetic(psi);
-
-        using var process =
-            Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start {fileName}");
-
-        // Drain both pipes CONCURRENTLY: reading stdout to EOF before touching
-        // stderr deadlocks when the child fills the stderr pipe buffer and blocks
-        // on write — stdout then never EOFs (CliPipelineTests' flake, same family).
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
-        var stderrTask = process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-
-        var output = string.Join(
-            "\n",
-            new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s))
-        );
-
-        return (process.ExitCode, output);
     }
 }

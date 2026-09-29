@@ -9,11 +9,6 @@ namespace Rivet.Tests;
 
 public sealed class RealWorldImportTests
 {
-    private static string LoadFixture(string name)
-    {
-        return File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
-    }
-
     // Stub types for imported code that references ASP.NET Core or newer runtime types
     private const string ImportStubs = """
         namespace Microsoft.AspNetCore.Http
@@ -124,7 +119,7 @@ public sealed class RealWorldImportTests
     /// </summary>
     private static RoundTripResult FullRoundTrip(string fixtureName, string ns)
     {
-        var json = LoadFixture(fixtureName);
+        var json = Fixture.Text(fixtureName);
         var import1 = CompilationHelper.Import(json, ns);
 
         // Pass 1: Import → compile → walk
@@ -167,7 +162,7 @@ public sealed class RealWorldImportTests
     /// </summary>
     private static RoundTripResult FullRoundTripLenient(string fixtureName, string ns)
     {
-        var json = LoadFixture(fixtureName);
+        var json = Fixture.Text(fixtureName);
         var import1 = CompilationHelper.Import(json, ns);
 
         // Pass 1
@@ -329,8 +324,7 @@ public sealed class RealWorldImportTests
         }
 
         // --- All $refs resolve ---
-        var allRefs = new List<string>();
-        CollectRefs(emittedDoc, allRefs);
+        var allRefs = JsonRefs.Collect(emittedDoc).Select(r => r.Reference).ToList();
         var schemaNames = new HashSet<string>();
         if (
             emittedDoc.TryGetProperty("components", out var components)
@@ -556,38 +550,12 @@ public sealed class RealWorldImportTests
             _ => false,
         };
 
-    private static void CollectRefs(JsonElement element, List<string> refs)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                foreach (var prop in element.EnumerateObject())
-                {
-                    if (prop.Name == "$ref" && prop.Value.ValueKind == JsonValueKind.String)
-                    {
-                        refs.Add(prop.Value.GetString()!);
-                    }
-                    else
-                    {
-                        CollectRefs(prop.Value, refs);
-                    }
-                }
-                break;
-            case JsonValueKind.Array:
-                foreach (var item in element.EnumerateArray())
-                {
-                    CollectRefs(item, refs);
-                }
-                break;
-        }
-    }
-
     // ========== Bug 1: Duplicate field names ==========
 
     [Fact]
     public void Duplicate_Route_Params_Produce_Unique_Field_Names()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-duplicate-routes.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-duplicate-routes.json"));
         var contractFile = result.Files.FirstOrDefault(f =>
             f.FileName.EndsWith("AnythingContract.cs")
         );
@@ -612,7 +580,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void OneOf_With_Collection_Types_Produces_Valid_Identifiers()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-union-types.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-union-types.json"));
         var allContent = string.Join("\n", result.Files.Select(f => f.Content));
 
         // No angle brackets in property names
@@ -627,7 +595,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Nullable_OneOf_Does_Not_Double_Nullable()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-union-types.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-union-types.json"));
         var allContent = string.Join("\n", result.Files.Select(f => f.Content));
 
         // No double nullable
@@ -642,7 +610,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Multiline_Description_Escapes_Newlines()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-multiline-desc.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-multiline-desc.json"));
 
         var contractFile = result.Files.FirstOrDefault(f =>
             f.FileName.EndsWith("HealthContract.cs")
@@ -662,7 +630,7 @@ public sealed class RealWorldImportTests
     {
         // When a path/query param has a oneOf schema, the synthetic record name
         // must not contain a dot (e.g. "GetById.fields" → "GetByIdFields")
-        var result = CompilationHelper.Import(LoadFixture("openapi-edge-cases.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-edge-cases.json"));
         var allContent = string.Join("\n", result.Files.Select(f => f.Content));
 
         // No dots in record names
@@ -676,7 +644,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Emoji_Property_Names_Deduplicated()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-edge-cases.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-edge-cases.json"));
         var rollupFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("ReactionRollup.cs"));
         Assert.NotNull(rollupFile);
 
@@ -702,7 +670,7 @@ public sealed class RealWorldImportTests
     {
         // oneOf where an inline variant resolves to a nullable type — the union
         // property should be "type?" not "type??"
-        var result = CompilationHelper.Import(LoadFixture("openapi-union-types.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-union-types.json"));
 
         // Find the union wrapper record for "value" (which has oneOf variants)
         var allContent = string.Join("\n", result.Files.Select(f => f.Content));
@@ -725,7 +693,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Ref_To_Primitive_Alias_Resolves_To_Underlying_Type()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-edge-cases.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-edge-cases.json"));
         var alertFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("ScanAlert.cs"));
         Assert.NotNull(alertFile);
 
@@ -751,7 +719,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Property_Name_Matching_Record_Name_Gets_Suffixed()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-edge-cases.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-edge-cases.json"));
         var emailFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("Email.cs"));
         Assert.NotNull(emailFile);
 
@@ -771,7 +739,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void Union_Ref_To_Bare_Object_Resolves_Through()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-edge-cases.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-edge-cases.json"));
         var payloadFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("EventPayload.cs"));
         Assert.NotNull(payloadFile);
 
@@ -800,7 +768,7 @@ public sealed class RealWorldImportTests
     public void OperationId_PascalCase_Collisions_Deduplicated()
     {
         // "widgets_list_items" and "widgets_ListItems" both → "ListItems" after stripping tag prefix
-        var result = CompilationHelper.Import(LoadFixture("openapi-duplicate-routes.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-duplicate-routes.json"));
         var widgetsFile = result.Files.FirstOrDefault(f =>
             f.FileName.EndsWith("WidgetsContract.cs")
         );
@@ -1071,7 +1039,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void NamingEdgeCases_ReservedWords_AreEscaped()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-naming-edge-cases.json"));
         var reservedFile = result.Files.FirstOrDefault(f =>
             f.FileName.EndsWith("ReservedWords.cs")
         );
@@ -1087,7 +1055,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void NamingEdgeCases_SpecialCharProperties_AreValid()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-naming-edge-cases.json"));
         var specialFile = result.Files.FirstOrDefault(f =>
             f.FileName.EndsWith("SpecialCharsModel.cs")
         );
@@ -1105,7 +1073,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void NamingEdgeCases_DuplicateEnums_Deduplicated()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-naming-edge-cases.json"));
         var allContent = string.Join("\n", result.Files.Select(f => f.Content));
 
         // DuplicatingEnum: "foo-bar" and "foo_bar" both → FooBar — needs dedup
@@ -1120,7 +1088,7 @@ public sealed class RealWorldImportTests
     [Fact]
     public void NamingEdgeCases_EmptyPropertyNames_Handled()
     {
-        var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-naming-edge-cases.json"));
         var statusFile = result.Files.FirstOrDefault(f => f.FileName.EndsWith("StatusResponse.cs"));
         Assert.NotNull(statusFile);
 
@@ -1137,7 +1105,7 @@ public sealed class RealWorldImportTests
     {
         // foo_bar_schema and FooBarSchema both PascalCase to FooBarSchema.
         // BOTH schemas must survive with distinct names — "one wins" is silent data loss.
-        var result = CompilationHelper.Import(LoadFixture("openapi-naming-edge-cases.json"));
+        var result = CompilationHelper.Import(Fixture.Text("openapi-naming-edge-cases.json"));
 
         var first = CompilationHelper.FindFile(result, "Types/FooBarSchema.cs");
         var second = CompilationHelper.FindFile(result, "Types/FooBarSchema_2.cs");

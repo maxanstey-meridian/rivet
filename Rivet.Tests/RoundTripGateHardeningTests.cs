@@ -164,21 +164,24 @@ public sealed class RoundTripGateHardeningTests
     [Fact]
     public void Artifact_Layout_Requires_All_Auditable_Evidence()
     {
-        using var artifacts = TemporaryDirectory.Create();
+        using var artifacts = new TempDir();
         foreach (var name in RoundTripCorpusGateTests.RequiredArtifactFiles)
         {
-            File.WriteAllText(Path.Combine(artifacts.Path, name), name);
+            File.WriteAllText(Path.Combine(artifacts.FullName, name), name);
         }
-        Directory.CreateDirectory(Path.Combine(artifacts.Path, "first-generated"));
-        Directory.CreateDirectory(Path.Combine(artifacts.Path, "second-generated"));
-        File.WriteAllText(Path.Combine(artifacts.Path, "first-generated", "First.cs"), "first");
-        File.WriteAllText(Path.Combine(artifacts.Path, "second-generated", "Second.cs"), "second");
+        Directory.CreateDirectory(Path.Combine(artifacts.FullName, "first-generated"));
+        Directory.CreateDirectory(Path.Combine(artifacts.FullName, "second-generated"));
+        File.WriteAllText(Path.Combine(artifacts.FullName, "first-generated", "First.cs"), "first");
+        File.WriteAllText(
+            Path.Combine(artifacts.FullName, "second-generated", "Second.cs"),
+            "second"
+        );
 
-        Assert.Empty(RoundTripCorpusGateTests.ValidateArtifactShape(artifacts.Path));
+        Assert.Empty(RoundTripCorpusGateTests.ValidateArtifactShape(artifacts.FullName));
 
-        File.Delete(Path.Combine(artifacts.Path, "first-details.json"));
-        Directory.CreateDirectory(Path.Combine(artifacts.Path, "first-generated", "obj"));
-        var findings = RoundTripCorpusGateTests.ValidateArtifactShape(artifacts.Path);
+        File.Delete(Path.Combine(artifacts.FullName, "first-details.json"));
+        Directory.CreateDirectory(Path.Combine(artifacts.FullName, "first-generated", "obj"));
+        var findings = RoundTripCorpusGateTests.ValidateArtifactShape(artifacts.FullName);
         Assert.Contains("retained artifact is missing: artifacts/first-details.json", findings);
         Assert.Contains("cache directory was retained: artifacts/first-generated/obj", findings);
     }
@@ -186,36 +189,36 @@ public sealed class RoundTripGateHardeningTests
     [Fact]
     public void Generated_Artifact_Tree_Is_Exact_And_Excludes_Caches()
     {
-        using var source = TemporaryDirectory.Create();
-        using var destination = TemporaryDirectory.Create();
-        Directory.CreateDirectory(Path.Combine(source.Path, "Models"));
-        Directory.CreateDirectory(Path.Combine(source.Path, "obj"));
-        Directory.CreateDirectory(Path.Combine(source.Path, "node_modules", "package"));
-        File.WriteAllText(Path.Combine(source.Path, "Root.cs"), "public sealed class Root;");
+        using var source = new TempDir();
+        using var destination = new TempDir();
+        Directory.CreateDirectory(Path.Combine(source.FullName, "Models"));
+        Directory.CreateDirectory(Path.Combine(source.FullName, "obj"));
+        Directory.CreateDirectory(Path.Combine(source.FullName, "node_modules", "package"));
+        File.WriteAllText(Path.Combine(source.FullName, "Root.cs"), "public sealed class Root;");
         File.WriteAllText(
-            Path.Combine(source.Path, "Models", "Nested.cs"),
+            Path.Combine(source.FullName, "Models", "Nested.cs"),
             "public sealed class Nested;"
         );
-        File.WriteAllText(Path.Combine(source.Path, "obj", "Cached.cs"), "cached");
+        File.WriteAllText(Path.Combine(source.FullName, "obj", "Cached.cs"), "cached");
         File.WriteAllText(
-            Path.Combine(source.Path, "node_modules", "package", "Cached.cs"),
+            Path.Combine(source.FullName, "node_modules", "package", "Cached.cs"),
             "cached"
         );
-        File.WriteAllText(Path.Combine(source.Path, "notes.txt"), "not generated C#");
+        File.WriteAllText(Path.Combine(source.FullName, "notes.txt"), "not generated C#");
 
-        RoundTripCorpusGateTests.CopyGeneratedSourceTree(source.Path, destination.Path);
+        RoundTripCorpusGateTests.CopyGeneratedSourceTree(source.FullName, destination.FullName);
 
         Assert.Equal(
             ["Models/Nested.cs", "Root.cs"],
             Directory
-                .EnumerateFiles(destination.Path, "*", SearchOption.AllDirectories)
-                .Select(path => Path.GetRelativePath(destination.Path, path).Replace('\\', '/'))
+                .EnumerateFiles(destination.FullName, "*", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(destination.FullName, path).Replace('\\', '/'))
                 .Order(StringComparer.Ordinal)
                 .ToArray()
         );
         Assert.Equal(
             "public sealed class Nested;",
-            File.ReadAllText(Path.Combine(destination.Path, "Models", "Nested.cs"))
+            File.ReadAllText(Path.Combine(destination.FullName, "Models", "Nested.cs"))
         );
     }
 
@@ -297,14 +300,14 @@ public sealed class RoundTripGateHardeningTests
     [Fact]
     public void Actual_Gate_Marker_Scanner_Detects_A_Planted_CSharp_Marker()
     {
-        using var source = TemporaryDirectory.Create();
+        using var source = new TempDir();
         File.WriteAllText(
-            Path.Combine(source.Path, "Contract.cs"),
+            Path.Combine(source.FullName, "Contract.cs"),
             "// [rivet:unsupported body content-type=text/plain]\n"
         );
         var report = new RoundTripCorpusGateTests.GateReport("probe", new string('0', 64));
 
-        RoundTripCorpusGateTests.RecordMarkers(report, "markers", "probe import", source.Path);
+        RoundTripCorpusGateTests.RecordMarkers(report, "markers", "probe import", source.FullName);
 
         Assert.False(report.Passed);
         using var result = JsonDocument.Parse(RoundTripCorpusGateTests.SerializeReport(report));
@@ -319,14 +322,14 @@ public sealed class RoundTripGateHardeningTests
     [Fact]
     public void Gate_Marker_Scanner_Ignores_Marker_Text_Inside_A_String_Literal()
     {
-        using var source = TemporaryDirectory.Create();
+        using var source = new TempDir();
         File.WriteAllText(
-            Path.Combine(source.Path, "Contract.cs"),
+            Path.Combine(source.FullName, "Contract.cs"),
             "const string description = \"[rivet:unsupported is quoted data\";\n"
         );
         var report = new RoundTripCorpusGateTests.GateReport("probe", new string('0', 64));
 
-        RoundTripCorpusGateTests.RecordMarkers(report, "markers", "probe import", source.Path);
+        RoundTripCorpusGateTests.RecordMarkers(report, "markers", "probe import", source.FullName);
 
         Assert.True(report.Passed);
     }
@@ -362,9 +365,9 @@ public sealed class RoundTripGateHardeningTests
         string summaryJson
     )
     {
-        using var reports = TemporaryDirectory.Create();
-        var summaryPath = Path.Combine(reports.Path, "summary.json");
-        var detailsPath = Path.Combine(reports.Path, "details.json");
+        using var reports = new TempDir();
+        var summaryPath = Path.Combine(reports.FullName, "summary.json");
+        var detailsPath = Path.Combine(reports.FullName, "details.json");
         File.WriteAllText(summaryPath, summaryJson);
         File.WriteAllText(detailsPath, """{"sourceDefects":[]}""");
         return RoundTripCorpusGateTests.ReadDiffResult(
@@ -372,22 +375,5 @@ public sealed class RoundTripGateHardeningTests
             summaryPath,
             detailsPath
         );
-    }
-
-    private sealed class TemporaryDirectory(string path) : IDisposable
-    {
-        public string Path { get; } = path;
-
-        public static TemporaryDirectory Create()
-        {
-            var path = System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(),
-                $"rivet-gate-hardening-{Guid.NewGuid():N}"
-            );
-            Directory.CreateDirectory(path);
-            return new TemporaryDirectory(path);
-        }
-
-        public void Dispose() => Directory.Delete(Path, recursive: true);
     }
 }

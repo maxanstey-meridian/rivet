@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -18,26 +17,20 @@ namespace Rivet.Tests;
 [Collection("Repository builds")]
 public sealed class MvcBindingHostTests : IDisposable
 {
-    private static readonly string _repoRoot = FindRepoRoot();
+    private static readonly string _repoRoot = CliRunner.RepoRoot;
     private static readonly string _sampleDir = Path.Combine(_repoRoot, "samples", "AnnotationApi");
-    private readonly string _tempDir = Path.Combine(
-        Path.GetTempPath(),
-        $"rivet-mvc-binding-{Guid.NewGuid():N}"
-    );
+    private readonly TempDir _temp = new();
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_tempDir))
-        {
-            Directory.Delete(_tempDir, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 
     [Fact]
     public async Task Host_Binds_Defaulted_Query_And_Complex_Body_As_Emitted()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var server = await StartAnnotationApiServer(cts.Token);
+        await using var server = await CliRunner.StartServerAsync(
+            Path.Combine(_sampleDir, "AnnotationApi.csproj"),
+            cts.Token
+        );
 
         using var http = new HttpClient { BaseAddress = new Uri(server.Url) };
 
@@ -128,7 +121,10 @@ public sealed class MvcBindingHostTests : IDisposable
         // 200 PUT against the real placeholder proves the binding — the same wire
         // name the emitted-contract test asserts on the path parameter.
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var server = await StartAnnotationApiServer(cts.Token);
+        await using var server = await CliRunner.StartServerAsync(
+            Path.Combine(_sampleDir, "AnnotationApi.csproj"),
+            cts.Token
+        );
 
         using var http = new HttpClient { BaseAddress = new Uri(server.Url) };
 
@@ -156,8 +152,8 @@ public sealed class MvcBindingHostTests : IDisposable
         // the FromQuery(Name="q") wire name, the required q, the defaulted optional
         // limit with its 20, and the required SearchTasksRequest body whose
         // properties (term, minPriority, tag) match what MVC binds by value.
-        var outputDir = Path.Combine(_tempDir, "spec");
-        var (exitCode, output) = await RunProcessAsync(
+        var outputDir = Path.Combine(_temp.FullName, "spec");
+        var (exitCode, output) = await CliRunner.RunAsync(
             "dotnet",
             $"run --project \"{Path.Combine(_repoRoot, "Rivet.Tool")}\" -- "
                 + $"--project \"{Path.Combine(_sampleDir, "AnnotationApi.csproj")}\" "
@@ -261,146 +257,5 @@ public sealed class MvcBindingHostTests : IDisposable
         }
 
         return (schema, null);
-    }
-
-    private static string FindRepoRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        while (dir is not null && !File.Exists(Path.Combine(dir, "Rivet.slnx")))
-        {
-            dir = Path.GetDirectoryName(dir);
-        }
-
-        return dir ?? throw new InvalidOperationException("Could not find repo root (Rivet.slnx)");
-    }
-
-    internal static void MakeBuildHermetic(ProcessStartInfo psi)
-    {
-        psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
-        psi.Environment["UseSharedCompilation"] = "false";
-    }
-
-    private static async Task<(int ExitCode, string Output)> RunProcessAsync(
-        string fileName,
-        string arguments,
-        string? workingDir = null,
-        CancellationToken ct = default
-    )
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            WorkingDirectory = workingDir ?? _repoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        MakeBuildHermetic(psi);
-
-        using var process =
-            Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start {fileName}");
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
-        var stderrTask = process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-
-        var output = string.Join(
-            "\n",
-            new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s))
-        );
-
-        return (process.ExitCode, output);
-    }
-
-    private static async Task<AsyncServerHandle> StartAnnotationApiServer(CancellationToken ct)
-    {
-        // Port 0 asks the OS for a free ephemeral port: two live-host proofs (or an
-        // unrelated process) can no longer collide on a pre-drawn random port and
-        // kill Kestrel before the test asserts anything. The actually bound URL is
-        // read back from the "Now listening on:" line below.
-        var psi = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            Arguments =
-                $"run --project \"{Path.Combine(_sampleDir, "AnnotationApi.csproj")}\" --urls http://127.0.0.1:0",
-            WorkingDirectory = _repoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        MakeBuildHermetic(psi);
-
-        var process =
-            Process.Start(psi)
-            ?? throw new InvalidOperationException("Failed to start AnnotationApi server");
-
-        const string listeningMarker = "Now listening on:";
-        string? boundUrl = null;
-        var output = new StringBuilder();
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                var line = await process.StandardOutput.ReadLineAsync(ct);
-                if (line is null)
-                {
-                    break;
-                }
-
-                output.AppendLine(line);
-
-                var markerIndex = line.IndexOf(listeningMarker, StringComparison.Ordinal);
-                if (markerIndex >= 0)
-                {
-                    boundUrl = line[(markerIndex + listeningMarker.Length)..].Trim();
-                    break;
-                }
-            }
-
-            if (boundUrl is null)
-            {
-                var stderr = await process.StandardError.ReadToEndAsync(ct);
-                throw new InvalidOperationException(
-                    $"Server did not start. Output:\n{output}\nStderr:\n{stderr}"
-                );
-            }
-        }
-        catch
-        {
-            process.Kill();
-            process.Dispose();
-            throw;
-        }
-
-        return new AsyncServerHandle(process, boundUrl);
-    }
-
-    private sealed class AsyncServerHandle(Process process, string boundUrl) : IAsyncDisposable
-    {
-        // The URL the server actually bound — for --urls http://127.0.0.1:0 the OS
-        // assigns a free ephemeral port.
-        public string Url { get; } = boundUrl;
-
-        public async ValueTask DisposeAsync()
-        {
-            try
-            {
-                process.Kill();
-                await process.WaitForExitAsync();
-            }
-            catch
-            {
-                // Best effort
-            }
-
-            process.Dispose();
-        }
     }
 }

@@ -113,57 +113,39 @@ public sealed class OpenApiDocumentInfoTests
     [Fact]
     public async Task Pipeline_Threads_Flags_Into_Spec()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"rivet-docinfo-{Guid.NewGuid():N}");
-        try
-        {
-            var spec = await RunPipeline(
-                new RivetOptions(
-                    "ignored",
-                    tempDir,
-                    [],
-                    Quiet: true,
-                    Title: "Orders API",
-                    Version: "2.3.0",
-                    Servers: ["https://api.example.com"]
-                )
-            );
+        using var tempDir = new TempDir();
+        var spec = await RunPipeline(
+            new RivetOptions(
+                "ignored",
+                tempDir.FullName,
+                [],
+                Quiet: true,
+                Title: "Orders API",
+                Version: "2.3.0",
+                Servers: ["https://api.example.com"]
+            )
+        );
 
-            using var doc = JsonDocument.Parse(spec);
-            var root = doc.RootElement;
-            Assert.Equal("Orders API", root.GetProperty("info").GetProperty("title").GetString());
-            Assert.Equal("2.3.0", root.GetProperty("info").GetProperty("version").GetString());
-            Assert.Equal(
-                "https://api.example.com",
-                root.GetProperty("servers")[0].GetProperty("url").GetString()
-            );
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
-        }
+        using var doc = JsonDocument.Parse(spec);
+        var root = doc.RootElement;
+        Assert.Equal("Orders API", root.GetProperty("info").GetProperty("title").GetString());
+        Assert.Equal("2.3.0", root.GetProperty("info").GetProperty("version").GetString());
+        Assert.Equal(
+            "https://api.example.com",
+            root.GetProperty("servers")[0].GetProperty("url").GetString()
+        );
     }
 
     [Fact]
     public async Task Pipeline_Without_Flags_Matches_Direct_Default_Emit()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"rivet-docinfo-{Guid.NewGuid():N}");
-        try
-        {
-            var spec = await RunPipeline(new RivetOptions("ignored", tempDir, [], Quiet: true));
+        using var tempDir = new TempDir();
+        var spec = await RunPipeline(
+            new RivetOptions("ignored", tempDir.FullName, [], Quiet: true)
+        );
 
-            // The pipeline's no-flags output must be byte-identical to the
-            // emitter's pre-flag default output.
-            Assert.Equal(Emit(null), spec);
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
-        }
+        // The pipeline's no-flags output must be byte-identical to the
+        // emitter's pre-flag default output.
+        Assert.Equal(Emit(null), spec);
     }
 }

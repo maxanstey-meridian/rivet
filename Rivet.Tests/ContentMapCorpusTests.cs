@@ -51,54 +51,47 @@ public sealed class ContentMapCorpusTests
             }
             """;
 
-        var workDir = Directory.CreateTempSubdirectory("rivet-content-map-");
-        try
-        {
-            var sourcePath = Path.Combine(workDir.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var generatedDirectory = Path.Combine(workDir.FullName, "generated");
-            var import = CliRunner.RunCli(
-                workDir.FullName,
-                [
-                    "--from-openapi",
-                    sourcePath,
-                    "--output",
-                    generatedDirectory,
-                    "--namespace",
-                    "Generated",
-                ]
-            );
-            Assert.True(import.ExitCode == 0, import.StdErr);
+        using var workDir = new TempDir();
+        var sourcePath = Path.Combine(workDir.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generatedDirectory = Path.Combine(workDir.FullName, "generated");
+        var import = CliRunner.RunCli(
+            workDir.FullName,
+            [
+                "--from-openapi",
+                sourcePath,
+                "--output",
+                generatedDirectory,
+                "--namespace",
+                "Generated",
+            ]
+        );
+        Assert.True(import.ExitCode == 0, import.StdErr);
 
-            var outputDirectory = Path.Combine(workDir.FullName, "output");
-            var emit = CliRunner.RunCli(
-                workDir.FullName,
-                [generatedDirectory, "--openapi", "--output", outputDirectory]
-            );
-            Assert.True(emit.ExitCode == 0, emit.StdErr);
+        var outputDirectory = Path.Combine(workDir.FullName, "output");
+        var emit = CliRunner.RunCli(
+            workDir.FullName,
+            [generatedDirectory, "--openapi", "--output", outputDirectory]
+        );
+        Assert.True(emit.ExitCode == 0, emit.StdErr);
 
-            var original = JsonNode.Parse(spec)!["paths"]!["/convert"]!["post"]!;
-            var reemitted = JsonNode.Parse(
-                File.ReadAllText(Path.Combine(outputDirectory, "openapi.json"))
-            )!["paths"]!["/convert"]!["post"]!;
-            Assert.True(
-                JsonNode.DeepEquals(
-                    original["requestBody"]!["content"],
-                    reemitted["requestBody"]!["content"]
-                ),
-                "Request content map changed."
-            );
-            Assert.True(
-                JsonNode.DeepEquals(
-                    original["responses"]!["200"]!["content"],
-                    reemitted["responses"]!["200"]!["content"]
-                ),
-                "Response content map changed."
-            );
-        }
-        finally
-        {
-            workDir.Delete(recursive: true);
-        }
+        var original = JsonNode.Parse(spec)!["paths"]!["/convert"]!["post"]!;
+        var reemitted = JsonNode.Parse(
+            File.ReadAllText(Path.Combine(outputDirectory, "openapi.json"))
+        )!["paths"]!["/convert"]!["post"]!;
+        Assert.True(
+            JsonNode.DeepEquals(
+                original["requestBody"]!["content"],
+                reemitted["requestBody"]!["content"]
+            ),
+            "Request content map changed."
+        );
+        Assert.True(
+            JsonNode.DeepEquals(
+                original["responses"]!["200"]!["content"],
+                reemitted["responses"]!["200"]!["content"]
+            ),
+            "Response content map changed."
+        );
     }
 }

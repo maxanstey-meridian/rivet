@@ -14,18 +14,9 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class EmitPipelineTests : IDisposable
 {
-    private readonly string _outputDir = Path.Combine(
-        Path.GetTempPath(),
-        $"rivet-emit-pipeline-{Guid.NewGuid():N}"
-    );
+    private readonly TempDir _output = new();
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_outputDir))
-        {
-            Directory.Delete(_outputDir, recursive: true);
-        }
-    }
+    public void Dispose() => _output.Dispose();
 
     private static EmitPipeline.EmitInput BuildEmitInput(
         IReadOnlyList<TsEndpointDefinition> endpoints,
@@ -75,13 +66,13 @@ public sealed class EmitPipelineTests : IDisposable
     public async Task ExtractedInlineTypes_Become_Component_Schemas_In_OpenApi()
     {
         var input = BuildEmitInput(DuplicateInlineEndpoints());
-        var options = new RivetOptions(".", _outputDir, []);
+        var options = new RivetOptions(".", _output.FullName, []);
 
         var result = await EmitPipeline.RunAsync(input, options);
 
         Assert.Equal(0, result);
 
-        var specPath = Path.Combine(_outputDir, "openapi.json");
+        var specPath = Path.Combine(_output.FullName, "openapi.json");
         Assert.True(
             File.Exists(specPath),
             "--output <dir> must write <dir>/openapi.json by default"
@@ -173,12 +164,12 @@ public sealed class EmitPipelineTests : IDisposable
         };
 
         var input = BuildEmitInput(endpoints, [existingDef]);
-        var options = new RivetOptions(".", _outputDir, []);
+        var options = new RivetOptions(".", _output.FullName, []);
 
         await EmitPipeline.RunAsync(input, options);
 
         using var doc = JsonDocument.Parse(
-            await File.ReadAllTextAsync(Path.Combine(_outputDir, "openapi.json"))
+            await File.ReadAllTextAsync(Path.Combine(_output.FullName, "openapi.json"))
         );
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
@@ -203,14 +194,17 @@ public sealed class EmitPipelineTests : IDisposable
     public async Task Verify_Passes_When_Spec_Matches_And_Writes_Nothing()
     {
         var input = BuildEmitInput(DuplicateInlineEndpoints());
-        Assert.Equal(0, await EmitPipeline.RunAsync(input, new RivetOptions(".", _outputDir, [])));
+        Assert.Equal(
+            0,
+            await EmitPipeline.RunAsync(input, new RivetOptions(".", _output.FullName, []))
+        );
 
-        var specPath = Path.Combine(_outputDir, "openapi.json");
+        var specPath = Path.Combine(_output.FullName, "openapi.json");
         var writtenAt = File.GetLastWriteTimeUtc(specPath);
 
         var result = await EmitPipeline.RunAsync(
             input,
-            new RivetOptions(".", _outputDir, [], Verify: true)
+            new RivetOptions(".", _output.FullName, [], Verify: true)
         );
 
         Assert.Equal(0, result);
@@ -221,16 +215,16 @@ public sealed class EmitPipelineTests : IDisposable
     public async Task Verify_Fails_On_Stale_Spec_Without_Overwriting_It()
     {
         var input = BuildEmitInput(DuplicateInlineEndpoints());
-        await EmitPipeline.RunAsync(input, new RivetOptions(".", _outputDir, []));
+        await EmitPipeline.RunAsync(input, new RivetOptions(".", _output.FullName, []));
 
-        var specPath = Path.Combine(_outputDir, "openapi.json");
+        var specPath = Path.Combine(_output.FullName, "openapi.json");
         var tampered = (await File.ReadAllTextAsync(specPath)).Replace("\"age\"", "\"years\"");
         await File.WriteAllTextAsync(specPath, tampered);
 
         int result = -1;
         var stderr = CompilationHelper.CaptureStdErr(() =>
             result = EmitPipeline
-                .RunAsync(input, new RivetOptions(".", _outputDir, [], Verify: true))
+                .RunAsync(input, new RivetOptions(".", _output.FullName, [], Verify: true))
                 .GetAwaiter()
                 .GetResult()
         );
@@ -248,7 +242,7 @@ public sealed class EmitPipelineTests : IDisposable
         int result = -1;
         var stderr = CompilationHelper.CaptureStdErr(() =>
             result = EmitPipeline
-                .RunAsync(input, new RivetOptions(".", _outputDir, [], Verify: true))
+                .RunAsync(input, new RivetOptions(".", _output.FullName, [], Verify: true))
                 .GetAwaiter()
                 .GetResult()
         );
@@ -256,7 +250,7 @@ public sealed class EmitPipelineTests : IDisposable
         Assert.Equal(1, result);
         Assert.Contains("does not exist", stderr);
         Assert.False(
-            File.Exists(Path.Combine(_outputDir, "openapi.json")),
+            File.Exists(Path.Combine(_output.FullName, "openapi.json")),
             "--verify must never write"
         );
     }
@@ -276,7 +270,7 @@ public sealed class EmitPipelineTests : IDisposable
         var exception = await Assert.ThrowsAsync<RivetUserException>(() =>
             EmitPipeline.RunAsync(
                 input,
-                new RivetOptions(".", _outputDir, [], SecuritySchemes: securitySchemes)
+                new RivetOptions(".", _output.FullName, [], SecuritySchemes: securitySchemes)
             )
         );
 
@@ -288,12 +282,12 @@ public sealed class EmitPipelineTests : IDisposable
     {
         // The rivet-ts vite plugin passes both --output <dir>/rivet and --openapi <abs path>.
         // The override wins; nothing is duplicated into the output directory.
-        var specDir = Path.Combine(_outputDir, "spec-home");
+        var specDir = Path.Combine(_output.FullName, "spec-home");
         var overridePath = Path.Combine(specDir, "api-spec.json");
         var input = BuildEmitInput(DuplicateInlineEndpoints());
         var options = new RivetOptions(
             ".",
-            Path.Combine(_outputDir, "rivet"),
+            Path.Combine(_output.FullName, "rivet"),
             [],
             OpenApiPath: overridePath
         );
@@ -303,7 +297,7 @@ public sealed class EmitPipelineTests : IDisposable
         Assert.Equal(0, result);
         Assert.True(File.Exists(overridePath), "--openapi <abs path> must be honored");
         Assert.False(
-            File.Exists(Path.Combine(_outputDir, "rivet", "openapi.json")),
+            File.Exists(Path.Combine(_output.FullName, "rivet", "openapi.json")),
             "--openapi is the sole writer when given"
         );
 
@@ -316,7 +310,7 @@ public sealed class EmitPipelineTests : IDisposable
     {
         // The rivet-ts scaffold's generate script relies on this: --openapi ../openapi.json
         // resolved against --output lands the spec next to the output directory.
-        var outputDir = Path.Combine(_outputDir, "client", "generated", "rivet");
+        var outputDir = Path.Combine(_output.FullName, "client", "generated", "rivet");
         var input = BuildEmitInput(DuplicateInlineEndpoints());
         var options = new RivetOptions(
             ".",
@@ -328,6 +322,8 @@ public sealed class EmitPipelineTests : IDisposable
         var result = await EmitPipeline.RunAsync(input, options);
 
         Assert.Equal(0, result);
-        Assert.True(File.Exists(Path.Combine(_outputDir, "client", "generated", "openapi.json")));
+        Assert.True(
+            File.Exists(Path.Combine(_output.FullName, "client", "generated", "openapi.json"))
+        );
     }
 }

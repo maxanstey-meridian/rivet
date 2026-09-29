@@ -260,30 +260,23 @@ public sealed class DocumentOperationProvenanceTests
 
     private static void WithImportedSource(string spec, Action<string, string> assertion)
     {
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-provenance-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
-            var import = CliRunner.RunCli(
-                workDirectory.FullName,
-                [
-                    "--from-openapi",
-                    sourcePath,
-                    "--output",
-                    generatedDirectory,
-                    "--namespace",
-                    "Generated",
-                ]
-            );
-            Assert.True(import.ExitCode == 0, import.StdErr);
-            assertion(workDirectory.FullName, generatedDirectory);
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
+        var import = CliRunner.RunCli(
+            workDirectory.FullName,
+            [
+                "--from-openapi",
+                sourcePath,
+                "--output",
+                generatedDirectory,
+                "--namespace",
+                "Generated",
+            ]
+        );
+        Assert.True(import.ExitCode == 0, import.StdErr);
+        assertion(workDirectory.FullName, generatedDirectory);
     }
 
     private static JsonObject Emit(

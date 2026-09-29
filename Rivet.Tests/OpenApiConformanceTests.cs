@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json.Nodes;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
@@ -30,20 +29,11 @@ namespace Rivet.Tests;
 public sealed class OpenApiConformanceTests : IDisposable
 {
     private readonly ITestOutputHelper _output;
-    private readonly string _tempDir = Path.Combine(
-        Path.GetTempPath(),
-        $"rivet-conformance-{Guid.NewGuid():N}"
-    );
+    private readonly TempDir _temp = new();
 
     public OpenApiConformanceTests(ITestOutputHelper output) => _output = output;
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_tempDir))
-        {
-            Directory.Delete(_tempDir, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 
     // ════════════════════════════════ Corpus ════════════════════════════════
     //
@@ -51,7 +41,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     // OpenAPI emission, plus the ContractApi sample project and the contract-JSON
     // fixtures. One name → one emitted spec.
 
-    private static readonly string _repoRoot = FindRepoRoot();
+    private static readonly string _repoRoot = CliRunner.RepoRoot;
     private static readonly string _jsDir = Path.Combine(_repoRoot, "Rivet.Tests", "js");
 
     // Conformance fixtures are emitted the way a real deployment would invoke the
@@ -85,26 +75,26 @@ public sealed class OpenApiConformanceTests : IDisposable
             "header-contracts" => EmitFromSources([HeaderContractsSource], "bearer"),
             "contractapi-sample" => EmitFromSources(LoadContractApiSampleSources(), "bearer"),
             "contract-sample-json" => CompilationHelper.EmitOpenApiFromJson(
-                LoadFixture("contract-sample.json"),
+                Fixture.Text("contract-sample.json"),
                 _fixtureDocumentInfo
             ),
             "contract-tagged-union-json" => CompilationHelper.EmitOpenApiFromJson(
-                LoadFixture("contract-tagged-union.json"),
+                Fixture.Text("contract-tagged-union.json"),
                 _fixtureDocumentInfo
             ),
             "php-golden-contract-json" => CompilationHelper.EmitOpenApiFromJson(
-                LoadFixture("php-golden-contract.json"),
+                Fixture.Text("php-golden-contract.json"),
                 _fixtureDocumentInfo
             ),
             // TS-lowerer-shaped contract JSON: brands appear only as inline kind:"brand"
             // nodes, and multipart inputs are decomposed into params with an inputTypeName
             // that has NO matching entry in types[] (mirrors rivet-ts output; BUG-1/BUG-2).
             "contract-ts-brands-json" => CompilationHelper.EmitOpenApiFromJson(
-                LoadFixture("contract-ts-brands.json"),
+                Fixture.Text("contract-ts-brands.json"),
                 _fixtureDocumentInfo
             ),
             "contract-ts-multipart-json" => CompilationHelper.EmitOpenApiFromJson(
-                LoadFixture("contract-ts-multipart.json"),
+                Fixture.Text("contract-ts-multipart.json"),
                 _fixtureDocumentInfo
             ),
             _ => throw new ArgumentException($"Unknown conformance fixture '{fixtureName}'"),
@@ -129,9 +119,6 @@ public sealed class OpenApiConformanceTests : IDisposable
             _fixtureDocumentInfo
         );
     }
-
-    private static string LoadFixture(string name) =>
-        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
 
     private static string[] LoadContractApiSampleSources()
     {
@@ -159,22 +146,10 @@ public sealed class OpenApiConformanceTests : IDisposable
             .ToArray();
     }
 
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Rivet.slnx")))
-        {
-            dir = dir.Parent;
-        }
-
-        return dir?.FullName
-            ?? throw new InvalidOperationException("Could not locate repo root (Rivet.slnx)");
-    }
-
     private string WriteSpec(string fixtureName)
     {
-        Directory.CreateDirectory(_tempDir);
-        var path = Path.Combine(_tempDir, $"{fixtureName}.openapi.json");
+        Directory.CreateDirectory(_temp.FullName);
+        var path = Path.Combine(_temp.FullName, $"{fixtureName}.openapi.json");
         File.WriteAllText(path, EmitSpec(fixtureName));
 
         // Triage aid: RIVET_CONFORMANCE_DUMP=<dir> keeps a copy of every emitted spec.
@@ -226,7 +201,7 @@ public sealed class OpenApiConformanceTests : IDisposable
             "index.js"
         );
 
-        var (exitCode, stdout, stderr) = RunNode(
+        var (exitCode, stdout, stderr) = CliRunner.RunNode(
             spectral,
             ["lint", "--ruleset", ruleset, "--format", "json", specPath]
         );
@@ -290,17 +265,17 @@ public sealed class OpenApiConformanceTests : IDisposable
     public void OpenApiTypescript_Output_Compiles_Under_TscStrict(string fixtureName)
     {
         var specPath = WriteSpec(fixtureName);
-        var typesPath = Path.Combine(_tempDir, $"{fixtureName}.ts");
+        var typesPath = Path.Combine(_temp.FullName, $"{fixtureName}.ts");
 
         var openapiTs = Path.Combine(_jsDir, "node_modules", "openapi-typescript", "bin", "cli.js");
-        var (genExit, genOut, genErr) = RunNode(openapiTs, [specPath, "-o", typesPath]);
+        var (genExit, genOut, genErr) = CliRunner.RunNode(openapiTs, [specPath, "-o", typesPath]);
         Assert.True(
             genExit == 0 && File.Exists(typesPath),
             $"openapi-typescript failed for '{fixtureName}' (exit {genExit}):\n{genOut}\n{genErr}"
         );
 
         var tsc = Path.Combine(_jsDir, "node_modules", "typescript", "bin", "tsc");
-        var (tscExit, tscOut, tscErr) = RunNode(
+        var (tscExit, tscOut, tscErr) = CliRunner.RunNode(
             tsc,
             [
                 "--noEmit",
@@ -377,46 +352,6 @@ public sealed class OpenApiConformanceTests : IDisposable
             walker.Enums,
             securityConfig
         );
-    }
-
-    // ═══════════════════════════ Process plumbing ═══════════════════════════
-
-    private static (int ExitCode, string StdOut, string StdErr) RunNode(
-        string script,
-        string[] args
-    )
-    {
-        if (!File.Exists(script))
-        {
-            throw new InvalidOperationException(
-                $"Node tool not found: {script}. Run 'pnpm install' in {_jsDir} (see its README)."
-            );
-        }
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = "node",
-            WorkingDirectory = _jsDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        psi.ArgumentList.Add(script);
-        foreach (var arg in args)
-        {
-            psi.ArgumentList.Add(arg);
-        }
-
-        using var process =
-            Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start node {script}");
-
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-
-        return (process.ExitCode, stdout, stderr);
     }
 
     // ════════════════════════════ Fixture sources ═══════════════════════════
