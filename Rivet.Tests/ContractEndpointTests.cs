@@ -11,6 +11,65 @@ public sealed class ContractEndpointTests
         CompilationHelper.WalkContract(source).Endpoints;
 
     [Fact]
+    public void Nested_Contract_Class_Is_Discovered()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            public static class Api
+            {
+                [RivetContract]
+                public static class TasksContract
+                {
+                    public static readonly RouteDefinition<TaskDto> GetTask =
+                        Define.Get<TaskDto>("/api/tasks");
+                }
+            }
+            """;
+
+        var endpoint = Assert.Single(Generate(source));
+        Assert.Equal("getTask", endpoint.Name);
+        Assert.Equal("/api/tasks", endpoint.RouteTemplate);
+    }
+
+    [Fact]
+    public void Required_Field_Is_Required_In_Schema()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed class NoteDto
+            {
+                [JsonInclude]
+                public required string? Text;
+
+                [JsonInclude]
+                public string? Tag;
+            }
+
+            [RivetContract]
+            public static class NotesContract
+            {
+                public static readonly RouteDefinition<NoteDto> Get = Define.Get<NoteDto>("/api/notes");
+            }
+            """;
+
+        var (_, walker) = CompilationHelper.WalkContract(source);
+        var properties = walker.Definitions["NoteDto"].Properties;
+        Assert.False(properties.Single(p => p.Name == "text").IsOptional);
+        Assert.True(properties.Single(p => p.Name == "tag").IsOptional);
+    }
+
+    [Fact]
     public void Get_WithInputAndOutput_RouteAndQueryParams()
     {
         var source = """

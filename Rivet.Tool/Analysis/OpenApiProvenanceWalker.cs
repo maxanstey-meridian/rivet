@@ -149,11 +149,7 @@ internal static class OpenApiProvenanceWalker
                 {
                     var openApiSchemaType = StringValue(args[6]);
                     var format = StringValue(args[7]);
-                    schema = ApplySchemaLeafMetadata(
-                        typeWalker.MapType(schemaType),
-                        openApiSchemaType,
-                        format
-                    );
+                    schema = typeWalker.MapType(schemaType).WithLeaf(openApiSchemaType, format);
                     schema = typeWalker.ApplyGeneratedSchemaRef(
                         schema,
                         StringValue(args[5]),
@@ -487,27 +483,6 @@ internal static class OpenApiProvenanceWalker
             .OrderBy(value => value.Order)
             .Select(value => value.Component)
             .ToList();
-
-    private static TsType ApplySchemaLeafMetadata(TsType type, string? schemaType, string? format)
-    {
-        var explicitFormat = format == "" ? null : format;
-        return type switch
-        {
-            TsType.Primitive primitive => primitive with
-            {
-                Name = schemaType ?? primitive.Name,
-                Format = format is null ? primitive.Format : explicitFormat,
-            },
-            TsType.Nullable { Inner: TsType.Primitive primitive } => new TsType.Nullable(
-                primitive with
-                {
-                    Name = schemaType ?? primitive.Name,
-                    Format = format is null ? primitive.Format : explicitFormat,
-                }
-            ),
-            _ => type,
-        };
-    }
 
     private static IReadOnlyList<OpenApiServerProvenance> ReadServers(
         Compilation compilation,

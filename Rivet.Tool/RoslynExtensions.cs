@@ -4,18 +4,26 @@ namespace Rivet.Tool;
 
 internal static class RoslynExtensions
 {
-    public static IEnumerable<INamedTypeSymbol> GetAllTypes(INamespaceSymbol ns)
+    /// <summary>Every type in the namespace tree, including nested types.</summary>
+    public static IEnumerable<INamedTypeSymbol> GetAllTypes(INamespaceOrTypeSymbol container)
     {
-        foreach (var type in ns.GetTypeMembers())
+        foreach (var type in container.GetTypeMembers())
         {
             yield return type;
+            foreach (var nested in GetAllTypes(type))
+            {
+                yield return nested;
+            }
         }
 
-        foreach (var nested in ns.GetNamespaceMembers())
+        if (container is INamespaceSymbol ns)
         {
-            foreach (var type in GetAllTypes(nested))
+            foreach (var child in ns.GetNamespaceMembers())
             {
-                yield return type;
+                foreach (var type in GetAllTypes(child))
+                {
+                    yield return type;
+                }
             }
         }
     }

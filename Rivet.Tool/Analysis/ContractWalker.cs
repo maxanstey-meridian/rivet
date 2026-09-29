@@ -436,11 +436,12 @@ public static class ContractWalker
                         call.GetIntArg("statusCode")?.ToString() ?? call.GetStringArg("statusKey"),
                         responseHeaderName,
                         call.TypeArgs.Count == 1
-                            ? ApplyParameterMetadata(
-                                typeWalker.MapType(call.TypeArgs[0]),
-                                call.GetStringArg("schemaType"),
-                                call.GetStringArg("format")
-                            )
+                            ? typeWalker
+                                .MapType(call.TypeArgs[0])
+                                .WithLeaf(
+                                    call.GetStringArg("schemaType"),
+                                    call.GetStringArg("format")
+                                )
                             : new TsType.Primitive("string"),
                         call.GetStringArg("description"),
                         call.GetBoolArg("required") ?? false,
@@ -539,11 +540,7 @@ public static class ContractWalker
                     new TsMediaTypeContent(
                         requestMediaType,
                         typeWalker.ApplyGeneratedSchemaRef(
-                            ApplyParameterMetadata(
-                                typeWalker.MapType(call.TypeArgs[0]),
-                                schemaType,
-                                format
-                            ),
+                            typeWalker.MapType(call.TypeArgs[0]).WithLeaf(schemaType, format),
                             call.GetStringArg("schemaRef"),
                             $"Request content '{requestMediaType}' on endpoint '{name}'"
                         ),
@@ -612,11 +609,9 @@ public static class ContractWalker
                     ),
                 };
                 var metadata = ParseParameterMetadata(call.GetStringArg("metadataJson"));
-                var parameterType = ApplyParameterMetadata(
-                    typeWalker.MapType(call.TypeArgs[0]),
-                    call.GetStringArg("schemaType"),
-                    call.GetStringArg("format")
-                );
+                var parameterType = typeWalker
+                    .MapType(call.TypeArgs[0])
+                    .WithLeaf(call.GetStringArg("schemaType"), call.GetStringArg("format"));
                 parameterType = typeWalker.ApplyGeneratedSchemaRef(
                     parameterType,
                     call.GetStringArg("schemaRef"),
@@ -665,11 +660,7 @@ public static class ContractWalker
                         new TsMediaTypeContent(
                             responseMediaType,
                             typeWalker.ApplyGeneratedSchemaRef(
-                                ApplyParameterMetadata(
-                                    typeWalker.MapType(call.TypeArgs[0]),
-                                    schemaType,
-                                    format
-                                ),
+                                typeWalker.MapType(call.TypeArgs[0]).WithLeaf(schemaType, format),
                                 call.GetStringArg("schemaRef"),
                                 $"Response content '{responseMediaType}' on endpoint '{name}'"
                             ),
@@ -723,11 +714,7 @@ public static class ContractWalker
                         new TsMediaTypeContent(
                             typedResponseMediaType,
                             typeWalker.ApplyGeneratedSchemaRef(
-                                ApplyParameterMetadata(
-                                    typeWalker.MapType(call.TypeArgs[0]),
-                                    schemaType,
-                                    format
-                                ),
+                                typeWalker.MapType(call.TypeArgs[0]).WithLeaf(schemaType, format),
                                 call.GetStringArg("schemaRef"),
                                 $"Response content '{typedResponseMediaType}' on endpoint '{name}'"
                             ),
@@ -1348,7 +1335,7 @@ public static class ContractWalker
                         headerName,
                         typeWalker.MapPropertyType(headerProp),
                         ParamSource.Header,
-                        IsOptional: typeWalker.IsOptionalProperty(headerProp)
+                        IsOptional: typeWalker.IsOptional(headerProp)
                     )
                 );
             }
@@ -1447,28 +1434,8 @@ public static class ContractWalker
                     // Form fields are request surface: request-only properties lower,
                     // response-only properties are absent from the multipart body
                     // (planner-constraint:component-schema-directionality).
-                    foreach (var prop in typeWalker.GetEffectiveProperties(tInput))
+                    foreach (var formProp in typeWalker.GetRequestProperties(tInput))
                     {
-                        if (prop is not IPropertySymbol formProp)
-                        {
-                            continue;
-                        }
-
-                        if (
-                            typeWalker.IsJsonIgnored(formProp)
-                            || typeWalker.GetJsonPropertySurface(formProp)
-                                == JsonPropertySurface.ResponseOnly
-                        )
-                        {
-                            continue;
-                        }
-
-                        // [RivetHeader] properties were already emitted as header params
-                        if (typeWalker.GetHeaderName(formProp) is not null)
-                        {
-                            continue;
-                        }
-
                         // Skip properties already emitted as route params
                         if (routeMatchedProps.Contains(formProp.Name))
                         {
@@ -1476,7 +1443,7 @@ public static class ContractWalker
                         }
 
                         var tsName =
-                            typeWalker.GetJsonPropertyName(formProp)
+                            typeWalker.GetJsonMemberName(formProp)
                             ?? Naming.ToCamelCase(formProp.Name);
 
                         if (IsFormFileType(wkt, formProp.Type))
@@ -1486,7 +1453,7 @@ public static class ContractWalker
                                     tsName,
                                     new TsType.Primitive("File"),
                                     ParamSource.File,
-                                    IsOptional: typeWalker.IsOptionalProperty(formProp)
+                                    IsOptional: typeWalker.IsOptional(formProp)
                                 )
                             );
                         }
@@ -1499,7 +1466,7 @@ public static class ContractWalker
                                     tsName,
                                     new TsType.Array(new TsType.Primitive("File")),
                                     ParamSource.File,
-                                    IsOptional: typeWalker.IsOptionalProperty(formProp)
+                                    IsOptional: typeWalker.IsOptional(formProp)
                                 )
                             );
                         }
@@ -1511,7 +1478,7 @@ public static class ContractWalker
                                     tsName,
                                     typeWalker.MapPropertyType(formProp),
                                     ParamSource.FormField,
-                                    IsOptional: typeWalker.IsOptionalProperty(formProp)
+                                    IsOptional: typeWalker.IsOptional(formProp)
                                 )
                             );
                         }
@@ -1524,16 +1491,7 @@ public static class ContractWalker
                     // required JSON body on bodyless POST/PUTs (66 github-corpus ops).
                     // Request-surface comparison: route-binding equivalence is judged on
                     // properties the request surface actually carries.
-                    var bodyProps = typeWalker
-                        .GetEffectiveProperties(tInput)
-                        .OfType<IPropertySymbol>()
-                        .Where(p =>
-                            !typeWalker.IsJsonIgnored(p)
-                            && typeWalker.GetJsonPropertySurface(p)
-                                != JsonPropertySurface.ResponseOnly
-                            && typeWalker.GetHeaderName(p) is null
-                        )
-                        .ToList();
+                    var bodyProps = typeWalker.GetRequestProperties(tInput).ToList();
                     if (
                         bodyProps.Count == 0
                         || bodyProps.Any(p => !routeMatchedProps.Contains(p.Name))
@@ -1583,29 +1541,9 @@ public static class ContractWalker
                 // (serialized but never deserializable) cannot carry request values,
                 // so they are absent from the param list
                 // (planner-constraint:component-schema-directionality).
-                foreach (var prop in typeWalker.GetEffectiveProperties(tInput))
+                foreach (var queryProp in typeWalker.GetRequestProperties(tInput))
                 {
-                    if (prop is not IPropertySymbol queryProp)
-                    {
-                        continue;
-                    }
-
-                    if (
-                        typeWalker.IsJsonIgnored(queryProp)
-                        || typeWalker.GetJsonPropertySurface(queryProp)
-                            == JsonPropertySurface.ResponseOnly
-                    )
-                    {
-                        continue;
-                    }
-
-                    // [RivetHeader] properties were already emitted as header params
-                    if (typeWalker.GetHeaderName(queryProp) is not null)
-                    {
-                        continue;
-                    }
-
-                    var jsonName = typeWalker.GetJsonPropertyName(queryProp);
+                    var jsonName = typeWalker.GetJsonMemberName(queryProp);
                     var tsName = jsonName ?? Naming.ToCamelCase(queryProp.Name);
 
                     var isFormFile = SymbolEqualityComparer.Default.Equals(
@@ -1666,7 +1604,7 @@ public static class ContractWalker
                             tsName,
                             tsType,
                             ParamSource.Query,
-                            IsOptional: typeWalker.IsOptionalProperty(queryProp)
+                            IsOptional: typeWalker.IsOptional(queryProp)
                         )
                     );
                 }
@@ -1718,27 +1656,6 @@ public static class ContractWalker
         }
 
         return (parameters, inputTypeName);
-    }
-
-    private static TsType ApplyParameterMetadata(TsType type, string? schemaType, string? format)
-    {
-        var explicitFormat = format == "" ? null : format;
-        return type switch
-        {
-            TsType.Primitive primitive => primitive with
-            {
-                Name = schemaType ?? primitive.Name,
-                Format = format is null ? primitive.Format : explicitFormat,
-            },
-            TsType.Nullable { Inner: TsType.Primitive primitive } => new TsType.Nullable(
-                primitive with
-                {
-                    Name = schemaType ?? primitive.Name,
-                    Format = format is null ? primitive.Format : explicitFormat,
-                }
-            ),
-            _ => type,
-        };
     }
 
     private static ParameterMetadata ParseParameterMetadata(string? json)
@@ -1867,14 +1784,9 @@ public static class ContractWalker
             .ToHashSet(StringComparer.Ordinal);
         if (
             typeWalker
-                .GetEffectiveProperties(inputType)
-                .OfType<IPropertySymbol>()
+                .GetRequestProperties(inputType)
                 .Any(property =>
-                    !typeWalker.IsJsonIgnored(property)
-                    && typeWalker.GetJsonPropertySurface(property)
-                        != JsonPropertySurface.ResponseOnly
-                    && typeWalker.GetHeaderName(property) is null
-                    && !routeNames.Contains(RouteParser.NormalizeForMatching(property.Name))
+                    !routeNames.Contains(RouteParser.NormalizeForMatching(property.Name))
                     && SymbolEqualityComparer.Default.Equals(property.Type, bodyType)
                 )
         )
@@ -1883,28 +1795,14 @@ public static class ContractWalker
         }
 
         var inputProperties = typeWalker
-            .GetEffectiveProperties(inputType)
-            .OfType<IPropertySymbol>()
-            .Where(property =>
-                !typeWalker.IsJsonIgnored(property)
-                && typeWalker.GetJsonPropertySurface(property) != JsonPropertySurface.ResponseOnly
-                && typeWalker.GetHeaderName(property) is null
-            )
+            .GetRequestProperties(inputType)
             .GroupBy(
                 property =>
-                    typeWalker.GetJsonPropertyName(property) ?? Naming.ToCamelCase(property.Name),
+                    typeWalker.GetJsonMemberName(property) ?? Naming.ToCamelCase(property.Name),
                 StringComparer.Ordinal
             )
             .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
-        var bodyProperties = typeWalker
-            .GetEffectiveProperties(bodyType)
-            .OfType<IPropertySymbol>()
-            .Where(property =>
-                !typeWalker.IsJsonIgnored(property)
-                && typeWalker.GetJsonPropertySurface(property) != JsonPropertySurface.ResponseOnly
-                && typeWalker.GetHeaderName(property) is null
-            )
-            .ToList();
+        var bodyProperties = typeWalker.GetRequestProperties(bodyType).ToList();
         if (bodyProperties.Count == 0)
         {
             return false;
@@ -1913,8 +1811,7 @@ public static class ContractWalker
         foreach (var bodyProperty in bodyProperties)
         {
             var wireName =
-                typeWalker.GetJsonPropertyName(bodyProperty)
-                ?? Naming.ToCamelCase(bodyProperty.Name);
+                typeWalker.GetJsonMemberName(bodyProperty) ?? Naming.ToCamelCase(bodyProperty.Name);
             if (!inputProperties.TryGetValue(wireName, out var matches) || matches.Count != 1)
             {
                 return false;
@@ -1924,8 +1821,7 @@ public static class ContractWalker
             if (
                 routeNames.Contains(RouteParser.NormalizeForMatching(inputProperty.Name))
                 || !SymbolEqualityComparer.Default.Equals(bodyProperty.Type, inputProperty.Type)
-                || typeWalker.IsOptionalProperty(bodyProperty)
-                    != typeWalker.IsOptionalProperty(inputProperty)
+                || typeWalker.IsOptional(bodyProperty) != typeWalker.IsOptional(inputProperty)
             )
             {
                 return false;

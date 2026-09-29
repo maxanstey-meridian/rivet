@@ -323,24 +323,16 @@ public sealed class TypeWalker
     /// Never/WhenWritingNull/WhenWritingDefault do not remove the property from either
     /// schema — WhenWritingNull/WhenWritingDefault only allow omission on the response
     /// wire, handled by requiredness (CanOmitOnWire). Direction does not change this
-    /// answer; presence asymmetry lives in GetJsonPropertySurface.
+    /// answer; presence asymmetry lives in GetJsonPropertySurface. Fields are only
+    /// surfaced through [JsonInclude] (GetJsonFieldSurface), so they are never ignored here.
     /// </summary>
-    public bool IsJsonIgnored(IPropertySymbol prop) => IsJsonIgnoredMember(prop);
-
-    /// <summary>
-    /// Wire-member overload: [JsonExtensionData]/[JsonIgnore] are property attributes,
-    /// so a field is never ignored by them (fields carrying them are surfaced through
-    /// GetJsonFieldSurface's include gate).
-    /// </summary>
-    public bool IsJsonIgnored(ISymbol member) =>
-        member switch
-        {
-            IPropertySymbol prop => IsJsonIgnoredMember(prop),
-            _ => false,
-        };
-
-    private bool IsJsonIgnoredMember(IPropertySymbol prop)
+    public bool IsJsonIgnored(ISymbol member)
     {
+        if (member is not IPropertySymbol prop)
+        {
+            return false;
+        }
+
         foreach (var attribute in prop.GetAttributes())
         {
             if (attribute.Is(_types.JsonExtensionData))
@@ -366,18 +358,13 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// Reads the [JsonIgnore(Condition = …)] named argument. Null (and any non-enum
-    /// value) means the attribute's parameterless form, i.e. Always.
+    /// Reads the [JsonIgnore(Condition = …)] named argument. Null means the
+    /// attribute's parameterless form, i.e. Always.
     /// </summary>
-    private static JsonIgnoreCondition? ReadJsonIgnoreCondition(AttributeData attribute)
-    {
-        var named = attribute.NamedArguments.FirstOrDefault(kv => kv.Key == "Condition");
-        return named.Value.Value is int raw ? (JsonIgnoreCondition?)raw
-            : attribute.ConstructorArguments.Length > 0
-            && attribute.ConstructorArguments[0].Value is int positional
-                ? (JsonIgnoreCondition?)positional
+    private static JsonIgnoreCondition? ReadJsonIgnoreCondition(AttributeData attribute) =>
+        attribute.NamedArguments.FirstOrDefault(kv => kv.Key == "Condition").Value.Value is int raw
+            ? (JsonIgnoreCondition)raw
             : null;
-    }
 
     /// <summary>
     /// Whether the property is serialized/deserialized under default System.Text.Json
@@ -391,7 +378,7 @@ public sealed class TypeWalker
     /// </summary>
     public JsonPropertySurface GetJsonPropertySurface(IPropertySymbol prop)
     {
-        var hasInclude = HasJsonInclude(prop);
+        var hasInclude = prop.HasAttribute(_types.JsonInclude);
 
         // Non-public members surface only through [JsonInclude].
         var getterPublic = prop.GetMethod?.DeclaredAccessibility is Accessibility.Public;
@@ -454,8 +441,6 @@ public sealed class TypeWalker
         return getterPublic ? JsonPropertySurface.ResponseOnly : JsonPropertySurface.RequestOnly;
     }
 
-    private bool HasJsonInclude(IPropertySymbol prop) => prop.HasAttribute(_types.JsonInclude);
-
     /// <summary>
     /// The wire surface of a FIELD member under default System.Text.Json web options.
     /// Fields have no accessors: STJ touches the member directly, so [JsonInclude]
@@ -485,11 +470,7 @@ public sealed class TypeWalker
     /// </summary>
     private bool IsDeserializableViaConstructor(IPropertySymbol prop)
     {
-        var containingType = prop.ContainingType;
-        if (containingType is not INamedTypeSymbol named)
-        {
-            return false;
-        }
+        var named = prop.ContainingType;
 
         // Records: primary constructor parameters bind properties by name.
         var constructors = named
@@ -521,11 +502,6 @@ public sealed class TypeWalker
         // parameters generate the properties. Any other constructor (copies included)
         // is not the primary one. Roslyn marks the primary constructor as the one
         // whose declaring syntax is the record declaration's parameter list.
-        if (constructor.IsImplicitlyDeclared)
-        {
-            return false;
-        }
-
         foreach (var syntaxReference in constructor.DeclaringSyntaxReferences)
         {
             var node = syntaxReference.GetSyntax().Parent;
@@ -545,30 +521,18 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// Whether the property can be omitted on the wire for the queried direction:
-    /// WhenWritingNull omits null values; WhenWritingDefault omits CLR defaults;
-    /// nullable-annotated or [RivetOptional] properties can be omitted by the host.
+    /// Whether the serializer may leave the member off the wire: [JsonIgnore]
+    /// WhenWritingNull/WhenWritingDefault omission, or an optional member. Such a
+    /// member cannot be required on the emitted schema (acceptance:json-property-surface).
     /// </summary>
-    public bool CanOmitOnWire(IPropertySymbol prop)
-    {
-        var condition = ReadJsonIgnoreConditionFrom(prop);
-        if (condition is JsonIgnoreCondition.WhenWritingNull)
-        {
-            return true;
-        }
-
-        if (condition is JsonIgnoreCondition.WhenWritingDefault)
-        {
-            return true;
-        }
-
-        return IsOptionalProperty(prop);
-    }
-
-    private JsonIgnoreCondition? ReadJsonIgnoreConditionFrom(IPropertySymbol prop) =>
-        prop.GetAttribute(_types.JsonIgnore) is { } attribute
-            ? ReadJsonIgnoreCondition(attribute)
-            : null;
+    private bool CanOmitOnWire(ISymbol member) =>
+        (
+            member is IPropertySymbol prop
+            && prop.GetAttribute(_types.JsonIgnore) is { } ignore
+            && ReadJsonIgnoreCondition(ignore)
+                is JsonIgnoreCondition.WhenWritingNull
+                    or JsonIgnoreCondition.WhenWritingDefault
+        ) || IsOptional(member);
 
     /// <summary>
     /// A3: flattens the wire-member surface of a type across its BaseType chain
@@ -620,13 +584,6 @@ public sealed class TypeWalker
                     {
                         continue;
                     }
-
-                    // Records synthesize EqualityContract; guard by name in case a compiler
-                    // version stops marking it implicitly declared.
-                    if (property.Name == "EqualityContract")
-                    {
-                        continue;
-                    }
                 }
                 else if (member is IFieldSymbol field)
                 {
@@ -667,25 +624,23 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// Returns the [JsonPropertyName] value if present, null otherwise.
+    /// The request-surface properties of an input type: not JSON-ignored, not
+    /// response-only and not header-bound.
     /// </summary>
-    public string? GetJsonPropertyName(IPropertySymbol prop) =>
-        prop.GetAttribute(_types.JsonPropertyName).StringArgument();
+    public IEnumerable<IPropertySymbol> GetRequestProperties(ITypeSymbol type) =>
+        GetEffectiveProperties(type)
+            .OfType<IPropertySymbol>()
+            .Where(property =>
+                !IsJsonIgnored(property)
+                && GetJsonPropertySurface(property) != JsonPropertySurface.ResponseOnly
+                && GetHeaderName(property) is null
+            );
 
     /// <summary>
-    /// [JsonPropertyName] for either wire member kind: [JsonPropertyName] is valid on
-    /// fields in System.Text.Json, so an included field's wire name must honor it too.
+    /// The [JsonPropertyName] of a property or included field, or null.
     /// </summary>
     public string? GetJsonMemberName(ISymbol member) =>
-        member switch
-        {
-            IPropertySymbol prop => GetJsonPropertyName(prop),
-            IFieldSymbol field => GetJsonFieldName(field),
-            _ => null,
-        };
-
-    private string? GetJsonFieldName(IFieldSymbol field) =>
-        field.GetAttribute(_types.JsonPropertyName).StringArgument();
+        member.GetAttribute(_types.JsonPropertyName).StringArgument();
 
     /// <summary>
     /// Walks a named type, producing a TsTypeDefinition and recursively
@@ -788,11 +743,11 @@ public sealed class TypeWalker
             }
 
             // [JsonPropertyName("x")] → use "x" instead of camelCase(Name)
-            var jsonPropertyName = member.GetAttribute(_types.JsonPropertyName).StringArgument();
+            var jsonPropertyName = GetJsonMemberName(member);
 
             var tsName = jsonPropertyName ?? Naming.ToCamelCase(member.Name);
             var tsType = MapTypeCore(GetMemberType(member), $"{name}.{member.Name}");
-            var isOptional = MemberIsOptional(member);
+            var isOptional = CanOmitOnWire(member);
             var isDeprecated = member.HasAttribute(_types.Obsolete);
 
             // Read metadata attributes
@@ -892,16 +847,18 @@ public sealed class TypeWalker
                 format = daFormat;
             }
 
-            if (schemaType is not null && tsType is TsType.Primitive schemaPrimitive)
-            {
-                tsType = schemaPrimitive with { Name = schemaType };
-            }
-            else if (
-                schemaType is not null
-                && tsType is TsType.Nullable { Inner: TsType.Primitive nullableSchemaPrimitive }
+            // An explicit [RivetFormat] (even an empty one) replaces the inferred format;
+            // a DataAnnotations format only fills a leaf that has none.
+            tsType = tsType.WithLeaf(schemaType, isFormatSpecified ? format ?? "" : null);
+            if (
+                !isFormatSpecified
+                && format is not null
+                && tsType
+                    is TsType.Primitive { Format: null }
+                        or TsType.Nullable { Inner: TsType.Primitive { Format: null } }
             )
             {
-                tsType = new TsType.Nullable(nullableSchemaPrimitive with { Name = schemaType });
+                tsType = tsType.WithLeaf(null, format);
             }
 
             // Merge DataAnnotation constraints with RivetConstraints.
@@ -925,28 +882,6 @@ public sealed class TypeWalker
             else
             {
                 constraints ??= daConstraints;
-            }
-
-            // Apply format to the TsType if it's a primitive without one already
-            if (isFormatSpecified && tsType is TsType.Primitive p)
-            {
-                tsType = p with { Format = format };
-            }
-            else if (isFormatSpecified && tsType is TsType.Nullable { Inner: TsType.Primitive np })
-            {
-                tsType = new TsType.Nullable(np with { Format = format });
-            }
-            else if (format is not null && tsType is TsType.Primitive { Format: null } fallback)
-            {
-                tsType = fallback with { Format = format };
-            }
-            else if (
-                format is not null
-                && tsType
-                    is TsType.Nullable { Inner: TsType.Primitive { Format: null } nullableFallback }
-            )
-            {
-                tsType = new TsType.Nullable(nullableFallback with { Format = format });
             }
 
             if (schemaRef is not null)
@@ -1124,31 +1059,10 @@ public sealed class TypeWalker
             _ => type,
         };
 
-    public TsType MapPropertyType(IPropertySymbol property)
-    {
-        var type = MapType(property.Type);
-        var schemaType = property.GetAttribute(_types.RivetSchemaType).StringArgument();
+    public TsType MapPropertyType(IPropertySymbol property) =>
+        MapType(property.Type)
+            .WithLeaf(property.GetAttribute(_types.RivetSchemaType).StringArgument(), null);
 
-        return (type, schemaType) switch
-        {
-            (TsType.Primitive primitive, not null) => primitive with { Name = schemaType },
-            (TsType.Nullable { Inner: TsType.Primitive primitive }, not null) =>
-                new TsType.Nullable(primitive with { Name = schemaType }),
-            _ => type,
-        };
-    }
-
-    /// <summary>
-    /// P2 wave 4: lowers a [JsonPolymorphic]/[JsonDerivedType] base type to a
-    /// TaggedUnion whose variants are the [JsonDerivedType] registrations, matching
-    /// System.Text.Json's wire semantics when serializing AS the base type: the
-    /// discriminator property (default <c>$type</c>) is written first with the
-    /// registration's tag, followed by the derived type's full flattened property
-    /// surface. The base itself is a variant only if explicitly registered. Returns
-    /// null when the symbol carries neither attribute, or when the shape is
-    /// diagnosed-unsupported (non-string tags, zero registrations) — callers then
-    /// fall back to the plain flattening path.
-    /// </summary>
     /// <summary>
     /// Lowers a [RivetUnion] wrapper record to an undiscriminated union of its
     /// property types. Nullable wrappers are stripped — every variant property
@@ -1183,6 +1097,17 @@ public sealed class TypeWalker
         return new TsType.Union(variants);
     }
 
+    /// <summary>
+    /// Lowers a [JsonPolymorphic]/[JsonDerivedType] base type to a
+    /// TaggedUnion whose variants are the [JsonDerivedType] registrations, matching
+    /// System.Text.Json's wire semantics when serializing AS the base type: the
+    /// discriminator property (default <c>$type</c>) is written first with the
+    /// registration's tag, followed by the derived type's full flattened property
+    /// surface. The base itself is a variant only if explicitly registered. Returns
+    /// null when the symbol carries neither attribute, or when the shape is
+    /// diagnosed-unsupported (non-string tags, zero registrations) — callers then
+    /// fall back to the plain flattening path.
+    /// </summary>
     private TsType.TaggedUnion? TryBuildPolymorphicUnion(INamedTypeSymbol definition, string name)
     {
         AttributeData? polymorphicAttr = null;
@@ -1312,7 +1237,7 @@ public sealed class TypeWalker
                     new TsType.InlineObjectField(
                         fieldName,
                         fieldType,
-                        MemberIsOptional(member),
+                        CanOmitOnWire(member),
                         memberSurface switch
                         {
                             JsonPropertySurface.RequestOnly => TsType
@@ -1594,10 +1519,7 @@ public sealed class TypeWalker
                     var brandName = GetEmittedName(namedType);
                     var brand = new TsType.Brand(
                         brandName,
-                        ApplyTypeFormat(
-                            MapTypeCore(scalarInner, context),
-                            GetTypeFormat(namedType)
-                        ),
+                        MapTypeCore(scalarInner, context).WithLeaf(null, GetTypeFormat(namedType)),
                         GetTypeMetadata(namedType),
                         GetTypeDescription(namedType)
                     );
@@ -1731,49 +1653,18 @@ public sealed class TypeWalker
         type.GetAttribute(_types.RivetFormat).StringArgument();
 
     /// <summary>
-    /// The exact decimal literal of an enum constant: ulong constants (the only
-    /// constants Convert.ToInt64 cannot carry) write their digits directly; every
-    /// other legal underlying type converts through Int64. Decimal string literals
-    /// keep every legal C# enum constant exact through the contract IR without an
-    /// Int32 assumption (acceptance:numeric-enums-cover-all-legal-underlying-values).
+    /// The exact decimal literal of an enum constant, for every legal underlying type
+    /// (acceptance:numeric-enums-cover-all-legal-underlying-values).
     /// </summary>
-    private static string EnumLiteral(object? constantValue)
-    {
-        if (constantValue is null)
-        {
-            // An enum field without a constant value has no wire fact to emit —
-            // refuse rather than guess (packet governing rule). Unreachable for
-            // legal C# enums; reached only if the walker's field selection drifts.
-            throw new InvalidOperationException(
+    private static string EnumLiteral(object? constantValue) =>
+        Convert.ToString(constantValue, CultureInfo.InvariantCulture) is { Length: > 0 } literal
+            ? literal
+            // Unreachable for legal C# enums; reached only if the walker's field
+            // selection drifts. Refuse rather than guess.
+            : throw new InvalidOperationException(
                 "Enum member has no constant value and cannot be emitted as a numeric "
                     + "union member."
             );
-        }
-
-        if (constantValue is ulong unsigned)
-        {
-            return unsigned.ToString(CultureInfo.InvariantCulture);
-        }
-
-        return Convert
-            .ToInt64(constantValue, CultureInfo.InvariantCulture)
-            .ToString(CultureInfo.InvariantCulture);
-    }
-
-    private static TsType ApplyTypeFormat(TsType type, string? format) =>
-        format is null
-            ? type
-            : type switch
-            {
-                TsType.Primitive primitive => primitive with { Format = format },
-                TsType.Nullable { Inner: TsType.Primitive primitive } => new TsType.Nullable(
-                    primitive with
-                    {
-                        Format = format,
-                    }
-                ),
-                _ => type,
-            };
 
     private static string AtContext(string? context) => context is null ? "" : $" on '{context}'";
 
@@ -2265,14 +2156,18 @@ public sealed class TypeWalker
             ? attr.StringArgument() ?? prop.Name
             : null;
 
-    public bool IsOptionalProperty(IPropertySymbol prop)
+    /// <summary>
+    /// Requiredness of a wire member (property or field): [RivetOptional] wins, then
+    /// [Required], then the C# `required` keyword, then nullability.
+    /// </summary>
+    public bool IsOptional(ISymbol member)
     {
-        if (prop.HasAttribute(_types.RivetOptional))
+        if (member.HasAttribute(_types.RivetOptional))
         {
             return true;
         }
 
-        if (prop.HasAttribute(_types.Required))
+        if (member.HasAttribute(_types.Required))
         {
             return false;
         }
@@ -2281,35 +2176,13 @@ public sealed class TypeWalker
         // null — the one form that expresses required-AND-nullable (a real axis:
         // 139 github-corpus properties). DataAnnotations [Required] cannot say
         // this (it rejects null at MVC binding); the keyword can.
-        if (prop.IsRequired)
+        if (member is IPropertySymbol { IsRequired: true } or IFieldSymbol { IsRequired: true })
         {
             return false;
         }
 
-        // Nullable reference/value types are optional unless required/[Required]
-        if (prop.Type.NullableAnnotation == NullableAnnotation.Annotated)
-        {
-            return true;
-        }
-
-        return false;
+        return GetMemberType(member).NullableAnnotation == NullableAnnotation.Annotated;
     }
-
-    /// <summary>
-    /// Requiredness for either wire member kind: properties use the full
-    /// [RivetOptional]/[Required]/required/nullable rule PLUS the [JsonIgnore]
-    /// WhenWritingNull/WhenWritingDefault omission — a property the serializer can
-    /// leave off the wire cannot be required on the emitted schema
-    /// (acceptance:json-property-surface); fields use the nullability/attributes
-    /// without the property-only `required` keyword.
-    /// </summary>
-    private bool MemberIsOptional(ISymbol member) =>
-        member switch
-        {
-            IPropertySymbol prop => CanOmitOnWire(prop),
-            IFieldSymbol field => MemberFieldIsOptional(field),
-            _ => false,
-        };
 
     /// <summary>The declared type of a wire member (property or field).</summary>
     public static ITypeSymbol GetMemberType(ISymbol member) =>
@@ -2321,19 +2194,4 @@ public sealed class TypeWalker
                 $"Wire member '{member.Name}' is neither a property nor a field."
             ),
         };
-
-    private bool MemberFieldIsOptional(IFieldSymbol field)
-    {
-        if (field.HasAttribute(_types.RivetOptional))
-        {
-            return true;
-        }
-
-        if (field.HasAttribute(_types.Required))
-        {
-            return false;
-        }
-
-        return field.Type.NullableAnnotation == NullableAnnotation.Annotated;
-    }
 }
