@@ -29,23 +29,29 @@ internal static class CompilationLoader
             await project.GetCompilationAsync()
             ?? throw new InvalidOperationException("Failed to get compilation.");
 
+        return WithoutErrors(compilation);
+    }
+
+    /// <summary>The compilation, or null after printing its first errors to stderr.</summary>
+    private static Compilation? WithoutErrors(Compilation compilation)
+    {
         var errors = compilation
             .GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
 
-        if (errors.Count > 0)
+        if (errors.Count == 0)
         {
-            Console.Error.WriteLine($"Project has {errors.Count} compilation error(s):");
-            foreach (var error in errors.Take(10))
-            {
-                Console.Error.WriteLine($"  {error}");
-            }
-
-            return null;
+            return compilation;
         }
 
-        return compilation;
+        Console.Error.WriteLine($"C# compilation has {errors.Count} error(s):");
+        foreach (var error in errors.Take(10))
+        {
+            Console.Error.WriteLine($"  {error}");
+        }
+
+        return null;
     }
 
     private static void EnsureMSBuildRegistered()
@@ -270,22 +276,6 @@ internal static class CompilationLoader
             )
         );
 
-        var errors = compilation
-            .GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
-            .ToList();
-
-        if (errors.Count > 0)
-        {
-            Console.Error.WriteLine("C# compilation errors:");
-            foreach (var error in errors)
-            {
-                Console.Error.WriteLine($"  {error}");
-            }
-
-            return null;
-        }
-
-        return compilation;
+        return WithoutErrors(compilation);
     }
 }

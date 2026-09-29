@@ -111,7 +111,7 @@ public static class RouteParser
     /// nothing else: hyphenated names like {enterprise-team} (legal in OpenAPI
     /// path templates and common in imported specs) are one token, not a name
     /// truncated at the hyphen. Truncation here used to collide two params into
-    /// one and corrupt the re-rendered template (FABLE_ROUNDTRIP #2).
+    /// one and corrupt the re-rendered template.
     /// </summary>
     private static string ExtractParamName(string body)
     {

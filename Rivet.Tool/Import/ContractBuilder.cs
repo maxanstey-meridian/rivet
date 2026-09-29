@@ -185,8 +185,8 @@ internal static class ContractBuilder
         string? requestBodyType = null;
 
         // An optional request body (required:false — the
-        // OpenAPI default) is modeled by a nullable TInput; the emitter's E11
-        // rule re-emits it as required:false. Only for pure-body inputs on
+        // OpenAPI default) is modeled by a nullable TInput, which the emitter
+        // re-emits as required:false. Only for pure-body inputs on
         // body-carrying methods: a record that merged required path/query
         // params cannot be nullable as a whole, so that case stays loud.
         var bodyIsOptional =
@@ -935,7 +935,7 @@ internal static class ContractBuilder
             // — `per_page` no longer drifts to `perPage` (263 github query
             // params). Headers carry their original name via [RivetHeader]
             // instead; path params match route tokens by NAME (normalized), and
-            // a pin equal to the token is inert by the A14 rule.
+            // a pin equal to the token is inert (route-bound params keep the route name).
             var wireName =
                 param.In is ParameterLocation.Header
                 || string.Equals(

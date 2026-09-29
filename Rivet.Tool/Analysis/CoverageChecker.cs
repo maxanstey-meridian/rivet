@@ -626,10 +626,7 @@ public static class CoverageChecker
             .Select(value => value.ToUpperInvariant())
             .ToArray();
         var route =
-            trigger.NamedArguments.FirstOrDefault(argument => argument.Key == "Route").Value.Value
-                as string
-            ?? function.StringArgument()
-            ?? method.Name;
+            trigger.NamedArgument("Route") as string ?? function.StringArgument() ?? method.Name;
 
         return new EndpointContext(
             true,

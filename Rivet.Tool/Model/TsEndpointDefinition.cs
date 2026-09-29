@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Rivet.Tool.Model;
 
 /// <summary>
-/// A typed fetch function: export const foo = (...) => rivetFetch(...)
+/// One operation: its route, parameters, request body and responses.
 /// </summary>
 public sealed record TsEndpointDefinition(
     string Name,
@@ -33,7 +33,7 @@ public sealed record TsEndpointDefinition(
         string? BinaryRequestContentType = null,
     // .AcceptsContentType()/.ProducesContentType(): non-JSON media types for
     // JSON-schema'd bodies (text/plain string body, text/html string response).
-    // Schema is unchanged — only the declared content-type key (FABLE_ROUNDTRIP #10).
+    // Schema is unchanged — only the declared content-type key.
     [property: JsonIgnore(
         Condition = JsonIgnoreCondition.WhenWritingNull
     )] string? RequestContentTypeOverride = null,

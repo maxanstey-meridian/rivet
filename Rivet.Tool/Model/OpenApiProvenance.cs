@@ -8,19 +8,16 @@ public sealed record OpenApiDocumentProvenance(
     IReadOnlyList<OpenApiComponentExampleProvenance> ComponentExamples,
     IReadOnlyList<OpenApiComponentRequestBodyProvenance>? ComponentRequestBodies = null,
     IReadOnlyList<OpenApiVendorExtensionProvenance>? VendorExtensions = null,
-    IReadOnlyList<OpenApiComponentParameterProvenance>? ComponentParameters = null,
-    IReadOnlyList<OpenApiComponentResponseProvenance>? ComponentResponses = null,
-    IReadOnlyList<OpenApiComponentSchemaProvenance>? ComponentSchemas = null,
+    IReadOnlyList<OpenApiRawComponentProvenance>? ComponentParameters = null,
+    IReadOnlyList<OpenApiRawComponentProvenance>? ComponentResponses = null,
+    IReadOnlyList<OpenApiRawComponentProvenance>? ComponentSchemas = null,
     IReadOnlyList<OpenApiImportedSourceFileProvenance>? ImportedSourceFiles = null
 );
 
 public sealed record OpenApiImportedSourceFileProvenance(string Path, string Fingerprint);
 
-public sealed record OpenApiComponentParameterProvenance(string Name, string Json);
-
-public sealed record OpenApiComponentResponseProvenance(string Name, string Json);
-
-public sealed record OpenApiComponentSchemaProvenance(string Name, string Json);
+/// <summary>A component (parameter, response or schema) kept as its raw JSON.</summary>
+public sealed record OpenApiRawComponentProvenance(string Name, string Json);
 
 public sealed record OpenApiVendorExtensionProvenance(
     string OwnerPointer,

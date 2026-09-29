@@ -84,15 +84,6 @@ public static class SecurityParser
     internal static bool IsValidSchemeName(string name) =>
         name.Length > 0
         && name.All(character =>
-            character
-                is >= 'a'
-                    and <= 'z'
-                    or >= 'A'
-                    and <= 'Z'
-                    or >= '0'
-                    and <= '9'
-                    or '.'
-                    or '_'
-                    or '-'
+            char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-'
         );
 }

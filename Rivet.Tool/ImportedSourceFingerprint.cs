@@ -16,8 +16,6 @@ internal static class ImportedSourceFingerprint
     {
         var canonical = root.WithoutTrivia().NormalizeWhitespace(eol: "\n").ToFullString();
         return Prefix
-            + Convert
-                .ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))
-                .ToLowerInvariant();
+            + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 }

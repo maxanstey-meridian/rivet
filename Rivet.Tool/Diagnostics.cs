@@ -27,7 +27,7 @@ public static class Diagnostics
     public const string RouteBoundJsonPropertyNameIgnored = "RIV1003";
     public const string ControllerExampleUndeclaredStatus = "RIV1004";
 
-    // RIV1005 (FromHeaderParameterExcluded) retired in P2 wave 5: [FromHeader] params now
+    // RIV1005 (FromHeaderParameterExcluded) retired: [FromHeader] params now
     // map to ParamSource.Header instead of being excluded. The number is never reused.
     public const string UnmappedTypedResult = "RIV1006";
     public const string TypeNameCollision = "RIV1007";
@@ -35,10 +35,10 @@ public static class Diagnostics
     public const string UnsupportedTimeSpan = "RIV1009";
     public const string UnsupportedBigInteger = "RIV1010";
 
-    // RIV1011 (UnsupportedChar) retired in P2 wave 6: char now maps to a length-1 string
+    // RIV1011 (UnsupportedChar) retired: char now maps to a length-1 string
     // schema (the System.Text.Json wire shape) with x-rivet-csharp-type. The number is
     // never reused.
-    // RIV1012 (UnsupportedObject) retired in P2 wave 6: object/object? now map to the
+    // RIV1012 (UnsupportedObject) retired: object/object? now map to the
     // untyped (empty) schema deliberately and silently — "any JSON value" is exactly
     // what the type declares. The number is never reused.
     public const string DictionaryKeyTypeDropped = "RIV1013";

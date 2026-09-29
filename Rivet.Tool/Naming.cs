@@ -37,15 +37,7 @@ internal static class Naming
     public static string UniqueName(string baseName, ISet<string> used) =>
         NameCandidates(baseName).First(used.Add);
 
-    public static string ToCamelCase(string name)
-    {
-        if (string.IsNullOrEmpty(name))
-        {
-            return name;
-        }
-
-        return JsonNamingPolicy.CamelCase.ConvertName(name);
-    }
+    public static string ToCamelCase(string name) => JsonNamingPolicy.CamelCase.ConvertName(name);
 
     /// <summary>
     /// Casing policies for enum wire values declared by a
@@ -71,40 +63,25 @@ internal static class Naming
     /// extension ("x-rivet-enum-naming-policy") for a policy — the import
     /// round-trip's single carrier.
     /// </summary>
-    public static string ToPolicyToken(RivetNamingPolicy policy) =>
-        policy switch
-        {
-            RivetNamingPolicy.LowerCase => "lowerCase",
-            RivetNamingPolicy.CamelCase => "camelCase",
-            RivetNamingPolicy.SnakeCase => "snakeCase",
-            RivetNamingPolicy.KebabCase => "kebabCase",
-            _ => throw new ArgumentOutOfRangeException(nameof(policy), policy, null),
-        };
+    public static string ToPolicyToken(RivetNamingPolicy policy) => ToCamelCase(policy.ToString());
 
     /// <summary>
-    /// Parses a naming-policy token; null for anything that is not a declared
+    /// Parses a naming-policy token; false for anything that is not a declared
     /// policy — the import path refuses to guess an unknown token's casing.
     /// </summary>
     public static bool TryPolicyFromToken(string token, out RivetNamingPolicy policy)
     {
-        policy = default;
-        switch (token)
+        foreach (var candidate in Enum.GetValues<RivetNamingPolicy>())
         {
-            case "lowerCase":
-                policy = RivetNamingPolicy.LowerCase;
+            if (ToPolicyToken(candidate) == token)
+            {
+                policy = candidate;
                 return true;
-            case "camelCase":
-                policy = RivetNamingPolicy.CamelCase;
-                return true;
-            case "snakeCase":
-                policy = RivetNamingPolicy.SnakeCase;
-                return true;
-            case "kebabCase":
-                policy = RivetNamingPolicy.KebabCase;
-                return true;
-            default:
-                return false;
+            }
         }
+
+        policy = default;
+        return false;
     }
 
     /// <summary>

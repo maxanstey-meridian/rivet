@@ -10,12 +10,15 @@ namespace Rivet.Tool.Emit;
 /// through the importer.
 /// </summary>
 public sealed record OpenApiDocumentInfo(
-    string Title = "API",
-    string Version = "1.0.0",
+    string Title = OpenApiDocumentInfo.DefaultTitle,
+    string Version = OpenApiDocumentInfo.DefaultVersion,
     IReadOnlyList<string>? Servers = null,
     OpenApiDocumentProvenance? Provenance = null
 )
 {
+    private const string DefaultTitle = "API";
+    private const string DefaultVersion = "1.0.0";
+
     public static OpenApiDocumentInfo Resolve(
         OpenApiDocumentProvenance? provenance,
         string? title,
@@ -23,8 +26,8 @@ public sealed record OpenApiDocumentInfo(
         IReadOnlyList<string>? servers
     )
     {
-        var resolvedTitle = title ?? provenance?.Info.Title ?? "API";
-        var resolvedVersion = version ?? provenance?.Info.Version ?? "1.0.0";
+        var resolvedTitle = title ?? provenance?.Info.Title ?? DefaultTitle;
+        var resolvedVersion = version ?? provenance?.Info.Version ?? DefaultVersion;
         var resolvedProvenance = provenance is null
             ? null
             : provenance with

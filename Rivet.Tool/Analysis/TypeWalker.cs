@@ -11,7 +11,7 @@ namespace Rivet.Tool.Analysis;
 /// <summary>
 /// The HTTP surface a wire schema describes: request (what the host accepts) or
 /// response (what the host sends). Property accessibility/ignore semantics differ
-/// between them (planner-constraint:json-surface-position-aware).
+/// between them.
 /// </summary>
 public enum JsonSurfaceDirection
 {
@@ -45,7 +45,7 @@ public sealed class TypeWalker
     private readonly Dictionary<string, TsType> _enums = new();
     private readonly HashSet<string> _visiting = new();
 
-    // A5: emitted-name registry keyed by fully-qualified name (namespace + arity).
+    // Emitted-name registry keyed by fully-qualified name (namespace + arity).
     // Distinct types whose simple names collide get deterministic numeric suffixes
     // (discovery order), mirroring the component-name registry in OpenApiEmitter.
     private readonly Dictionary<string, string> _emittedNames = new(StringComparer.Ordinal);
@@ -130,7 +130,7 @@ public sealed class TypeWalker
         _jsonObjectType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonObject");
         _jsonArrayType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonArray");
 
-        // Diagnosed-unsupported scalars (FABLE_GAPS §7 item 12) — resolved up front
+        // Diagnosed-unsupported scalars — resolved up front
         // so the fallback path can name them instead of failing silently.
         _timeSpanType = compilation.GetTypeByMetadataName("System.TimeSpan");
         _bigIntegerType = compilation.GetTypeByMetadataName("System.Numerics.BigInteger");
@@ -363,16 +363,14 @@ public sealed class TypeWalker
     /// attribute's parameterless form, i.e. Always.
     /// </summary>
     private static JsonIgnoreCondition? ReadJsonIgnoreCondition(AttributeData attribute) =>
-        attribute.NamedArguments.FirstOrDefault(kv => kv.Key == "Condition").Value.Value is int raw
-            ? (JsonIgnoreCondition)raw
-            : null;
+        attribute.NamedArgument("Condition") is int raw ? (JsonIgnoreCondition)raw : null;
 
     /// <summary>
     /// Whether the property is serialized/deserialized under default System.Text.Json
     /// web options for the queried direction, per observed serializer behavior:
     /// public get+set properties surface in both directions; get-only properties
     /// serialize on the response and deserialize only when bound by a matching
-    /// constructor parameter (records — planner-constraint:stj-constructor-truth);
+    /// constructor parameter (records);
     /// set-only properties deserialize only (request); non-public members are absent
     /// unless [JsonInclude] (fields likewise). Unsupported shapes are reported and
     /// excluded rather than guessed.
@@ -388,8 +386,7 @@ public sealed class TypeWalker
         if (prop.Type.Kind == SymbolKind.DynamicType)
         {
             // Dynamic members keep parity with the established object handling:
-            // the untyped-schema representation, never silent disappearance
-            // (planner-constraint:object-dynamic-parity).
+            // the untyped-schema representation, never silent disappearance.
             return JsonPropertySurface.Both;
         }
 
@@ -413,7 +410,7 @@ public sealed class TypeWalker
         {
             // Get-only property. STJ deserializes it only via a matching constructor
             // parameter (records) or a public parameterized constructor — response
-            // surface otherwise (planner-constraint:stj-constructor-truth).
+            // surface otherwise.
             if (getterPublic || hasInclude)
             {
                 return IsDeserializableViaConstructor(prop)
@@ -433,7 +430,7 @@ public sealed class TypeWalker
         // accessor for its direction. [JsonInclude] on the property pulls the
         // non-public side in too — STJ serializes via the public accessor and
         // deserializes via the included non-public accessor, so the property
-        // surfaces in both directions (planner-constraint:mixed-accessor-include-truth).
+        // surfaces in both directions.
         if (hasInclude)
         {
             return JsonPropertySurface.Both;
@@ -446,16 +443,14 @@ public sealed class TypeWalker
     /// The wire surface of a FIELD member under default System.Text.Json web options.
     /// Fields have no accessors: STJ touches the member directly, so [JsonInclude]
     /// means both-surface (serialized and deserialized) regardless of accessibility;
-    /// without the include a field is invisible to the serializer
-    /// (planner-constraint:jsoninclude-fields-represented).
+    /// without the include a field is invisible to the serializer.
     /// </summary>
     public JsonPropertySurface GetJsonFieldSurface(IFieldSymbol field)
     {
         if (field.Type.Kind == SymbolKind.DynamicType)
         {
             // Dynamic members keep parity with the established object handling:
-            // untyped-schema representation, never silent disappearance
-            // (planner-constraint:object-dynamic-parity).
+            // untyped-schema representation, never silent disappearance.
             return JsonPropertySurface.Both;
         }
 
@@ -536,7 +531,7 @@ public sealed class TypeWalker
         ) || IsOptional(member);
 
     /// <summary>
-    /// A3: flattens the wire-member surface of a type across its BaseType chain
+    /// Flattens the wire-member surface of a type across its BaseType chain
     /// (base-most first; derived declarations win on name collision — overrides and
     /// shadowing both resolve to the most-derived declaration). Stops at object/ValueType
     /// and at base types outside the walkable assemblies. Skips static/indexer/implicitly
@@ -590,7 +585,7 @@ public sealed class TypeWalker
                 {
                     // [JsonInclude] public fields are statically visible wire surface
                     // (serialized and deserialized under default web options);
-                    // non-included fields stay absent (planner-constraint:jsoninclude-fields-represented).
+                    // non-included fields stay absent.
                     // Auto-property backing fields are compiler detail — the property
                     // represents them; properties win on a name collision.
                     if (field.IsStatic || field.IsConst || field.AssociatedSymbol is not null)
@@ -652,7 +647,7 @@ public sealed class TypeWalker
     {
         // For closed generics like PagedResult<MessageDto>, walk the open definition
         var definition = symbol.IsGenericType ? symbol.OriginalDefinition : symbol;
-        // A5: resolve via the full-namespace registry — same FQN reuses its emitted name,
+        // Resolve via the full-namespace registry — same FQN reuses its emitted name,
         // a simple-name collision gets a deterministic disambiguated name + loud diagnostic
         var name = GetEmittedName(definition);
 
@@ -675,7 +670,7 @@ public sealed class TypeWalker
         // Extract type parameter names (e.g. "T", "TItem")
         var typeParams = definition.TypeParameters.Select(tp => tp.Name).ToList();
 
-        // P2 wave 4: a [JsonPolymorphic]/[JsonDerivedType] base type registers as a
+        // A [JsonPolymorphic]/[JsonDerivedType] base type registers as a
         // TaggedUnion alias definition (oneOf + discriminator + mapping) instead of
         // silently flattening to its own property surface. Diagnosed-unsupported
         // shapes (non-string tags, zero registrations) fall through to flattening.
@@ -712,9 +707,9 @@ public sealed class TypeWalker
 
         var properties = new List<TsPropertyDefinition>();
 
-        // A3: include inherited members by flattening the BaseType chain. The shared
+        // Include inherited members by flattening the BaseType chain. The shared
         // per-type component schema represents accessibility-derived asymmetry via
-        // readOnly/writeOnly (planner-constraint:component-schema-directionality);
+        // readOnly/writeOnly;
         // explicit [RivetReadOnly]/[RivetWriteOnly] take precedence over the derived
         // marker below.
         foreach (var member in GetEffectiveProperties(definition))
@@ -735,7 +730,7 @@ public sealed class TypeWalker
                 continue;
             }
 
-            // P2 wave 5: [RivetHeader] properties are request header params, never part
+            // [RivetHeader] properties are request header params, never part
             // of a JSON schema — ContractWalker/EndpointWalker surface them as
             // ParamSource.Header params instead.
             if (member is IPropertySymbol headerCheck && GetHeaderName(headerCheck) is not null)
@@ -828,7 +823,7 @@ public sealed class TypeWalker
             }
 
             // Accessibility-derived asymmetry becomes readOnly/writeOnly on the shared
-            // component schema (planner-constraint:component-schema-directionality);
+            // component schema;
             // explicit [RivetReadOnly]/[RivetWriteOnly] attributes take precedence
             // (their assignment above wins because the derived marker only fills false).
             if (!isReadOnly && memberSurface == JsonPropertySurface.ResponseOnly)
@@ -1118,12 +1113,7 @@ public sealed class TypeWalker
         }
 
         var discriminator = "$type";
-        if (
-            polymorphicAttr
-                ?.NamedArguments.FirstOrDefault(a => a.Key == "TypeDiscriminatorPropertyName")
-                .Value.Value
-            is string custom
-        )
+        if (polymorphicAttr?.NamedArgument("TypeDiscriminatorPropertyName") is string custom)
         {
             discriminator = custom;
         }
@@ -1180,8 +1170,7 @@ public sealed class TypeWalker
                     continue;
                 }
 
-                // Variants are the shared wire shape for both directions
-                // (planner-constraint:tagged-union-variant-surface): keep every
+                // Variants are the shared wire shape for both directions: keep every
                 // non-Excluded member and represent RequestOnly/ResponseOnly
                 // asymmetry via the field surface marker (emitted as
                 // writeOnly/readOnly), never Both-only filtering.
@@ -1231,7 +1220,7 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// A5: returns the emitted (schema/TS) name for a type. Keyed internally by
+    /// Returns the emitted schema name for a type. Keyed internally by
     /// fully-qualified name so distinct types never silently merge; the emitted name
     /// stays the short simple name unless it collides, in which case the later type
     /// gets a deterministic numeric suffix (discovery order) and a loud diagnostic —
@@ -1284,7 +1273,7 @@ public sealed class TypeWalker
         }
 
         // Nullable reference type annotation.
-        // A12: must run before the type-parameter check so Wrapper<T>(T? Value)
+        // Must run before the type-parameter check so Wrapper<T>(T? Value)
         // lowers as Nullable(TypeParam), not bare TypeParam.
         if (
             symbol.NullableAnnotation == NullableAnnotation.Annotated
@@ -1311,7 +1300,7 @@ public sealed class TypeWalker
         // Array T[]
         if (symbol is IArrayTypeSymbol arrayType)
         {
-            // byte[] (FABLE_GAPS spec/wire divergence): System.Text.Json serializes
+            // byte[]: System.Text.Json serializes
             // byte[] as a base64 STRING on the wire, never as an integer array — the
             // spec must match the wire. Lowered as a string primitive with format
             // "base64" (emitted as contentEncoding: base64, the OpenAPI 3.1 idiom);
@@ -1356,7 +1345,7 @@ public sealed class TypeWalker
             // Dictionary<K, V>
             if (IsDictionaryType(namedType) && namedType.TypeArguments.Length == 2)
             {
-                // FABLE_GAPS §7 item 12: non-string keys carry their contract
+                // Non-string keys carry their contract
                 // representation on the Dictionary node (emitted as propertyNames):
                 // enums (registering the previously-vanishing key-enum schema),
                 // string-backed brands, and primitives System.Text.Json serializes
@@ -1383,7 +1372,7 @@ public sealed class TypeWalker
             // honoring [JsonStringEnumMemberName].
             if (namedType.TypeKind == TypeKind.Enum)
             {
-                // A5: full-namespace keyed naming — colliding enum names disambiguate
+                // Full-namespace keyed naming — colliding enum names disambiguate
                 // loudly instead of first-wins TryAdd
                 var enumName = GetEmittedName(namedType);
                 if (!_enums.ContainsKey(enumName))
@@ -1522,10 +1511,10 @@ public sealed class TypeWalker
             return new TsType.InlineObject(fields);
         }
 
-        // Diagnosed-unsupported scalars (FABLE_GAPS §7 item 12): TimeSpan and BigInteger
+        // Diagnosed-unsupported scalars: TimeSpan and BigInteger
         // fall through to the empty {} fallback schema with a diagnostic naming the
         // cause — diagnose, don't change the wire. char (length-1 string) and object
-        // (deliberately untyped) graduated to supported mappings in P2 wave 6
+        // (deliberately untyped) graduated to supported mappings
         // (RIV1011/RIV1012 retired).
         var unsupportedId = symbol switch
         {
@@ -1635,7 +1624,7 @@ public sealed class TypeWalker
     private static string AtContext(string? context) => context is null ? "" : $" on '{context}'";
 
     /// <summary>
-    /// FABLE_GAPS §7 item 12 (P2 wave 3): maps a dictionary key type to its contract
+    /// Maps a dictionary key type to its contract
     /// representation, or null for plain string keys (the propertyNames-less default).
     /// Supported: string, enums (mapping registers the key enum's schema — the
     /// "vanishing key-enum" fix), string-backed value-object brands, and primitives
@@ -1713,7 +1702,7 @@ public sealed class TypeWalker
     /// True when the symbol is a supported collection (List/IList/ICollection/
     /// IEnumerable/IReadOnlyList/IReadOnlyCollection, or an array) whose element is
     /// the given type. Used by walkers to detect collection-of-IFormFile multipart
-    /// parts (FABLE_GAPS §7 item 12).
+    /// parts.
     /// </summary>
     public bool IsCollectionOf(ITypeSymbol symbol, INamedTypeSymbol? element)
     {
@@ -1741,12 +1730,12 @@ public sealed class TypeWalker
         var result = symbol.SpecialType switch
         {
             SpecialType.System_String => new TsType.Primitive("string"),
-            // char (P2 wave 6): System.Text.Json writes char as a single-character
+            // char: System.Text.Json writes char as a single-character
             // JSON string (and char dictionary keys as single-character property
             // names) — the emitter pins both length bounds to 1; CSharpType recovers
             // the exact type on import.
             SpecialType.System_Char => new TsType.Primitive("string", null, "char"),
-            // object (P2 wave 6): "any JSON value" — the untyped (empty) schema is
+            // object: "any JSON value" — the untyped (empty) schema is
             // the honest spec for it, deliberately and silently. CSharpType "object"
             // tells the emitter the untyped emission is intentional (no RIV2005);
             // the wire schema stays a bare {} with no sidecar.
@@ -1845,7 +1834,7 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// FABLE_ROUNDTRIP cross-corpus #1: a bodyless-method input can only lower to
+    /// A bodyless-method input can only lower to
     /// route/query params when its JSON surface IS its property surface. Maps,
     /// collections and scalars serialize as a single value — enumerating their CLR
     /// properties (Count, Keys, Comparer, Capacity, …) invents wire params.
@@ -1996,7 +1985,7 @@ public sealed class TypeWalker
                     break;
 
                 case { Length: >= 2 } when attr.Is(_types.Range):
-                    // A9: the (Type, string, string) overload puts an ITypeSymbol in arg 0 —
+                    // The (Type, string, string) overload puts an ITypeSymbol in arg 0 —
                     // the old Convert.ToDouble crashed the tool with InvalidCastException
                     var args = attr.ConstructorArguments;
                     var (minArg, maxArg) =
@@ -2081,7 +2070,7 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// A9: converts a [Range] constructor argument to double. Strings parse with
+    /// Converts a [Range] constructor argument to double. Strings parse with
     /// InvariantCulture (the old Convert.ToDouble misparsed under comma-decimal locales).
     /// </summary>
     private static bool TryConvertRangeBound(object? value, out double result)
@@ -2132,7 +2121,7 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// P2 wave 5: the wire header name of a [RivetHeader] property, or null when the
+    /// The wire header name of a [RivetHeader] property, or null when the
     /// property is not header-bound. The attribute's name argument keeps the original
     /// casing ("Notion-Version"); without one the property name itself is the header name.
     /// </summary>

@@ -41,24 +41,15 @@ internal static class OpenApiProvenanceReader
         var componentExamples = ReadComponentExamples(root);
         var componentRequestBodies = ReadComponentRequestBodies(root);
         var componentParameters = ReadComponents(root, "parameters")
-            .Select(component => new OpenApiComponentParameterProvenance(
-                component.Name,
-                component.Json
-            ))
+            .Select(component => new OpenApiRawComponentProvenance(component.Name, component.Json))
             .ToList();
         var componentResponses = ReadComponents(root, "responses")
-            .Select(component => new OpenApiComponentResponseProvenance(
-                component.Name,
-                component.Json
-            ))
+            .Select(component => new OpenApiRawComponentProvenance(component.Name, component.Json))
             .ToList();
         var schemaComponents = ReadComponents(root, "schemas");
         var componentSchemas = schemaComponents
             .Where(component => NeedsSchemaProvenance(component.Value))
-            .Select(component => new OpenApiComponentSchemaProvenance(
-                component.Name,
-                component.Json
-            ))
+            .Select(component => new OpenApiRawComponentProvenance(component.Name, component.Json))
             .ToList();
         var opaqueSchemaPointers = schemaComponents
             .Where(component => NeedsSchemaProvenance(component.Value))

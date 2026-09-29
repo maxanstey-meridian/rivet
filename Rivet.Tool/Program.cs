@@ -24,7 +24,7 @@ static async Task<int> Run(string[] args)
         return 1;
     }
 
-    // Contract JSON mode: JSON → TypeScript (same emitters as Roslyn path)
+    // Contract JSON mode: the same emitter as the Roslyn path
     if (options.FromContractPath is not null)
     {
         return await RunFromContract(options);

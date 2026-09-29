@@ -236,26 +236,23 @@ internal static class OpenApiProvenanceWalker
             .OrderBy(value => value.Order)
             .Select(value => value.RequestBody)
             .ToList();
-        var componentParameters = ReadJsonComponents<OpenApiComponentParameterProvenance>(
+        var componentParameters = ReadJsonComponents(
             compilation,
             attributes,
             "Rivet.RivetDocumentParameterAttribute",
-            "parameter",
-            static (name, json) => new OpenApiComponentParameterProvenance(name, json)
+            "parameter"
         );
-        var componentResponses = ReadJsonComponents<OpenApiComponentResponseProvenance>(
+        var componentResponses = ReadJsonComponents(
             compilation,
             attributes,
             "Rivet.RivetDocumentResponseAttribute",
-            "response",
-            static (name, json) => new OpenApiComponentResponseProvenance(name, json)
+            "response"
         );
-        var componentSchemas = ReadJsonComponents<OpenApiComponentSchemaProvenance>(
+        var componentSchemas = ReadJsonComponents(
             compilation,
             attributes,
             "Rivet.RivetDocumentSchemaAttribute",
-            "schema",
-            static (name, json) => new OpenApiComponentSchemaProvenance(name, json)
+            "schema"
         );
         var importedSourceFiles = attributes
             .OfAttribute(compilation, "Rivet.RivetImportedSourceFileAttribute")
@@ -449,12 +446,11 @@ internal static class OpenApiProvenanceWalker
         );
     }
 
-    private static IReadOnlyList<T> ReadJsonComponents<T>(
+    private static IReadOnlyList<OpenApiRawComponentProvenance> ReadJsonComponents(
         Compilation compilation,
         IReadOnlyList<AttributeData> attributes,
         string attributeName,
-        string kind,
-        Func<string, string, T> create
+        string kind
     ) =>
         attributes
             .OfAttribute(compilation, attributeName)
@@ -478,7 +474,7 @@ internal static class OpenApiProvenanceWalker
                         $"Invalid Rivet document component {kind} JSON for '{name}': {exception.Message}"
                     );
                 }
-                return (Order: order, Component: create(name, json));
+                return (Order: order, Component: new OpenApiRawComponentProvenance(name, json));
             })
             .OrderBy(value => value.Order)
             .Select(value => value.Component)

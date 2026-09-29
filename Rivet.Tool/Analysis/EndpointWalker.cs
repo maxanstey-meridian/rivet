@@ -230,8 +230,7 @@ public static class EndpointWalker
     /// fixed-status typed results (the TypedResultStatusCodes table) and Results&lt;T1,..&gt;
     /// arities are excluded: their status/branches are read statically elsewhere, and
     /// Results&lt;...&gt; unmapped branches refuse with the specific unmapped-result
-    /// diagnostic rather than this generic container refusal
-    /// (planner-constraint:container-guard-excludes-fixed-and-results).
+    /// diagnostic rather than this generic container refusal.
     /// </summary>
     internal static bool IsStatusSelectingResultContainer(WellKnownTypes wkt, ITypeSymbol type)
     {
@@ -563,7 +562,7 @@ public static class EndpointWalker
     }
 
     /// <summary>
-    /// A6: substitutes ASP.NET <c>[controller]</c>/<c>[action]</c> route tokens.
+    /// Substitutes ASP.NET <c>[controller]</c>/<c>[action]</c> route tokens.
     /// <c>[controller]</c> resolves to the controller class name minus the
     /// "Controller" suffix; <c>[action]</c> to the action method name.
     /// Token matching is case-insensitive, matching ASP.NET conventions.
@@ -657,14 +656,14 @@ public static class EndpointWalker
             }
 
             // IFormFile maps to the Web API File type — don't walk it through Roslyn.
-            // Collection-of-IFormFile params emit array-of-binary (FABLE_GAPS §7 item 12).
+            // Collection-of-IFormFile params emit array-of-binary.
             var tsType =
                 source == ParamSource.File
                     ? typeWalker.IsCollectionOf(param.Type, wkt.IFormFile)
                         ? new TsType.Array(new TsType.Primitive("File"))
                         : (TsType)new TsType.Primitive("File")
                     : typeWalker.MapType(param.Type);
-            // E8: a C# default value makes the param optional on the wire.
+            // A C# default value makes the param optional on the wire.
             // FromQuery(Name=)/FromRoute(Name=)/FromForm(Name=) rename the wire surface
             // to match the actual request key / route placeholder (IModelNameProvider).
             var wireName = GetBindingName(param, WireNamedSources(wkt)) ?? param.Name;
@@ -745,8 +744,7 @@ public static class EndpointWalker
                     continue;
                 }
 
-                var named = attr.NamedArguments.FirstOrDefault(kv => kv.Key == "Name");
-                if (named.Value.Value is string name && !string.IsNullOrEmpty(name))
+                if (attr.NamedArgument("Name") is string name && !string.IsNullOrEmpty(name))
                 {
                     return name;
                 }
@@ -758,7 +756,7 @@ public static class EndpointWalker
 
     /// <summary>
     /// The literal source text of a parameter's C# default value (for example "20"
-    /// for `int limit = 20`, "default" for a default literal), or null. E8: surfaced
+    /// for `int limit = 20`, "default" for a default literal), or null. Surfaced
     /// on the param so emitters can publish schema.default alongside IsOptional —
     /// the contract frontend already flows [RivetDefault] through the same field.
     /// </summary>
@@ -938,7 +936,7 @@ public static class EndpointWalker
     /// <summary>
     /// Refusal for an unattributed parameter whose transport source cannot be
     /// established: the extraction aborts instead of emitting a contract that
-    /// silently omits user input (planner-constraint:unresolved-facts-refuse-emission).
+    /// silently omits user input.
     /// Never returns normally — the return exists so `??` flow analysis can see it.
     /// </summary>
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
@@ -1103,8 +1101,7 @@ public static class EndpointWalker
                     else
                     {
                         // An unmapped Results<> branch must never vanish from a
-                        // successful contract: refuse instead of warn-and-omit
-                        // (planner-constraint:unresolved-facts-refuse-emission).
+                        // successful contract: refuse instead of warn-and-omit.
                         throw new RivetUserException(
                             $"error {Diagnostics.UnmappedTypedResult}: typed result "
                                 + $"'{resultArg.ToDisplayString()}' in Results<...> on endpoint "
@@ -1131,7 +1128,7 @@ public static class EndpointWalker
 
     /// <summary>
     /// Reads a [ProducesResponseType(typeof(T), code)] / [ProducesResponseType(code)] /
-    /// generic [ProducesResponseType&lt;T&gt;(code)] (A7 — .NET 7+) attribute.
+    /// generic [ProducesResponseType&lt;T&gt;(code)] (.NET 7+) attribute.
     /// Returns null when the attribute is neither form.
     /// </summary>
     private static (ITypeSymbol? Type, int? StatusCode)? ReadProducesResponseType(
@@ -1145,7 +1142,7 @@ public static class EndpointWalker
             return null;
         }
 
-        // A7: generic ProducesResponseTypeAttribute`1 is a distinct symbol — the body
+        // Generic ProducesResponseTypeAttribute`1 is a distinct symbol — the body
         // type rides on the attribute class's type argument, the status on ctor arg 0
         if (
             wkt.ProducesResponseTypeOfT is not null
@@ -1208,7 +1205,7 @@ public static class EndpointWalker
 
         foreach (var attr in method.GetAttributes())
         {
-            // A7: covers the classic and the generic [ProducesResponseType<T>] forms
+            // Covers the classic and the generic [ProducesResponseType<T>] forms
             var parsed = ReadProducesResponseType(wkt, attr);
             if (parsed is not { StatusCode: int statusCode })
             {

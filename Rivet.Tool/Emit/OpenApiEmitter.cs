@@ -162,7 +162,7 @@ public sealed class OpenApiEmitter
             doc["servers"] = ArrayOf(provenanceServers.Select(BuildServer));
         }
 
-        // W4: operations carry tags — declare them in the global tags array
+        // Operations carry tags — declare them in the global tags array
         // (operation-tag-defined; docs-UI consumers use it for grouping/ordering).
         if (documentInfo.Provenance is { } documentProvenance)
         {
@@ -955,11 +955,10 @@ public sealed class OpenApiEmitter
 
             // RIV1102 defense in depth: HTTP forbids a message body on 1xx/204/205/304.
             // Authored examples or contents there could never reach the wire, so
-            // emission aborts before any output is written (mirrors the RIV2012
-            // path: typed exception → EmitPipeline catch → exit 1). The parse-side
-            // guard in ResponseStatusValidation runs on every frontend; this re-check
-            // catches any path that assembled content without passing through it.
-            // captures any path that assembled content without passing through it.
+            // emission aborts before any output is written (a RivetUserException, exit 1,
+            // as for RIV2012). The parse-side guard in ResponseStatusValidation runs on
+            // every frontend; this re-check catches any path that assembled content
+            // without passing through it.
             // A bare DataType on a body-forbidden status is the synthesized
             // status-preservation artifact (e.g. a .Status(204) override with
             // TOutput in scope); it is not authored content, so it emits
@@ -1371,7 +1370,7 @@ public sealed class OpenApiEmitter
     }
 
     /// <summary>
-    /// WP-1.1: the record name the importer should synthesize for an inline request-body
+    /// The record name the importer should synthesize for an inline request-body
     /// schema (emitted as <c>x-rivet-input-type</c>). Mirrors the importer's
     /// <c>{fieldName}Request</c> convention but pins it explicitly, so the name survives
     /// operationId/tag hand-edits.
@@ -1598,8 +1597,7 @@ public sealed class OpenApiEmitter
         // Route-filtered lowering is request surface: a response-only property
         // (serialized but never deserializable — derived readOnly, or an explicit
         // [RivetReadOnly]) cannot appear in a request body; route-bound properties
-        // are excluded as before (they are bound by the route, not the JSON body)
-        // (planner-constraint:component-schema-directionality).
+        // are excluded as before (they are bound by the route, not the JSON body).
         bodyProperties = sourceProperties
             .Where(prop => !matchedBodyNames.Contains(prop.Name) && !prop.IsReadOnly)
             .ToList();
@@ -2092,8 +2090,7 @@ public sealed class OpenApiEmitter
         foreach (var field in obj.Fields)
         {
             var fieldSchema = MapTsTypeToJsonSchema(field.Type, context);
-            // Polymorphic-variant surface asymmetry becomes readOnly/writeOnly
-            // (planner-constraint:tagged-union-variant-surface).
+            // Polymorphic-variant surface asymmetry becomes readOnly/writeOnly.
             if (field.Surface is TsType.InlineObjectFieldSurface.ResponseOnly)
             {
                 fieldSchema["readOnly"] = true;
@@ -2123,8 +2120,8 @@ public sealed class OpenApiEmitter
     private JsonObject BuildTaggedUnionSchema(TsType.TaggedUnion tu, string? context = null)
     {
         // OpenAPI `discriminator` is only meaningful on a oneOf of $ref'd named schemas with
-        // a tag→$ref mapping — consumers reject or ignore a discriminator over inline schemas
-        // (E11). Each inline variant becomes a named component schema referenced via $ref.
+        // a tag→$ref mapping — consumers reject or ignore a discriminator over inline schemas.
+        // Each inline variant becomes a named component schema referenced via $ref.
         var baseName =
             _taggedUnionNames.GetValueOrDefault(InlineTypeExtractor.CanonicalHash(tu))
             ?? TsType.GetNameSuffix(tu);
@@ -2182,7 +2179,7 @@ public sealed class OpenApiEmitter
         {
             if (p.CSharpType is null)
             {
-                // The catch-all used to name no symbol at all (FABLE_GAPS §7 item 12) —
+                // The catch-all used to name no symbol at all —
                 // context threads the offending type/property or endpoint site through.
                 Diagnostics.Warn(
                     Diagnostics.UnknownTypeUntypedSchema,
@@ -2200,7 +2197,7 @@ public sealed class OpenApiEmitter
             return unknownSchema;
         }
 
-        // byte[] (FABLE_GAPS spec/wire divergence): System.Text.Json serializes byte[]
+        // byte[]: System.Text.Json serializes byte[]
         // as a base64 string on the wire, so the schema is type: string with
         // contentEncoding: base64 — the OpenAPI 3.1 idiom (`format: byte` is the
         // deprecated 3.0 spelling). x-rivet-csharp-type carries the exact C# type
@@ -2219,7 +2216,7 @@ public sealed class OpenApiEmitter
             return base64Schema;
         }
 
-        // char (P2 wave 6): System.Text.Json serializes char as a single-character
+        // char: System.Text.Json serializes char as a single-character
         // JSON string on the wire, so the schema is a string with both length bounds
         // pinned to 1. x-rivet-csharp-type carries the exact C# type for lossless
         // import round-trips (a plain length-1 string stays a C# string).
@@ -2486,7 +2483,7 @@ public sealed class OpenApiEmitter
         var genericInstances = new Dictionary<string, TsType.Generic>();
         CollectGenericInstances(endpoints, genericInstances);
 
-        // E6: templates are skipped during collection (their unresolved Generic refs are
+        // Templates are skipped during collection (their unresolved Generic refs are
         // garbage like PagedResult_T), so nested instantiations only surface when a
         // template's properties are resolved against concrete type args. Iterate to a
         // fixpoint so e.g. Wrapper<X> { PagedResult<X> } registers PagedResult_X too.
@@ -2533,9 +2530,9 @@ public sealed class OpenApiEmitter
         {
             if (!_definitions.TryGetValue(generic.Name, out var genericDef))
             {
-                // E6: a generic instantiation whose template is absent from definitions used
+                // A generic instantiation whose template is absent from definitions used
                 // to emit a $ref with no matching component — a dangling reference every
-                // consumer rejects (GAP-1). Never emit a dangling $ref: warn loudly and
+                // consumer rejects. Never emit a dangling $ref: warn loudly and
                 // synthesize a valid free-form fallback component under the $ref'd name.
                 Diagnostics.Warn(
                     Diagnostics.GenericTemplateMissing,
@@ -2852,7 +2849,7 @@ public sealed class OpenApiEmitter
             {
                 schema["format"] = p.Format;
             }
-            // char keys (P2 wave 6): single-character property names on the wire —
+            // char keys: single-character property names on the wire —
             // same length-1 shape as the char property schema.
             if (p.CSharpType is "char")
             {
@@ -2891,7 +2888,7 @@ public sealed class OpenApiEmitter
         // Every definition schema is emitted, so every generic it uses must be monomorphised.
         foreach (var (_, def) in _definitions)
         {
-            // E6: skip generic TEMPLATE definitions — their Generic refs still contain
+            // Skip generic TEMPLATE definitions — their Generic refs still contain
             // unresolved TypeParams and used to register garbage Foo_T instances. Only
             // concrete instantiations monomorphise (nested ones via the fixpoint pass).
             if (def.TypeParameters.Count > 0)

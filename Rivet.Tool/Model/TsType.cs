@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Rivet.Tool.Model;
 
 /// <summary>
-/// Intermediate representation of a TypeScript type expression.
+/// Intermediate representation of a schema type.
 /// Produced by the type walker, consumed by the emitter. The JSON shape (discriminated by
 /// <c>kind</c>) is the contract-JSON wire format in <c>rivet-contract-schema.json</c>.
 /// </summary>
@@ -110,8 +110,7 @@ public abstract record TsType
     /// The wire surface an inline-object field participates in. Polymorphic variants are
     /// the shared wire shape for both directions; a derived property System.Text.Json only
     /// serializes (or only deserializes) keeps its variant presence with the asymmetry
-    /// expressed as readOnly/writeOnly on emission
-    /// (planner-constraint:tagged-union-variant-surface).
+    /// expressed as readOnly/writeOnly on emission.
     /// </summary>
     public enum InlineObjectFieldSurface
     {
@@ -222,7 +221,7 @@ public abstract record TsType
             Literal literal => LiteralNameSuffix(literal.Value),
             // Field TYPES are part of the suffix: naming by field names alone made
             // Wrapper<{value:string}> and Wrapper<{value:number}> collide on "Wrapper_Value"
-            // and silently overwrite each other's component schema (E2).
+            // and silently overwrite each other's component schema.
             InlineObject obj => obj.Fields.Count <= 3
                 ? string.Join(
                     "_",

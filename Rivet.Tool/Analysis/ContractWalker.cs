@@ -416,13 +416,13 @@ public static class ContractWalker
         // base64 JSON string, so an ordinary Define.Get<byte[]> response emits the
         // base64 string schema (TypeWalker's mapping) — NOT a binary file. Only an
         // explicit file declaration ([ProducesFile]/.ProducesFile/Define.File) makes
-        // it a file: then a plain byte[] (or a (byte[], string) named tuple) maps to
-        // no TS type and the client gets Blob.
+        // it a file: then a plain byte[] (or a (byte[], string) named tuple) has no
+        // schema of its own and the body is binary.
         if (fileContentType is not null)
         {
             if (IsByteArrayStringTuple(tOutput) || IsPlainByteArray(tOutput))
             {
-                tOutput = null; // Explicit file payload — don't map to TS, client gets Blob
+                tOutput = null; // Explicit file payload: binary body, no schema
             }
         }
 
@@ -747,7 +747,7 @@ public static class ContractWalker
     )
     {
         var routeParamNames = RouteParser.ParseRouteParamNames(route);
-        // Wire-name pinning for params (FABLE_ROUNDTRIP #1/#4): a route token and a
+        // Wire-name pinning for params: a route token and a
         // C# property are the same param when they match under normalization
         // ({thing_id} ↔ ThingId, {enterprise-team} ↔ EnterpriseTeam). The param
         // always keeps the TOKEN's spelling — the route template is wire truth.
@@ -767,7 +767,7 @@ public static class ContractWalker
         var lowersBody = hasBody && binaryContentType is null && !hasOnlyBinaryRequestBody;
         string? inputTypeName = null;
 
-        // P2 wave 5: [RivetHeader] properties are header params on every HTTP method —
+        // [RivetHeader] properties are header params on every HTTP method —
         // classified BEFORE the route/query/body split so a header never leaks into the
         // body schema (TypeWalker skips them) or the query string.
         if (tInput is not null)
@@ -816,7 +816,7 @@ public static class ContractWalker
                 string? bodyPropertyName = null;
                 if (tInput is not null)
                 {
-                    // A3: match against the flattened member surface (incl. inherited)
+                    // Match against the flattened member surface (incl. inherited)
                     var normalized = RouteParser.NormalizeForMatching(paramName);
                     var matchingProp = typeWalker
                         .GetEffectiveProperties(tInput)
@@ -893,10 +893,9 @@ public static class ContractWalker
                             ? typeWalker.MapType(tInput, $"multipart input '{tInput.Name}'")
                             : null;
                     inputTypeName = mappedInput is TsType.TypeRef typeRef ? typeRef.Name : null;
-                    // A3: walk the flattened property surface (incl. inherited).
+                    // Walk the flattened property surface (incl. inherited).
                     // Form fields are request surface: request-only properties lower,
-                    // response-only properties are absent from the multipart body
-                    // (planner-constraint:component-schema-directionality).
+                    // response-only properties are absent from the multipart body.
                     foreach (var formProp in typeWalker.GetRequestProperties(tInput))
                     {
                         // Skip properties already emitted as route params
@@ -922,7 +921,7 @@ public static class ContractWalker
                         }
                         else if (typeWalker.IsCollectionOf(formProp.Type, wkt.IFormFile))
                         {
-                            // FABLE_GAPS §7 item 12: List<IFormFile>/IFormFile[] →
+                            // List<IFormFile>/IFormFile[] →
                             // multipart array-of-binary part, consistent with single files
                             parameters.Add(
                                 new TsEndpointParam(
@@ -949,7 +948,7 @@ public static class ContractWalker
                 }
                 else
                 {
-                    // FABLE_ROUNDTRIP #4: an input whose every property is route-bound
+                    // An input whose every property is route-bound
                     // has no body left to carry — emitting one anyway fabricated a
                     // required JSON body on bodyless POST/PUTs (66 github-corpus ops).
                     // Request-surface comparison: route-binding equivalence is judged on
@@ -973,7 +972,7 @@ public static class ContractWalker
             // to route → Route, remaining → Query — never a JSON body param
             if (tInput is not null && !typeWalker.IsParamLowerable(tInput))
             {
-                // FABLE_ROUNDTRIP cross-corpus #1: walking a dictionary/collection/scalar
+                // Walking a dictionary/collection/scalar
                 // input here enumerated its CLR members (Count, Keys, Comparer, …) into
                 // the emitted spec as invented query params. Drop the input LOUDLY and
                 // keep the route tokens as untyped path params.
@@ -999,11 +998,10 @@ public static class ContractWalker
                 inputTypeName = tInput.Name;
                 var matchedRouteParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                // A3: walk the flattened property surface (incl. inherited).
+                // Walk the flattened property surface (incl. inherited).
                 // Query/route lowering is request surface: response-only properties
                 // (serialized but never deserializable) cannot carry request values,
-                // so they are absent from the param list
-                // (planner-constraint:component-schema-directionality).
+                // so they are absent from the param list.
                 foreach (var queryProp in typeWalker.GetRequestProperties(tInput))
                 {
                     var jsonName = typeWalker.GetJsonMemberName(queryProp);
@@ -1037,7 +1035,7 @@ public static class ContractWalker
                     {
                         matchedRouteParams.Add(routeName);
 
-                        // A14: a route-bound param must keep the ROUTE name — runtime route
+                        // A route-bound param must keep the ROUTE name — runtime route
                         // binding uses the C# property name, so a [JsonPropertyName] rename
                         // would leave the {token} uninterpolated in every client.
                         if (jsonName is not null && jsonName != routeName)
@@ -1060,7 +1058,7 @@ public static class ContractWalker
                         continue;
                     }
 
-                    // E8: surface property-level optionality ([RivetOptional], nullability)
+                    // Surface property-level optionality ([RivetOptional], nullability)
                     // on the param so emitters mark non-nullable optionals required: false
                     parameters.Add(
                         new TsEndpointParam(
@@ -1274,7 +1272,7 @@ public static class ContractWalker
         TypeWalker typeWalker
     )
     {
-        // Like-surface comparison (planner-constraint:compatible-body-surface-comparison):
+        // Like-surface comparison:
         // both sides are request surfaces — a response-only accessibility exclusion on
         // one side must not by itself make equivalent request declarations incompatible.
         var routeNames = RouteParser
@@ -1338,9 +1336,9 @@ public static class ContractWalker
         TypeWalker typeWalker,
         ITypeSymbol type
     ) =>
-        // A3: consider inherited properties too. Collections of IFormFile count —
+        // Consider inherited properties too. Collections of IFormFile count —
         // a record whose ONLY files were List<IFormFile> used to emit as JSON with
-        // format:binary strings, an unimplementable spec (FABLE_GAPS §7 item 12).
+        // format:binary strings, an unimplementable spec.
         typeWalker
             .GetEffectiveProperties(type)
             .OfType<IPropertySymbol>()
