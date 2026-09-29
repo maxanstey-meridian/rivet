@@ -89,7 +89,8 @@ public static class Diagnostics
     public const string ImportAdditionalPropertiesDropped = "RIV3004";
     public const string ImportDiscriminatorDropped = "RIV3005";
     public const string ImportAliasTargetMissing = "RIV3006";
-    public const string ImportAliasRefCycle = "RIV3007";
+    // RIV3007 (ImportAliasRefCycle) retired: alias cycles are broken before mapping and
+    // reported as RIV3001. The number is never reused.
     public const string ImportUnresolvableAliasReference = "RIV3008";
     public const string ImportUnresolvedSchema = "RIV3009";
     public const string ImportUnsupportedSchemaType = "RIV3010";
@@ -211,8 +212,6 @@ public static class Diagnostics
             "Discriminator with no reversible polymorphic shape (plain object without oneOf, or oneOf whose mapping is absent/unusable) — imported without dispatch semantics.",
         [ImportAliasTargetMissing] =
             "Alias schema references a missing schema — consumers fall back to JsonElement.",
-        [ImportAliasRefCycle] =
-            "Alias schema is part of a $ref cycle — consumers fall back to JsonElement.",
         [ImportUnresolvableAliasReference] =
             "Reference to an unresolvable alias schema (cycle or missing target) — using JsonElement.",
         [ImportUnresolvedSchema] =

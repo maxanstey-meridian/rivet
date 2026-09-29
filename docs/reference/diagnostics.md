@@ -126,8 +126,7 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV3004` | Retired | Reserved diagnostic ID. Mixed named objects now retain typed properties plus extension data. | No action. |
 | `RIV3005` | Warning | `discriminator` with no reversible polymorphic shape (plain object without `oneOf`, or `oneOf` whose `mapping` is absent/unusable) — imported without dispatch semantics. | Model the polymorphism as a `oneOf` with a complete `discriminator.mapping` whose variants carry the tag property, or accept the non-polymorphic import. |
 | `RIV3006` | Warning | Alias schema references a missing schema — consumers fall back to `JsonElement`. | Fix the dangling `$ref` in the source spec, or type the member after scaffolding. |
-| `RIV3007` | Warning | Alias schema is part of a `$ref` cycle — consumers fall back to `JsonElement`. | Break the cycle in the source spec, or type the member after scaffolding. |
-| `RIV3008` | Warning | Reference to an unresolvable alias schema (cycle or missing target) — using `JsonElement`. | Fix the alias it references (see `RIV3006`/`RIV3007`). |
+| `RIV3008` | Warning | Reference to an unresolvable alias schema (cycle or missing target) — using `JsonElement`. | Fix the alias it references (see `RIV3001`/`RIV3006`). |
 | `RIV3009` | Warning | Schema could not be resolved to a C# type — mapped to `JsonElement`. | Type the member by hand in the scaffolded C#. |
 | `RIV3010` | Warning | Unhandled JSON Schema `type` — mapped to `JsonElement`. | Type the member by hand in the scaffolded C#. |
 | `RIV3011` | Warning | Array schema without `items` — mapped to `List<JsonElement>`. | Add `items` to the source spec, or type the list element after scaffolding. |

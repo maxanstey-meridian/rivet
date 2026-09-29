@@ -61,7 +61,6 @@ public sealed class ImportMetricTests
             // missing target) — consumers fall back to an untyped object, loudly.
             Diagnostics.ImportAliasCycleBroken => "alias-unresolvable",
             Diagnostics.ImportAliasTargetMissing => "alias-unresolvable",
-            Diagnostics.ImportAliasRefCycle => "alias-unresolvable",
             Diagnostics.ImportUnresolvableAliasReference => "alias-unresolvable",
             // Added with Phase 4 / I5: a schema declaring BOTH `properties` and
             // `additionalProperties` keeps one side and drops the other — previously silent

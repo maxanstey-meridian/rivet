@@ -187,7 +187,7 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3011` | `array-missing-items` | Array schema without `items` → `List<JsonElement>`. |
 | `RIV3012` | `enum-constraint-dropped` | Enum that can't be a C# enum (single-value, mixed, out-of-range) degrades to a primitive. |
 | `RIV3005` | `discriminator-dropped` | `discriminator` with no reversible polymorphic shape (plain object without `oneOf`, or `oneOf` whose `mapping` is absent/unusable) — dispatch semantics dropped. |
-| `RIV3001`, `RIV3006`, `RIV3007`, `RIV3008` | `alias-unresolvable` | Cyclic / dangling `$ref` alias chains broken with placeholders. |
+| `RIV3001`, `RIV3006`, `RIV3008` | `alias-unresolvable` | Cyclic / dangling `$ref` alias chains broken with placeholders. |
 | `RIV3014` | `dictionary-key-dropped` | A `propertyNames` schema has no C# dictionary-key representation; keys degrade to `string`. |
 | `RIV3015` | `named-scalar-algebra-unsupported` | A named scalar component uses const/composition/heterogeneous leaves outside bounded scalar preservation; its fallback mapping is retained. |
 | `RIV3003` | `operation-method-dropped` | TRACE operation dropped — the HTTP method has no contract representation. |
