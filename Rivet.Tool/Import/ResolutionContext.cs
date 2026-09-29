@@ -89,7 +89,7 @@ internal sealed class ResolutionContext(List<string> warnings)
         Func<T, string> nameOf
     )
     {
-        foreach (var candidate in SchemaClassifier.NameCandidates(baseName))
+        foreach (var candidate in Naming.NameCandidates(baseName))
         {
             if (ReservedTypeNames.Contains(candidate))
             {

@@ -268,7 +268,7 @@ public static class InlineTypeExtractor
             }
         }
 
-        return ResolveCollision(name, usedNames);
+        return Naming.NameCandidates(name).First(candidate => !usedNames.Contains(candidate));
     }
 
     private static bool HasStutter(string name)
@@ -299,22 +299,6 @@ public static class InlineTypeExtractor
         }
         words.Add(s[start..]);
         return words;
-    }
-
-    private static string ResolveCollision(string name, HashSet<string> usedNames)
-    {
-        if (!usedNames.Contains(name))
-        {
-            return name;
-        }
-
-        var i = 2;
-        while (usedNames.Contains(name + i))
-        {
-            i++;
-        }
-
-        return name + i;
     }
 
     private static readonly HashSet<string> _commonFields = new(StringComparer.OrdinalIgnoreCase)

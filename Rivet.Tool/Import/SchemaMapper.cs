@@ -192,7 +192,7 @@ internal sealed class SchemaMapper
             .Skip(1)
             .FirstOrDefault(name => HasMappedSchemaWithShape(name, properties));
 
-    /// <summary>The N of a <see cref="SchemaClassifier.NameCandidates"/> name <c>{baseName}_N</c>.</summary>
+    /// <summary>The N of a <see cref="Naming.NameCandidates"/> name <c>{baseName}_N</c>.</summary>
     private static int? ParseNumberedSuffix(string name, string baseName)
     {
         var prefix = baseName + "_";
@@ -277,7 +277,7 @@ internal sealed class SchemaMapper
             }
 
             // Deduplicate schema names that collide after PascalCase sanitization
-            var name = SchemaClassifier.UniqueName(_ctx.TypeName(key), usedNames);
+            var name = Naming.UniqueName(_ctx.TypeName(key), usedNames);
 
             // Track mapping from original OpenAPI key to (possibly deduped) C# name
             _ctx.SchemaNameMap[key] = name;
@@ -296,7 +296,7 @@ internal sealed class SchemaMapper
 
             if (TryGetScalarAliasTarget(key, schemas, out _, out _))
             {
-                var name = SchemaClassifier.UniqueName(_ctx.TypeName(key), usedNames);
+                var name = Naming.UniqueName(_ctx.TypeName(key), usedNames);
                 _ctx.SchemaNameMap[key] = name;
                 _ctx.ReservedTypeNames.Add(name);
                 continue;

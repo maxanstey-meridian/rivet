@@ -821,7 +821,7 @@ public sealed class InlineTypeExtractorTests
         var result = InlineTypeExtractor.Extract(endpoints, existingDefs);
 
         Assert.Single(result.ExtractedTypes);
-        Assert.Equal("BuyerFindDto2", result.ExtractedTypes[0].Name);
+        Assert.Equal("BuyerFindDto_2", result.ExtractedTypes[0].Name);
     }
 
     [Fact]
@@ -1521,7 +1521,7 @@ public sealed class InlineTypeExtractorTests
         // Both outer wrappers are identical → extracted as one type ("BuyerFindDto")
         // Both inner { id, name } are identical → extracted as one type
         // Inner context is "Buyers.find.return.field.data" → data-skip → "BuyerFind"
-        // Collides with outer → gets "BuyerFindDto2", but crucially NOT "DataDto"
+        // Collides with outer → gets "BuyerFindDto_2", but crucially NOT "DataDto"
         Assert.DoesNotContain(result.ExtractedTypes, t => t.Name.StartsWith("Data"));
         var innerType = result.ExtractedTypes.FirstOrDefault(t =>
             t.Properties.Any(p => p.Name == "id") && t.Properties.Any(p => p.Name == "name")
@@ -1792,7 +1792,7 @@ public sealed class InlineTypeExtractorTests
         var names = result.ExtractedTypes.Select(t => t.Name).OrderBy(n => n).ToList();
         Assert.Equal(2, names.Count);
         Assert.Contains("MessageResponse", names);
-        Assert.Contains("MessageResponse2", names);
+        Assert.Contains("MessageResponse_2", names);
     }
 
     [Fact]
@@ -2046,7 +2046,7 @@ public sealed class InlineTypeExtractorTests
             type
         );
 
-        Assert.Equal("BuyerFindDto2", result);
+        Assert.Equal("BuyerFindDto_2", result);
     }
 
     [Fact]
@@ -2071,7 +2071,7 @@ public sealed class InlineTypeExtractorTests
             typeA
         );
 
-        Assert.Equal("BuyerFindDto2", result);
+        Assert.Equal("BuyerFindDto_2", result);
     }
 
     [Fact]

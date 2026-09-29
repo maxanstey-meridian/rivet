@@ -485,27 +485,12 @@ internal static class SchemaClassifier
 
     // --- Naming / dedup ---
 
-    /// <summary>
-    /// The import's one disambiguation scheme: <c>Name</c>, then <c>Name_2</c>, <c>Name_3</c>…
-    /// The separator keeps a suffix from reading as part of a name that already ends in a digit.
-    /// </summary>
-    internal static IEnumerable<string> NameCandidates(string baseName)
-    {
-        yield return baseName;
-        for (var suffix = 2; ; suffix++)
-        {
-            yield return $"{baseName}_{suffix}";
-        }
-    }
-
-    /// <summary>The first free <see cref="NameCandidates"/> entry, claimed in <paramref name="used"/>.</summary>
-    internal static string UniqueName(string baseName, ISet<string> used) =>
-        NameCandidates(baseName).First(used.Add);
-
     internal static List<RecordProperty> DeduplicateProperties(List<RecordProperty> properties)
     {
         var used = new HashSet<string>(StringComparer.Ordinal);
-        return properties.Select(prop => prop with { Name = UniqueName(prop.Name, used) }).ToList();
+        return properties
+            .Select(prop => prop with { Name = Naming.UniqueName(prop.Name, used) })
+            .ToList();
     }
 
     // --- Enum / Brand builders ---
@@ -535,7 +520,7 @@ internal static class SchemaClassifier
 
             var original = member.ToString();
             var sanitized = Naming.ToPascalCaseFromSegments(original);
-            var memberName = UniqueName(sanitized, used);
+            var memberName = Naming.UniqueName(sanitized, used);
             if (memberName != sanitized)
             {
                 members.Add(new GeneratedEnumMember(memberName, original));
@@ -598,7 +583,7 @@ internal static class SchemaClassifier
                 namingMagnitude = memberNode.ToJsonString().Trim();
             }
 
-            var csharpName = UniqueName(
+            var csharpName = Naming.UniqueName(
                 useVarnames ? Naming.ToPascalCaseFromSegments(varnames![index])
                     : namingMagnitude.StartsWith('-') ? $"ValueNeg{namingMagnitude.TrimStart('-')}"
                     : $"Value{namingMagnitude}",

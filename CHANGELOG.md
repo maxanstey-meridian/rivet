@@ -30,3 +30,4 @@
 - `Rivet.Attributes`: removed the `FileRouteDefinition.ContentType(…)` and `FileRouteDefinition<TInput>.ContentType(…)` aliases. Use `.ProducesFile(…)`. Import now scaffolds `.ProducesFile("…")` on `Define.File(...)` endpoints.
 - Analysis: a contract endpoint that declares the same response header twice for one status (case-insensitively, e.g. `ETag` and `etag`) now fails with `RIV1109`. Before, both spellings were emitted.
 - `Rivet.Attributes`: removed the no-argument `.SecurityRequirements()` builder method; it declared the same `security: []` as `.Anonymous()`. Use `.Anonymous()`.
+- OpenAPI emission: an inline object whose derived component name is taken and no descriptive name fits is now named `Name_2`, `Name_3`… (was `Name2`), the same scheme import uses.

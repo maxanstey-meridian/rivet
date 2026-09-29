@@ -19,6 +19,24 @@ internal enum RivetNamingPolicy
 
 internal static class Naming
 {
+    /// <summary>
+    /// Rivet's one disambiguation scheme, shared by import and emit: <c>Name</c>, then
+    /// <c>Name_2</c>, <c>Name_3</c>… The separator keeps a suffix from reading as part of a
+    /// name that already ends in a digit.
+    /// </summary>
+    public static IEnumerable<string> NameCandidates(string baseName)
+    {
+        yield return baseName;
+        for (var suffix = 2; ; suffix++)
+        {
+            yield return $"{baseName}_{suffix}";
+        }
+    }
+
+    /// <summary>The first free <see cref="NameCandidates"/> entry, claimed in <paramref name="used"/>.</summary>
+    public static string UniqueName(string baseName, ISet<string> used) =>
+        NameCandidates(baseName).First(used.Add);
+
     public static string ToCamelCase(string name)
     {
         if (string.IsNullOrEmpty(name))

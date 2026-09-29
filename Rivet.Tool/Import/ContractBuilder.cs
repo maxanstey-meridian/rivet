@@ -1895,12 +1895,7 @@ internal static class ContractBuilder
     {
         var used = new HashSet<string>(StringComparer.Ordinal);
         return fields
-            .Select(field =>
-                field with
-                {
-                    FieldName = SchemaClassifier.UniqueName(field.FieldName, used),
-                }
-            )
+            .Select(field => field with { FieldName = Naming.UniqueName(field.FieldName, used) })
             .ToList();
     }
 
