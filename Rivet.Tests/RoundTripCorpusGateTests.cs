@@ -188,7 +188,7 @@ public sealed class RoundTripCorpusGateTests
             return;
         }
 
-        foreach (var finding in RoundTripGateValidator.Validate(originalPath, firstEmittedPath))
+        foreach (var finding in RoundTripGateValidator.Validate(firstEmittedPath))
         {
             report.Add("integrity", finding);
         }
@@ -263,9 +263,7 @@ public sealed class RoundTripCorpusGateTests
             return;
         }
 
-        foreach (
-            var finding in RoundTripGateValidator.Validate(firstEmittedPath, secondEmittedPath)
-        )
+        foreach (var finding in RoundTripGateValidator.Validate(secondEmittedPath))
         {
             report.Add("fixedPoint", $"second document: {finding}");
         }
