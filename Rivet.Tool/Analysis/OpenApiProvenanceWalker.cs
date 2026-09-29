@@ -10,7 +10,7 @@ internal static class OpenApiProvenanceWalker
     {
         var attributes = compilation.Assembly.GetAttributes();
         var infoAttributes = attributes
-            .Where(attribute => Is(attribute, "Rivet.RivetDocumentInfoAttribute"))
+            .OfAttribute(compilation, "Rivet.RivetDocumentInfoAttribute")
             .ToList();
         if (infoAttributes.Count == 0)
         {
@@ -51,7 +51,7 @@ internal static class OpenApiProvenanceWalker
         );
 
         var tags = attributes
-            .Where(attribute => Is(attribute, "Rivet.RivetDocumentTagAttribute"))
+            .OfAttribute(compilation, "Rivet.RivetDocumentTagAttribute")
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
@@ -71,7 +71,7 @@ internal static class OpenApiProvenanceWalker
             .Select(value => value.Tag)
             .ToList();
         var externalDocsAttributes = attributes
-            .Where(attribute => Is(attribute, "Rivet.RivetDocumentExternalDocsAttribute"))
+            .OfAttribute(compilation, "Rivet.RivetDocumentExternalDocsAttribute")
             .ToList();
         if (externalDocsAttributes.Count > 1)
         {
@@ -90,12 +90,13 @@ internal static class OpenApiProvenanceWalker
                 )
                 : null;
         var servers = ReadServers(
+            compilation,
             attributes,
             "Rivet.RivetDocumentServerAttribute",
             "Rivet.RivetDocumentServerVariableAttribute"
         );
         var componentExamples = attributes
-            .Where(attribute => Is(attribute, "Rivet.RivetDocumentExampleAttribute"))
+            .OfAttribute(compilation, "Rivet.RivetDocumentExampleAttribute")
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
@@ -131,7 +132,7 @@ internal static class OpenApiProvenanceWalker
             .Select(value => value.Example)
             .ToList();
         var requestBodyContents = attributes
-            .Where(attribute => Is(attribute, "Rivet.RivetDocumentRequestBodyContentAttribute"))
+            .OfAttribute(compilation, "Rivet.RivetDocumentRequestBodyContentAttribute")
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
@@ -178,7 +179,7 @@ internal static class OpenApiProvenanceWalker
             })
             .ToList();
         var requestBodyExamples = attributes
-            .Where(attribute => Is(attribute, "Rivet.RivetDocumentRequestBodyExampleAttribute"))
+            .OfAttribute(compilation, "Rivet.RivetDocumentRequestBodyExampleAttribute")
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
@@ -208,7 +209,7 @@ internal static class OpenApiProvenanceWalker
             })
             .ToList();
         var componentRequestBodies = attributes
-            .Where(attribute => Is(attribute, "Rivet.RivetDocumentRequestBodyAttribute"))
+            .OfAttribute(compilation, "Rivet.RivetDocumentRequestBodyAttribute")
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
@@ -240,25 +241,28 @@ internal static class OpenApiProvenanceWalker
             .Select(value => value.RequestBody)
             .ToList();
         var componentParameters = ReadJsonComponents<OpenApiComponentParameterProvenance>(
+            compilation,
             attributes,
             "Rivet.RivetDocumentParameterAttribute",
             "parameter",
             static (name, json) => new OpenApiComponentParameterProvenance(name, json)
         );
         var componentResponses = ReadJsonComponents<OpenApiComponentResponseProvenance>(
+            compilation,
             attributes,
             "Rivet.RivetDocumentResponseAttribute",
             "response",
             static (name, json) => new OpenApiComponentResponseProvenance(name, json)
         );
         var componentSchemas = ReadJsonComponents<OpenApiComponentSchemaProvenance>(
+            compilation,
             attributes,
             "Rivet.RivetDocumentSchemaAttribute",
             "schema",
             static (name, json) => new OpenApiComponentSchemaProvenance(name, json)
         );
         var importedSourceFiles = attributes
-            .Where(attribute => Is(attribute, "Rivet.RivetImportedSourceFileAttribute"))
+            .OfAttribute(compilation, "Rivet.RivetImportedSourceFileAttribute")
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
@@ -276,7 +280,7 @@ internal static class OpenApiProvenanceWalker
             .ToList();
         ValidateImportedSourceFiles(compilation, importedSourceFiles);
         var vendorExtensions = attributes
-            .Where(attribute => Is(attribute, "Rivet.RivetVendorExtensionAttribute"))
+            .OfAttribute(compilation, "Rivet.RivetVendorExtensionAttribute")
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
@@ -365,11 +369,14 @@ internal static class OpenApiProvenanceWalker
             $"error {Diagnostics.ImportedSchemaProvenanceConflict}: imported schema provenance conflicts with the current C# source because '{path}' {reason}; re-import the OpenAPI document or remove/update its raw schema provenance"
         );
 
-    internal static OpenApiOperationProvenance? ReadOperation(IFieldSymbol field)
+    internal static OpenApiOperationProvenance? ReadOperation(
+        Compilation compilation,
+        IFieldSymbol field
+    )
     {
         var attributes = field.GetAttributes();
         var provenanceAttributes = attributes
-            .Where(attribute => Is(attribute, "Rivet.RivetOperationProvenanceAttribute"))
+            .OfAttribute(compilation, "Rivet.RivetOperationProvenanceAttribute")
             .ToList();
         if (provenanceAttributes.Count == 0)
         {
@@ -393,6 +400,7 @@ internal static class OpenApiProvenanceWalker
             RequiredBool(args[2], "operation deprecation"),
             hasServerOverride
                 ? ReadServers(
+                    compilation,
                     attributes,
                     "Rivet.RivetOperationServerAttribute",
                     "Rivet.RivetOperationServerVariableAttribute"
@@ -404,9 +412,7 @@ internal static class OpenApiProvenanceWalker
                 : null,
             StringValue(args[8]),
             attributes
-                .Where(attribute =>
-                    Is(attribute, "Rivet.RivetOperationParameterComponentAttribute")
-                )
+                .OfAttribute(compilation, "Rivet.RivetOperationParameterComponentAttribute")
                 .Select(attribute =>
                 {
                     var values = attribute.ConstructorArguments;
@@ -423,7 +429,7 @@ internal static class OpenApiProvenanceWalker
                 .Select(value => value.Reference)
                 .ToList(),
             attributes
-                .Where(attribute => Is(attribute, "Rivet.RivetOperationResponseComponentAttribute"))
+                .OfAttribute(compilation, "Rivet.RivetOperationResponseComponentAttribute")
                 .Select(attribute =>
                 {
                     var values = attribute.ConstructorArguments;
@@ -448,13 +454,14 @@ internal static class OpenApiProvenanceWalker
     }
 
     private static IReadOnlyList<T> ReadJsonComponents<T>(
+        Compilation compilation,
         IReadOnlyList<AttributeData> attributes,
         string attributeName,
         string kind,
         Func<string, string, T> create
     ) =>
         attributes
-            .Where(attribute => Is(attribute, attributeName))
+            .OfAttribute(compilation, attributeName)
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
@@ -503,13 +510,14 @@ internal static class OpenApiProvenanceWalker
     }
 
     private static IReadOnlyList<OpenApiServerProvenance> ReadServers(
+        Compilation compilation,
         IReadOnlyList<AttributeData> attributes,
         string serverAttributeName,
         string variableAttributeName
     )
     {
         var variables = attributes
-            .Where(attribute => Is(attribute, variableAttributeName))
+            .OfAttribute(compilation, variableAttributeName)
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
@@ -527,7 +535,7 @@ internal static class OpenApiProvenanceWalker
             .ToList();
 
         return attributes
-            .Where(attribute => Is(attribute, serverAttributeName))
+            .OfAttribute(compilation, serverAttributeName)
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
@@ -550,8 +558,15 @@ internal static class OpenApiProvenanceWalker
             .ToList();
     }
 
-    private static bool Is(AttributeData attribute, string metadataName) =>
-        attribute.AttributeClass?.ToDisplayString() == metadataName;
+    private static IEnumerable<AttributeData> OfAttribute(
+        this IEnumerable<AttributeData> attributes,
+        Compilation compilation,
+        string metadataName
+    )
+    {
+        var type = compilation.GetTypeByMetadataName(metadataName);
+        return attributes.Where(attribute => attribute.Is(type));
+    }
 
     private static string? StringValue(TypedConstant value) => value.Value as string;
 

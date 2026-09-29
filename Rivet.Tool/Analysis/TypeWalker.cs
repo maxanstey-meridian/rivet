@@ -64,26 +64,10 @@ public sealed class TypeWalker
     private readonly INamedTypeSymbol? _timeSpanType;
     private readonly INamedTypeSymbol? _bigIntegerType;
 
-    // Generic collection/dictionary type sets for membership checks
-    private readonly ImmutableHashSet<INamedTypeSymbol> _collectionTypes;
+    private readonly INamedTypeSymbol? _listType;
     private readonly ImmutableHashSet<INamedTypeSymbol> _dictionaryTypes;
 
-    // Attribute symbols for property-level metadata
-    private readonly INamedTypeSymbol? _jsonPropertyNameType;
-    private readonly INamedTypeSymbol? _jsonIgnoreType;
-    private readonly INamedTypeSymbol? _jsonExtensionDataType;
-    private readonly INamedTypeSymbol? _obsoleteType;
-
-    // STJ visibility attributes: [JsonInclude] opts non-public members into the wire
-    // surface; [JsonConstructor] marks the deserialization constructor.
-    private readonly INamedTypeSymbol? _jsonIncludeType;
-    private readonly INamedTypeSymbol? _jsonConstructorType;
-
-    // STJ polymorphism attributes (P2 wave 4): [JsonPolymorphic]/[JsonDerivedType]
-    // base types lower to a TaggedUnion alias instead of silently flattening.
-    private readonly INamedTypeSymbol? _jsonPolymorphicType;
-    private readonly INamedTypeSymbol? _jsonDerivedTypeType;
-    private readonly INamedTypeSymbol? _rivetUnionType;
+    private readonly WellKnownTypes _types;
 
     public TypeWalker(Compilation compilation)
     {
@@ -151,15 +135,7 @@ public sealed class TypeWalker
         _timeSpanType = compilation.GetTypeByMetadataName("System.TimeSpan");
         _bigIntegerType = compilation.GetTypeByMetadataName("System.Numerics.BigInteger");
 
-        _collectionTypes = ResolveTypeSet(
-            compilation,
-            "System.Collections.Generic.List`1",
-            "System.Collections.Generic.IList`1",
-            "System.Collections.Generic.ICollection`1",
-            "System.Collections.Generic.IEnumerable`1",
-            "System.Collections.Generic.IReadOnlyList`1",
-            "System.Collections.Generic.IReadOnlyCollection`1"
-        );
+        _listType = compilation.GetTypeByMetadataName("System.Collections.Generic.List`1");
 
         _dictionaryTypes = ResolveTypeSet(
             compilation,
@@ -168,29 +144,7 @@ public sealed class TypeWalker
             "System.Collections.Generic.IReadOnlyDictionary`2"
         );
 
-        _jsonPropertyNameType = compilation.GetTypeByMetadataName(
-            "System.Text.Json.Serialization.JsonPropertyNameAttribute"
-        );
-        _jsonIgnoreType = compilation.GetTypeByMetadataName(
-            "System.Text.Json.Serialization.JsonIgnoreAttribute"
-        );
-        _jsonExtensionDataType = compilation.GetTypeByMetadataName(
-            "System.Text.Json.Serialization.JsonExtensionDataAttribute"
-        );
-        _jsonIncludeType = compilation.GetTypeByMetadataName(
-            "System.Text.Json.Serialization.JsonIncludeAttribute"
-        );
-        _jsonConstructorType = compilation.GetTypeByMetadataName(
-            "System.Text.Json.Serialization.JsonConstructorAttribute"
-        );
-        _obsoleteType = compilation.GetTypeByMetadataName("System.ObsoleteAttribute");
-        _jsonPolymorphicType = compilation.GetTypeByMetadataName(
-            "System.Text.Json.Serialization.JsonPolymorphicAttribute"
-        );
-        _jsonDerivedTypeType = compilation.GetTypeByMetadataName(
-            "System.Text.Json.Serialization.JsonDerivedTypeAttribute"
-        );
-        _rivetUnionType = compilation.GetTypeByMetadataName("Rivet.RivetUnionAttribute");
+        _types = new WellKnownTypes(compilation);
         LoadGeneratedSchemas(compilation.Assembly);
     }
 
@@ -199,9 +153,7 @@ public sealed class TypeWalker
         foreach (
             var attribute in assembly
                 .GetAttributes()
-                .Where(attribute =>
-                    attribute.AttributeClass?.Name == "RivetGeneratedSchemaAttribute"
-                )
+                .Where(attribute => attribute.Is(_types.RivetGeneratedSchema))
         )
         {
             if (
@@ -391,21 +343,12 @@ public sealed class TypeWalker
     {
         foreach (var attribute in prop.GetAttributes())
         {
-            if (
-                _jsonExtensionDataType is not null
-                && SymbolEqualityComparer.Default.Equals(
-                    attribute.AttributeClass,
-                    _jsonExtensionDataType
-                )
-            )
+            if (attribute.Is(_types.JsonExtensionData))
             {
                 return true;
             }
 
-            if (
-                _jsonIgnoreType is not null
-                && SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, _jsonIgnoreType)
-            )
+            if (attribute.Is(_types.JsonIgnore))
             {
                 var condition = ReadJsonIgnoreCondition(attribute);
                 return condition switch
@@ -511,10 +454,7 @@ public sealed class TypeWalker
         return getterPublic ? JsonPropertySurface.ResponseOnly : JsonPropertySurface.RequestOnly;
     }
 
-    private bool HasJsonInclude(IPropertySymbol prop) =>
-        _jsonIncludeType is not null
-        && prop.GetAttributes()
-            .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIncludeType));
+    private bool HasJsonInclude(IPropertySymbol prop) => prop.HasAttribute(_types.JsonInclude);
 
     /// <summary>
     /// The wire surface of a FIELD member under default System.Text.Json web options.
@@ -533,15 +473,9 @@ public sealed class TypeWalker
             return JsonPropertySurface.Both;
         }
 
-        var hasInclude =
-            _jsonIncludeType is not null
-            && field
-                .GetAttributes()
-                .Any(a =>
-                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonIncludeType)
-                );
-
-        return hasInclude ? JsonPropertySurface.Both : JsonPropertySurface.Excluded;
+        return field.HasAttribute(_types.JsonInclude)
+            ? JsonPropertySurface.Both
+            : JsonPropertySurface.Excluded;
     }
 
     /// <summary>
@@ -564,16 +498,7 @@ public sealed class TypeWalker
 
         foreach (var constructor in constructors)
         {
-            var hasJsonConstructor =
-                _jsonConstructorType is not null
-                && constructor
-                    .GetAttributes()
-                    .Any(attr =>
-                        SymbolEqualityComparer.Default.Equals(
-                            attr.AttributeClass,
-                            _jsonConstructorType
-                        )
-                    );
+            var hasJsonConstructor = constructor.HasAttribute(_types.JsonConstructor);
 
             foreach (var parameter in constructor.Parameters)
             {
@@ -640,19 +565,10 @@ public sealed class TypeWalker
         return IsOptionalProperty(prop);
     }
 
-    private static JsonIgnoreCondition? ReadJsonIgnoreConditionFrom(IPropertySymbol prop)
-    {
-        var attribute = prop.GetAttributes()
-            .FirstOrDefault(a =>
-                a.AttributeClass is not null && a.AttributeClass.Name == "JsonIgnoreAttribute"
-            );
-        if (attribute is null)
-        {
-            return null;
-        }
-
-        return ReadJsonIgnoreCondition(attribute);
-    }
+    private JsonIgnoreCondition? ReadJsonIgnoreConditionFrom(IPropertySymbol prop) =>
+        prop.GetAttribute(_types.JsonIgnore) is { } attribute
+            ? ReadJsonIgnoreCondition(attribute)
+            : null;
 
     /// <summary>
     /// A3: flattens the wire-member surface of a type across its BaseType chain
@@ -753,29 +669,8 @@ public sealed class TypeWalker
     /// <summary>
     /// Returns the [JsonPropertyName] value if present, null otherwise.
     /// </summary>
-    public string? GetJsonPropertyName(IPropertySymbol prop)
-    {
-        if (_jsonPropertyNameType is null)
-        {
-            return null;
-        }
-
-        var attr = prop.GetAttributes()
-            .FirstOrDefault(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonPropertyNameType)
-            );
-
-        if (
-            attr is not null
-            && attr.ConstructorArguments.Length == 1
-            && attr.ConstructorArguments[0].Value is string name
-        )
-        {
-            return name;
-        }
-
-        return null;
-    }
+    public string? GetJsonPropertyName(IPropertySymbol prop) =>
+        prop.GetAttribute(_types.JsonPropertyName).StringArgument();
 
     /// <summary>
     /// [JsonPropertyName] for either wire member kind: [JsonPropertyName] is valid on
@@ -789,26 +684,8 @@ public sealed class TypeWalker
             _ => null,
         };
 
-    private string? GetJsonFieldName(IFieldSymbol field)
-    {
-        if (_jsonPropertyNameType is null)
-        {
-            return null;
-        }
-
-        var attr = field
-            .GetAttributes()
-            .FirstOrDefault(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, _jsonPropertyNameType)
-            );
-
-        return
-            attr is not null
-            && attr.ConstructorArguments.Length == 1
-            && attr.ConstructorArguments[0].Value is string name
-            ? name
-            : null;
-    }
+    private string? GetJsonFieldName(IFieldSymbol field) =>
+        field.GetAttribute(_types.JsonPropertyName).StringArgument();
 
     /// <summary>
     /// Walks a named type, producing a TsTypeDefinition and recursively
@@ -911,37 +788,12 @@ public sealed class TypeWalker
             }
 
             // [JsonPropertyName("x")] → use "x" instead of camelCase(Name)
-            string? jsonPropertyName = null;
-            if (_jsonPropertyNameType is not null)
-            {
-                var attr = member
-                    .GetAttributes()
-                    .FirstOrDefault(a =>
-                        SymbolEqualityComparer.Default.Equals(
-                            a.AttributeClass,
-                            _jsonPropertyNameType
-                        )
-                    );
-                if (
-                    attr is not null
-                    && attr.ConstructorArguments.Length == 1
-                    && attr.ConstructorArguments[0].Value is string propName
-                )
-                {
-                    jsonPropertyName = propName;
-                }
-            }
+            var jsonPropertyName = member.GetAttribute(_types.JsonPropertyName).StringArgument();
 
             var tsName = jsonPropertyName ?? Naming.ToCamelCase(member.Name);
             var tsType = MapTypeCore(GetMemberType(member), $"{name}.{member.Name}");
             var isOptional = MemberIsOptional(member);
-            var isDeprecated =
-                _obsoleteType is not null
-                && member
-                    .GetAttributes()
-                    .Any(a =>
-                        SymbolEqualityComparer.Default.Equals(a.AttributeClass, _obsoleteType)
-                    );
+            var isDeprecated = member.HasAttribute(_types.Obsolete);
 
             // Read metadata attributes
             string? format = null;
@@ -958,8 +810,7 @@ public sealed class TypeWalker
             var daFormat = ReadDataAnnotationFormat(member.GetAttributes());
             foreach (var attr in member.GetAttributes())
             {
-                var attrName = attr.AttributeClass?.Name;
-                if (attrName is "RivetFormatAttribute")
+                if (attr.Is(_types.RivetFormat))
                 {
                     isFormatSpecified = true;
                     format =
@@ -969,7 +820,7 @@ public sealed class TypeWalker
                             : null;
                 }
                 else if (
-                    attrName is "RivetSchemaTypeAttribute"
+                    attr.Is(_types.RivetSchemaType)
                     && attr.ConstructorArguments.Length > 0
                     && attr.ConstructorArguments[0].Value is string primitiveType
                 )
@@ -977,7 +828,7 @@ public sealed class TypeWalker
                     schemaType = primitiveType;
                 }
                 else if (
-                    attrName is "RivetSchemaRefAttribute"
+                    attr.Is(_types.RivetSchemaRef)
                     && attr.ConstructorArguments.Length > 0
                     && attr.ConstructorArguments[0].Value is string refName
                 )
@@ -985,19 +836,19 @@ public sealed class TypeWalker
                     schemaRef = refName;
                 }
                 else if (
-                    attrName is "RivetDefaultAttribute"
+                    attr.Is(_types.RivetDefault)
                     && attr.ConstructorArguments.Length > 0
                     && attr.ConstructorArguments[0].Value is string def
                 )
                 {
                     defaultValue = def;
                 }
-                else if (attrName is "RivetConstraintsAttribute")
+                else if (attr.Is(_types.RivetConstraints))
                 {
                     constraints = ReadConstraints(attr);
                 }
                 else if (
-                    attrName is "RivetDescriptionAttribute"
+                    attr.Is(_types.RivetDescription)
                     && attr.ConstructorArguments.Length > 0
                     && attr.ConstructorArguments[0].Value is string desc
                 )
@@ -1005,18 +856,18 @@ public sealed class TypeWalker
                     description = desc;
                 }
                 else if (
-                    attrName is "RivetExampleAttribute"
+                    attr.Is(_types.RivetExample)
                     && attr.ConstructorArguments.Length > 0
                     && attr.ConstructorArguments[0].Value is string ex
                 )
                 {
                     example = ex;
                 }
-                else if (attrName is "RivetReadOnlyAttribute")
+                else if (attr.Is(_types.RivetReadOnly))
                 {
                     isReadOnly = true;
                 }
-                else if (attrName is "RivetWriteOnlyAttribute")
+                else if (attr.Is(_types.RivetWriteOnly))
                 {
                     isWriteOnly = true;
                 }
@@ -1142,28 +993,12 @@ public sealed class TypeWalker
         );
     }
 
-    private static string? GetTypeDescription(INamedTypeSymbol definition)
-    {
-        foreach (var attr in definition.GetAttributes())
-        {
-            if (
-                attr.AttributeClass?.Name is "RivetDescriptionAttribute"
-                && attr.ConstructorArguments.Length > 0
-                && attr.ConstructorArguments[0].Value is string td
-            )
-            {
-                return td;
-            }
-        }
+    private string? GetTypeDescription(INamedTypeSymbol definition) =>
+        definition.GetAttribute(_types.RivetDescription).StringArgument();
 
-        return null;
-    }
-
-    private static TsTypeMetadata? GetTypeMetadata(INamedTypeSymbol definition)
+    private TsTypeMetadata? GetTypeMetadata(INamedTypeSymbol definition)
     {
-        var attribute = definition
-            .GetAttributes()
-            .FirstOrDefault(attr => attr.AttributeClass?.Name == "RivetGeneratedTypeAttribute");
+        var attribute = definition.GetAttribute(_types.RivetGeneratedType);
         if (attribute is null || attribute.ConstructorArguments.Length < 2)
         {
             return null;
@@ -1177,15 +1012,13 @@ public sealed class TypeWalker
         return new TsTypeMetadata(componentId, provenance);
     }
 
-    private static Dictionary<string, TsScalarMetadata> ReadGeneratedSchemaMetadata(ISymbol symbol)
+    private Dictionary<string, TsScalarMetadata> ReadGeneratedSchemaMetadata(ISymbol symbol)
     {
         var result = new Dictionary<string, TsScalarMetadata>(StringComparer.Ordinal);
         foreach (
             var attribute in symbol
                 .GetAttributes()
-                .Where(attribute =>
-                    attribute.AttributeClass?.Name == "RivetGeneratedSchemaMetadataAttribute"
-                )
+                .Where(attribute => attribute.Is(_types.RivetGeneratedSchemaMetadata))
         )
         {
             if (
@@ -1294,14 +1127,7 @@ public sealed class TypeWalker
     public TsType MapPropertyType(IPropertySymbol property)
     {
         var type = MapType(property.Type);
-        var schemaType =
-            property
-                .GetAttributes()
-                .FirstOrDefault(attribute =>
-                    attribute.AttributeClass?.Name == "RivetSchemaTypeAttribute"
-                )
-                ?.ConstructorArguments.FirstOrDefault()
-                .Value as string;
+        var schemaType = property.GetAttribute(_types.RivetSchemaType).StringArgument();
 
         return (type, schemaType) switch
         {
@@ -1333,14 +1159,7 @@ public sealed class TypeWalker
     /// </summary>
     private TsType.Union? TryBuildRivetUnion(INamedTypeSymbol definition, string name)
     {
-        if (
-            _rivetUnionType is null
-            || !definition
-                .GetAttributes()
-                .Any(attr =>
-                    SymbolEqualityComparer.Default.Equals(attr.AttributeClass, _rivetUnionType)
-                )
-        )
+        if (!definition.HasAttribute(_types.RivetUnion))
         {
             return null;
         }
@@ -1366,22 +1185,15 @@ public sealed class TypeWalker
 
     private TsType.TaggedUnion? TryBuildPolymorphicUnion(INamedTypeSymbol definition, string name)
     {
-        if (_jsonPolymorphicType is null && _jsonDerivedTypeType is null)
-        {
-            return null;
-        }
-
         AttributeData? polymorphicAttr = null;
         var derivedAttrs = new List<AttributeData>();
         foreach (var attr in definition.GetAttributes())
         {
-            if (SymbolEqualityComparer.Default.Equals(attr.AttributeClass, _jsonPolymorphicType))
+            if (attr.Is(_types.JsonPolymorphic))
             {
                 polymorphicAttr = attr;
             }
-            else if (
-                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, _jsonDerivedTypeType)
-            )
+            else if (attr.Is(_types.JsonDerivedType))
             {
                 derivedAttrs.Add(attr);
             }
@@ -1695,11 +1507,7 @@ public sealed class TypeWalker
                     if (isStringEnum)
                     {
                         if (
-                            namedType
-                                .GetAttributes()
-                                .Any(a =>
-                                    a.AttributeClass?.ToDisplayString() == "System.FlagsAttribute"
-                                )
+                            namedType.HasAttribute(_types.Flags)
                             || fields.Select(f => EnumLiteral(f.ConstantValue)).Distinct().Count()
                                 != fields.Count
                         )
@@ -1754,14 +1562,7 @@ public sealed class TypeWalker
                     }
                     else
                     {
-                        var format =
-                            namedType
-                                .GetAttributes()
-                                .FirstOrDefault(attribute =>
-                                    attribute.AttributeClass?.Name == "RivetFormatAttribute"
-                                )
-                                ?.ConstructorArguments.FirstOrDefault()
-                                .Value as string;
+                        var format = GetTypeFormat(namedType);
                         _enums[enumName] = new TsType.IntUnion(
                             fields
                                 .Select(field => EnumLiteral(field.ConstantValue))
@@ -1867,21 +1668,9 @@ public sealed class TypeWalker
     /// writes the CLR name verbatim, so Rivet must not camel-case it
     /// (acceptance:string-enum-preserves-member-name).
     /// </summary>
-    private static string EnumWireValue(IFieldSymbol field, RivetNamingPolicy? policy)
-    {
-        var attr = field
-            .GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.Name is "JsonStringEnumMemberNameAttribute");
-        if (
-            attr?.ConstructorArguments.Length > 0
-            && attr.ConstructorArguments[0].Value is string original
-        )
-        {
-            return original;
-        }
-
-        return policy is null ? field.Name : Naming.ToPolicyCase(field.Name, policy.Value);
-    }
+    private string EnumWireValue(IFieldSymbol field, RivetNamingPolicy? policy) =>
+        field.GetAttribute(_types.JsonStringEnumMemberName).StringArgument()
+        ?? (policy is null ? field.Name : Naming.ToPolicyCase(field.Name, policy.Value));
 
     /// <summary>
     /// The string-wire shape an enum declares through its type-level
@@ -1892,9 +1681,7 @@ public sealed class TypeWalker
     /// its casing in the class name (attribute args cannot hold a naming
     /// policy). Null when the enum is numeric-wire.
     /// </summary>
-    private static (bool IsString, RivetNamingPolicy? Policy) GetEnumWireShape(
-        INamedTypeSymbol type
-    )
+    private (bool IsString, RivetNamingPolicy? Policy) GetEnumWireShape(INamedTypeSymbol type)
     {
         var converters = type.GetAttributes()
             .Where(a => IsJsonConverterAttribute(a.AttributeClass))
@@ -1905,8 +1692,7 @@ public sealed class TypeWalker
         }
         if (
             converters.Length != 1
-            || converters[0].AttributeClass?.ToDisplayString()
-                != "System.Text.Json.Serialization.JsonConverterAttribute"
+            || !converters[0].Is(_types.JsonConverter)
             || converters[0].ConstructorArguments is not [{ Value: INamedTypeSymbol converterType }]
         )
         {
@@ -1941,11 +1727,8 @@ public sealed class TypeWalker
         };
     }
 
-    private static string? GetTypeFormat(INamedTypeSymbol type) =>
-        type.GetAttributes()
-            .FirstOrDefault(attribute => attribute.AttributeClass?.Name == "RivetFormatAttribute")
-            ?.ConstructorArguments.FirstOrDefault()
-            .Value as string;
+    private string? GetTypeFormat(INamedTypeSymbol type) =>
+        type.GetAttribute(_types.RivetFormat).StringArgument();
 
     /// <summary>
     /// The exact decimal literal of an enum constant: ulong constants (the only
@@ -2140,11 +1923,11 @@ public sealed class TypeWalker
         return null;
     }
 
-    private static bool IsJsonConverterAttribute(INamedTypeSymbol? type)
+    private bool IsJsonConverterAttribute(INamedTypeSymbol? type)
     {
         for (; type is not null; type = type.BaseType)
         {
-            if (type.ToDisplayString() == "System.Text.Json.Serialization.JsonConverterAttribute")
+            if (SymbolEqualityComparer.Default.Equals(type, _types.JsonConverter))
             {
                 return true;
             }
@@ -2152,13 +1935,9 @@ public sealed class TypeWalker
         return false;
     }
 
-    private static ITypeSymbol? TryGetScalarInner(INamedTypeSymbol symbol)
+    private ITypeSymbol? TryGetScalarInner(INamedTypeSymbol symbol)
     {
-        if (
-            symbol
-                .GetAttributes()
-                .All(a => a.AttributeClass?.ToDisplayString() != "Rivet.RivetScalarAttribute")
-        )
+        if (!symbol.HasAttribute(_types.RivetScalar))
         {
             return null;
         }
@@ -2250,7 +2029,13 @@ public sealed class TypeWalker
     }
 
     private bool IsCollectionType(INamedTypeSymbol symbol) =>
-        _collectionTypes.Contains(symbol.OriginalDefinition);
+        symbol.OriginalDefinition.SpecialType
+            is SpecialType.System_Collections_Generic_IList_T
+                or SpecialType.System_Collections_Generic_ICollection_T
+                or SpecialType.System_Collections_Generic_IEnumerable_T
+                or SpecialType.System_Collections_Generic_IReadOnlyList_T
+                or SpecialType.System_Collections_Generic_IReadOnlyCollection_T
+        || SymbolEqualityComparer.Default.Equals(symbol.OriginalDefinition, _listType);
 
     /// <summary>
     /// True for the scalar/simple shapes an explicit [FromForm] parameter declares
@@ -2334,7 +2119,7 @@ public sealed class TypeWalker
         return c.HasAny ? c : null;
     }
 
-    private static TsPropertyConstraints? ReadDataAnnotationConstraints(
+    private TsPropertyConstraints? ReadDataAnnotationConstraints(
         ImmutableArray<AttributeData> attributes
     )
     {
@@ -2346,24 +2131,17 @@ public sealed class TypeWalker
 
         foreach (var attr in attributes)
         {
-            var name = attr.AttributeClass?.Name;
-            switch (name)
+            switch (attr.ConstructorArguments)
             {
-                case "MinLengthAttribute"
-                    when attr.ConstructorArguments.Length > 0
-                        && attr.ConstructorArguments[0].Value is int ml:
+                case [{ Value: int ml }, ..] when attr.Is(_types.MinLength):
                     minLength = ml;
                     break;
 
-                case "MaxLengthAttribute"
-                    when attr.ConstructorArguments.Length > 0
-                        && attr.ConstructorArguments[0].Value is int mxl:
+                case [{ Value: int mxl }, ..] when attr.Is(_types.MaxLength):
                     maxLength = mxl;
                     break;
 
-                case "StringLengthAttribute"
-                    when attr.ConstructorArguments.Length > 0
-                        && attr.ConstructorArguments[0].Value is int slMax:
+                case [{ Value: int slMax }, ..] when attr.Is(_types.StringLength):
                     maxLength = slMax;
                     var minLenArg = attr.NamedArguments.FirstOrDefault(a =>
                         a.Key == "MinimumLength"
@@ -2375,7 +2153,7 @@ public sealed class TypeWalker
 
                     break;
 
-                case "RangeAttribute" when attr.ConstructorArguments.Length >= 2:
+                case { Length: >= 2 } when attr.Is(_types.Range):
                     // A9: the (Type, string, string) overload puts an ITypeSymbol in arg 0 —
                     // the old Convert.ToDouble crashed the tool with InvalidCastException
                     var args = attr.ConstructorArguments;
@@ -2409,9 +2187,7 @@ public sealed class TypeWalker
 
                     break;
 
-                case "RegularExpressionAttribute"
-                    when attr.ConstructorArguments.Length > 0
-                        && attr.ConstructorArguments[0].Value is string pat:
+                case [{ Value: string pat }, ..] when attr.Is(_types.RegularExpression):
                     pattern = pat;
                     break;
             }
@@ -2462,16 +2238,17 @@ public sealed class TypeWalker
         }
     }
 
-    private static string? ReadDataAnnotationFormat(ImmutableArray<AttributeData> attributes)
+    private string? ReadDataAnnotationFormat(ImmutableArray<AttributeData> attributes)
     {
         foreach (var attr in attributes)
         {
-            switch (attr.AttributeClass?.Name)
+            if (attr.Is(_types.EmailAddress))
             {
-                case "EmailAddressAttribute":
-                    return "email";
-                case "UrlAttribute":
-                    return "uri";
+                return "email";
+            }
+            if (attr.Is(_types.Url))
+            {
+                return "uri";
             }
         }
 
@@ -2483,33 +2260,19 @@ public sealed class TypeWalker
     /// property is not header-bound. The attribute's name argument keeps the original
     /// casing ("Notion-Version"); without one the property name itself is the header name.
     /// </summary>
-    public static string? GetHeaderName(IPropertySymbol prop)
+    public string? GetHeaderName(IPropertySymbol prop) =>
+        prop.GetAttribute(_types.RivetHeader) is { } attr
+            ? attr.StringArgument() ?? prop.Name
+            : null;
+
+    public bool IsOptionalProperty(IPropertySymbol prop)
     {
-        var attr = prop.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.Name is "RivetHeaderAttribute");
-
-        if (attr is null)
-        {
-            return null;
-        }
-
-        return
-            attr.ConstructorArguments.Length > 0
-            && attr.ConstructorArguments[0].Value is string name
-            ? name
-            : prop.Name;
-    }
-
-    public static bool IsOptionalProperty(IPropertySymbol prop)
-    {
-        var attributes = prop.GetAttributes();
-
-        if (attributes.Any(a => a.AttributeClass?.Name is "RivetOptionalAttribute"))
+        if (prop.HasAttribute(_types.RivetOptional))
         {
             return true;
         }
 
-        if (attributes.Any(a => a.AttributeClass?.Name is "RequiredAttribute"))
+        if (prop.HasAttribute(_types.Required))
         {
             return false;
         }
@@ -2559,16 +2322,14 @@ public sealed class TypeWalker
             ),
         };
 
-    private static bool MemberFieldIsOptional(IFieldSymbol field)
+    private bool MemberFieldIsOptional(IFieldSymbol field)
     {
-        var attributes = field.GetAttributes();
-
-        if (attributes.Any(a => a.AttributeClass?.Name is "RivetOptionalAttribute"))
+        if (field.HasAttribute(_types.RivetOptional))
         {
             return true;
         }
 
-        if (attributes.Any(a => a.AttributeClass?.Name is "RequiredAttribute"))
+        if (field.HasAttribute(_types.Required))
         {
             return false;
         }

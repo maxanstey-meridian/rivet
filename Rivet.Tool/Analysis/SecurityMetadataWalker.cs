@@ -13,12 +13,20 @@ internal static class SecurityMetadataWalker
         var requirements = new SortedDictionary<int, List<SecurityRequirementScheme>>();
         var requirementOrders = new HashSet<int>();
         var hasEmptyGlobalSecurity = false;
+        var schemeType = compilation.GetTypeByMetadataName("Rivet.RivetSecuritySchemeAttribute");
+        var flowType = compilation.GetTypeByMetadataName("Rivet.RivetOAuthFlowAttribute");
+        var globalType = compilation.GetTypeByMetadataName("Rivet.RivetGlobalSecurityAttribute");
+        var globalSchemeType = compilation.GetTypeByMetadataName(
+            "Rivet.RivetGlobalSecuritySchemeAttribute"
+        );
+        var emptyGlobalType = compilation.GetTypeByMetadataName(
+            "Rivet.RivetEmptyGlobalSecurityAttribute"
+        );
 
         foreach (var attribute in compilation.Assembly.GetAttributes())
         {
-            var attributeName = attribute.AttributeClass?.ToDisplayString();
             if (
-                attributeName == "Rivet.RivetSecuritySchemeAttribute"
+                attribute.Is(schemeType)
                 && attribute.ConstructorArguments is [var nameArgument, ..]
                 && nameArgument.Value is string name
             )
@@ -31,7 +39,7 @@ internal static class SecurityMetadataWalker
                 }
             }
             else if (
-                attributeName == "Rivet.RivetOAuthFlowAttribute"
+                attribute.Is(flowType)
                 && attribute.ConstructorArguments
                     is [
                         var schemeArgument,
@@ -73,7 +81,7 @@ internal static class SecurityMetadataWalker
                 );
             }
             else if (
-                attributeName == "Rivet.RivetGlobalSecurityAttribute"
+                attribute.Is(globalType)
                 && attribute.ConstructorArguments is [var orderArgument]
                 && orderArgument.Value is int order
             )
@@ -81,7 +89,7 @@ internal static class SecurityMetadataWalker
                 requirementOrders.Add(order);
             }
             else if (
-                attributeName == "Rivet.RivetGlobalSecuritySchemeAttribute"
+                attribute.Is(globalSchemeType)
                 && attribute.ConstructorArguments
                     is [var schemeOrderArgument, var requirementSchemeArgument, var scopesArgument]
                 && schemeOrderArgument.Value is int schemeOrder
@@ -97,7 +105,7 @@ internal static class SecurityMetadataWalker
                     new SecurityRequirementScheme(requirementScheme, ReadStrings(scopesArgument))
                 );
             }
-            else if (attributeName == "Rivet.RivetEmptyGlobalSecurityAttribute")
+            else if (attribute.Is(emptyGlobalType))
             {
                 hasEmptyGlobalSecurity = true;
             }

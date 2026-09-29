@@ -137,8 +137,7 @@ public static class CoverageChecker
         {
             if (
                 type.IsAbstract && !type.IsStatic
-                || !type.GetAttributes()
-                    .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, contractAttr))
+                || !type.GetAttributes().Any(a => a.Is(contractAttr))
             )
             {
                 continue;
@@ -803,14 +802,10 @@ public static class CoverageChecker
 
         var trigger = methodSymbol
             .Parameters.SelectMany(parameter => parameter.GetAttributes())
-            .FirstOrDefault(attribute =>
-                SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, wkt.HttpTrigger)
-            );
+            .FirstOrDefault(attribute => attribute.Is(wkt.HttpTrigger));
         var function = methodSymbol
             .GetAttributes()
-            .FirstOrDefault(attribute =>
-                SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, wkt.Function)
-            );
+            .FirstOrDefault(attribute => attribute.Is(wkt.Function));
         if (trigger is null || function is null)
         {
             return EndpointContext.None;

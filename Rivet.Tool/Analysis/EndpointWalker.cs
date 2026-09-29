@@ -129,20 +129,12 @@ public static class EndpointWalker
             successResponse?.DataType
         );
 
-        var consumes = method
-            .GetAttributes()
-            .Where(a =>
-                a.AttributeClass?.ToDisplayString() == "Microsoft.AspNetCore.Mvc.ConsumesAttribute"
-            )
-            .ToArray();
+        var consumes = method.GetAttributes().Where(a => a.Is(wkt.Consumes)).ToArray();
         if (consumes.Length == 0)
         {
             consumes = method
                 .ContainingType.GetAttributes()
-                .Where(a =>
-                    a.AttributeClass?.ToDisplayString()
-                    == "Microsoft.AspNetCore.Mvc.ConsumesAttribute"
-                )
+                .Where(a => a.Is(wkt.Consumes))
                 .ToArray();
         }
         var requestMediaTypes = consumes
@@ -284,7 +276,7 @@ public static class EndpointWalker
 
         foreach (var attr in method.GetAttributes().Concat(method.ContainingType.GetAttributes()))
         {
-            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.Produces))
+            if (!attr.Is(wkt.Produces))
             {
                 continue;
             }
@@ -330,9 +322,7 @@ public static class EndpointWalker
 
         var examples = method
             .GetAttributes()
-            .Where(attr =>
-                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.RivetRequestExample)
-            )
+            .Where(attr => attr.Is(wkt.RivetRequestExample))
             .Select(attr =>
                 ToRequestExample(attr, DefaultRequestExampleMediaType(parameters, isFormEncoded))
             )
@@ -355,9 +345,7 @@ public static class EndpointWalker
 
         return method
             .GetAttributes()
-            .Where(attr =>
-                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.RivetResponseExample)
-            )
+            .Where(attr => attr.Is(wkt.RivetResponseExample))
             .Select(ToPendingResponseExample)
             .Where(example => example is not null)
             .Cast<PendingResponseExample>()
@@ -388,7 +376,7 @@ public static class EndpointWalker
                 .GetAttributes()
                 .Any(attr =>
                     attr.AttributeClass is not null
-                    && SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.FromForm)
+                    && attr.Is(wkt.FromForm)
                     && !SymbolEqualityComparer.Default.Equals(param.Type, wkt.IFormFile)
                 )
         );
@@ -579,10 +567,7 @@ public static class EndpointWalker
 
         foreach (var attr in containingType.GetAttributes())
         {
-            if (
-                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.Route)
-                && attr.ConstructorArguments.Length > 0
-            )
+            if (attr.Is(wkt.Route) && attr.ConstructorArguments.Length > 0)
             {
                 return attr.ConstructorArguments[0].Value as string;
             }
@@ -801,10 +786,7 @@ public static class EndpointWalker
     }
 
     private static bool HasAttribute(IParameterSymbol param, INamedTypeSymbol? attributeType) =>
-        attributeType is not null
-        && param
-            .GetAttributes()
-            .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, attributeType));
+        attributeType is not null && param.GetAttributes().Any(a => a.Is(attributeType));
 
     /// <summary>
     /// The literal source text of a parameter's C# default value (for example "20"

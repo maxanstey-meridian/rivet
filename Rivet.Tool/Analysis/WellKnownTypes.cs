@@ -4,342 +4,209 @@ using Microsoft.CodeAnalysis;
 namespace Rivet.Tool.Analysis;
 
 /// <summary>
-/// Pre-resolves ASP.NET and infrastructure type symbols from the compilation
-/// so walkers can compare via SymbolEqualityComparer instead of ToDisplayString().
+/// Pre-resolves ASP.NET, Rivet and infrastructure type symbols from the compilation
+/// so walkers compare by symbol instead of by name.
 /// </summary>
-public sealed class WellKnownTypes
+public sealed class WellKnownTypes(Compilation c)
 {
-    // HTTP method attributes
-    public readonly INamedTypeSymbol? HttpGet;
-    public readonly INamedTypeSymbol? HttpPost;
-    public readonly INamedTypeSymbol? HttpPut;
-    public readonly INamedTypeSymbol? HttpDelete;
-    public readonly INamedTypeSymbol? HttpPatch;
-    public readonly INamedTypeSymbol? HttpHead;
-    public readonly INamedTypeSymbol? HttpOptions;
+    private const string Mvc = "Microsoft.AspNetCore.Mvc.";
+    private const string HttpResults = "Microsoft.AspNetCore.Http.HttpResults.";
 
-    // Binding attributes
-    public readonly INamedTypeSymbol? Route;
-    public readonly INamedTypeSymbol? FromBody;
-    public readonly INamedTypeSymbol? FromForm;
-    public readonly INamedTypeSymbol? FromQuery;
-    public readonly INamedTypeSymbol? FromRoute;
-    public readonly INamedTypeSymbol? FromHeader;
-    public readonly INamedTypeSymbol? FromServices;
+    private static readonly (string MetadataName, string Verb)[] _httpMethodTable =
+    [
+        (Mvc + "HttpGetAttribute", "GET"),
+        (Mvc + "HttpPostAttribute", "POST"),
+        (Mvc + "HttpPutAttribute", "PUT"),
+        (Mvc + "HttpDeleteAttribute", "DELETE"),
+        (Mvc + "HttpPatchAttribute", "PATCH"),
+        (Mvc + "HttpHeadAttribute", "HEAD"),
+        (Mvc + "HttpOptionsAttribute", "OPTIONS"),
+    ];
 
-    // Response metadata
-    public readonly INamedTypeSymbol? ProducesResponseType;
-    public readonly INamedTypeSymbol? ProducesResponseTypeOfT;
-    public readonly INamedTypeSymbol? Produces;
-    public readonly INamedTypeSymbol? RivetRequestExample;
-    public readonly INamedTypeSymbol? RivetResponseExample;
+    // Only genuinely fixed statuses live here. ProblemHttpResult (a Results.Problem
+    // branch can carry any status) and JsonHttpResult<T> (Results.Json selects its
+    // own status) are not entries — a Results<...> branch using them is an
+    // unresolved contract.
+    private static readonly (string MetadataName, int Status)[] _typedResultTable =
+    [
+        (HttpResults + "Ok`1", 200),
+        (HttpResults + "Ok", 200),
+        (HttpResults + "Created`1", 201),
+        (HttpResults + "Created", 201),
+        (HttpResults + "Accepted`1", 202),
+        (HttpResults + "Accepted", 202),
+        (HttpResults + "NoContent", 204),
+        (HttpResults + "BadRequest`1", 400),
+        (HttpResults + "BadRequest", 400),
+        (HttpResults + "UnauthorizedHttpResult", 401),
+        (HttpResults + "NotFound`1", 404),
+        (HttpResults + "NotFound", 404),
+        (HttpResults + "Conflict`1", 409),
+        (HttpResults + "Conflict", 409),
+        (HttpResults + "UnprocessableEntity`1", 422),
+        (HttpResults + "UnprocessableEntity", 422),
+        (HttpResults + "ValidationProblem", 400),
+        (HttpResults + "ForbidHttpResult", 403),
+        (HttpResults + "InternalServerError", 500),
+        (HttpResults + "InternalServerError`1", 500),
+    ];
+
+    // Binding and response attributes
+    public INamedTypeSymbol? Route { get; } = c.GetTypeByMetadataName(Mvc + "RouteAttribute");
+    public INamedTypeSymbol? FromBody { get; } = c.GetTypeByMetadataName(Mvc + "FromBodyAttribute");
+    public INamedTypeSymbol? FromForm { get; } = c.GetTypeByMetadataName(Mvc + "FromFormAttribute");
+    public INamedTypeSymbol? FromQuery { get; } =
+        c.GetTypeByMetadataName(Mvc + "FromQueryAttribute");
+    public INamedTypeSymbol? FromRoute { get; } =
+        c.GetTypeByMetadataName(Mvc + "FromRouteAttribute");
+    public INamedTypeSymbol? FromHeader { get; } =
+        c.GetTypeByMetadataName(Mvc + "FromHeaderAttribute");
+    public INamedTypeSymbol? FromServices { get; } =
+        c.GetTypeByMetadataName(Mvc + "FromServicesAttribute");
+    public INamedTypeSymbol? Consumes { get; } = c.GetTypeByMetadataName(Mvc + "ConsumesAttribute");
+    public INamedTypeSymbol? ProducesResponseType { get; } =
+        c.GetTypeByMetadataName(Mvc + "ProducesResponseTypeAttribute");
+
+    // The .NET 7+ generic [ProducesResponseType<T>] is a distinct symbol.
+    public INamedTypeSymbol? ProducesResponseTypeOfT { get; } =
+        c.GetTypeByMetadataName(Mvc + "ProducesResponseTypeAttribute`1");
+    public INamedTypeSymbol? Produces { get; } = c.GetTypeByMetadataName(Mvc + "ProducesAttribute");
+    public INamedTypeSymbol? RivetRequestExample { get; } =
+        RivetType(c, "RivetRequestExampleAttribute");
+    public INamedTypeSymbol? RivetResponseExample { get; } =
+        RivetType(c, "RivetResponseExampleAttribute");
+    public INamedTypeSymbol? RivetRequestBody { get; } = RivetType(c, "RivetRequestBodyAttribute");
+    public INamedTypeSymbol? ProducesFile { get; } = RivetType(c, "ProducesFileAttribute");
+
+    // Member and type metadata attributes
+    public INamedTypeSymbol? RivetFormat { get; } = RivetType(c, "RivetFormatAttribute");
+    public INamedTypeSymbol? RivetSchemaType { get; } = RivetType(c, "RivetSchemaTypeAttribute");
+    public INamedTypeSymbol? RivetSchemaRef { get; } = RivetType(c, "RivetSchemaRefAttribute");
+    public INamedTypeSymbol? RivetDefault { get; } = RivetType(c, "RivetDefaultAttribute");
+    public INamedTypeSymbol? RivetConstraints { get; } = RivetType(c, "RivetConstraintsAttribute");
+    public INamedTypeSymbol? RivetDescription { get; } = RivetType(c, "RivetDescriptionAttribute");
+    public INamedTypeSymbol? RivetExample { get; } = RivetType(c, "RivetExampleAttribute");
+    public INamedTypeSymbol? RivetReadOnly { get; } = RivetType(c, "RivetReadOnlyAttribute");
+    public INamedTypeSymbol? RivetWriteOnly { get; } = RivetType(c, "RivetWriteOnlyAttribute");
+    public INamedTypeSymbol? RivetOptional { get; } = RivetType(c, "RivetOptionalAttribute");
+    public INamedTypeSymbol? RivetHeader { get; } = RivetType(c, "RivetHeaderAttribute");
+    public INamedTypeSymbol? RivetScalar { get; } = RivetType(c, "RivetScalarAttribute");
+    public INamedTypeSymbol? RivetUnion { get; } = RivetType(c, "RivetUnionAttribute");
+    public INamedTypeSymbol? RivetGeneratedType { get; } =
+        RivetType(c, "RivetGeneratedTypeAttribute");
+    public INamedTypeSymbol? RivetGeneratedSchema { get; } =
+        RivetType(c, "RivetGeneratedSchemaAttribute");
+    public INamedTypeSymbol? RivetGeneratedSchemaMetadata { get; } =
+        RivetType(c, "RivetGeneratedSchemaMetadataAttribute");
+    public INamedTypeSymbol? Obsolete { get; } =
+        c.GetTypeByMetadataName("System.ObsoleteAttribute");
+    public INamedTypeSymbol? Flags { get; } = c.GetTypeByMetadataName("System.FlagsAttribute");
+
+    // System.Text.Json
+    public INamedTypeSymbol? JsonPropertyName { get; } = Stj(c, "JsonPropertyNameAttribute");
+    public INamedTypeSymbol? JsonIgnore { get; } = Stj(c, "JsonIgnoreAttribute");
+    public INamedTypeSymbol? JsonExtensionData { get; } = Stj(c, "JsonExtensionDataAttribute");
+    public INamedTypeSymbol? JsonInclude { get; } = Stj(c, "JsonIncludeAttribute");
+    public INamedTypeSymbol? JsonConstructor { get; } = Stj(c, "JsonConstructorAttribute");
+    public INamedTypeSymbol? JsonPolymorphic { get; } = Stj(c, "JsonPolymorphicAttribute");
+    public INamedTypeSymbol? JsonDerivedType { get; } = Stj(c, "JsonDerivedTypeAttribute");
+    public INamedTypeSymbol? JsonConverter { get; } = Stj(c, "JsonConverterAttribute");
+    public INamedTypeSymbol? JsonStringEnumMemberName { get; } =
+        Stj(c, "JsonStringEnumMemberNameAttribute");
+
+    // DataAnnotations
+    public INamedTypeSymbol? Required { get; } = DataAnnotation(c, "RequiredAttribute");
+    public INamedTypeSymbol? MinLength { get; } = DataAnnotation(c, "MinLengthAttribute");
+    public INamedTypeSymbol? MaxLength { get; } = DataAnnotation(c, "MaxLengthAttribute");
+    public INamedTypeSymbol? StringLength { get; } = DataAnnotation(c, "StringLengthAttribute");
+    public INamedTypeSymbol? Range { get; } = DataAnnotation(c, "RangeAttribute");
+    public INamedTypeSymbol? RegularExpression { get; } =
+        DataAnnotation(c, "RegularExpressionAttribute");
+    public INamedTypeSymbol? EmailAddress { get; } = DataAnnotation(c, "EmailAddressAttribute");
+    public INamedTypeSymbol? Url { get; } = DataAnnotation(c, "UrlAttribute");
 
     // Task wrappers (OriginalDefinition for generic matching)
-    public readonly INamedTypeSymbol? TaskOfT;
-    public readonly INamedTypeSymbol? Task;
-    public readonly INamedTypeSymbol? ValueTaskOfT;
-    public readonly INamedTypeSymbol? ValueTask;
+    public INamedTypeSymbol? TaskOfT { get; } =
+        c.GetTypeByMetadataName("System.Threading.Tasks.Task`1");
+    public INamedTypeSymbol? Task { get; } = c.GetTypeByMetadataName("System.Threading.Tasks.Task");
+    public INamedTypeSymbol? ValueTaskOfT { get; } =
+        c.GetTypeByMetadataName("System.Threading.Tasks.ValueTask`1");
+    public INamedTypeSymbol? ValueTask { get; } =
+        c.GetTypeByMetadataName("System.Threading.Tasks.ValueTask");
 
     // MVC result types
-    public readonly INamedTypeSymbol? ActionResultOfT;
-    public readonly INamedTypeSymbol? ActionResult;
-    public readonly INamedTypeSymbol? IActionResult;
-    public readonly INamedTypeSymbol? IResult;
-
-    // Infrastructure
-    public readonly INamedTypeSymbol? IFormFile;
-
-    // Typed HTTP results — generic variants
-    public readonly INamedTypeSymbol? OkOfT;
-    public readonly INamedTypeSymbol? CreatedOfT;
-    public readonly INamedTypeSymbol? AcceptedOfT;
-    public readonly INamedTypeSymbol? BadRequestOfT;
-    public readonly INamedTypeSymbol? NotFoundOfT;
-    public readonly INamedTypeSymbol? ConflictOfT;
-    public readonly INamedTypeSymbol? UnprocessableEntityOfT;
-
-    // Typed HTTP results — non-generic variants
-    public readonly INamedTypeSymbol? Ok;
-    public readonly INamedTypeSymbol? Created;
-    public readonly INamedTypeSymbol? Accepted;
-    public readonly INamedTypeSymbol? NoContent;
-    public readonly INamedTypeSymbol? BadRequest;
-    public readonly INamedTypeSymbol? Unauthorized;
-    public readonly INamedTypeSymbol? NotFound;
-    public readonly INamedTypeSymbol? Conflict;
-    public readonly INamedTypeSymbol? UnprocessableEntity;
-
-    // A8: previously-unmapped typed results — Results<> branches using these were
-    // silently dropped from the contract
-    public readonly INamedTypeSymbol? ValidationProblem;
-    public readonly INamedTypeSymbol? ForbidHttpResult;
-    public readonly INamedTypeSymbol? InternalServerError;
-    public readonly INamedTypeSymbol? InternalServerErrorOfT;
+    public INamedTypeSymbol? ActionResultOfT { get; } =
+        c.GetTypeByMetadataName(Mvc + "ActionResult`1");
+    public INamedTypeSymbol? ActionResult { get; } = c.GetTypeByMetadataName(Mvc + "ActionResult");
+    public INamedTypeSymbol? IActionResult { get; } =
+        c.GetTypeByMetadataName(Mvc + "IActionResult");
+    public INamedTypeSymbol? IResult { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IResult");
+    public INamedTypeSymbol? IFormFile { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IFormFile");
 
     // Coverage analysis
-    public readonly INamedTypeSymbol? RouteDefinition;
-    public readonly INamedTypeSymbol? RouteDefinitionOfT;
-    public readonly INamedTypeSymbol? RouteDefinitionOfTInputTOutput;
-    public readonly INamedTypeSymbol? InputRouteDefinitionOfT;
-    public readonly INamedTypeSymbol? FileRouteDefinition;
-    public readonly INamedTypeSymbol? FileRouteDefinitionOfT;
-    public readonly INamedTypeSymbol? BoundRouteDefinition;
-    public readonly INamedTypeSymbol? BoundRouteDefinitionOfT;
-    public readonly INamedTypeSymbol? BoundFileRouteDefinition;
-    public readonly INamedTypeSymbol? EndpointRouteBuilderExtensions;
-    public readonly INamedTypeSymbol? Function;
-    public readonly INamedTypeSymbol? HttpTrigger;
+    public INamedTypeSymbol? RouteDefinition { get; } = RivetType(c, "RouteDefinition");
+    public INamedTypeSymbol? RouteDefinitionOfT { get; } = RivetType(c, "RouteDefinition`1");
+    public INamedTypeSymbol? RouteDefinitionOfTInputTOutput { get; } =
+        RivetType(c, "RouteDefinition`2");
+    public INamedTypeSymbol? InputRouteDefinitionOfT { get; } =
+        RivetType(c, "InputRouteDefinition`1");
+    public INamedTypeSymbol? FileRouteDefinition { get; } = RivetType(c, "FileRouteDefinition");
+    public INamedTypeSymbol? FileRouteDefinitionOfT { get; } =
+        RivetType(c, "FileRouteDefinition`1");
+    public INamedTypeSymbol? BoundRouteDefinition { get; } = RivetType(c, "BoundRouteDefinition");
+    public INamedTypeSymbol? BoundRouteDefinitionOfT { get; } =
+        RivetType(c, "BoundRouteDefinition`1");
+    public INamedTypeSymbol? BoundFileRouteDefinition { get; } =
+        RivetType(c, "BoundFileRouteDefinition");
+    public INamedTypeSymbol? EndpointRouteBuilderExtensions { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions");
+    public INamedTypeSymbol? Function { get; } =
+        c.GetTypeByMetadataName("Microsoft.Azure.Functions.Worker.FunctionAttribute");
+    public INamedTypeSymbol? HttpTrigger { get; } =
+        c.GetTypeByMetadataName("Microsoft.Azure.Functions.Worker.HttpTriggerAttribute");
 
-    /// <summary>
-    /// Maps HTTP method attribute symbol → verb string ("GET", "POST", etc.).
-    /// </summary>
-    public readonly ImmutableDictionary<INamedTypeSymbol, string> HttpMethodAttributes;
+    /// <summary>HTTP method attribute symbol → verb ("GET", "POST", …).</summary>
+    public ImmutableDictionary<INamedTypeSymbol, string> HttpMethodAttributes { get; } =
+        Resolve(c, _httpMethodTable);
 
-    /// <summary>
-    /// Maps typed result OriginalDefinition → HTTP status code.
-    /// </summary>
-    public readonly ImmutableDictionary<INamedTypeSymbol, int> TypedResultStatusCodes;
+    /// <summary>Typed result OriginalDefinition → fixed HTTP status code.</summary>
+    public ImmutableDictionary<INamedTypeSymbol, int> TypedResultStatusCodes { get; } =
+        Resolve(c, _typedResultTable);
 
-    /// <summary>
-    /// Results&lt;T1, T2, ...&gt; arities 2–6.
-    /// </summary>
-    public readonly ImmutableHashSet<INamedTypeSymbol> ResultsArities;
+    /// <summary>Results&lt;T1, T2, ...&gt; arities 2–6.</summary>
+    public ImmutableHashSet<INamedTypeSymbol> ResultsArities { get; } =
+        Enumerable
+            .Range(2, 5)
+            .Select(arity => c.GetTypeByMetadataName($"{HttpResults}Results`{arity}"))
+            .OfType<INamedTypeSymbol>()
+            .ToImmutableHashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
 
-    public WellKnownTypes(Compilation compilation)
+    private static INamedTypeSymbol? RivetType(Compilation c, string name) =>
+        c.GetTypeByMetadataName("Rivet." + name);
+
+    private static INamedTypeSymbol? Stj(Compilation c, string name) =>
+        c.GetTypeByMetadataName("System.Text.Json.Serialization." + name);
+
+    private static INamedTypeSymbol? DataAnnotation(Compilation c, string name) =>
+        c.GetTypeByMetadataName("System.ComponentModel.DataAnnotations." + name);
+
+    private static ImmutableDictionary<INamedTypeSymbol, T> Resolve<T>(
+        Compilation compilation,
+        (string MetadataName, T Value)[] table
+    )
     {
-        // HTTP method attributes
-        HttpGet = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.HttpGetAttribute");
-        HttpPost = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.HttpPostAttribute");
-        HttpPut = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.HttpPutAttribute");
-        HttpDelete = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Mvc.HttpDeleteAttribute"
-        );
-        HttpPatch = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Mvc.HttpPatchAttribute"
-        );
-        HttpHead = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.HttpHeadAttribute");
-        HttpOptions = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Mvc.HttpOptionsAttribute"
-        );
-
-        // Binding attributes
-        Route = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.RouteAttribute");
-        FromBody = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromBodyAttribute");
-        FromForm = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromFormAttribute");
-        FromQuery = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Mvc.FromQueryAttribute"
-        );
-        FromRoute = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Mvc.FromRouteAttribute"
-        );
-        FromHeader = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Mvc.FromHeaderAttribute"
-        );
-        FromServices = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Mvc.FromServicesAttribute"
-        );
-
-        // Response metadata
-        ProducesResponseType = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute"
-        );
-        // A7: the .NET 7+ generic [ProducesResponseType<T>] is a distinct symbol
-        ProducesResponseTypeOfT = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute`1"
-        );
-        // [Produces("content/type")] — explicit success content type on an action or
-        // controller; wins over the statically-knowable formatter defaults.
-        Produces = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ProducesAttribute");
-        RivetRequestExample = compilation.GetTypeByMetadataName(
-            "Rivet.RivetRequestExampleAttribute"
-        );
-        RivetResponseExample = compilation.GetTypeByMetadataName(
-            "Rivet.RivetResponseExampleAttribute"
-        );
-
-        // Task wrappers
-        TaskOfT = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task`1");
-        Task = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task");
-        ValueTaskOfT = compilation.GetTypeByMetadataName("System.Threading.Tasks.ValueTask`1");
-        ValueTask = compilation.GetTypeByMetadataName("System.Threading.Tasks.ValueTask");
-
-        // MVC result types
-        ActionResultOfT = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Mvc.ActionResult`1"
-        );
-        ActionResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ActionResult");
-        IActionResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.IActionResult");
-        IResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IResult");
-
-        // Infrastructure
-        IFormFile = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IFormFile");
-
-        // Typed HTTP results — generic
-        OkOfT = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.Ok`1");
-        CreatedOfT = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.Created`1"
-        );
-        AcceptedOfT = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.Accepted`1"
-        );
-        BadRequestOfT = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.BadRequest`1"
-        );
-        NotFoundOfT = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.NotFound`1"
-        );
-        ConflictOfT = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.Conflict`1"
-        );
-        UnprocessableEntityOfT = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.UnprocessableEntity`1"
-        );
-
-        // Typed HTTP results — non-generic
-        Ok = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResults.Ok");
-        Created = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.Created"
-        );
-        Accepted = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.Accepted"
-        );
-        NoContent = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.NoContent"
-        );
-        BadRequest = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.BadRequest"
-        );
-        Unauthorized = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.UnauthorizedHttpResult"
-        );
-        NotFound = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.NotFound"
-        );
-        Conflict = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.Conflict"
-        );
-        UnprocessableEntity = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.UnprocessableEntity"
-        );
-
-        // Typed results with genuinely fixed statuses
-        ValidationProblem = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.ValidationProblem"
-        );
-        ForbidHttpResult = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.ForbidHttpResult"
-        );
-        InternalServerError = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.InternalServerError"
-        );
-        InternalServerErrorOfT = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.InternalServerError`1"
-        );
-
-        // Coverage analysis
-        RouteDefinition = compilation.GetTypeByMetadataName("Rivet.RouteDefinition");
-        RouteDefinitionOfT = compilation.GetTypeByMetadataName("Rivet.RouteDefinition`1");
-        RouteDefinitionOfTInputTOutput = compilation.GetTypeByMetadataName(
-            "Rivet.RouteDefinition`2"
-        );
-        InputRouteDefinitionOfT = compilation.GetTypeByMetadataName("Rivet.InputRouteDefinition`1");
-        FileRouteDefinition = compilation.GetTypeByMetadataName("Rivet.FileRouteDefinition");
-        FileRouteDefinitionOfT = compilation.GetTypeByMetadataName("Rivet.FileRouteDefinition`1");
-        BoundRouteDefinition = compilation.GetTypeByMetadataName("Rivet.BoundRouteDefinition");
-        BoundRouteDefinitionOfT = compilation.GetTypeByMetadataName("Rivet.BoundRouteDefinition`1");
-        BoundFileRouteDefinition = compilation.GetTypeByMetadataName(
-            "Rivet.BoundFileRouteDefinition"
-        );
-        EndpointRouteBuilderExtensions = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions"
-        );
-        Function = compilation.GetTypeByMetadataName(
-            "Microsoft.Azure.Functions.Worker.FunctionAttribute"
-        );
-        HttpTrigger = compilation.GetTypeByMetadataName(
-            "Microsoft.Azure.Functions.Worker.HttpTriggerAttribute"
-        );
-
-        // Build convenience dictionaries
-        HttpMethodAttributes = BuildHttpMethodAttributes();
-        TypedResultStatusCodes = BuildTypedResultStatusCodes();
-        ResultsArities = BuildResultsArities(compilation);
-    }
-
-    private ImmutableDictionary<INamedTypeSymbol, string> BuildHttpMethodAttributes()
-    {
-        var builder = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, string>(
+        var builder = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, T>(
             SymbolEqualityComparer.Default
         );
-        TryAdd(builder, HttpGet, "GET");
-        TryAdd(builder, HttpPost, "POST");
-        TryAdd(builder, HttpPut, "PUT");
-        TryAdd(builder, HttpDelete, "DELETE");
-        TryAdd(builder, HttpPatch, "PATCH");
-        TryAdd(builder, HttpHead, "HEAD");
-        TryAdd(builder, HttpOptions, "OPTIONS");
-        return builder.ToImmutable();
-    }
-
-    private ImmutableDictionary<INamedTypeSymbol, int> BuildTypedResultStatusCodes()
-    {
-        var builder = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, int>(
-            SymbolEqualityComparer.Default
-        );
-        TryAdd(builder, OkOfT, 200);
-        TryAdd(builder, Ok, 200);
-        TryAdd(builder, CreatedOfT, 201);
-        TryAdd(builder, Created, 201);
-        TryAdd(builder, AcceptedOfT, 202);
-        TryAdd(builder, Accepted, 202);
-        TryAdd(builder, NoContent, 204);
-        TryAdd(builder, BadRequestOfT, 400);
-        TryAdd(builder, BadRequest, 400);
-        TryAdd(builder, Unauthorized, 401);
-        TryAdd(builder, NotFoundOfT, 404);
-        TryAdd(builder, NotFound, 404);
-        TryAdd(builder, ConflictOfT, 409);
-        TryAdd(builder, Conflict, 409);
-        TryAdd(builder, UnprocessableEntityOfT, 422);
-        TryAdd(builder, UnprocessableEntity, 422);
-        // Only genuinely fixed statuses live here. ProblemHttpResult (a Results.Problem
-        // branch can carry any status) and JsonHttpResult<T> (Results.Json selects its
-        // own status) can carry/select another status at runtime, so they are not
-        // entries — a Results<...> branch using them is an unresolved contract.
-        TryAdd(builder, ValidationProblem, 400);
-        TryAdd(builder, ForbidHttpResult, 403);
-        TryAdd(builder, InternalServerError, 500);
-        TryAdd(builder, InternalServerErrorOfT, 500);
-        return builder.ToImmutable();
-    }
-
-    private static ImmutableHashSet<INamedTypeSymbol> BuildResultsArities(Compilation compilation)
-    {
-        var builder = ImmutableHashSet.CreateBuilder<INamedTypeSymbol>(
-            SymbolEqualityComparer.Default
-        );
-        for (var arity = 2; arity <= 6; arity++)
+        foreach (var (metadataName, value) in table)
         {
-            var symbol = compilation.GetTypeByMetadataName(
-                $"Microsoft.AspNetCore.Http.HttpResults.Results`{arity}"
-            );
-            if (symbol is not null)
+            if (compilation.GetTypeByMetadataName(metadataName) is { } symbol)
             {
-                builder.Add(symbol);
+                builder.Add(symbol, value);
             }
         }
         return builder.ToImmutable();
-    }
-
-    private static void TryAdd<T>(
-        ImmutableDictionary<INamedTypeSymbol, T>.Builder builder,
-        INamedTypeSymbol? symbol,
-        T value
-    )
-    {
-        if (symbol is not null)
-        {
-            builder.Add(symbol, value);
-        }
     }
 }

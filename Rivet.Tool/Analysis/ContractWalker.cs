@@ -236,7 +236,7 @@ public static class ContractWalker
         route = RouteParser.StripRouteConstraints(route);
 
         var name = Naming.ToCamelCase(field.Name);
-        var provenance = OpenApiProvenanceWalker.ReadOperation(field);
+        var provenance = OpenApiProvenanceWalker.ReadOperation(compilation, field);
 
         // Determine TInput / TOutput from type arguments on the root factory call
         ITypeSymbol? tInput = null;
@@ -874,7 +874,7 @@ public static class ContractWalker
         }
 
         // [ProducesFile] attribute on the field → file endpoint
-        if (field.GetAttributes().Any(a => a.AttributeClass?.Name == "ProducesFileAttribute"))
+        if (field.HasAttribute(wkt.ProducesFile))
         {
             fileContentType ??= "application/octet-stream";
         }
@@ -1337,7 +1337,7 @@ public static class ContractWalker
 
                 if (
                     typeWalker.IsJsonIgnored(headerProp)
-                    || TypeWalker.GetHeaderName(headerProp) is not { } headerName
+                    || typeWalker.GetHeaderName(headerProp) is not { } headerName
                 )
                 {
                     continue;
@@ -1348,7 +1348,7 @@ public static class ContractWalker
                         headerName,
                         typeWalker.MapPropertyType(headerProp),
                         ParamSource.Header,
-                        IsOptional: TypeWalker.IsOptionalProperty(headerProp)
+                        IsOptional: typeWalker.IsOptionalProperty(headerProp)
                     )
                 );
             }
@@ -1464,7 +1464,7 @@ public static class ContractWalker
                         }
 
                         // [RivetHeader] properties were already emitted as header params
-                        if (TypeWalker.GetHeaderName(formProp) is not null)
+                        if (typeWalker.GetHeaderName(formProp) is not null)
                         {
                             continue;
                         }
@@ -1486,7 +1486,7 @@ public static class ContractWalker
                                     tsName,
                                     new TsType.Primitive("File"),
                                     ParamSource.File,
-                                    IsOptional: TypeWalker.IsOptionalProperty(formProp)
+                                    IsOptional: typeWalker.IsOptionalProperty(formProp)
                                 )
                             );
                         }
@@ -1499,7 +1499,7 @@ public static class ContractWalker
                                     tsName,
                                     new TsType.Array(new TsType.Primitive("File")),
                                     ParamSource.File,
-                                    IsOptional: TypeWalker.IsOptionalProperty(formProp)
+                                    IsOptional: typeWalker.IsOptionalProperty(formProp)
                                 )
                             );
                         }
@@ -1511,7 +1511,7 @@ public static class ContractWalker
                                     tsName,
                                     typeWalker.MapPropertyType(formProp),
                                     ParamSource.FormField,
-                                    IsOptional: TypeWalker.IsOptionalProperty(formProp)
+                                    IsOptional: typeWalker.IsOptionalProperty(formProp)
                                 )
                             );
                         }
@@ -1531,7 +1531,7 @@ public static class ContractWalker
                             !typeWalker.IsJsonIgnored(p)
                             && typeWalker.GetJsonPropertySurface(p)
                                 != JsonPropertySurface.ResponseOnly
-                            && TypeWalker.GetHeaderName(p) is null
+                            && typeWalker.GetHeaderName(p) is null
                         )
                         .ToList();
                     if (
@@ -1600,7 +1600,7 @@ public static class ContractWalker
                     }
 
                     // [RivetHeader] properties were already emitted as header params
-                    if (TypeWalker.GetHeaderName(queryProp) is not null)
+                    if (typeWalker.GetHeaderName(queryProp) is not null)
                     {
                         continue;
                     }
@@ -1666,7 +1666,7 @@ public static class ContractWalker
                             tsName,
                             tsType,
                             ParamSource.Query,
-                            IsOptional: TypeWalker.IsOptionalProperty(queryProp)
+                            IsOptional: typeWalker.IsOptionalProperty(queryProp)
                         )
                     );
                 }
@@ -1805,9 +1805,7 @@ public static class ContractWalker
 
         var attribute = field
             .GetAttributes()
-            .FirstOrDefault(candidate =>
-                SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, attributeType)
-            );
+            .FirstOrDefault(candidate => candidate.Is(attributeType));
         if (attribute?.ConstructorArguments is not [{ Value: ITypeSymbol bodyType }, ..])
         {
             return null;
@@ -1843,9 +1841,7 @@ public static class ContractWalker
 
         var attribute = field
             .GetAttributes()
-            .FirstOrDefault(candidate =>
-                SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, attributeType)
-            );
+            .FirstOrDefault(candidate => candidate.Is(attributeType));
         if (attribute is null)
         {
             return null;
@@ -1877,7 +1873,7 @@ public static class ContractWalker
                     !typeWalker.IsJsonIgnored(property)
                     && typeWalker.GetJsonPropertySurface(property)
                         != JsonPropertySurface.ResponseOnly
-                    && TypeWalker.GetHeaderName(property) is null
+                    && typeWalker.GetHeaderName(property) is null
                     && !routeNames.Contains(RouteParser.NormalizeForMatching(property.Name))
                     && SymbolEqualityComparer.Default.Equals(property.Type, bodyType)
                 )
@@ -1892,7 +1888,7 @@ public static class ContractWalker
             .Where(property =>
                 !typeWalker.IsJsonIgnored(property)
                 && typeWalker.GetJsonPropertySurface(property) != JsonPropertySurface.ResponseOnly
-                && TypeWalker.GetHeaderName(property) is null
+                && typeWalker.GetHeaderName(property) is null
             )
             .GroupBy(
                 property =>
@@ -1906,7 +1902,7 @@ public static class ContractWalker
             .Where(property =>
                 !typeWalker.IsJsonIgnored(property)
                 && typeWalker.GetJsonPropertySurface(property) != JsonPropertySurface.ResponseOnly
-                && TypeWalker.GetHeaderName(property) is null
+                && typeWalker.GetHeaderName(property) is null
             )
             .ToList();
         if (bodyProperties.Count == 0)
@@ -1928,8 +1924,8 @@ public static class ContractWalker
             if (
                 routeNames.Contains(RouteParser.NormalizeForMatching(inputProperty.Name))
                 || !SymbolEqualityComparer.Default.Equals(bodyProperty.Type, inputProperty.Type)
-                || TypeWalker.IsOptionalProperty(bodyProperty)
-                    != TypeWalker.IsOptionalProperty(inputProperty)
+                || typeWalker.IsOptionalProperty(bodyProperty)
+                    != typeWalker.IsOptionalProperty(inputProperty)
             )
             {
                 return false;

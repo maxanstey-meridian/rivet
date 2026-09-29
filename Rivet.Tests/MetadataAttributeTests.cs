@@ -58,6 +58,61 @@ public sealed class MetadataAttributeTests
         Assert.DoesNotContain("nickname", required);
     }
 
+    [Fact]
+    public void Attributes_Are_Identified_By_Symbol_Not_By_Name()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Other
+            {
+                [System.AttributeUsage(System.AttributeTargets.All)]
+                public sealed class RequiredAttribute : System.Attribute;
+
+                [System.AttributeUsage(System.AttributeTargets.All)]
+                public sealed class RivetDescriptionAttribute(string text) : System.Attribute
+                {
+                    public string Text { get; } = text;
+                }
+            }
+
+            namespace App
+            {
+                [RivetType]
+                public sealed record ItemDto(
+                    [property: Other.Required] string? Nickname,
+                    [property: System.ComponentModel.DataAnnotations.Required] string? Alias,
+                    [property: Other.RivetDescription("not a Rivet description")] string Name);
+
+                [RivetContract]
+                public static class ItemContract
+                {
+                    public static readonly RouteDefinition<ItemDto> Get = Define.Get<ItemDto>("/api/items");
+                }
+            }
+            """;
+
+        using var doc = EmitOpenApi(source);
+        var schema = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ItemDto");
+        var required = schema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
+
+        Assert.DoesNotContain("nickname", required);
+        Assert.Contains("alias", required);
+        Assert.False(
+            schema
+                .GetProperty("properties")
+                .GetProperty("name")
+                .TryGetProperty("description", out _)
+        );
+    }
+
     // ========== [RivetDescription] ==========
 
     [Fact]
