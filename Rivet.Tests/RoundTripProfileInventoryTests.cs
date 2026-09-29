@@ -1,5 +1,7 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace Rivet.Tests;
 
@@ -483,6 +485,29 @@ public sealed class RoundTripProfileInventoryTests
         Assert.Contains("reviewed source-defect policy changed", result.StdErr);
     }
 
+    [Fact]
+    public void Inventory_Proof_Names_Are_Existing_Tests()
+    {
+        var script = File.ReadAllText(CliRunner.RepoPath("tools", "roundtrip_inventory.py"));
+        var proofs = Regex.Matches(
+            script,
+            @"^\w+_PROOF = \(?\s*""(?<type>\w+)\.(?<method>\w+)""",
+            RegexOptions.Multiline
+        );
+
+        Assert.Equal(17, proofs.Count);
+        foreach (Match proof in proofs)
+        {
+            var method = typeof(RoundTripProfileInventoryTests)
+                .Assembly.GetType($"Rivet.Tests.{proof.Groups["type"].Value}")
+                ?.GetMethod(proof.Groups["method"].Value);
+            Assert.True(
+                method?.GetCustomAttributes<FactAttribute>().Any() == true,
+                $"roundtrip_inventory.py names a proof test that does not exist: {proof.Value}"
+            );
+        }
+    }
+
     private static JsonObject ReadProfile() =>
         JsonNode
             .Parse(File.ReadAllText(CliRunner.RepoPath("corpus", "verified-profile.json")))!
@@ -503,7 +528,7 @@ public sealed class RoundTripProfileInventoryTests
         CliRunner.Run(
             CliRunner.RepoPath(),
             "python3",
-            [CliRunner.RepoPath("tools", "roundtrip-inventory.py"), .. arguments]
+            [CliRunner.RepoPath("tools", "roundtrip_inventory.py"), .. arguments]
         );
 
     private static string[] Errors(string output)

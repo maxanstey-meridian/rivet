@@ -45,7 +45,6 @@ public sealed class EndpointMetadataSurfaceTests
 
         using var emitted = RunDiskPipeline(
             spec,
-            "rivet-parameter-metadata-",
             generatedSource => Assert.Contains("\\\"allowEmptyValue\\\":true", generatedSource)
         );
         var parameters = emitted
@@ -140,7 +139,6 @@ public sealed class EndpointMetadataSurfaceTests
 
         using var emitted = RunDiskPipeline(
             spec,
-            "rivet-framework-scalar-collision-",
             generatedSource =>
             {
                 Assert.Contains("global::System.DateTime OccurredAt", generatedSource);
@@ -228,7 +226,6 @@ public sealed class EndpointMetadataSurfaceTests
 
         using var emitted = RunDiskPipeline(
             spec,
-            "rivet-response-header-metadata-",
             generatedSource =>
             {
                 Assert.Contains("schemaExamplesJson:", generatedSource);
@@ -282,51 +279,41 @@ public sealed class EndpointMetadataSurfaceTests
 
     private static JsonDocument RunDiskPipeline(
         string spec,
-        string temporaryDirectoryPrefix,
         Action<string>? inspectGeneratedSource = null
     )
     {
-        var workDirectory = Directory.CreateTempSubdirectory(temporaryDirectoryPrefix);
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
-            var import = CliRunner.RunCli(
-                workDirectory.FullName,
-                [
-                    "--from-openapi",
-                    sourcePath,
-                    "--output",
-                    generatedDirectory,
-                    "--namespace",
-                    "Generated",
-                ]
-            );
-            Assert.True(import.ExitCode == 0, import.StdErr);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
+        var import = CliRunner.RunCli(
+            workDirectory.FullName,
+            [
+                "--from-openapi",
+                sourcePath,
+                "--output",
+                generatedDirectory,
+                "--namespace",
+                "Generated",
+            ]
+        );
+        Assert.True(import.ExitCode == 0, import.StdErr);
 
-            inspectGeneratedSource?.Invoke(
-                string.Join(
-                    "\n",
-                    Directory
-                        .GetFiles(generatedDirectory, "*.cs", SearchOption.AllDirectories)
-                        .Select(File.ReadAllText)
-                )
-            );
+        inspectGeneratedSource?.Invoke(
+            string.Join(
+                "\n",
+                Directory
+                    .GetFiles(generatedDirectory, "*.cs", SearchOption.AllDirectories)
+                    .Select(File.ReadAllText)
+            )
+        );
 
-            var outputDirectory = Path.Combine(workDirectory.FullName, "output");
-            var emit = CliRunner.RunCli(
-                workDirectory.FullName,
-                [generatedDirectory, "--openapi", "--output", outputDirectory]
-            );
-            Assert.True(emit.ExitCode == 0, emit.StdErr);
-            return JsonDocument.Parse(
-                File.ReadAllText(Path.Combine(outputDirectory, "openapi.json"))
-            );
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        var outputDirectory = Path.Combine(workDirectory.FullName, "output");
+        var emit = CliRunner.RunCli(
+            workDirectory.FullName,
+            [generatedDirectory, "--openapi", "--output", outputDirectory]
+        );
+        Assert.True(emit.ExitCode == 0, emit.StdErr);
+        return JsonDocument.Parse(File.ReadAllText(Path.Combine(outputDirectory, "openapi.json")));
     }
 }

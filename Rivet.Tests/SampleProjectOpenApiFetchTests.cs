@@ -1,6 +1,3 @@
-using System.Diagnostics;
-using System.Text;
-
 namespace Rivet.Tests;
 
 /// <summary>
@@ -23,36 +20,27 @@ namespace Rivet.Tests;
 [Collection("Repository builds")]
 public sealed class SampleProjectOpenApiFetchTests : IDisposable
 {
-    private static readonly string _repoRoot = FindRepoRoot();
+    private static readonly string _repoRoot = CliRunner.RepoRoot;
     private static readonly string _sampleDir = Path.Combine(_repoRoot, "samples", "ContractApi");
     private static readonly string _jsDir = Path.Combine(_repoRoot, "Rivet.Tests", "js");
-    private readonly string _tempDir = Path.Combine(
-        Path.GetTempPath(),
-        $"rivet-oaf-test-{Guid.NewGuid():N}"
-    );
+    private readonly TempDir _temp = new();
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_tempDir))
-        {
-            Directory.Delete(_tempDir, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 
     // ════════════════ WP-2.1 — openapi-fetch consumer type-checks ════════════════
 
     [Fact]
     public async Task OpenApiFetch_Consumer_TypeChecks_Under_TscStrict()
     {
-        Directory.CreateDirectory(_tempDir);
-        await GenerateOpenApiFetchArtifacts(_tempDir);
-        await WriteTsConfig(_tempDir);
-        LinkNodeModules(_tempDir);
+        Directory.CreateDirectory(_temp.FullName);
+        await GenerateOpenApiFetchArtifacts(_temp.FullName);
+        await WriteTsConfig(_temp.FullName);
+        LinkNodeModules(_temp.FullName);
 
         var tsc = Path.Combine(_jsDir, "node_modules", "typescript", "bin", "tsc");
-        var (tscExit, tscOut, tscErr) = RunNode(
+        var (tscExit, tscOut, tscErr) = CliRunner.RunNode(
             tsc,
-            ["--project", Path.Combine(_tempDir, "tsconfig.json")]
+            ["--project", Path.Combine(_temp.FullName, "tsconfig.json")]
         );
         Assert.True(
             tscExit == 0,
@@ -71,32 +59,38 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
     [Fact]
     public async Task OpenApiFetch_Consumer_Produces_Expected_Responses_Against_Live_Server()
     {
-        Directory.CreateDirectory(_tempDir);
+        Directory.CreateDirectory(_temp.FullName);
 
         // 1. Generate the openapi-fetch consumer package
-        await GenerateOpenApiFetchArtifacts(_tempDir);
-        await WriteTsConfig(_tempDir);
-        LinkNodeModules(_tempDir);
+        await GenerateOpenApiFetchArtifacts(_temp.FullName);
+        await WriteTsConfig(_temp.FullName);
+        LinkNodeModules(_temp.FullName);
 
         // 2. Compile TS → JS
         var tsc = Path.Combine(_jsDir, "node_modules", "typescript", "bin", "tsc");
-        var (tscExit, tscOut, tscErr) = RunNode(
+        var (tscExit, tscOut, tscErr) = CliRunner.RunNode(
             tsc,
-            ["--project", Path.Combine(_tempDir, "tsconfig.json")]
+            ["--project", Path.Combine(_temp.FullName, "tsconfig.json")]
         );
         Assert.True(tscExit == 0, $"tsc failed:\n{tscOut}\n{tscErr}");
 
         // 3. Boot the real ContractApi server
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        await using var server = await StartSampleServer(cts.Token);
+        await using var server = await CliRunner.StartServerAsync(
+            Path.Combine(_sampleDir, "ContractApi.csproj"),
+            cts.Token
+        );
 
         // 4. Run the consumer against the live server, assert expected literals
-        await File.WriteAllTextAsync(Path.Combine(_tempDir, "single-run.mjs"), SingleRunScript);
+        await File.WriteAllTextAsync(
+            Path.Combine(_temp.FullName, "single-run.mjs"),
+            SingleRunScript
+        );
 
-        var (nodeExit, nodeOutput) = await RunProcessAsync(
+        var (nodeExit, nodeOutput) = await CliRunner.RunAsync(
             "node",
-            $"\"{Path.Combine(_tempDir, "single-run.mjs")}\" {server.Url}",
-            workingDir: _tempDir
+            $"\"{Path.Combine(_temp.FullName, "single-run.mjs")}\" {server.Url}",
+            workingDirectory: _temp.FullName
         );
 
         Assert.True(nodeExit == 0, $"openapi-fetch run found mismatches:\n{nodeOutput}");
@@ -125,7 +119,7 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         // openapi-typescript over it (vendored, offline).
         var openapiTs = Path.Combine(_jsDir, "node_modules", "openapi-typescript", "bin", "cli.js");
         var schemaPath = Path.Combine(dir, "schema.d.ts");
-        var (genExit, genOut, genErr) = RunNode(openapiTs, [specPath, "-o", schemaPath]);
+        var (genExit, genOut, genErr) = CliRunner.RunNode(openapiTs, [specPath, "-o", schemaPath]);
         Assert.True(
             genExit == 0 && File.Exists(schemaPath),
             $"openapi-typescript failed (exit {genExit}):\n{genOut}\n{genErr}"
@@ -339,184 +333,4 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
 
         console.log("Single-arm run: openapi-fetch produced the expected statuses and bodies across all 7 scenarios");
         """;
-
-    // ═══════════════════════════ Process plumbing ═══════════════════════════
-
-    private static string FindRepoRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        while (dir is not null && !File.Exists(Path.Combine(dir, "Rivet.slnx")))
-        {
-            dir = Path.GetDirectoryName(dir);
-        }
-
-        return dir ?? throw new InvalidOperationException("Could not find repo root (Rivet.slnx)");
-    }
-
-    private static (int ExitCode, string StdOut, string StdErr) RunNode(
-        string script,
-        string[] args
-    )
-    {
-        if (!File.Exists(script))
-        {
-            throw new InvalidOperationException(
-                $"Node tool not found: {script}. Run 'pnpm install' in {_jsDir} (see its README)."
-            );
-        }
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = "node",
-            WorkingDirectory = _jsDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        psi.ArgumentList.Add(script);
-        foreach (var arg in args)
-        {
-            psi.ArgumentList.Add(arg);
-        }
-
-        using var process =
-            Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start node {script}");
-
-        // Drain both pipes concurrently — sequential ReadToEnd deadlocks when the
-        // child fills the other pipe's buffer (same family as RunProcessAsync).
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
-
-        return (process.ExitCode, stdoutTask.Result, stderrTask.Result);
-    }
-
-    private static async Task<(int ExitCode, string Output)> RunProcessAsync(
-        string fileName,
-        string arguments,
-        string? workingDir = null,
-        CancellationToken ct = default
-    )
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            WorkingDirectory = workingDir ?? _repoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        SampleProjectTests.MakeBuildHermetic(psi);
-
-        using var process =
-            Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start {fileName}");
-
-        // Drain both pipes CONCURRENTLY: reading stdout to EOF before touching
-        // stderr deadlocks when the child fills the stderr pipe buffer and blocks
-        // on write — stdout then never EOFs (CliPipelineTests' flake, same family).
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
-        var stderrTask = process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-
-        var output = string.Join(
-            "\n",
-            new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s))
-        );
-
-        return (process.ExitCode, output);
-    }
-
-    private static async Task<AsyncServerHandle> StartSampleServer(CancellationToken ct)
-    {
-        // Port 0 asks the OS for a free ephemeral port: two live-host proofs (or an
-        // unrelated process) can no longer collide on a pre-drawn random port and
-        // kill Kestrel before the test asserts anything. The actually bound URL is
-        // read back from the "Now listening on:" line below.
-        var psi = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            Arguments =
-                $"run --project \"{Path.Combine(_sampleDir, "ContractApi.csproj")}\" --urls http://127.0.0.1:0",
-            WorkingDirectory = _repoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        SampleProjectTests.MakeBuildHermetic(psi);
-
-        var process =
-            Process.Start(psi)
-            ?? throw new InvalidOperationException("Failed to start sample server");
-
-        const string listeningMarker = "Now listening on:";
-        string? boundUrl = null;
-        var output = new StringBuilder();
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                var line = await process.StandardOutput.ReadLineAsync(ct);
-                if (line is null)
-                {
-                    break;
-                }
-
-                output.AppendLine(line);
-
-                var markerIndex = line.IndexOf(listeningMarker, StringComparison.Ordinal);
-                if (markerIndex >= 0)
-                {
-                    boundUrl = line[(markerIndex + listeningMarker.Length)..].Trim();
-                    break;
-                }
-            }
-
-            if (boundUrl is null)
-            {
-                var stderr = await process.StandardError.ReadToEndAsync(ct);
-                throw new InvalidOperationException(
-                    $"Server did not start. Output:\n{output}\nStderr:\n{stderr}"
-                );
-            }
-        }
-        catch
-        {
-            process.Kill();
-            process.Dispose();
-            throw;
-        }
-
-        return new AsyncServerHandle(process, boundUrl);
-    }
-
-    private sealed class AsyncServerHandle(Process process, string boundUrl) : IAsyncDisposable
-    {
-        // The URL the server actually bound — for --urls http://127.0.0.1:0 the OS
-        // assigns a free ephemeral port.
-        public string Url { get; } = boundUrl;
-
-        public async ValueTask DisposeAsync()
-        {
-            try
-            {
-                process.Kill();
-                await process.WaitForExitAsync();
-            }
-            catch
-            {
-                // Best effort
-            }
-
-            process.Dispose();
-        }
-    }
 }

@@ -163,24 +163,17 @@ public sealed class ImportedSchemaProvenanceRoundTripTests
             """;
 
         var source = JsonNode.Parse(spec)!.AsObject();
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-imported-schema-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
 
-            var first = RunPass(workDirectory.FullName, sourcePath, "first");
-            AssertSchemaSurface(source, first);
+        var first = RunPass(workDirectory.FullName, sourcePath, "first");
+        AssertSchemaSurface(source, first);
 
-            var firstPath = Path.Combine(workDirectory.FullName, "first", "openapi.json");
-            var second = RunPass(workDirectory.FullName, firstPath, "second");
-            AssertSchemaSurface(source, second);
-            AssertSchemaSurface(first, second);
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        var firstPath = Path.Combine(workDirectory.FullName, "first", "openapi.json");
+        var second = RunPass(workDirectory.FullName, firstPath, "second");
+        AssertSchemaSurface(source, second);
+        AssertSchemaSurface(first, second);
     }
 
     [Fact]
@@ -221,42 +214,35 @@ public sealed class ImportedSchemaProvenanceRoundTripTests
               }
             }
             """;
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-imported-conflict-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
-            File.WriteAllText(sourcePath, spec);
-            var import = CliRunner.RunCli(
-                workDirectory.FullName,
-                ["--from-openapi", sourcePath, "--output", generatedDirectory]
-            );
-            Assert.True(import.ExitCode == 0, import.StdErr);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
+        File.WriteAllText(sourcePath, spec);
+        var import = CliRunner.RunCli(
+            workDirectory.FullName,
+            ["--from-openapi", sourcePath, "--output", generatedDirectory]
+        );
+        Assert.True(import.ExitCode == 0, import.StdErr);
 
-            var payloadPath = Path.Combine(generatedDirectory, "Types", "Payload.cs");
-            var payload = File.ReadAllText(payloadPath);
-            var edited = payload.Replace("public string Value", "public long Value");
-            Assert.NotEqual(payload, edited);
-            File.WriteAllText(payloadPath, edited);
+        var payloadPath = Path.Combine(generatedDirectory, "Types", "Payload.cs");
+        var payload = File.ReadAllText(payloadPath);
+        var edited = payload.Replace("public string Value", "public long Value");
+        Assert.NotEqual(payload, edited);
+        File.WriteAllText(payloadPath, edited);
 
-            var emit = CliRunner.RunCli(
-                workDirectory.FullName,
-                [
-                    generatedDirectory,
-                    "--openapi",
-                    "--output",
-                    Path.Combine(workDirectory.FullName, "out"),
-                ]
-            );
+        var emit = CliRunner.RunCli(
+            workDirectory.FullName,
+            [
+                generatedDirectory,
+                "--openapi",
+                "--output",
+                Path.Combine(workDirectory.FullName, "out"),
+            ]
+        );
 
-            Assert.Equal(1, emit.ExitCode);
-            Assert.Contains(Diagnostics.ImportedSchemaProvenanceConflict, emit.StdErr);
-            Assert.Contains("Types/Payload.cs", emit.StdErr);
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        Assert.Equal(1, emit.ExitCode);
+        Assert.Contains(Diagnostics.ImportedSchemaProvenanceConflict, emit.StdErr);
+        Assert.Contains("Types/Payload.cs", emit.StdErr);
     }
 
     [Fact]
@@ -282,36 +268,29 @@ public sealed class ImportedSchemaProvenanceRoundTripTests
               "paths": {}
             }
             """;
-        var workDirectory = Directory.CreateTempSubdirectory("rivet-imported-formatting-");
-        try
-        {
-            var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
-            var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
-            File.WriteAllText(sourcePath, spec);
-            var import = CliRunner.RunCli(
-                workDirectory.FullName,
-                ["--from-openapi", sourcePath, "--output", generatedDirectory]
-            );
-            Assert.True(import.ExitCode == 0, import.StdErr);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
+        File.WriteAllText(sourcePath, spec);
+        var import = CliRunner.RunCli(
+            workDirectory.FullName,
+            ["--from-openapi", sourcePath, "--output", generatedDirectory]
+        );
+        Assert.True(import.ExitCode == 0, import.StdErr);
 
-            var payloadPath = Path.Combine(generatedDirectory, "Types", "Payload.cs");
-            File.AppendAllText(payloadPath, "\n\n");
-            var emit = CliRunner.RunCli(
-                workDirectory.FullName,
-                [
-                    generatedDirectory,
-                    "--openapi",
-                    "--output",
-                    Path.Combine(workDirectory.FullName, "out"),
-                ]
-            );
+        var payloadPath = Path.Combine(generatedDirectory, "Types", "Payload.cs");
+        File.AppendAllText(payloadPath, "\n\n");
+        var emit = CliRunner.RunCli(
+            workDirectory.FullName,
+            [
+                generatedDirectory,
+                "--openapi",
+                "--output",
+                Path.Combine(workDirectory.FullName, "out"),
+            ]
+        );
 
-            Assert.Equal(0, emit.ExitCode);
-        }
-        finally
-        {
-            workDirectory.Delete(recursive: true);
-        }
+        Assert.Equal(0, emit.ExitCode);
     }
 
     private static JsonObject RunPass(string workingDirectory, string sourcePath, string name)

@@ -58,16 +58,17 @@ tasks:
         desc: Run test suite
         cmds:
             - dotnet test ./Rivet.slnx
-            - python3 -m unittest tools/test_roundtrip_audit.py -v
+            - python3 -m unittest tools/test_openapi_common.py -v
 
     format:
         desc: Format C# projects
+        # Analyzer fixes first: their code fixes can leave whitespace CSharpier rejects, so CSharpier runs last.
         cmds:
-            - dotnet csharpier format .
             - dotnet format ./Rivet.slnx analyzers --severity warn
+            - dotnet csharpier format .
 
-    format:verbose:
-        desc: Verify C# formatting
+    format:check:
+        desc: Verify C# formatting and analyzer fixes
         cmds:
             - dotnet csharpier check .
             - dotnet format ./Rivet.slnx analyzers --severity warn --verify-no-changes --verbosity minimal

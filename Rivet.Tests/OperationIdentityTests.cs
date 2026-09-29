@@ -340,8 +340,8 @@ public sealed class OperationIdentityTests
     [Fact]
     public async Task Public_Cli_Fails_On_Contradictory_Operations_Without_Partial_Replacement()
     {
-        using var work = OperationIdentityWork.Create();
-        var outputDir = Path.Combine(work.Path, "output");
+        using var work = new TempDir();
+        var outputDir = Path.Combine(work.FullName, "output");
         Directory.CreateDirectory(outputDir);
 
         // Seed a previously written openapi.json — a failed re-emission must leave it
@@ -350,7 +350,7 @@ public sealed class OperationIdentityTests
         const string previousSpec = "{ \"previous\": true }";
         await File.WriteAllTextAsync(specPath, previousSpec);
 
-        var sourcePath = Path.Combine(work.Path, "Conflicting.cs");
+        var sourcePath = Path.Combine(work.FullName, "Conflicting.cs");
         await File.WriteAllTextAsync(
             sourcePath,
             """
@@ -388,7 +388,7 @@ public sealed class OperationIdentityTests
             """
         );
 
-        var emission = CliRunner.RunCli(work.Path, [sourcePath, "--output", outputDir]);
+        var emission = CliRunner.RunCli(work.FullName, [sourcePath, "--output", outputDir]);
 
         Assert.Equal(1, emission.ExitCode);
         Assert.Contains("error RIV2012:", emission.StdErr);
@@ -437,13 +437,13 @@ public sealed class OperationIdentityTests
     [Fact]
     public async Task Public_Cli_Emits_Both_Overloads_With_Reported_Count_Matching()
     {
-        using var work = OperationIdentityWork.Create();
-        var outputDir = Path.Combine(work.Path, "output");
+        using var work = new TempDir();
+        var outputDir = Path.Combine(work.FullName, "output");
 
-        var sourcePath = Path.Combine(work.Path, "Overloads.cs");
+        var sourcePath = Path.Combine(work.FullName, "Overloads.cs");
         await File.WriteAllTextAsync(sourcePath, OverloadsSource);
 
-        var emission = CliRunner.RunCli(work.Path, [sourcePath, "--output", outputDir]);
+        var emission = CliRunner.RunCli(work.FullName, [sourcePath, "--output", outputDir]);
 
         Assert.Equal(0, emission.ExitCode);
         Assert.Contains("2 endpoints.", emission.StdOut);
@@ -737,15 +737,15 @@ public sealed class OperationIdentityTests
     [Fact]
     public async Task Public_Cli_Fails_On_Param_Contradiction_Without_Partial_Replacement()
     {
-        using var work = OperationIdentityWork.Create();
-        var outputDir = Path.Combine(work.Path, "output");
+        using var work = new TempDir();
+        var outputDir = Path.Combine(work.FullName, "output");
         Directory.CreateDirectory(outputDir);
 
         var specPath = Path.Combine(outputDir, "openapi.json");
         const string previousSpec = "{ \"previous\": true }";
         await File.WriteAllTextAsync(specPath, previousSpec);
 
-        var sourcePath = Path.Combine(work.Path, "ParamConflict.cs");
+        var sourcePath = Path.Combine(work.FullName, "ParamConflict.cs");
         await File.WriteAllTextAsync(
             sourcePath,
             """
@@ -783,7 +783,7 @@ public sealed class OperationIdentityTests
             """
         );
 
-        var emission = CliRunner.RunCli(work.Path, [sourcePath, "--output", outputDir]);
+        var emission = CliRunner.RunCli(work.FullName, [sourcePath, "--output", outputDir]);
 
         Assert.Equal(1, emission.ExitCode);
         Assert.Contains("error RIV2012:", emission.StdErr);
@@ -792,29 +792,5 @@ public sealed class OperationIdentityTests
         Assert.DoesNotContain("Unhandled exception", emission.StdErr);
 
         Assert.Equal(previousSpec, await File.ReadAllTextAsync(specPath));
-    }
-}
-
-/// <summary>Self-contained temp workspace for CLI regression runs.</summary>
-internal sealed class OperationIdentityWork(string path) : IDisposable
-{
-    public string Path { get; } = path;
-
-    public static OperationIdentityWork Create()
-    {
-        var path = System.IO.Path.Combine(
-            System.IO.Path.GetTempPath(),
-            $"rivet-operation-identity-{Guid.NewGuid():N}"
-        );
-        Directory.CreateDirectory(path);
-        return new OperationIdentityWork(path);
-    }
-
-    public void Dispose()
-    {
-        if (Directory.Exists(Path))
-        {
-            Directory.Delete(Path, recursive: true);
-        }
     }
 }

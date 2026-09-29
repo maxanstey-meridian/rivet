@@ -324,7 +324,6 @@ Use the repository commands after checking their current definitions. Do not rep
 | Focused regressions | Each F item has an outcome-based regression; each A item has a recorded conclusion and evidence |
 | Build | `dotnet build ./Rivet.slnx` succeeds on restored dependencies |
 | Full tests | `dotnet test ./Rivet.slnx` including Local tests and every supported runtime-test target |
-| Round-trip audit | `python3 -m unittest tools/test_roundtrip_audit.py -v` plus importer compilation regressions |
 | Samples | `task samples:build` or its current equivalent, including FunctionsApi |
 | Real Functions gate | `task test:functions` with required Core Tools; missing prerequisites remain explicit blockers for this gate |
 | Docs | `task docs:build` after docs changes |

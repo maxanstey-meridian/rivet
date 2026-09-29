@@ -8,24 +8,6 @@ namespace Rivet.Tests;
 
 public sealed class OpenApiEmitterTests
 {
-    private static JsonDocument EmitOpenApi(
-        string source,
-        ContractSecurityMetadata? security = null
-    )
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            security
-        );
-        return JsonDocument.Parse(json);
-    }
-
     private static JsonDocument EmitOpenApiFromController(
         string source,
         ContractSecurityMetadata? security = null
@@ -173,7 +155,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var operation = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/members/{id}/role")
@@ -222,7 +204,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var bodySchema = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/members/{id}/role")
@@ -262,7 +244,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var operation = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/members/{id}/role")
@@ -301,7 +283,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var operation = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/members/{id}/role")
@@ -445,7 +427,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var body = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/members/{id}")
@@ -515,7 +497,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
         var memberBody = doc
             .RootElement.GetProperty("paths")
@@ -577,7 +559,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var root = doc.RootElement;
 
         Assert.Equal("3.1.0", root.GetProperty("openapi").GetString());
@@ -642,7 +624,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var post = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/tasks")
@@ -684,7 +666,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var responses = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/tasks/{id}")
@@ -796,7 +778,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var resp204 = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/tasks/{id}")
@@ -1202,7 +1184,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var mediaType = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/login")
@@ -1644,7 +1626,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var multipart = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/files")
@@ -1696,7 +1678,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var mediaType = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/tasks/{id}")
@@ -1742,7 +1724,9 @@ public sealed class OpenApiEmitterTests
         // the shared parse-side guard inside Emit aborts before
         // any output is written (the BuildResponses re-check stays as defense in
         // depth dominated by this guard on every public path).
-        var exception = Assert.Throws<RivetUserException>(() => EmitOpenApi(source));
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApi(source)
+        );
 
         Assert.Contains("RIV1102", exception.Message);
         // The parse guard receives bare endpoint.Name ('deleteSession'); the
@@ -1770,7 +1754,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var mediaType = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/documents/{id}")
@@ -1935,7 +1919,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var taskSchema = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -1971,7 +1955,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var descProp = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -2014,7 +1998,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var addressProp = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -2068,7 +2052,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var props = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -2106,7 +2090,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var root = doc.RootElement;
 
         // Version must be 3.1.x
@@ -2244,7 +2228,7 @@ public sealed class OpenApiEmitterTests
 
         var security = SecurityParser.ParseMany(["bearer"]);
 
-        using var doc = EmitOpenApi(source, security);
+        using var doc = CompilationHelper.EmitOpenApi(source, security);
         var root = doc.RootElement;
 
         // Top-level security
@@ -2281,7 +2265,7 @@ public sealed class OpenApiEmitterTests
 
         var security = SecurityParser.ParseMany(["bearer"]);
 
-        using var doc = EmitOpenApi(source, security);
+        using var doc = CompilationHelper.EmitOpenApi(source, security);
         var get = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/health")
@@ -2315,7 +2299,7 @@ public sealed class OpenApiEmitterTests
 
         var security = SecurityParser.ParseMany(["admin=bearer"]);
 
-        using var doc = EmitOpenApi(source, security);
+        using var doc = CompilationHelper.EmitOpenApi(source, security);
         var delete = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/admin/tasks")
@@ -2349,7 +2333,9 @@ public sealed class OpenApiEmitterTests
 
         var security = SecurityParser.ParseMany(["bearer"]);
 
-        var exception = Assert.Throws<RivetUserException>(() => EmitOpenApi(source, security));
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApi(source, security)
+        );
 
         Assert.Contains("RIV2002", exception.Message);
         Assert.Contains("security scheme 'admin'", exception.Message);
@@ -2378,7 +2364,9 @@ public sealed class OpenApiEmitterTests
         var security = SecurityParser.ParseMany(["bearer"]);
 
         JsonDocument? doc = null;
-        var stderr = CompilationHelper.CaptureStdErr(() => doc = EmitOpenApi(source, security));
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            doc = CompilationHelper.EmitOpenApi(source, security)
+        );
         using var docGuard = doc;
 
         // (CaptureStdErr may see unrelated warnings from parallel tests — assert only
@@ -2409,7 +2397,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var root = doc.RootElement;
 
         // No top-level security
@@ -2446,7 +2434,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var get = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/tasks/{id}")
@@ -2680,7 +2668,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var root = doc.RootElement;
 
         // Collect all schema names
@@ -2697,8 +2685,7 @@ public sealed class OpenApiEmitterTests
         }
 
         // Collect all $ref values recursively
-        var refs = new List<string>();
-        CollectRefs(root, refs);
+        var refs = JsonRefs.Collect(root).Select(r => r.Reference).ToList();
 
         // Every $ref must resolve
         foreach (var refValue in refs)
@@ -2830,7 +2817,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var parameters = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/search")
@@ -3273,7 +3260,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
         // Brand should be a component schema
@@ -3895,32 +3882,6 @@ public sealed class OpenApiEmitterTests
         );
     }
 
-    private static void CollectRefs(JsonElement element, List<string> refs)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                foreach (var prop in element.EnumerateObject())
-                {
-                    if (prop.Name == "$ref" && prop.Value.ValueKind == JsonValueKind.String)
-                    {
-                        refs.Add(prop.Value.GetString()!);
-                    }
-                    else
-                    {
-                        CollectRefs(prop.Value, refs);
-                    }
-                }
-                break;
-            case JsonValueKind.Array:
-                foreach (var item in element.EnumerateArray())
-                {
-                    CollectRefs(item, refs);
-                }
-                break;
-        }
-    }
-
     // ========== Description-only does not bleed into summary ==========
 
     [Fact]
@@ -3943,7 +3904,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var operation = doc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/items/{id}")
@@ -4179,7 +4140,7 @@ public sealed class OpenApiEmitterTests
     [Fact]
     public void ExclusiveMinimum_Looser_Than_Minimum_Survives_Numerically()
     {
-        using var doc = EmitOpenApi(
+        using var doc = CompilationHelper.EmitOpenApi(
             """
             using System.ComponentModel.DataAnnotations;
             using Rivet;
@@ -4221,7 +4182,7 @@ public sealed class OpenApiEmitterTests
     {
         // Mirror case: x >= 0 AND x > 5 — the effective bound is x > 5. 3.1 keeps
         // both numerically; exclusiveMinimum: 5 carries the binding constraint.
-        using var doc = EmitOpenApi(
+        using var doc = CompilationHelper.EmitOpenApi(
             """
             using System.ComponentModel.DataAnnotations;
             using Rivet;
@@ -4260,7 +4221,7 @@ public sealed class OpenApiEmitterTests
     {
         // x <= 10 AND x < 100 — maximum: 10 is the binding constraint; 3.1 carries
         // the looser exclusive bound numerically without corrupting it.
-        using var doc = EmitOpenApi(
+        using var doc = CompilationHelper.EmitOpenApi(
             """
             using System.ComponentModel.DataAnnotations;
             using Rivet;
@@ -4402,7 +4363,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var tags = doc.RootElement.GetProperty("tags");
 
         var names = tags.EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToList();
@@ -4497,9 +4458,7 @@ public sealed class OpenApiEmitterTests
         // kind:"brand" nodes (the TS lowerer emits them that way); the --from path
         // dropped them while MapTsTypeToJsonSchema still $ref'd each brand by name —
         // a dangling reference every consumer rejects.
-        var json = File.ReadAllText(
-            Path.Combine(AppContext.BaseDirectory, "Fixtures", "contract-ts-brands.json")
-        );
+        var json = Fixture.Text("contract-ts-brands.json");
         var spec = CompilationHelper.EmitOpenApiFromJson(json);
         using var doc = JsonDocument.Parse(spec);
 
@@ -4545,9 +4504,7 @@ public sealed class OpenApiEmitterTests
         // ep.InputTypeName with no existence check — a schema nobody defines. The fix
         // mirrors the E6 generic fallback: warn loudly and build the multipart request
         // schema inline from the endpoint's params.
-        var json = File.ReadAllText(
-            Path.Combine(AppContext.BaseDirectory, "Fixtures", "contract-ts-multipart.json")
-        );
+        var json = Fixture.Text("contract-ts-multipart.json");
 
         var spec = string.Empty;
         var stderr = CompilationHelper.CaptureStdErr(() =>

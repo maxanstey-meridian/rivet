@@ -89,21 +89,14 @@ public sealed class FunctionsPrefixTests
         string expected
     )
     {
-        var directory = Directory.CreateTempSubdirectory();
-        try
-        {
-            File.WriteAllText(Path.Combine(directory.FullName, "host.json"), json);
-            Assert.Equal(
-                expected,
-                FunctionsHostConfiguration.LoadRoutePrefix(
-                    Path.Combine(directory.FullName, "Api.csproj")
-                )
-            );
-        }
-        finally
-        {
-            directory.Delete(true);
-        }
+        using var directory = new TempDir();
+        File.WriteAllText(Path.Combine(directory.FullName, "host.json"), json);
+        Assert.Equal(
+            expected,
+            FunctionsHostConfiguration.LoadRoutePrefix(
+                Path.Combine(directory.FullName, "Api.csproj")
+            )
+        );
     }
 
     [Theory]
@@ -112,19 +105,12 @@ public sealed class FunctionsPrefixTests
     [InlineData("{\"extensions\":{\"http\":{\"routePrefix\":3}}}")]
     public void Invalid_host_configuration_does_not_silently_assume_default(string json)
     {
-        var directory = Directory.CreateTempSubdirectory();
-        try
-        {
-            File.WriteAllText(Path.Combine(directory.FullName, "host.json"), json);
-            Assert.Throws<RivetUserException>(() =>
-                FunctionsHostConfiguration.LoadRoutePrefix(
-                    Path.Combine(directory.FullName, "Api.csproj")
-                )
-            );
-        }
-        finally
-        {
-            directory.Delete(true);
-        }
+        using var directory = new TempDir();
+        File.WriteAllText(Path.Combine(directory.FullName, "host.json"), json);
+        Assert.Throws<RivetUserException>(() =>
+            FunctionsHostConfiguration.LoadRoutePrefix(
+                Path.Combine(directory.FullName, "Api.csproj")
+            )
+        );
     }
 }

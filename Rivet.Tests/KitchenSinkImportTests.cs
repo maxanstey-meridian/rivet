@@ -8,9 +8,7 @@ namespace Rivet.Tests;
 
 public sealed class KitchenSinkImportTests
 {
-    private static readonly string _fixture = File.ReadAllText(
-        Path.Combine(AppContext.BaseDirectory, "Fixtures", "openapi-kitchen-sink.json")
-    );
+    private static readonly string _fixture = Fixture.Text("openapi-kitchen-sink.json");
     private static readonly ImportResult _fixtureImport = CompilationHelper.Import(
         _fixture,
         "KitchenSink"
@@ -831,8 +829,7 @@ public sealed class KitchenSinkImportTests
             schemaNames.Add(s.Name);
         }
 
-        var allRefs = new List<string>();
-        CollectRefs(doc, allRefs);
+        var allRefs = JsonRefs.Collect(doc).Select(r => r.Reference).ToList();
         var brokenRefs = allRefs
             .Where(r => r.StartsWith("#/components/schemas/"))
             .Where(r => !schemaNames.Contains(r["#/components/schemas/".Length..]))
@@ -1433,31 +1430,5 @@ public sealed class KitchenSinkImportTests
         }
 
         return req.EnumerateArray().Any(v => v.GetString() == propName);
-    }
-
-    private static void CollectRefs(JsonElement element, List<string> refs)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                foreach (var prop in element.EnumerateObject())
-                {
-                    if (prop.Name == "$ref" && prop.Value.ValueKind == JsonValueKind.String)
-                    {
-                        refs.Add(prop.Value.GetString()!);
-                    }
-                    else
-                    {
-                        CollectRefs(prop.Value, refs);
-                    }
-                }
-                break;
-            case JsonValueKind.Array:
-                foreach (var item in element.EnumerateArray())
-                {
-                    CollectRefs(item, refs);
-                }
-                break;
-        }
     }
 }

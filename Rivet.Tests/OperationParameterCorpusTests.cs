@@ -113,54 +113,47 @@ public sealed class OperationParameterCorpusTests
             }
             """;
 
-        var workDir = Directory.CreateTempSubdirectory("rivet-operation-parameters-");
-        try
-        {
-            var sourcePath = Path.Combine(workDir.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var generatedDirectory = Path.Combine(workDir.FullName, "generated");
-            var import = CliRunner.RunCli(
-                workDir.FullName,
-                [
-                    "--from-openapi",
-                    sourcePath,
-                    "--output",
-                    generatedDirectory,
-                    "--namespace",
-                    "Generated",
-                ]
-            );
-            Assert.True(import.ExitCode == 0, import.StdErr);
+        using var workDir = new TempDir();
+        var sourcePath = Path.Combine(workDir.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generatedDirectory = Path.Combine(workDir.FullName, "generated");
+        var import = CliRunner.RunCli(
+            workDir.FullName,
+            [
+                "--from-openapi",
+                sourcePath,
+                "--output",
+                generatedDirectory,
+                "--namespace",
+                "Generated",
+            ]
+        );
+        Assert.True(import.ExitCode == 0, import.StdErr);
 
-            var outputDirectory = Path.Combine(workDir.FullName, "output");
-            var emit = CliRunner.RunCli(
-                workDir.FullName,
-                [generatedDirectory, "--openapi", "--output", outputDirectory]
-            );
-            Assert.True(emit.ExitCode == 0, emit.StdErr);
-            Assert.Equal("", emit.StdErr);
+        var outputDirectory = Path.Combine(workDir.FullName, "output");
+        var emit = CliRunner.RunCli(
+            workDir.FullName,
+            [generatedDirectory, "--openapi", "--output", outputDirectory]
+        );
+        Assert.True(emit.ExitCode == 0, emit.StdErr);
+        Assert.Equal("", emit.StdErr);
 
-            var operation = JsonNode.Parse(
-                File.ReadAllText(Path.Combine(outputDirectory, "openapi.json"))
-            )!["paths"]!["/things/{thing_id}"]!["post"]!;
-            Assert.True(
-                JsonNode.DeepEquals(
-                    JsonNode.Parse(spec)!["paths"]!["/things/{thing_id}"]!["post"]!["parameters"],
-                    operation["parameters"]
-                ),
-                $"Parameters changed.\nExpected: {JsonNode.Parse(spec)!["paths"]!["/things/{thing_id}"]!["post"]!["parameters"]}\nActual: {operation["parameters"]}"
-            );
-            Assert.True(
-                JsonNode.DeepEquals(
-                    JsonNode.Parse(spec)!["paths"]!["/things/{thing_id}"]!["post"]!["requestBody"],
-                    operation["requestBody"]
-                ),
-                "Request body changed."
-            );
-        }
-        finally
-        {
-            workDir.Delete(recursive: true);
-        }
+        var operation = JsonNode.Parse(
+            File.ReadAllText(Path.Combine(outputDirectory, "openapi.json"))
+        )!["paths"]!["/things/{thing_id}"]!["post"]!;
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse(spec)!["paths"]!["/things/{thing_id}"]!["post"]!["parameters"],
+                operation["parameters"]
+            ),
+            $"Parameters changed.\nExpected: {JsonNode.Parse(spec)!["paths"]!["/things/{thing_id}"]!["post"]!["parameters"]}\nActual: {operation["parameters"]}"
+        );
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse(spec)!["paths"]!["/things/{thing_id}"]!["post"]!["requestBody"],
+                operation["requestBody"]
+            ),
+            "Request body changed."
+        );
     }
 }

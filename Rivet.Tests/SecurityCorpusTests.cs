@@ -168,66 +168,59 @@ public sealed class SecurityCorpusTests
             }
             """;
 
-        var workDir = Directory.CreateTempSubdirectory("rivet-security-corpus-");
-        try
-        {
-            var sourcePath = Path.Combine(workDir.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var generatedDirectory = Path.Combine(workDir.FullName, "generated");
-            var import = CliRunner.RunCli(
-                workDir.FullName,
-                [
-                    "--from-openapi",
-                    sourcePath,
-                    "--output",
-                    generatedDirectory,
-                    "--namespace",
-                    "Generated",
-                ]
-            );
-            Assert.True(import.ExitCode == 0, import.StdErr);
+        using var workDir = new TempDir();
+        var sourcePath = Path.Combine(workDir.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generatedDirectory = Path.Combine(workDir.FullName, "generated");
+        var import = CliRunner.RunCli(
+            workDir.FullName,
+            [
+                "--from-openapi",
+                sourcePath,
+                "--output",
+                generatedDirectory,
+                "--namespace",
+                "Generated",
+            ]
+        );
+        Assert.True(import.ExitCode == 0, import.StdErr);
 
-            var outputDirectory = Path.Combine(workDir.FullName, "output");
-            var emit = CliRunner.RunCli(
-                workDir.FullName,
-                [generatedDirectory, "--openapi", "--output", outputDirectory]
-            );
-            Assert.True(emit.ExitCode == 0, emit.StdErr);
+        var outputDirectory = Path.Combine(workDir.FullName, "output");
+        var emit = CliRunner.RunCli(
+            workDir.FullName,
+            [generatedDirectory, "--openapi", "--output", outputDirectory]
+        );
+        Assert.True(emit.ExitCode == 0, emit.StdErr);
 
-            var original = JsonNode.Parse(spec)!.AsObject();
-            var reemitted = JsonNode
-                .Parse(File.ReadAllText(Path.Combine(outputDirectory, "openapi.json")))!
-                .AsObject();
-            Assert.True(
-                JsonNode.DeepEquals(original["security"], reemitted["security"]),
-                "Global security requirements changed."
-            );
-            Assert.True(
-                JsonNode.DeepEquals(
-                    original["components"]!["securitySchemes"],
-                    reemitted["components"]!["securitySchemes"]
-                ),
-                "Security scheme definitions changed."
-            );
-            Assert.True(
-                JsonNode.DeepEquals(
-                    original["paths"]!["/widgets"]!["post"]!["security"],
-                    reemitted["paths"]!["/widgets"]!["post"]!["security"]
-                ),
-                "Operation security requirements changed."
-            );
-            Assert.True(
-                JsonNode.DeepEquals(
-                    original["paths"]!["/health"]!["get"]!["security"],
-                    reemitted["paths"]!["/health"]!["get"]!["security"]
-                ),
-                "Anonymous operation override changed."
-            );
-        }
-        finally
-        {
-            workDir.Delete(recursive: true);
-        }
+        var original = JsonNode.Parse(spec)!.AsObject();
+        var reemitted = JsonNode
+            .Parse(File.ReadAllText(Path.Combine(outputDirectory, "openapi.json")))!
+            .AsObject();
+        Assert.True(
+            JsonNode.DeepEquals(original["security"], reemitted["security"]),
+            "Global security requirements changed."
+        );
+        Assert.True(
+            JsonNode.DeepEquals(
+                original["components"]!["securitySchemes"],
+                reemitted["components"]!["securitySchemes"]
+            ),
+            "Security scheme definitions changed."
+        );
+        Assert.True(
+            JsonNode.DeepEquals(
+                original["paths"]!["/widgets"]!["post"]!["security"],
+                reemitted["paths"]!["/widgets"]!["post"]!["security"]
+            ),
+            "Operation security requirements changed."
+        );
+        Assert.True(
+            JsonNode.DeepEquals(
+                original["paths"]!["/health"]!["get"]!["security"],
+                reemitted["paths"]!["/health"]!["get"]!["security"]
+            ),
+            "Anonymous operation override changed."
+        );
     }
 
     [Theory]
@@ -288,47 +281,38 @@ public sealed class SecurityCorpusTests
               "security": [{ "auth": [] }]
             }
             """;
-        var workDir = Directory.CreateTempSubdirectory("rivet-security-override-");
-        try
-        {
-            var sourcePath = Path.Combine(workDir.FullName, "source.json");
-            File.WriteAllText(sourcePath, spec);
-            var generatedDirectory = Path.Combine(workDir.FullName, "generated");
-            var import = CliRunner.RunCli(
-                workDir.FullName,
-                ["--from-openapi", sourcePath, "--output", generatedDirectory]
-            );
-            Assert.Equal(0, import.ExitCode);
+        using var workDir = new TempDir();
+        var sourcePath = Path.Combine(workDir.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generatedDirectory = Path.Combine(workDir.FullName, "generated");
+        var import = CliRunner.RunCli(
+            workDir.FullName,
+            ["--from-openapi", sourcePath, "--output", generatedDirectory]
+        );
+        Assert.Equal(0, import.ExitCode);
 
-            var outputDirectory = Path.Combine(workDir.FullName, "output");
-            var emit = CliRunner.RunCli(
-                workDir.FullName,
-                [
-                    generatedDirectory,
-                    "--openapi",
-                    "--output",
-                    outputDirectory,
-                    "--security",
-                    "auth=apikey:header:X-Override",
-                ]
-            );
-            Assert.True(emit.ExitCode == 0, emit.StdErr);
+        var outputDirectory = Path.Combine(workDir.FullName, "output");
+        var emit = CliRunner.RunCli(
+            workDir.FullName,
+            [
+                generatedDirectory,
+                "--openapi",
+                "--output",
+                outputDirectory,
+                "--security",
+                "auth=apikey:header:X-Override",
+            ]
+        );
+        Assert.True(emit.ExitCode == 0, emit.StdErr);
 
-            var output = JsonNode.Parse(
-                File.ReadAllText(Path.Combine(outputDirectory, "openapi.json"))
-            )!;
-            var auth = output["components"]!["securitySchemes"]!["auth"]!;
-            Assert.Equal("apiKey", auth["type"]!.GetValue<string>());
-            Assert.Equal("X-Override", auth["name"]!.GetValue<string>());
-            Assert.Equal("header", auth["in"]!.GetValue<string>());
-            Assert.True(
-                JsonNode.DeepEquals(JsonNode.Parse("[{\"auth\":[]}]")!, output["security"])
-            );
-        }
-        finally
-        {
-            workDir.Delete(recursive: true);
-        }
+        var output = JsonNode.Parse(
+            File.ReadAllText(Path.Combine(outputDirectory, "openapi.json"))
+        )!;
+        var auth = output["components"]!["securitySchemes"]!["auth"]!;
+        Assert.Equal("apiKey", auth["type"]!.GetValue<string>());
+        Assert.Equal("X-Override", auth["name"]!.GetValue<string>());
+        Assert.Equal("header", auth["in"]!.GetValue<string>());
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse("[{\"auth\":[]}]")!, output["security"]));
     }
 
     private static System.Text.Json.JsonDocument ImportCompileWalkAndEmit(string spec)

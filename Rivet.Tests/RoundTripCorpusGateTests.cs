@@ -85,7 +85,7 @@ public sealed class RoundTripCorpusGateTests
                 CliRunner.Run(
                     CliRunner.RepoPath(),
                     "python3",
-                    [CliRunner.RepoPath("tools", "roundtrip-inventory.py")]
+                    [CliRunner.RepoPath("tools", "roundtrip_inventory.py")]
                 )
             ),
         LazyThreadSafetyMode.ExecutionAndPublication
@@ -121,7 +121,7 @@ public sealed class RoundTripCorpusGateTests
         string sha256
     )
     {
-        var workDir = Directory.CreateTempSubdirectory($"rivet-corpus-{corpusId}-");
+        using var workDir = new TempDir();
         var reportDirectory = CliRunner.RepoPath("TestResults", "roundtrip", corpusId);
         if (Directory.Exists(reportDirectory))
         {
@@ -132,96 +132,86 @@ public sealed class RoundTripCorpusGateTests
         Directory.CreateDirectory(artifactDirectory);
         var report = new GateReport(corpusId, sha256);
 
-        try
+        var inventory = _inventory.Value;
+        WriteProcessLog(artifactDirectory, "inventory", inventory);
+        RecordInventory(report, inventory);
+        if (report.HasFailures("inventory"))
         {
-            var inventory = _inventory.Value;
-            WriteProcessLog(artifactDirectory, "inventory", inventory);
-            RecordInventory(report, inventory);
-            if (report.HasFailures("inventory"))
-            {
-                Fail(reportDirectory, report);
-                return;
-            }
-
-            var originalPath = CliRunner.RepoPath("openapi", corpusFile);
-            VerifyArtifact(originalPath, sha256, report);
-            CopyFileIfPresent(originalPath, Path.Combine(artifactDirectory, "source.json"));
-            if (report.HasFailures("artifact"))
-            {
-                Fail(reportDirectory, report);
-                return;
-            }
-
-            var firstSourceDirectory = Path.Combine(workDir.FullName, "first-src");
-            var firstImport = Import(workDir.FullName, originalPath, firstSourceDirectory);
-            WriteProcessLog(artifactDirectory, "first-import", firstImport);
-            RecordDiagnostics(report, "first import", firstImport, allowSourceDefect: true);
-            CopyGeneratedSourceTree(
-                firstSourceDirectory,
-                Path.Combine(artifactDirectory, "first-generated")
-            );
-            ValidateSourceDefectDiagnosticCount(report);
-            if (firstImport.ExitCode != 0 || !Directory.Exists(firstSourceDirectory))
-            {
-                Fail(reportDirectory, report);
-                return;
-            }
-
-            RecordMarkers(report, "markers", "first import", firstSourceDirectory);
-
-            var firstCompile = Compile(workDir.FullName, firstSourceDirectory);
-            WriteProcessLog(artifactDirectory, "first-compile", firstCompile);
-            RecordCompilation(report, "first compilation", firstCompile);
-
-            var firstOutputDirectory = Path.Combine(workDir.FullName, "first-out");
-            var firstEmit = Emit(workDir.FullName, firstSourceDirectory, firstOutputDirectory);
-            WriteProcessLog(artifactDirectory, "first-emit", firstEmit);
-            RecordDiagnostics(report, "first emission", firstEmit, allowSourceDefect: false);
-            var firstEmittedPath = Path.Combine(firstOutputDirectory, "openapi.json");
-            CopyFileIfPresent(
-                firstEmittedPath,
-                Path.Combine(artifactDirectory, "first-openapi.json")
-            );
-            if (firstEmit.ExitCode != 0 || !File.Exists(firstEmittedPath))
-            {
-                if (!File.Exists(firstEmittedPath))
-                {
-                    report.Add("diagnostics", "first emission did not produce openapi.json");
-                }
-
-                Fail(reportDirectory, report);
-                return;
-            }
-
-            foreach (var finding in RoundTripGateValidator.Validate(originalPath, firstEmittedPath))
-            {
-                report.Add("integrity", finding);
-            }
-
-            var firstDiff = RunDiff(
-                workDir.FullName,
-                artifactDirectory,
-                "first",
-                originalPath,
-                firstEmittedPath
-            );
-            RecordSemanticFindings(report, firstDiff);
-            ValidateComparatorSourceDefects(report, firstDiff);
-            report.SetMetrics(firstDiff.Summary, CompareComponents(originalPath, firstEmittedPath));
-
-            RunFixedPoint(workDir.FullName, artifactDirectory, firstEmittedPath, report);
-            foreach (var finding in ValidateArtifactShape(artifactDirectory))
-            {
-                report.Add("artifact", finding);
-            }
-
-            WriteReport(reportDirectory, report);
-            Assert.True(report.Passed, report.DescribeFailure(reportDirectory));
+            Fail(reportDirectory, report);
+            return;
         }
-        finally
+
+        var originalPath = CliRunner.RepoPath("openapi", corpusFile);
+        VerifyArtifact(originalPath, sha256, report);
+        CopyFileIfPresent(originalPath, Path.Combine(artifactDirectory, "source.json"));
+        if (report.HasFailures("artifact"))
         {
-            workDir.Delete(recursive: true);
+            Fail(reportDirectory, report);
+            return;
         }
+
+        var firstSourceDirectory = Path.Combine(workDir.FullName, "first-src");
+        var firstImport = Import(workDir.FullName, originalPath, firstSourceDirectory);
+        WriteProcessLog(artifactDirectory, "first-import", firstImport);
+        RecordDiagnostics(report, "first import", firstImport, allowSourceDefect: true);
+        CopyGeneratedSourceTree(
+            firstSourceDirectory,
+            Path.Combine(artifactDirectory, "first-generated")
+        );
+        ValidateSourceDefectDiagnosticCount(report);
+        if (firstImport.ExitCode != 0 || !Directory.Exists(firstSourceDirectory))
+        {
+            Fail(reportDirectory, report);
+            return;
+        }
+
+        RecordMarkers(report, "markers", "first import", firstSourceDirectory);
+
+        var firstCompile = Compile(workDir.FullName, firstSourceDirectory);
+        WriteProcessLog(artifactDirectory, "first-compile", firstCompile);
+        RecordCompilation(report, "first compilation", firstCompile);
+
+        var firstOutputDirectory = Path.Combine(workDir.FullName, "first-out");
+        var firstEmit = Emit(workDir.FullName, firstSourceDirectory, firstOutputDirectory);
+        WriteProcessLog(artifactDirectory, "first-emit", firstEmit);
+        RecordDiagnostics(report, "first emission", firstEmit, allowSourceDefect: false);
+        var firstEmittedPath = Path.Combine(firstOutputDirectory, "openapi.json");
+        CopyFileIfPresent(firstEmittedPath, Path.Combine(artifactDirectory, "first-openapi.json"));
+        if (firstEmit.ExitCode != 0 || !File.Exists(firstEmittedPath))
+        {
+            if (!File.Exists(firstEmittedPath))
+            {
+                report.Add("diagnostics", "first emission did not produce openapi.json");
+            }
+
+            Fail(reportDirectory, report);
+            return;
+        }
+
+        foreach (var finding in RoundTripGateValidator.Validate(firstEmittedPath))
+        {
+            report.Add("integrity", finding);
+        }
+
+        var firstDiff = RunDiff(
+            workDir.FullName,
+            artifactDirectory,
+            "first",
+            originalPath,
+            firstEmittedPath
+        );
+        RecordSemanticFindings(report, firstDiff);
+        ValidateComparatorSourceDefects(report, firstDiff);
+        report.SetMetrics(firstDiff.Summary, CompareComponents(originalPath, firstEmittedPath));
+
+        RunFixedPoint(workDir.FullName, artifactDirectory, firstEmittedPath, report);
+        foreach (var finding in ValidateArtifactShape(artifactDirectory))
+        {
+            report.Add("artifact", finding);
+        }
+
+        WriteReport(reportDirectory, report);
+        Assert.True(report.Passed, report.DescribeFailure(reportDirectory));
     }
 
     private static void RunFixedPoint(
@@ -273,9 +263,7 @@ public sealed class RoundTripCorpusGateTests
             return;
         }
 
-        foreach (
-            var finding in RoundTripGateValidator.Validate(firstEmittedPath, secondEmittedPath)
-        )
+        foreach (var finding in RoundTripGateValidator.Validate(secondEmittedPath))
         {
             report.Add("fixedPoint", $"second document: {finding}");
         }
@@ -317,7 +305,7 @@ public sealed class RoundTripCorpusGateTests
         {
             report.Add(
                 "inventory",
-                $"roundtrip-inventory.py exited {process.ExitCode}: {string.Join(" | ", Lines(process.StdErr))}"
+                $"roundtrip_inventory.py exited {process.ExitCode}: {string.Join(" | ", Lines(process.StdErr))}"
             );
             return;
         }
@@ -330,14 +318,14 @@ public sealed class RoundTripCorpusGateTests
                 || passed.ValueKind != JsonValueKind.True
             )
             {
-                report.Add("inventory", "roundtrip-inventory.py did not report passed=true");
+                report.Add("inventory", "roundtrip_inventory.py did not report passed=true");
             }
         }
         catch (JsonException exception)
         {
             report.Add(
                 "inventory",
-                $"roundtrip-inventory.py returned invalid JSON: {exception.Message}"
+                $"roundtrip_inventory.py returned invalid JSON: {exception.Message}"
             );
         }
     }
@@ -387,11 +375,9 @@ public sealed class RoundTripCorpusGateTests
         var summaryPath = Path.Combine(reportDirectory, $"{name}-summary.json");
         var detailsPath = Path.Combine(reportDirectory, $"{name}-details.json");
         var process = ProcessResult.From(
-            CliRunner.Run(
+            RoundTripDiff.Run(
                 workingDirectory,
-                "python3",
                 [
-                    CliRunner.RepoPath("tools", "roundtrip-diff.py"),
                     originalPath,
                     reemittedPath,
                     "--summary-json",

@@ -12,21 +12,6 @@ public sealed class DeepReviewFixTests
 {
     // ========== Helpers ==========
 
-    private static JsonDocument EmitOpenApi(string source)
-    {
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            null
-        );
-        return JsonDocument.Parse(json);
-    }
-
     private static IReadOnlyList<TsEndpointDefinition> WalkEndpoints(string source) =>
         CompilationHelper.WalkContract(source).Endpoints;
 
@@ -52,7 +37,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var idProp = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -84,7 +69,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var props = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -114,7 +99,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var props = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -150,7 +135,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var payload = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -192,7 +177,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
 
         // Multipart with named input type emits $ref to component schema
         var multipart = doc
@@ -395,7 +380,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        var doc = EmitOpenApi(source);
+        var doc = CompilationHelper.EmitOpenApi(source);
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
         // GetNameSuffix uses p.Name capitalised (e.g. "Number", "String")
@@ -434,7 +419,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        var doc = EmitOpenApi(source);
+        var doc = CompilationHelper.EmitOpenApi(source);
         var schema = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -494,7 +479,7 @@ public sealed class DeepReviewFixTests
         Assert.Single(ep.Params, p => p.Source == ParamSource.File);
         Assert.Single(formFields, f => f.Name == "title");
 
-        using var document = EmitOpenApi(source);
+        using var document = CompilationHelper.EmitOpenApi(source);
         var bodySchema = document
             .RootElement.GetProperty("paths")
             .GetProperty("/api/tasks/{taskId}/files")
@@ -537,7 +522,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        using var document = EmitOpenApi(source);
+        using var document = CompilationHelper.EmitOpenApi(source);
         var input = document
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -567,7 +552,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        using var doc = EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
         // Tuple elements remain structurally required even when their values are nullable.
@@ -698,7 +683,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        var doc = EmitOpenApi(source);
+        var doc = CompilationHelper.EmitOpenApi(source);
         var schema = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -736,7 +721,7 @@ public sealed class DeepReviewFixTests
             }
             """;
 
-        var doc = EmitOpenApi(source);
+        var doc = CompilationHelper.EmitOpenApi(source);
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
 
         // Both fields are required — Value is nullable but still a required constructor param
