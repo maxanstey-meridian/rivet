@@ -2031,26 +2031,25 @@ internal static class ContractBuilder
             return (true, null, null);
         }
 
-        var requirements = new List<SecurityRequirement>();
-        foreach (var requirement in operation.Security)
-        {
-            var schemes = new List<SecurityRequirementScheme>();
-            foreach (var (scheme, scopes) in requirement)
-            {
-                var name = scheme.Reference?.Id;
-                if (name is null)
-                {
-                    continue;
-                }
-
-                schemes.Add(new SecurityRequirementScheme(name, scopes.ToList()));
-            }
-
-            requirements.Add(new SecurityRequirement(schemes));
-        }
-
-        return (false, null, new SecurityRequirements(requirements));
+        return (false, null, MapSecurityRequirements(operation.Security));
     }
+
+    internal static SecurityRequirements MapSecurityRequirements(
+        IEnumerable<OpenApiSecurityRequirement> requirements
+    ) =>
+        new(
+            requirements
+                .Select(requirement => new SecurityRequirement(
+                    requirement
+                        .Where(entry => entry.Key.Reference?.Id is not null)
+                        .Select(entry => new SecurityRequirementScheme(
+                            entry.Key.Reference!.Id!,
+                            entry.Value.ToList()
+                        ))
+                        .ToList()
+                ))
+                .ToList()
+        );
 
     private static IReadOnlyList<GeneratedEndpointField> DeduplicateFields(
         List<GeneratedEndpointField> fields

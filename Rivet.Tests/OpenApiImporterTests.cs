@@ -6977,4 +6977,26 @@ public sealed class OpenApiImporterTests
         Assert.Contains("HolderFirst First", holder);
         Assert.Contains("HolderSecond Second", holder);
     }
+
+    [Fact]
+    public void Swagger2_Basic_Security_Definition_Imports_As_Http_Basic()
+    {
+        const string spec = """
+            {
+              "swagger": "2.0",
+              "info": { "title": "T", "version": "1" },
+              "securityDefinitions": { "basicAuth": { "type": "basic" } },
+              "security": [ { "basicAuth": [] } ],
+              "paths": {}
+            }
+            """;
+
+        var security = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "RivetSecurity.cs"
+        );
+
+        Assert.Contains("\"basicAuth\", \"http\"", security);
+        Assert.Contains("\"basic\"", security);
+    }
 }

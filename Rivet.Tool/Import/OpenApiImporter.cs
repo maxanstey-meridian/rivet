@@ -42,9 +42,10 @@ public static class OpenApiImporter
         // they must be broken before the library sees the document.
         BreakAliasCycles(root, warnings);
         NormalizeMappedVendorExtensions(root, root["swagger"] is not null, exampleObject: false);
-        var view = JsonSerializer.SerializeToElement(root);
-        var provenance = OpenApiProvenanceReader.Read(view, warnings);
-        var securityMetadata = ReadSecurityMetadata(view);
+        var provenance = OpenApiProvenanceReader.Read(
+            JsonSerializer.SerializeToElement(root),
+            warnings
+        );
         NormalizeLocalPathReferences(root);
         NormalizeSchemaReferenceMetadataSiblings(root);
         var swaggerSchemaLessResponses = ReadSwaggerSchemaLessResponses(root);
@@ -61,6 +62,7 @@ public static class OpenApiImporter
                 string.Join("; ", readResult.Diagnostic?.Errors.Select(e => e.Message) ?? [])
             );
         RegisterEscapedComponentIds(doc);
+        var securityMetadata = ReadSecurityMetadata(doc);
         RemoveConvertedSwaggerProducesContent(doc, swaggerSchemaLessResponses);
         var files = new List<GeneratedFile>();
         var mapper = new SchemaMapper(warnings);
@@ -475,150 +477,77 @@ public static class OpenApiImporter
         "xml",
     ];
 
-    private static ContractSecurityMetadata ReadSecurityMetadata(JsonElement root)
-    {
-        var schemes = new Dictionary<string, SecuritySchemeDefinition>(StringComparer.Ordinal);
-        JsonElement securitySchemes = default;
-        var hasSecuritySchemes =
-            root.TryGetProperty("components", out var components)
-            && components.TryGetProperty("securitySchemes", out securitySchemes);
-        if (!hasSecuritySchemes)
-        {
-            hasSecuritySchemes = root.TryGetProperty("securityDefinitions", out securitySchemes);
-        }
-
-        if (hasSecuritySchemes)
-        {
-            foreach (var scheme in securitySchemes.EnumerateObject())
-            {
-                schemes[scheme.Name] = ReadSecurityScheme(scheme.Name, scheme.Value);
-            }
-        }
-
-        var globalRequirements = root.TryGetProperty("security", out var security)
-            ? ReadSecurityRequirements(security)
-            : null;
-        return new ContractSecurityMetadata(schemes, globalRequirements);
-    }
-
-    private static SecuritySchemeDefinition ReadSecurityScheme(string name, JsonElement scheme)
-    {
-        var type = RequiredString(scheme, "type", $"security scheme '{name}'");
-        var description = OptionalString(scheme, "description");
-        return type switch
-        {
-            "apiKey" => new ApiKeySecurityScheme(
-                RequiredString(scheme, "name", $"apiKey security scheme '{name}'"),
-                ParseApiKeyLocation(
-                    RequiredString(scheme, "in", $"apiKey security scheme '{name}'"),
-                    name
-                ),
-                description
-            ),
-            "http" => new HttpSecurityScheme(
-                RequiredString(scheme, "scheme", $"HTTP security scheme '{name}'"),
-                OptionalString(scheme, "bearerFormat"),
-                description
-            ),
-            "oauth2" => new OAuth2SecurityScheme(ReadOAuthFlows(name, scheme), description),
-            "openIdConnect" => new OpenIdConnectSecurityScheme(
-                RequiredString(
-                    scheme,
-                    "openIdConnectUrl",
-                    $"OpenID Connect security scheme '{name}'"
-                ),
-                description
-            ),
-            "mutualTLS" => new MutualTlsSecurityScheme(description),
-            _ => throw InvalidSpec($"Security scheme '{name}' has unsupported type '{type}'."),
-        };
-    }
-
-    private static IReadOnlyList<OAuth2Flow> ReadOAuthFlows(string name, JsonElement scheme)
-    {
-        if (scheme.TryGetProperty("flows", out var flows))
-        {
-            return flows
-                .EnumerateObject()
-                .Select(flow => ReadOAuthFlow(ParseOAuthFlowType(flow.Name, name), flow.Value))
-                .ToList();
-        }
-
-        // Swagger 2 carries one OAuth flow directly on the security definition.
-        var swaggerFlow = RequiredString(scheme, "flow", $"OAuth2 security scheme '{name}'");
-        return [ReadOAuthFlow(ParseOAuthFlowType(swaggerFlow, name), scheme)];
-    }
-
-    private static OAuth2Flow ReadOAuthFlow(OAuth2FlowType flowType, JsonElement flow)
-    {
-        var scopes = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (flow.TryGetProperty("scopes", out var sourceScopes))
-        {
-            foreach (var scope in sourceScopes.EnumerateObject())
-            {
-                scopes.Add(scope.Name, scope.Value.GetString() ?? "");
-            }
-        }
-
-        return new OAuth2Flow(
-            flowType,
-            OptionalString(flow, "authorizationUrl"),
-            OptionalString(flow, "tokenUrl"),
-            OptionalString(flow, "refreshUrl"),
-            scopes
-        );
-    }
-
-    private static SecurityRequirements ReadSecurityRequirements(JsonElement requirements) =>
+    private static ContractSecurityMetadata ReadSecurityMetadata(OpenApiDocument doc) =>
         new(
-            requirements
-                .EnumerateArray()
-                .Select(requirement => new SecurityRequirement(
-                    requirement
-                        .EnumerateObject()
-                        .Select(scheme => new SecurityRequirementScheme(
-                            scheme.Name,
-                            scheme
-                                .Value.EnumerateArray()
-                                .Select(scope => scope.GetString() ?? "")
-                                .ToList()
-                        ))
-                        .ToList()
-                ))
-                .ToList()
+            (
+                doc.Components?.SecuritySchemes ?? new Dictionary<string, IOpenApiSecurityScheme>()
+            ).ToDictionary(
+                entry => entry.Key,
+                entry => MapSecurityScheme(entry.Key, entry.Value),
+                StringComparer.Ordinal
+            ),
+            doc.Security is { } security ? ContractBuilder.MapSecurityRequirements(security) : null
         );
 
-    private static string RequiredString(JsonElement owner, string property, string context) =>
-        OptionalString(owner, property)
-        ?? throw InvalidSpec($"{context} is missing required '{property}'.");
-
-    private static string? OptionalString(JsonElement owner, string property) =>
-        owner.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
-
-    private static SecurityApiKeyLocation ParseApiKeyLocation(string value, string schemeName) =>
-        value switch
+    private static SecuritySchemeDefinition MapSecurityScheme(
+        string name,
+        IOpenApiSecurityScheme scheme
+    ) =>
+        scheme.Type switch
         {
-            "query" => SecurityApiKeyLocation.Query,
-            "header" => SecurityApiKeyLocation.Header,
-            "cookie" => SecurityApiKeyLocation.Cookie,
-            _ => throw InvalidSpec(
-                $"apiKey security scheme '{schemeName}' has unsupported location '{value}'."
+            SecuritySchemeType.ApiKey => new ApiKeySecurityScheme(
+                scheme.Name ?? throw MissingSecurityField(name, "name"),
+                scheme.In switch
+                {
+                    ParameterLocation.Query => SecurityApiKeyLocation.Query,
+                    ParameterLocation.Header => SecurityApiKeyLocation.Header,
+                    ParameterLocation.Cookie => SecurityApiKeyLocation.Cookie,
+                    _ => throw MissingSecurityField(name, "in"),
+                },
+                scheme.Description
             ),
+            SecuritySchemeType.Http => new HttpSecurityScheme(
+                scheme.Scheme ?? throw MissingSecurityField(name, "scheme"),
+                scheme.BearerFormat,
+                scheme.Description
+            ),
+            SecuritySchemeType.OAuth2 => new OAuth2SecurityScheme(
+                MapOAuthFlows(scheme.Flows ?? throw MissingSecurityField(name, "flows")),
+                scheme.Description
+            ),
+            SecuritySchemeType.OpenIdConnect => new OpenIdConnectSecurityScheme(
+                scheme.OpenIdConnectUrl?.OriginalString
+                    ?? throw MissingSecurityField(name, "openIdConnectUrl"),
+                scheme.Description
+            ),
+            SecuritySchemeType.MutualTLS => new MutualTlsSecurityScheme(scheme.Description),
+            _ => throw MissingSecurityField(name, "type"),
         };
 
-    private static OAuth2FlowType ParseOAuthFlowType(string value, string schemeName) =>
-        value switch
+    private static RivetUserException MissingSecurityField(string scheme, string field) =>
+        InvalidSpec($"security scheme '{scheme}' has a missing or unsupported '{field}'.");
+
+    private static IReadOnlyList<OAuth2Flow> MapOAuthFlows(OpenApiOAuthFlows flows) =>
+        new (OAuth2FlowType Type, OpenApiOAuthFlow? Flow)[]
         {
-            "implicit" => OAuth2FlowType.Implicit,
-            "password" => OAuth2FlowType.Password,
-            "clientCredentials" or "application" => OAuth2FlowType.ClientCredentials,
-            "authorizationCode" or "accessCode" => OAuth2FlowType.AuthorizationCode,
-            _ => throw InvalidSpec(
-                $"OAuth2 security scheme '{schemeName}' has unsupported flow '{value}'."
-            ),
-        };
+            (OAuth2FlowType.Implicit, flows.Implicit),
+            (OAuth2FlowType.Password, flows.Password),
+            (OAuth2FlowType.ClientCredentials, flows.ClientCredentials),
+            (OAuth2FlowType.AuthorizationCode, flows.AuthorizationCode),
+        }
+            .Where(entry => entry.Flow is not null)
+            .Select(entry => new OAuth2Flow(
+                entry.Type,
+                entry.Flow!.AuthorizationUrl?.OriginalString,
+                entry.Flow.TokenUrl?.OriginalString,
+                entry.Flow.RefreshUrl?.OriginalString,
+                (entry.Flow.Scopes ?? new Dictionary<string, string>()).ToDictionary(
+                    scope => scope.Key,
+                    scope => scope.Value ?? "",
+                    StringComparer.Ordinal
+                )
+            ))
+            .ToList();
 
     private static HashSet<(
         string Path,
