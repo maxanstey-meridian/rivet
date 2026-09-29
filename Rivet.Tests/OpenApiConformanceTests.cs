@@ -647,8 +647,8 @@ public sealed class OpenApiConformanceTests : IDisposable
 
     /// <summary>
     /// Validation/metadata attributes — distilled from MetadataAttributeTests
-    /// fixtures: DataAnnotations constraints, RivetConstraints (MultipleOf,
-    /// ExclusiveMinimum), descriptions/examples/defaults, read/write-only,
+    /// fixtures: DataAnnotations constraints (including an exclusive range),
+    /// RivetConstraints (MultipleOf), descriptions/examples/defaults, read/write-only,
     /// deprecation, and a form-encoded endpoint.
     /// </summary>
     private const string ValidationMetadataSource = """
@@ -673,7 +673,7 @@ public sealed class OpenApiConformanceTests : IDisposable
             [property: Range(0, double.MaxValue)]
             double Price,
 
-            [property: Range(5, double.MaxValue), RivetConstraints(ExclusiveMinimum = 0)]
+            [property: Range(0, double.MaxValue, MinimumIsExclusive = true)]
             double Weight,
 
             [property: MinLength(1), MaxLength(100), RegularExpression("^[a-z]+$")]

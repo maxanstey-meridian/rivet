@@ -31,7 +31,7 @@ public sealed class AnnotationRoundTripTests
             [property: StringLength(500, MinimumLength = 10)]
             string Description,
 
-            [property: RivetConstraints(ExclusiveMinimum = 0, MultipleOf = 0.5)]
+            [property: Range(0, double.MaxValue, MinimumIsExclusive = true), RivetConstraints(MultipleOf = 0.5)]
             double Score,
 
             [property: EmailAddress]
@@ -128,7 +128,7 @@ public sealed class AnnotationRoundTripTests
         Assert.Equal(10, description.Constraints!.MinLength);
         Assert.Equal(500, description.Constraints.MaxLength);
 
-        // Score: [RivetConstraints(ExclusiveMinimum = 0, MultipleOf = 0.5)]
+        // Score: exclusive [Range] plus [RivetConstraints(MultipleOf = 0.5)]
         var score = typeDef.Properties.First(p => p.Name == "score");
         Assert.NotNull(score.Constraints);
         Assert.Equal(0.0, score.Constraints!.ExclusiveMinimum);
@@ -264,6 +264,87 @@ public sealed class AnnotationRoundTripTests
         var website = typeDef.Properties.First(p => p.Name == "website");
         var websitePrimitive = Assert.IsType<TsType.Primitive>(website.Type);
         Assert.Equal("uri", websitePrimitive.Format);
+    }
+
+    [Fact]
+    public void Import_Compile_Emit_Preserves_Every_Constraint_Facet()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Facets": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "minLength": 2, "maxLength": 8, "pattern": "^[a-z]+$" },
+                    "count": { "type": "integer", "minimum": 1, "maximum": 10 },
+                    "ratio": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+                    "above": { "type": "number", "exclusiveMinimum": 0.5 },
+                    "step": { "type": "number", "multipleOf": 0.25 },
+                    "tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 5, "uniqueItems": true },
+                    "some": { "type": "array", "items": { "type": "integer" }, "minItems": 2 },
+                    "few": { "type": "array", "items": { "type": "integer" }, "maxItems": 3 }
+                },
+                "required": ["name", "count", "ratio", "above", "step", "tags", "some", "few"]
+            }
+            """,
+            paths: """
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Facets" } } } } } } }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec);
+        var content = CompilationHelper.FindFile(imported, "Facets.cs");
+        Assert.DoesNotContain("RivetConstraints(Exclusive", content);
+        Assert.DoesNotContain("MinItems", content);
+
+        var reemitted = OpenApiEmitter.Emit(
+            [],
+            CompilationHelper
+                .DiscoverAndWalk(CompilationHelper.CompileImportResult(imported))
+                .Walker.Definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            null
+        );
+        var props = System
+            .Text.Json.JsonDocument.Parse(reemitted)
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Facets")
+            .GetProperty("properties");
+        var original = System
+            .Text.Json.JsonDocument.Parse(spec)
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Facets")
+            .GetProperty("properties");
+
+        string[] keywords =
+        [
+            "minLength",
+            "maxLength",
+            "pattern",
+            "minimum",
+            "maximum",
+            "exclusiveMinimum",
+            "exclusiveMaximum",
+            "multipleOf",
+            "minItems",
+            "maxItems",
+            "uniqueItems",
+        ];
+        foreach (var property in original.EnumerateObject())
+        {
+            var actual = props.GetProperty(property.Name);
+            foreach (var keyword in keywords)
+            {
+                Assert.Equal(
+                    property.Value.TryGetProperty(keyword, out var expected)
+                        ? expected.ToString()
+                        : null,
+                    actual.TryGetProperty(keyword, out var value) ? value.ToString() : null
+                );
+            }
+        }
     }
 
     [Fact]

@@ -712,12 +712,13 @@ public sealed class MetadataAttributeTests
     {
         var source = """
             using System.Collections.Generic;
+            using System.ComponentModel.DataAnnotations;
             using Rivet;
 
             [RivetType]
             public sealed record PagedResult<T>(
                 [property: RivetDescription("Result items")]
-                [property: RivetConstraints(MinItems = 0, MaxItems = 100)]
+                [property: Length(0, 100)]
                 List<T> Items,
                 [property: RivetDefault("1")]
                 int Page);

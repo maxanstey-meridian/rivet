@@ -294,7 +294,7 @@ internal static class CSharpWriter
             sb.AppendLine("using System.Text.Json;");
         }
         if (
-            record.Properties.Any(p => p.Constraints is { } cc && HasStandardConstraints(cc))
+            record.Properties.Any(p => p.Constraints is { } cc && HasDataAnnotationConstraints(cc))
             || record.Properties.Any(p => p.Format is "email" or "uri")
         )
         {
@@ -459,8 +459,7 @@ internal static class CSharpWriter
     /// <summary>
     /// True when any property would carry a ValidationAttribute: the DataAnnotations
     /// constraint set (StringLength/MinLength/MaxLength/Range/RegularExpression),
-    /// EmailAddress/Url from formats, or [RivetConstraints] (a ValidationAttribute
-    /// since the inbound-enforcement work).
+    /// EmailAddress/Url from formats, or [RivetConstraints] (itself a ValidationAttribute).
     /// </summary>
     private static bool CarriesValidationAttribute(GeneratedRecord record) =>
         record.Properties.Any(p =>
@@ -569,7 +568,7 @@ internal static class CSharpWriter
     private static string NullableIntLiteral(int? value) => value is { } v ? Literal(v) : "-1";
 
     private static string NullableDoubleLiteral(double? value) =>
-        value?.ToString(CultureInfo.InvariantCulture) ?? "double.NaN";
+        value is { } v ? Literal(v) : "double.NaN";
 
     public static string WriteEnum(GeneratedEnum enumDef, string ns)
     {
@@ -1287,12 +1286,9 @@ internal static class CSharpWriter
         return arguments;
     }
 
-    private static bool HasStandardConstraints(TsPropertyConstraints c) =>
-        c.MinLength.HasValue
-        || c.MaxLength.HasValue
-        || c.Pattern is not null
-        || c.Minimum.HasValue
-        || c.Maximum.HasValue;
+    /// <summary>Everything but MultipleOf and UniqueItems maps to a DataAnnotations attribute.</summary>
+    private static bool HasDataAnnotationConstraints(TsPropertyConstraints c) =>
+        c with { MultipleOf = null, UniqueItems = null } is { HasAny: true };
 
     private static void EmitConstraintAttributes(
         StringBuilder sb,
@@ -1300,90 +1296,76 @@ internal static class CSharpWriter
         string target
     )
     {
-        // StringLength when both min and max length are present
-        if (c.MinLength.HasValue && c.MaxLength.HasValue)
+        // [MinLength]/[MaxLength]/[Length] count characters on a string and items on a
+        // collection; the Tool reads them back by the property's type.
+        var isItems = c.MinItems.HasValue || c.MaxItems.HasValue;
+        var (min, max) = isItems ? (c.MinItems, c.MaxItems) : (c.MinLength, c.MaxLength);
+        if (min.HasValue && max.HasValue)
         {
             sb.AppendLine(
-                $"    [{target}StringLength({Literal(c.MaxLength.Value)}, MinimumLength = {Literal(c.MinLength.Value)})]"
+                isItems
+                    ? $"    [{target}Length({Literal(min.Value)}, {Literal(max.Value)})]"
+                    : $"    [{target}StringLength({Literal(max.Value)}, MinimumLength = {Literal(min.Value)})]"
             );
         }
-        else if (c.MinLength.HasValue)
+        else if (min.HasValue)
         {
-            sb.AppendLine($"    [{target}MinLength({Literal(c.MinLength.Value)})]");
+            sb.AppendLine($"    [{target}MinLength({Literal(min.Value)})]");
         }
-        else if (c.MaxLength.HasValue)
+        else if (max.HasValue)
         {
-            sb.AppendLine($"    [{target}MaxLength({Literal(c.MaxLength.Value)})]");
+            sb.AppendLine($"    [{target}MaxLength({Literal(max.Value)})]");
         }
 
-        // Range when minimum or maximum are present
-        // Use RangeAttribute (not Range) to disambiguate from System.Range
-        if (c.Minimum.HasValue && c.Maximum.HasValue)
+        // One [Range] carries one bound per side. When a schema declares both the
+        // inclusive and the exclusive form of a side, the tighter one is kept.
+        var lower = (c.Minimum, c.ExclusiveMinimum) switch
         {
-            sb.AppendLine(
-                $"    [{target}RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]"
-            );
-        }
-        else if (c.Minimum.HasValue)
+            (null, null) => ((double Value, bool Exclusive)?)null,
+            (var m, null) => (m.Value, false),
+            (null, var e) => (e.Value, true),
+            (var m, var e) => e >= m ? (e.Value, true) : (m.Value, false),
+        };
+        var upper = (c.Maximum, c.ExclusiveMaximum) switch
         {
-            sb.AppendLine(
-                $"    [{target}RangeAttribute({c.Minimum.Value.ToString(CultureInfo.InvariantCulture)}, double.MaxValue)]"
-            );
-        }
-        else if (c.Maximum.HasValue)
+            (null, null) => ((double Value, bool Exclusive)?)null,
+            (var m, null) => (m.Value, false),
+            (null, var e) => (e.Value, true),
+            (var m, var e) => e <= m ? (e.Value, true) : (m.Value, false),
+        };
+        if (lower is not null || upper is not null)
         {
-            sb.AppendLine(
-                $"    [{target}RangeAttribute(double.MinValue, {c.Maximum.Value.ToString(CultureInfo.InvariantCulture)})]"
-            );
+            // Use RangeAttribute (not Range) to disambiguate from System.Range.
+            var range =
+                $"{(lower is { } l ? Literal(l.Value) : "double.MinValue")}, {(upper is { } u ? Literal(u.Value) : "double.MaxValue")}";
+            if (lower is { Exclusive: true })
+            {
+                range += ", MinimumIsExclusive = true";
+            }
+            if (upper is { Exclusive: true })
+            {
+                range += ", MaximumIsExclusive = true";
+            }
+            sb.AppendLine($"    [{target}RangeAttribute({range})]");
         }
 
-        // Pattern
         if (c.Pattern is not null)
         {
             sb.AppendLine($"    [{target}RegularExpression({StringLiteral(c.Pattern)})]");
         }
 
-        // Exotic constraints → RivetConstraints
-        var exoticParts = new List<string>();
-        if (c.ExclusiveMinimum.HasValue)
-        {
-            exoticParts.Add(
-                $"ExclusiveMinimum = {c.ExclusiveMinimum.Value.ToString(CultureInfo.InvariantCulture)}"
-            );
-        }
-
-        if (c.ExclusiveMaximum.HasValue)
-        {
-            exoticParts.Add(
-                $"ExclusiveMaximum = {c.ExclusiveMaximum.Value.ToString(CultureInfo.InvariantCulture)}"
-            );
-        }
-
+        var rivetParts = new List<string>();
         if (c.MultipleOf.HasValue)
         {
-            exoticParts.Add(
-                $"MultipleOf = {c.MultipleOf.Value.ToString(CultureInfo.InvariantCulture)}"
-            );
+            rivetParts.Add($"MultipleOf = {Literal(c.MultipleOf.Value)}");
         }
-
-        if (c.MinItems.HasValue)
-        {
-            exoticParts.Add($"MinItems = {Literal(c.MinItems.Value)}");
-        }
-
-        if (c.MaxItems.HasValue)
-        {
-            exoticParts.Add($"MaxItems = {Literal(c.MaxItems.Value)}");
-        }
-
         if (c.UniqueItems == true)
         {
-            exoticParts.Add("UniqueItems = true");
+            rivetParts.Add("UniqueItems = true");
         }
-
-        if (exoticParts.Count > 0)
+        if (rivetParts.Count > 0)
         {
-            sb.AppendLine($"    [{target}RivetConstraints({string.Join(", ", exoticParts)})]");
+            sb.AppendLine($"    [{target}RivetConstraints({string.Join(", ", rivetParts)})]");
         }
     }
 
@@ -1392,6 +1374,8 @@ internal static class CSharpWriter
 
     private static string Literal(bool value) =>
         SymbolDisplay.FormatPrimitive(value, quoteStrings: false, useHexadecimalNumbers: false)!;
+
+    private static string Literal(double value) => value.ToString(CultureInfo.InvariantCulture);
 
     private static string Literal(int value) =>
         SymbolDisplay.FormatPrimitive(value, quoteStrings: false, useHexadecimalNumbers: false)!;

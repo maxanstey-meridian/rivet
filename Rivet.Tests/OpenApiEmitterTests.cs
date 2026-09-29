@@ -4281,28 +4281,46 @@ public sealed class OpenApiEmitterTests
 
     // ========== OpenAPI 3.1 numeric exclusiveMinimum/Maximum ==========
 
-    [Fact]
-    public void ExclusiveMinimum_Looser_Than_Minimum_Survives_Numerically()
+    // One C# [Range] carries one bound per side, but the model (from --from contract
+    // JSON or generated-schema metadata) can carry an inclusive and an exclusive bound
+    // together. 3.1 keeps both numerically, never as the 3.0 boolean flag.
+    [Theory]
+    [InlineData(5.0, 0.0, null, null)]
+    [InlineData(0.0, 5.0, null, null)]
+    [InlineData(null, null, 10.0, 100.0)]
+    public void Inclusive_And_Exclusive_Bounds_Survive_Numerically(
+        double? minimum,
+        double? exclusiveMinimum,
+        double? maximum,
+        double? exclusiveMaximum
+    )
     {
-        using var doc = CompilationHelper.EmitOpenApi(
-            """
-            using System.ComponentModel.DataAnnotations;
-            using Rivet;
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Dto"] = new(
+                "Dto",
+                [],
+                [
+                    new TsPropertyDefinition(
+                        "value",
+                        new TsType.Primitive("number", "double"),
+                        false,
+                        Constraints: new TsPropertyConstraints(
+                            Minimum: minimum,
+                            Maximum: maximum,
+                            ExclusiveMinimum: exclusiveMinimum,
+                            ExclusiveMaximum: exclusiveMaximum
+                        )
+                    ),
+                ]
+            ),
+        };
 
-            namespace Test;
-
-            [RivetType]
-            public sealed record Dto(
-                string Name,
-                [property: Range(5, double.MaxValue), RivetConstraints(ExclusiveMinimum = 0)]
-                double Value);
-
-            [RivetContract]
-            public static class TestContract
-            {
-                public static readonly RouteDefinition<Dto> GetTest = Define.Get<Dto>("/api/test");
-            }
-            """
+        using var doc = EmitOpenApiFromModel(
+            [],
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>()
         );
 
         var props = doc
@@ -4312,20 +4330,27 @@ public sealed class OpenApiEmitterTests
             .GetProperty("properties")
             .GetProperty("value");
 
-        // Source means: x >= 5 AND x > 0. 3.1 expresses the conjunction losslessly
-        // with numeric bounds — minimum stays 5 (the binding constraint, E12) and the
-        // exclusive bound is carried as a number, never as the 3.0 boolean flag.
-        Assert.Equal(5.0, props.GetProperty("minimum").GetDouble());
-        var exclusiveMin = props.GetProperty("exclusiveMinimum");
-        Assert.Equal(JsonValueKind.Number, exclusiveMin.ValueKind);
-        Assert.Equal(0.0, exclusiveMin.GetDouble());
+        void AssertBound(string keyword, double? expected)
+        {
+            if (expected is null)
+            {
+                Assert.False(props.TryGetProperty(keyword, out _));
+                return;
+            }
+            var bound = props.GetProperty(keyword);
+            Assert.Equal(JsonValueKind.Number, bound.ValueKind);
+            Assert.Equal(expected, bound.GetDouble());
+        }
+
+        AssertBound("minimum", minimum);
+        AssertBound("exclusiveMinimum", exclusiveMinimum);
+        AssertBound("maximum", maximum);
+        AssertBound("exclusiveMaximum", exclusiveMaximum);
     }
 
     [Fact]
-    public void ExclusiveMinimum_Tighter_Than_Minimum_Survives_Numerically()
+    public void Exclusive_Range_Emits_Numeric_Exclusive_Bounds()
     {
-        // Mirror case: x >= 0 AND x > 5 — the effective bound is x > 5. 3.1 keeps
-        // both numerically; exclusiveMinimum: 5 carries the binding constraint.
         using var doc = CompilationHelper.EmitOpenApi(
             """
             using System.ComponentModel.DataAnnotations;
@@ -4335,9 +4360,10 @@ public sealed class OpenApiEmitterTests
 
             [RivetType]
             public sealed record Dto(
-                string Name,
-                [property: Range(0, double.MaxValue), RivetConstraints(ExclusiveMinimum = 5)]
-                double Value);
+                [property: Range(0, 10, MinimumIsExclusive = true, MaximumIsExclusive = true)]
+                double Value,
+                [property: Range(0, double.MaxValue, MinimumIsExclusive = true)]
+                int Count);
 
             [RivetContract]
             public static class TestContract
@@ -4351,22 +4377,26 @@ public sealed class OpenApiEmitterTests
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
             .GetProperty("Dto")
-            .GetProperty("properties")
-            .GetProperty("value");
+            .GetProperty("properties");
 
-        Assert.Equal(0.0, props.GetProperty("minimum").GetDouble());
-        var exclusiveMin = props.GetProperty("exclusiveMinimum");
-        Assert.Equal(JsonValueKind.Number, exclusiveMin.ValueKind);
-        Assert.Equal(5.0, exclusiveMin.GetDouble());
+        var value = props.GetProperty("value");
+        Assert.Equal(0.0, value.GetProperty("exclusiveMinimum").GetDouble());
+        Assert.Equal(10.0, value.GetProperty("exclusiveMaximum").GetDouble());
+        Assert.False(value.TryGetProperty("minimum", out _));
+        Assert.False(value.TryGetProperty("maximum", out _));
+
+        var count = props.GetProperty("count");
+        Assert.Equal(0.0, count.GetProperty("exclusiveMinimum").GetDouble());
+        Assert.False(count.TryGetProperty("exclusiveMaximum", out _));
+        Assert.False(count.TryGetProperty("maximum", out _));
     }
 
     [Fact]
-    public void ExclusiveMaximum_Looser_Than_Maximum_Survives_Numerically()
+    public void Length_Attributes_On_A_Collection_Emit_Item_Counts()
     {
-        // x <= 10 AND x < 100 — maximum: 10 is the binding constraint; 3.1 carries
-        // the looser exclusive bound numerically without corrupting it.
         using var doc = CompilationHelper.EmitOpenApi(
             """
+            using System.Collections.Generic;
             using System.ComponentModel.DataAnnotations;
             using Rivet;
 
@@ -4374,9 +4404,10 @@ public sealed class OpenApiEmitterTests
 
             [RivetType]
             public sealed record Dto(
-                string Name,
-                [property: Range(double.MinValue, 10), RivetConstraints(ExclusiveMaximum = 100)]
-                double Value);
+                [property: Length(1, 5)] List<string> Tags,
+                [property: MinLength(2)] IReadOnlyList<int>? Scores,
+                [property: MaxLength(3), RivetConstraints(UniqueItems = true)] string[] Codes,
+                [property: Length(2, 8)] string Name);
 
             [RivetContract]
             public static class TestContract
@@ -4390,13 +4421,23 @@ public sealed class OpenApiEmitterTests
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
             .GetProperty("Dto")
-            .GetProperty("properties")
-            .GetProperty("value");
+            .GetProperty("properties");
 
-        Assert.Equal(10.0, props.GetProperty("maximum").GetDouble());
-        var exclusiveMax = props.GetProperty("exclusiveMaximum");
-        Assert.Equal(JsonValueKind.Number, exclusiveMax.ValueKind);
-        Assert.Equal(100.0, exclusiveMax.GetDouble());
+        var tags = props.GetProperty("tags");
+        Assert.Equal(1, tags.GetProperty("minItems").GetInt32());
+        Assert.Equal(5, tags.GetProperty("maxItems").GetInt32());
+        Assert.False(tags.TryGetProperty("minLength", out _));
+
+        Assert.Equal(2, props.GetProperty("scores").GetProperty("minItems").GetInt32());
+
+        var codes = props.GetProperty("codes");
+        Assert.Equal(3, codes.GetProperty("maxItems").GetInt32());
+        Assert.True(codes.GetProperty("uniqueItems").GetBoolean());
+        Assert.False(codes.TryGetProperty("maxLength", out _));
+
+        var name = props.GetProperty("name");
+        Assert.Equal(2, name.GetProperty("minLength").GetInt32());
+        Assert.Equal(8, name.GetProperty("maxLength").GetInt32());
     }
 
     [Fact]

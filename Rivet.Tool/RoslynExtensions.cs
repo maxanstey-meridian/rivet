@@ -41,6 +41,10 @@ internal static class RoslynExtensions
     public static string? StringArgument(this AttributeData? attribute) =>
         attribute?.ConstructorArguments is [{ Value: string value }, ..] ? value : null;
 
+    /// <summary>The value of a named attribute argument, or null when it is not set.</summary>
+    public static object? NamedArgument(this AttributeData attribute, string name) =>
+        attribute.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value;
+
     /// <summary>The string values of an attribute argument, flattening arrays.</summary>
     public static IEnumerable<string> Strings(this TypedConstant constant) =>
         constant.Kind == TypedConstantKind.Array ? constant.Values.SelectMany(Strings)

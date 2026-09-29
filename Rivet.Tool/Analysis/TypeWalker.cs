@@ -756,12 +756,14 @@ public sealed class TypeWalker
             string? schemaType = null;
             string? schemaRef = null;
             string? defaultValue = null;
-            TsPropertyConstraints? constraints = null;
             string? description = null;
             string? example = null;
             var isReadOnly = false;
             var isWriteOnly = false;
-            var daConstraints = ReadDataAnnotationConstraints(member.GetAttributes());
+            var constraints = ReadConstraints(
+                member.GetAttributes(),
+                tsType is TsType.Array or TsType.Nullable { Inner: TsType.Array }
+            );
             var daFormat = ReadDataAnnotationFormat(member.GetAttributes());
             foreach (var attr in member.GetAttributes())
             {
@@ -797,10 +799,6 @@ public sealed class TypeWalker
                 )
                 {
                     defaultValue = def;
-                }
-                else if (attr.Is(_types.RivetConstraints))
-                {
-                    constraints = ReadConstraints(attr);
                 }
                 else if (
                     attr.Is(_types.RivetDescription)
@@ -859,29 +857,6 @@ public sealed class TypeWalker
             )
             {
                 tsType = tsType.WithLeaf(null, format);
-            }
-
-            // Merge DataAnnotation constraints with RivetConstraints.
-            // DA provides standard fields; RivetConstraints provides exotic-only fields.
-            if (daConstraints is not null && constraints is not null)
-            {
-                constraints = new TsPropertyConstraints(
-                    MinLength: daConstraints.MinLength,
-                    MaxLength: daConstraints.MaxLength,
-                    Pattern: daConstraints.Pattern,
-                    Minimum: daConstraints.Minimum,
-                    Maximum: daConstraints.Maximum,
-                    ExclusiveMinimum: constraints.ExclusiveMinimum,
-                    ExclusiveMaximum: constraints.ExclusiveMaximum,
-                    MultipleOf: constraints.MultipleOf,
-                    MinItems: constraints.MinItems,
-                    MaxItems: constraints.MaxItems,
-                    UniqueItems: constraints.UniqueItems
-                );
-            }
-            else
-            {
-                constraints ??= daConstraints;
             }
 
             if (schemaRef is not null)
@@ -1982,36 +1957,15 @@ public sealed class TypeWalker
     private bool IsDictionaryType(INamedTypeSymbol symbol) =>
         _dictionaryTypes.Contains(symbol.OriginalDefinition);
 
-    private static TsPropertyConstraints? ReadConstraints(AttributeData attr)
-    {
-        int? GetInt(string name) =>
-            attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is int v && v >= 0
-                ? v
-                : null;
-        double? GetDouble(string name) =>
-            attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is double v
-            && !double.IsNaN(v)
-                ? v
-                : null;
-        bool? GetBool(string name) =>
-            attr.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value is true
-                ? true
-                : null;
-
-        var c = new TsPropertyConstraints(
-            ExclusiveMinimum: GetDouble("ExclusiveMinimum"),
-            ExclusiveMaximum: GetDouble("ExclusiveMaximum"),
-            MultipleOf: GetDouble("MultipleOf"),
-            MinItems: GetInt("MinItems"),
-            MaxItems: GetInt("MaxItems"),
-            UniqueItems: GetBool("UniqueItems")
-        );
-
-        return c.HasAny ? c : null;
-    }
-
-    private TsPropertyConstraints? ReadDataAnnotationConstraints(
-        ImmutableArray<AttributeData> attributes
+    /// <summary>
+    /// Reads the DataAnnotations constraints plus the two facets DataAnnotations lacks
+    /// (<c>[RivetConstraints(MultipleOf, UniqueItems)]</c>). <c>[MinLength]</c>,
+    /// <c>[MaxLength]</c> and <c>[Length]</c> count items on an array and characters
+    /// on anything else.
+    /// </summary>
+    private TsPropertyConstraints? ReadConstraints(
+        ImmutableArray<AttributeData> attributes,
+        bool isArray
     )
     {
         int? minLength = null;
@@ -2019,6 +1973,10 @@ public sealed class TypeWalker
         string? pattern = null;
         double? minimum = null;
         double? maximum = null;
+        double? exclusiveMinimum = null;
+        double? exclusiveMaximum = null;
+        double? multipleOf = null;
+        bool? uniqueItems = null;
 
         foreach (var attr in attributes)
         {
@@ -2032,12 +1990,14 @@ public sealed class TypeWalker
                     maxLength = mxl;
                     break;
 
+                case [{ Value: int lMin }, { Value: int lMax }] when attr.Is(_types.Length):
+                    minLength = lMin;
+                    maxLength = lMax;
+                    break;
+
                 case [{ Value: int slMax }, ..] when attr.Is(_types.StringLength):
                     maxLength = slMax;
-                    var minLenArg = attr.NamedArguments.FirstOrDefault(a =>
-                        a.Key == "MinimumLength"
-                    );
-                    if (minLenArg.Value.Value is int slMin)
+                    if (attr.NamedArgument("MinimumLength") is int slMin)
                     {
                         minLength = slMin;
                     }
@@ -2065,15 +2025,30 @@ public sealed class TypeWalker
                         break;
                     }
 
-                    // Filter sentinel values emitted by CSharpWriter for single-sided constraints
+                    // double.MinValue/MaxValue mark an open side (CSharpWriter emits them
+                    // for single-sided constraints).
                     if (rangeMin is not double.MinValue)
                     {
-                        minimum = rangeMin;
+                        if (attr.NamedArgument("MinimumIsExclusive") is true)
+                        {
+                            exclusiveMinimum = rangeMin;
+                        }
+                        else
+                        {
+                            minimum = rangeMin;
+                        }
                     }
 
                     if (rangeMax is not double.MaxValue)
                     {
-                        maximum = rangeMax;
+                        if (attr.NamedArgument("MaximumIsExclusive") is true)
+                        {
+                            exclusiveMaximum = rangeMax;
+                        }
+                        else
+                        {
+                            maximum = rangeMax;
+                        }
                     }
 
                     break;
@@ -2081,15 +2056,34 @@ public sealed class TypeWalker
                 case [{ Value: string pat }, ..] when attr.Is(_types.RegularExpression):
                     pattern = pat;
                     break;
+
+                case [] when attr.Is(_types.RivetConstraints):
+                    if (attr.NamedArgument("MultipleOf") is double m && !double.IsNaN(m))
+                    {
+                        multipleOf = m;
+                    }
+
+                    if (attr.NamedArgument("UniqueItems") is true)
+                    {
+                        uniqueItems = true;
+                    }
+
+                    break;
             }
         }
 
         var c = new TsPropertyConstraints(
-            MinLength: minLength,
-            MaxLength: maxLength,
+            MinLength: isArray ? null : minLength,
+            MaxLength: isArray ? null : maxLength,
             Pattern: pattern,
             Minimum: minimum,
-            Maximum: maximum
+            Maximum: maximum,
+            ExclusiveMinimum: exclusiveMinimum,
+            ExclusiveMaximum: exclusiveMaximum,
+            MultipleOf: multipleOf,
+            MinItems: isArray ? minLength : null,
+            MaxItems: isArray ? maxLength : null,
+            UniqueItems: uniqueItems
         );
 
         return c.HasAny ? c : null;

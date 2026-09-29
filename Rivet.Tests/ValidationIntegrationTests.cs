@@ -15,7 +15,11 @@ public sealed class ValidationIntegrationTests
         [property: RegularExpression(@"^REF-\d+$")] string Reference,
         [property: Range(1, 100)] int Priority,
         [property: StringLength(500, MinimumLength = 10)] string Description,
-        [property: RivetConstraints(ExclusiveMinimum = 0, MultipleOf = 0.5)] double Score
+        [property:
+            Range(0, double.MaxValue, MinimumIsExclusive = true),
+            RivetConstraints(MultipleOf = 0.5)
+        ]
+            double Score
     );
 
     private static ConstrainedDto ValidInstance =>
@@ -100,27 +104,22 @@ public sealed class ValidationIntegrationTests
     }
 
     [Fact]
-    public void Exotic_RivetConstraints_Enforced_By_Validator()
+    public void Exclusive_Range_Enforced_By_Validator()
     {
-        // Score = -5 violates ExclusiveMinimum = 0. RivetConstraintsAttribute
-        // is a ValidationAttribute, so Validator.TryValidateObject() enforces it.
-        var dto = ValidInstance with
-        {
-            Score = -5,
-        };
+        var dto = ValidInstance with { Score = -5 };
         var (isValid, results) = Validate(dto);
 
         Assert.False(isValid);
         Assert.Contains(results, r => r.MemberNames.Contains("Score"));
     }
 
-    // ========== Per-facet RivetConstraints enforcement ==========
+    // ========== Per-facet enforcement ==========
 
     private sealed record FacetDto(
-        [property: RivetConstraints(ExclusiveMinimum = 0)] double AboveZero,
-        [property: RivetConstraints(ExclusiveMaximum = 100)] int BelowHundred,
+        [property: Range(0, double.MaxValue, MinimumIsExclusive = true)] double AboveZero,
+        [property: Range(double.MinValue, 100, MaximumIsExclusive = true)] int BelowHundred,
         [property: RivetConstraints(MultipleOf = 0.5)] double HalfSteps,
-        [property: RivetConstraints(MinItems = 1, MaxItems = 3)] IReadOnlyList<string>? Items,
+        [property: Length(1, 3)] IReadOnlyList<string>? Items,
         [property: RivetConstraints(UniqueItems = true)] IReadOnlyList<int>? Distinct
     );
 
@@ -226,11 +225,36 @@ public sealed class ValidationIntegrationTests
     [Fact]
     public void Null_Collections_Pass_Constraint_Validation()
     {
-        // Null is [Required]'s job — RivetConstraints lets nulls through,
-        // matching the DataAnnotations convention.
+        // Null is [Required]'s job.
         var (isValid, results) = ValidateFacets(ValidFacets with { Items = null, Distinct = null });
 
         Assert.True(isValid);
         Assert.Empty(results);
+    }
+
+    // [MinLength] counts through ICollection or a Count property. A deserialized
+    // IEnumerable<T> is a List<T>, so it validates; a lazy sequence cannot be counted.
+    private sealed record SequenceDto([property: MinLength(2)] IEnumerable<string>? Names);
+
+    [Fact]
+    public void MinLength_On_IEnumerable_Counts_A_Materialized_Sequence()
+    {
+        var results = new List<ValidationResult>();
+        var dto = new SequenceDto(new List<string> { "a" });
+
+        var isValid = Validator.TryValidateObject(dto, new ValidationContext(dto), results, true);
+
+        Assert.False(isValid);
+        Assert.Contains(results, r => r.MemberNames.Contains("Names"));
+    }
+
+    [Fact]
+    public void MinLength_On_IEnumerable_Throws_For_A_Lazy_Sequence()
+    {
+        var dto = new SequenceDto(Enumerable.Repeat("a", 3).Where(_ => true));
+
+        Assert.Throws<InvalidCastException>(() =>
+            Validator.TryValidateObject(dto, new ValidationContext(dto), [], true)
+        );
     }
 }

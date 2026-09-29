@@ -23,7 +23,7 @@ public sealed record InviteMemberRequest
     [StringLength(30, MinimumLength = 2)]
     public required string Nickname { get; init; }
 
-    [RivetConstraints(MaxItems = 5, UniqueItems = true)]
+    [MaxLength(5), RivetConstraints(UniqueItems = true)]
     public IReadOnlyList<string>? Tags { get; init; }
 }
 

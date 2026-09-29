@@ -5177,7 +5177,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void Import_Emits_RivetConstraints_Only_For_Exotic()
+    public void Import_Emits_RivetConstraints_Only_For_MultipleOf_And_UniqueItems()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -5197,10 +5197,8 @@ public sealed class OpenApiImporterTests
 
         var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Dto.cs");
         Assert.Contains("RivetConstraints(MultipleOf = 0.5)", content);
-        Assert.Contains(
-            "RivetConstraints(MinItems = 1, MaxItems = 10, UniqueItems = true)",
-            content
-        );
+        Assert.Contains("[Length(1, 10)]", content);
+        Assert.Contains("RivetConstraints(UniqueItems = true)", content);
         Assert.DoesNotContain("StringLength", content);
         Assert.DoesNotContain("RegularExpression", content);
     }

@@ -5,23 +5,15 @@ using System.Globalization;
 namespace Rivet;
 
 /// <summary>
-/// Preserves OpenAPI validation constraints through the C# round-trip.
-/// All properties are optional — only set the ones present in the original schema.
+/// The two JSON Schema facets DataAnnotations has no attribute for: <c>multipleOf</c>
+/// and <c>uniqueItems</c>. Use <c>[Range]</c> (with <c>MinimumIsExclusive</c>/
+/// <c>MaximumIsExclusive</c>) for bounds and <c>[MinLength]</c>/<c>[MaxLength]</c>/
+/// <c>[Length]</c> for item counts.
 /// <para>
-/// This is a <see cref="ValidationAttribute"/>: under validating hosts (ASP.NET
-/// <c>[ApiController]</c> model validation, <c>Validator.TryValidateObject</c>)
-/// the declared facets are enforced at runtime. Numeric facets
-/// (<see cref="ExclusiveMinimum"/>, <see cref="ExclusiveMaximum"/>,
-/// <see cref="MultipleOf"/>) apply to numeric values; collection facets
-/// (<see cref="MinItems"/>, <see cref="MaxItems"/>, <see cref="UniqueItems"/>)
-/// apply to non-string <see cref="IEnumerable"/> values. <c>null</c> always
-/// passes — pair with <c>[Required]</c> to reject nulls, matching the
-/// DataAnnotations convention.
-/// </para>
-/// <para>
-/// Behavior note: prior versions were spec-only (a plain <see cref="Attribute"/>);
-/// projects using <c>[ApiController]</c> model validation now get these facets
-/// enforced on request DTOs.
+/// This is a <see cref="ValidationAttribute"/>, so validating hosts enforce it.
+/// <see cref="MultipleOf"/> applies to numeric values and <see cref="UniqueItems"/> to
+/// non-string <see cref="IEnumerable"/> values. <c>null</c> always passes; pair with
+/// <c>[Required]</c> to reject nulls, as with DataAnnotations.
 /// </para>
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, Inherited = false)]
@@ -33,91 +25,34 @@ public sealed class RivetConstraintsAttribute : ValidationAttribute
     /// </summary>
     private const double MultipleOfTolerance = 1e-9;
 
-    public double ExclusiveMinimum { get; set; } = double.NaN;
-    public double ExclusiveMaximum { get; set; } = double.NaN;
     public double MultipleOf { get; set; } = double.NaN;
-    public int MinItems { get; set; } = -1;
-    public int MaxItems { get; set; } = -1;
     public bool UniqueItems { get; set; }
 
     protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
     {
-        // Null is [Required]'s job — DataAnnotations convention.
-        if (value is null)
-        {
-            return ValidationResult.Success;
-        }
-
         var name = validationContext.DisplayName;
         var members = validationContext.MemberName is { } member ? new[] { member } : null;
 
-        if (TryGetNumber(value, out var number))
+        if (
+            !double.IsNaN(MultipleOf)
+            && TryGetNumber(value, out var number)
+            && !IsMultipleOf(number, MultipleOf)
+        )
         {
-            if (!double.IsNaN(ExclusiveMinimum) && number <= ExclusiveMinimum)
-            {
-                return new ValidationResult(
-                    string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"The field {name} must be greater than {ExclusiveMinimum}."
-                    ),
-                    members
-                );
-            }
-
-            if (!double.IsNaN(ExclusiveMaximum) && number >= ExclusiveMaximum)
-            {
-                return new ValidationResult(
-                    string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"The field {name} must be less than {ExclusiveMaximum}."
-                    ),
-                    members
-                );
-            }
-
-            if (!double.IsNaN(MultipleOf) && !IsMultipleOf(number, MultipleOf))
-            {
-                return new ValidationResult(
-                    string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"The field {name} must be a multiple of {MultipleOf}."
-                    ),
-                    members
-                );
-            }
-
-            return ValidationResult.Success;
+            return new ValidationResult(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The field {name} must be a multiple of {MultipleOf}."
+                ),
+                members
+            );
         }
 
-        // Strings are IEnumerable<char> but minItems/maxItems/uniqueItems are
-        // array facets — never apply them to strings.
-        if (value is IEnumerable enumerable and not string)
+        // Strings are IEnumerable<char>, but uniqueItems is an array facet.
+        if (UniqueItems && value is IEnumerable enumerable and not string)
         {
             var items = enumerable.Cast<object?>().ToList();
-
-            if (MinItems >= 0 && items.Count < MinItems)
-            {
-                return new ValidationResult(
-                    string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"The field {name} must contain at least {MinItems} item(s)."
-                    ),
-                    members
-                );
-            }
-
-            if (MaxItems >= 0 && items.Count > MaxItems)
-            {
-                return new ValidationResult(
-                    string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"The field {name} must contain at most {MaxItems} item(s)."
-                    ),
-                    members
-                );
-            }
-
-            if (UniqueItems && items.Count != items.Distinct().Count())
+            if (items.Count != items.Distinct().Count())
             {
                 return new ValidationResult(
                     $"The field {name} must not contain duplicate items.",
@@ -129,7 +64,7 @@ public sealed class RivetConstraintsAttribute : ValidationAttribute
         return ValidationResult.Success;
     }
 
-    private static bool TryGetNumber(object value, out double number)
+    private static bool TryGetNumber(object? value, out double number)
     {
         switch (value)
         {

@@ -24,7 +24,7 @@ validating hosts at runtime.
 | `[RivetOptional]` | property | Removes the property from `required` |
 | `[RivetReadOnly]` / `[RivetWriteOnly]` | property | `readOnly: true` / `writeOnly: true` |
 | `[RivetFormat("fmt")]` | property | `format` — for custom formats (`uri-template`, `currency`, ...) with no dedicated C# type; takes precedence over formats inferred from DataAnnotations |
-| `[RivetConstraints(...)]` | property | `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minItems`, `maxItems`, `uniqueItems` — constraints DataAnnotations cannot express. Also a `ValidationAttribute`: enforced at runtime under validating hosts (`[ApiController]` model validation, `Validator.TryValidateObject`); null values pass — pair with `[Required]`. See [Runtime validation](../guides/runtime-validation.md#enforcing-constraints-at-runtime) |
+| `[RivetConstraints(...)]` | property | `multipleOf`, `uniqueItems` — the two constraints DataAnnotations cannot express. Also a `ValidationAttribute`: enforced at runtime under validating hosts (`[ApiController]` model validation, `Validator.TryValidateObject`); null values pass — pair with `[Required]`. See [Runtime validation](../guides/runtime-validation.md#enforcing-constraints-at-runtime) |
 | `[RivetHeader("Wire-Name")]` | property | Marks a contract input-record property as a **request header parameter** (`in: header`, original casing preserved; without a name the property name is the header name). The property never enters the JSON schema. **Spec-only** — header binding stays the host's job. `Accept`/`Content-Type`/`Authorization` are rejected by the emitter (RIV2009). |
 | `[RivetScalar]` | class, struct, record | Declares an explicit **scalar value object**: the type must have one public readable non-indexer property named `Value` and a public constructor accepting its type, whose type becomes the wire primitive with `x-rivet-brand`. Opt-in replacement for the retired shape-only single-`Value`-property convention; a `Value` wrapper without it is an ordinary object schema (invalid shapes fail with RIV1103). |
 | `Rivet*EnumConverter<T>` | enum | The string-enum converter family (requires .NET 8+, used inside `[JsonConverter(typeof(...))]`): `RivetLowerCaseEnumConverter<T>` / `RivetCamelCaseEnumConverter<T>` / `RivetSnakeCaseEnumConverter<T>` / `RivetKebabCaseEnumConverter<T>`. The converter class name declares both the string wire and the casing convention for enum wire values; the emitted contract values equal the runtime serializer's wire values by construction. A per-member `[JsonStringEnumMemberName]` (.NET 9+) overrides the casing. Two members casing to the same wire value fail generation (RIV1106). The bare built-in `[JsonConverter(typeof(JsonStringEnumConverter<T>))]` keeps exact C# member names. |
@@ -40,8 +40,10 @@ validating hosts at runtime.
 ## Standard attributes Rivet also reads
 
 - `System.ComponentModel.DataAnnotations`: `[Required]`, `[Range]`, `[MinLength]`,
-  `[MaxLength]`, `[StringLength]`, `[RegularExpression]`, `[EmailAddress]`, `[Url]`
-  → JSON Schema constraints and formats.
+  `[MaxLength]`, `[Length]`, `[StringLength]`, `[RegularExpression]`, `[EmailAddress]`, `[Url]`
+  → JSON Schema constraints and formats. `[Range]` with `MinimumIsExclusive`/`MaximumIsExclusive`
+  emits `exclusiveMinimum`/`exclusiveMaximum`. `[MinLength]`/`[MaxLength]`/`[Length]` emit
+  `minItems`/`maxItems` on a collection and `minLength`/`maxLength` otherwise.
 - `System.Text.Json`: `[JsonPropertyName("x")]` overrides the camelCased property
   name.
 - ASP.NET: `[Route]`, `[HttpGet]`/`[HttpPost]`/..., `[ProducesResponseType]`,

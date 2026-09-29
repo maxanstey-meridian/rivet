@@ -11,7 +11,7 @@ These hold whenever you regenerate the spec (`dotnet rivet --project … --outpu
   shape declared in compiled C# via the Roslyn semantic model. Custom serializer
   settings, middleware and other runtime behaviour outside that declaration are
   not visible; known fidelity loss produces diagnostics where Rivet can detect it.
-- Constraint attributes (`[Range]`, `[StringLength]`, `[MinLength]`, `[MaxLength]`,
+- Constraint attributes (`[Range]`, `[StringLength]`, `[MinLength]`, `[MaxLength]`, `[Length]`,
   `[RegularExpression]`, `[RivetConstraints]`, ...) are emitted as JSON Schema
   constraints (`minimum`, `maxLength`, `pattern`, `multipleOf`, ...).
 - `--check` verifies that every contract field has an implementation and that the
@@ -114,10 +114,14 @@ host — so the wire behaviour matches what the spec promises:
   `Validator.TryValidateObject(dto, context, results, validateAllProperties: true)`
   in an endpoint filter, returning your declared error shape on failure (this is
   the scaffolded-host pattern).
-- **`[RivetConstraints]`** is a `ValidationAttribute`, so its facets
-  (`ExclusiveMinimum`, `ExclusiveMaximum`, `MultipleOf`, `MinItems`, `MaxItems`,
-  `UniqueItems`) participate in both of the above. Null values pass — pair with
+- **`[RivetConstraints]`** is a `ValidationAttribute`, so its two facets
+  (`MultipleOf`, `UniqueItems`) participate in both of the above. Null values pass — pair with
   `[Required]`, per DataAnnotations convention.
+- Exclusive bounds and item counts are plain DataAnnotations:
+  `[Range(0, double.MaxValue, MinimumIsExclusive = true)]` and `[MinLength]`/`[MaxLength]`/`[Length]`
+  on a collection. `[MinLength]` counts a value through `ICollection` or a `Count` property,
+  so it validates deserialized collections (an `IEnumerable<T>` property holds a `List<T>`)
+  but throws `InvalidCastException` for a lazy sequence.
 
 ### The positional-record gotcha
 

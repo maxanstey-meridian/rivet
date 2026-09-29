@@ -118,6 +118,7 @@ public sealed class WellKnownTypes(Compilation c)
     public INamedTypeSymbol? Required { get; } = DataAnnotation(c, "RequiredAttribute");
     public INamedTypeSymbol? MinLength { get; } = DataAnnotation(c, "MinLengthAttribute");
     public INamedTypeSymbol? MaxLength { get; } = DataAnnotation(c, "MaxLengthAttribute");
+    public INamedTypeSymbol? Length { get; } = DataAnnotation(c, "LengthAttribute");
     public INamedTypeSymbol? StringLength { get; } = DataAnnotation(c, "StringLengthAttribute");
     public INamedTypeSymbol? Range { get; } = DataAnnotation(c, "RangeAttribute");
     public INamedTypeSymbol? RegularExpression { get; } =
