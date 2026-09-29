@@ -21,21 +21,19 @@ internal static class CSharpWriter
         var sb = new StringBuilder("using Rivet;\n\n");
         foreach (var schema in schemas)
         {
-            var schemaType = schema.SchemaType is null
-                ? "null"
-                : $"\"{EscapeString(schema.SchemaType)}\"";
-            var format = schema.Format is null ? "null" : $"\"{EscapeString(schema.Format)}\"";
+            var schemaType = schema.SchemaType is null ? "null" : StringLiteral(schema.SchemaType);
+            var format = schema.Format is null ? "null" : StringLiteral(schema.Format);
             var metadata = JsonSerializer.Serialize(schema.Metadata, options);
             var schemaRef = schema.SchemaRef is null
                 ? schema.IsArray
                     ? ", null"
                     : ""
-                : $", \"{EscapeString(schema.SchemaRef)}\"";
+                : $", {StringLiteral(schema.SchemaRef)}";
             var arrayArguments = schema.IsArray
-                ? $", true, \"{EscapeString(schema.ItemSchemaRef!)}\""
+                ? $", true, {StringLiteral(schema.ItemSchemaRef!)}"
                 : "";
             sb.AppendLine(
-                $"[assembly: RivetGeneratedSchema(\"{EscapeString(schema.Name)}\", \"{EscapeString(schema.ComponentId)}\", {schemaType}, {format}, {schema.IsNullable.ToString().ToLowerInvariant()}, \"{EscapeString(metadata)}\", {schema.IsEnum.ToString().ToLowerInvariant()}{schemaRef}{arrayArguments})]"
+                $"[assembly: RivetGeneratedSchema({StringLiteral(schema.Name)}, {StringLiteral(schema.ComponentId)}, {schemaType}, {format}, {Literal(schema.IsNullable)}, {StringLiteral(metadata)}, {Literal(schema.IsEnum)}{schemaRef}{arrayArguments})]"
             );
         }
 
@@ -178,7 +176,7 @@ internal static class CSharpWriter
         sb.AppendLine();
         var info = document.Info;
         sb.AppendLine(
-            $"[assembly: RivetDocumentInfo({StringLiteral(info.Title)}, {StringLiteral(info.Version)}, {NullableStringLiteral(info.Description)}, {NullableStringLiteral(info.TermsOfService)}, {NullableStringLiteral(info.Contact?.Name)}, {NullableStringLiteral(info.Contact?.Url)}, {NullableStringLiteral(info.Contact?.Email)}, {(info.Contact is not null).ToString().ToLowerInvariant()}, {NullableStringLiteral(info.License?.Name)}, {NullableStringLiteral(info.License?.Url)}, {NullableStringLiteral(info.License?.Identifier)})]"
+            $"[assembly: RivetDocumentInfo({StringLiteral(info.Title)}, {StringLiteral(info.Version)}, {NullableStringLiteral(info.Description)}, {NullableStringLiteral(info.TermsOfService)}, {NullableStringLiteral(info.Contact?.Name)}, {NullableStringLiteral(info.Contact?.Url)}, {NullableStringLiteral(info.Contact?.Email)}, {Literal((info.Contact is not null))}, {NullableStringLiteral(info.License?.Name)}, {NullableStringLiteral(info.License?.Url)}, {NullableStringLiteral(info.License?.Identifier)})]"
         );
         for (var tagIndex = 0; tagIndex < document.Tags.Count; tagIndex++)
         {
@@ -205,7 +203,7 @@ internal static class CSharpWriter
         {
             var requestBody = requestBodies[requestBodyIndex];
             sb.AppendLine(
-                $"[assembly: RivetDocumentRequestBody({requestBodyIndex}, {StringLiteral(requestBody.Name)}, {NullableStringLiteral(requestBody.Description)}, {requestBody.Required.ToString().ToLowerInvariant()})]"
+                $"[assembly: RivetDocumentRequestBody({requestBodyIndex}, {StringLiteral(requestBody.Name)}, {NullableStringLiteral(requestBody.Description)}, {Literal(requestBody.Required)})]"
             );
             for (var contentIndex = 0; contentIndex < requestBody.Contents.Count; contentIndex++)
             {
@@ -214,7 +212,7 @@ internal static class CSharpWriter
                     ? "null"
                     : $"typeof({content.CSharpTypeName})";
                 sb.AppendLine(
-                    $"[assembly: RivetDocumentRequestBodyContent({requestBodyIndex}, {contentIndex}, {StringLiteral(content.MediaType)}, {schemaType}, {content.IsBinary.ToString().ToLowerInvariant()}, {NullableStringLiteral(content.SchemaRef)}, {NullableStringLiteral(content.SchemaType)}, {NullableStringLiteral(content.Format)}, {content.IsFormatSpecified.ToString().ToLowerInvariant()}, {NullableStringLiteral(content.SchemaJson)})]"
+                    $"[assembly: RivetDocumentRequestBodyContent({requestBodyIndex}, {contentIndex}, {StringLiteral(content.MediaType)}, {schemaType}, {Literal(content.IsBinary)}, {NullableStringLiteral(content.SchemaRef)}, {NullableStringLiteral(content.SchemaType)}, {NullableStringLiteral(content.Format)}, {Literal(content.IsFormatSpecified)}, {NullableStringLiteral(content.SchemaJson)})]"
                 );
             }
             var requestBodyExamples = requestBody.Examples ?? [];
@@ -324,17 +322,17 @@ internal static class CSharpWriter
         sb.AppendLine();
         if (record.Description is not null)
         {
-            sb.AppendLine($"[RivetDescription(\"{EscapeString(record.Description)}\")]");
+            sb.AppendLine($"[RivetDescription({StringLiteral(record.Description)})]");
         }
         if (record.Polymorphism is { } poly)
         {
             sb.AppendLine(
-                $"[JsonPolymorphic(TypeDiscriminatorPropertyName = \"{EscapeString(poly.DiscriminatorPropertyName)}\")]"
+                $"[JsonPolymorphic(TypeDiscriminatorPropertyName = {StringLiteral(poly.DiscriminatorPropertyName)})]"
             );
             foreach (var variant in poly.Variants)
             {
                 sb.AppendLine(
-                    $"[JsonDerivedType(typeof({variant.TypeName}), \"{EscapeString(variant.Tag)}\")]"
+                    $"[JsonDerivedType(typeof({variant.TypeName}), {StringLiteral(variant.Tag)})]"
                 );
             }
         }
@@ -489,15 +487,15 @@ internal static class CSharpWriter
         }
         if (prop.WireName is not null)
         {
-            sb.AppendLine($"    [{target}JsonPropertyName(\"{EscapeString(prop.WireName)}\")]");
+            sb.AppendLine($"    [{target}JsonPropertyName({StringLiteral(prop.WireName)})]");
         }
         if (prop.HeaderName is not null)
         {
-            sb.AppendLine($"    [{target}RivetHeader(\"{EscapeString(prop.HeaderName)}\")]");
+            sb.AppendLine($"    [{target}RivetHeader({StringLiteral(prop.HeaderName)})]");
         }
         if (prop.SchemaRef is not null)
         {
-            sb.AppendLine($"    [{target}RivetSchemaRef(\"{EscapeString(prop.SchemaRef)}\")]");
+            sb.AppendLine($"    [{target}RivetSchemaRef({StringLiteral(prop.SchemaRef)})]");
         }
         if (!prop.IsRequired)
         {
@@ -513,7 +511,7 @@ internal static class CSharpWriter
         }
         else if (prop.Format is not null)
         {
-            sb.AppendLine($"    [{target}RivetFormat(\"{EscapeString(prop.Format)}\")]");
+            sb.AppendLine($"    [{target}RivetFormat({StringLiteral(prop.Format)})]");
         }
         else if (prop.IsFormatSpecified)
         {
@@ -521,7 +519,7 @@ internal static class CSharpWriter
         }
         if (prop.SchemaType is not null)
         {
-            sb.AppendLine($"    [{target}RivetSchemaType(\"{EscapeString(prop.SchemaType)}\")]");
+            sb.AppendLine($"    [{target}RivetSchemaType({StringLiteral(prop.SchemaType)})]");
         }
         if (prop.IsDeprecated)
         {
@@ -529,15 +527,15 @@ internal static class CSharpWriter
         }
         if (prop.Description is not null)
         {
-            sb.AppendLine($"    [{target}RivetDescription(\"{EscapeString(prop.Description)}\")]");
+            sb.AppendLine($"    [{target}RivetDescription({StringLiteral(prop.Description)})]");
         }
         if (prop.DefaultValue is not null)
         {
-            sb.AppendLine($"    [{target}RivetDefault(\"{EscapeString(prop.DefaultValue)}\")]");
+            sb.AppendLine($"    [{target}RivetDefault({StringLiteral(prop.DefaultValue)})]");
         }
         if (prop.Example is not null)
         {
-            sb.AppendLine($"    [{target}RivetExample(\"{EscapeString(prop.Example)}\")]");
+            sb.AppendLine($"    [{target}RivetExample({StringLiteral(prop.Example)})]");
         }
         if (prop.IsReadOnly)
         {
@@ -564,11 +562,11 @@ internal static class CSharpWriter
         var constraints = metadata.Constraints;
         var xml = metadata.Xml;
         sb.AppendLine(
-            $"{indent}[{target}RivetGeneratedSchemaMetadata({StringLiteral(generated.Pointer)}, {NullableStringLiteral(metadata.Title)}, {NullableStringLiteral(metadata.Description)}, {NullableStringLiteral(metadata.DefaultValue)}, {NullableStringLiteral(metadata.Example)}, {NullableStringLiteral(metadata.Examples)}, {NullableIntLiteral(constraints?.MinLength)}, {NullableIntLiteral(constraints?.MaxLength)}, {NullableStringLiteral(constraints?.Pattern)}, {NullableDoubleLiteral(constraints?.Minimum)}, {NullableDoubleLiteral(constraints?.Maximum)}, {NullableDoubleLiteral(constraints?.ExclusiveMinimum)}, {NullableDoubleLiteral(constraints?.ExclusiveMaximum)}, {NullableDoubleLiteral(constraints?.MultipleOf)}, {NullableIntLiteral(constraints?.MinItems)}, {NullableIntLiteral(constraints?.MaxItems)}, {(constraints?.UniqueItems == true).ToString().ToLowerInvariant()}, {NullableStringLiteral(xml?.Name)}, {NullableStringLiteral(xml?.Namespace)}, {NullableStringLiteral(xml?.Prefix)}, {(xml?.IsAttribute == true).ToString().ToLowerInvariant()}, {(xml?.IsWrapped == true).ToString().ToLowerInvariant()}, {NullableStringLiteral(metadata.Format)}, {metadata.IsFormatSpecified.ToString().ToLowerInvariant()}, {metadata.IsNullable.ToString().ToLowerInvariant()}, {metadata.IsDeprecated.ToString().ToLowerInvariant()}, {metadata.IsReadOnly.ToString().ToLowerInvariant()}, {metadata.IsWriteOnly.ToString().ToLowerInvariant()}, {NullableStringLiteral(metadata.Required is null ? null : JsonSerializer.Serialize(metadata.Required))})]"
+            $"{indent}[{target}RivetGeneratedSchemaMetadata({StringLiteral(generated.Pointer)}, {NullableStringLiteral(metadata.Title)}, {NullableStringLiteral(metadata.Description)}, {NullableStringLiteral(metadata.DefaultValue)}, {NullableStringLiteral(metadata.Example)}, {NullableStringLiteral(metadata.Examples)}, {NullableIntLiteral(constraints?.MinLength)}, {NullableIntLiteral(constraints?.MaxLength)}, {NullableStringLiteral(constraints?.Pattern)}, {NullableDoubleLiteral(constraints?.Minimum)}, {NullableDoubleLiteral(constraints?.Maximum)}, {NullableDoubleLiteral(constraints?.ExclusiveMinimum)}, {NullableDoubleLiteral(constraints?.ExclusiveMaximum)}, {NullableDoubleLiteral(constraints?.MultipleOf)}, {NullableIntLiteral(constraints?.MinItems)}, {NullableIntLiteral(constraints?.MaxItems)}, {Literal((constraints?.UniqueItems == true))}, {NullableStringLiteral(xml?.Name)}, {NullableStringLiteral(xml?.Namespace)}, {NullableStringLiteral(xml?.Prefix)}, {Literal((xml?.IsAttribute == true))}, {Literal((xml?.IsWrapped == true))}, {NullableStringLiteral(metadata.Format)}, {Literal(metadata.IsFormatSpecified)}, {Literal(metadata.IsNullable)}, {Literal(metadata.IsDeprecated)}, {Literal(metadata.IsReadOnly)}, {Literal(metadata.IsWriteOnly)}, {NullableStringLiteral(metadata.Required is null ? null : JsonSerializer.Serialize(metadata.Required))})]"
         );
     }
 
-    private static string NullableIntLiteral(int? value) => value?.ToString() ?? "-1";
+    private static string NullableIntLiteral(int? value) => value is { } v ? Literal(v) : "-1";
 
     private static string NullableDoubleLiteral(double? value) =>
         value?.ToString(CultureInfo.InvariantCulture) ?? "double.NaN";
@@ -629,11 +627,11 @@ internal static class CSharpWriter
         }
         if (enumDef.Description is not null)
         {
-            sb.AppendLine($"[Rivet.RivetDescription(\"{EscapeString(enumDef.Description)}\")]");
+            sb.AppendLine($"[Rivet.RivetDescription({StringLiteral(enumDef.Description)})]");
         }
         if (enumDef.Format is not null)
         {
-            sb.AppendLine($"[Rivet.RivetFormat(\"{EscapeString(enumDef.Format)}\")]");
+            sb.AppendLine($"[Rivet.RivetFormat({StringLiteral(enumDef.Format)})]");
         }
 
         sb.AppendLine("[Rivet.RivetType]");
@@ -654,7 +652,7 @@ internal static class CSharpWriter
                 // differs from it (OriginalName retained by MapEnum) need a pin.
                 if (familyConverter is null || member.OriginalName is not null)
                 {
-                    sb.AppendLine($"    [JsonStringEnumMemberName(\"{EscapeString(wireName)}\")]");
+                    sb.AppendLine($"    [JsonStringEnumMemberName({StringLiteral(wireName)})]");
                 }
             }
             var valueAssignment = member.IntValue is not null ? $" = {member.IntValue}" : "";
@@ -672,11 +670,11 @@ internal static class CSharpWriter
         sb.AppendLine();
         if (brand.Description is not null)
         {
-            sb.AppendLine($"[Rivet.RivetDescription(\"{EscapeString(brand.Description)}\")]");
+            sb.AppendLine($"[Rivet.RivetDescription({StringLiteral(brand.Description)})]");
         }
         if (brand.Format is not null)
         {
-            sb.AppendLine($"[Rivet.RivetFormat(\"{EscapeString(brand.Format)}\")]");
+            sb.AppendLine($"[Rivet.RivetFormat({StringLiteral(brand.Format)})]");
         }
         sb.AppendLine("[Rivet.RivetType]");
         sb.AppendLine(GeneratedTypeAttribute(brand.ComponentId, "Rivet."));
@@ -695,7 +693,7 @@ internal static class CSharpWriter
     /// <summary>A type with no component id was synthesised by the importer.</summary>
     private static string GeneratedTypeAttribute(string? componentId, string prefix = "")
     {
-        var id = componentId is null ? "null" : $"\"{EscapeString(componentId)}\"";
+        var id = componentId is null ? "null" : StringLiteral(componentId);
         var provenance = componentId is null ? "Synthetic" : "Component";
         return $"[{prefix}RivetGeneratedType({id}, {prefix}RivetGeneratedTypeProvenance.{provenance})]";
     }
@@ -762,7 +760,7 @@ internal static class CSharpWriter
                 ? null
                 : JsonSerializer.Serialize(provenance.Schemas);
             sb.AppendLine(
-                $"    [RivetOperationProvenance({provenance.OperationIdPresent.ToString().ToLowerInvariant()}, {NullableStringLiteral(provenance.OperationId)}, {provenance.Deprecated.ToString().ToLowerInvariant()}, {StringArrayLiteral(provenance.Tags)}, {NullableStringLiteral(provenance.RequestBodyDescription)}, {(provenance.ServerOverride is not null).ToString().ToLowerInvariant()}, {NullableStringLiteral(provenance.RivetIdentity?.Contract)}, {NullableStringLiteral(provenance.RivetIdentity?.Endpoint)}, {NullableStringLiteral(provenance.RequestBodyComponentId)}, {NullableStringLiteral(schemasJson)})]"
+                $"    [RivetOperationProvenance({Literal(provenance.OperationIdPresent)}, {NullableStringLiteral(provenance.OperationId)}, {Literal(provenance.Deprecated)}, {StringArrayLiteral(provenance.Tags)}, {NullableStringLiteral(provenance.RequestBodyDescription)}, {Literal((provenance.ServerOverride is not null))}, {NullableStringLiteral(provenance.RivetIdentity?.Contract)}, {NullableStringLiteral(provenance.RivetIdentity?.Endpoint)}, {NullableStringLiteral(provenance.RequestBodyComponentId)}, {NullableStringLiteral(schemasJson)})]"
             );
             if (provenance.ServerOverride is { } servers)
             {
@@ -826,14 +824,12 @@ internal static class CSharpWriter
         if (field.IsFileEndpoint)
         {
             var fileTypeArgs = field.InputType is not null ? $"<{field.InputType}>" : "";
-            sb.Append($"        Define.File{fileTypeArgs}(\"{EscapeString(field.Route)}\")");
+            sb.Append($"        Define.File{fileTypeArgs}({StringLiteral(field.Route)})");
         }
         else
         {
             var typeArgs = BuildTypeArgs(field.InputType, field.OutputType);
-            sb.Append(
-                $"        Define.{field.HttpMethod}{typeArgs}(\"{EscapeString(field.Route)}\")"
-            );
+            sb.Append($"        Define.{field.HttpMethod}{typeArgs}({StringLiteral(field.Route)})");
         }
 
         // Builder chain
@@ -907,12 +903,12 @@ internal static class CSharpWriter
 
         if (field.Summary is not null)
         {
-            calls.Add($".Summary(\"{EscapeString(field.Summary)}\")");
+            calls.Add($".Summary({StringLiteral(field.Summary)})");
         }
 
         if (field.Description is not null)
         {
-            calls.Add($".Description(\"{EscapeString(field.Description)}\")");
+            calls.Add($".Description({StringLiteral(field.Description)})");
         }
 
         // Emit .Status() when the code differs from the HTTP method default.
@@ -937,15 +933,15 @@ internal static class CSharpWriter
             && (field.SuccessStatus != defaultStatus || needsExplicitSuccessStatusForExamples)
         )
         {
-            calls.Add($".Status({field.SuccessStatus})");
+            calls.Add($".Status({Literal(field.SuccessStatus.Value)})");
         }
 
         if (field.SuccessStatusKey is not null)
         {
             var description = field.SuccessResponseDescription is null
                 ? ""
-                : $", \"{EscapeString(field.SuccessResponseDescription)}\"";
-            calls.Add($".StatusKey(\"{EscapeString(field.SuccessStatusKey)}\"{description})");
+                : $", {StringLiteral(field.SuccessResponseDescription)}";
+            calls.Add($".StatusKey({StringLiteral(field.SuccessStatusKey)}{description})");
         }
 
         if (field.SuppressImplicitResponse)
@@ -971,16 +967,13 @@ internal static class CSharpWriter
 
         foreach (var error in field.ErrorResponses)
         {
-            var statusArgument =
-                error.StatusCode == 0
-                    ? $"\"{EscapeString(error.StatusKey)}\""
-                    : error.StatusCode.ToString();
+            var statusArgument = StatusArgument(error.StatusKey);
             if (error.TypeName is not null)
             {
                 if (error.Description is not null)
                 {
                     calls.Add(
-                        $".Returns<{error.TypeName}>({statusArgument}, \"{EscapeString(error.Description)}\")"
+                        $".Returns<{error.TypeName}>({statusArgument}, {StringLiteral(error.Description)})"
                     );
                 }
                 else
@@ -992,7 +985,7 @@ internal static class CSharpWriter
             {
                 if (error.Description is not null)
                 {
-                    calls.Add($".Returns({statusArgument}, \"{EscapeString(error.Description)}\")");
+                    calls.Add($".Returns({statusArgument}, {StringLiteral(error.Description)})");
                 }
                 else
                 {
@@ -1028,7 +1021,7 @@ internal static class CSharpWriter
             }
             else
             {
-                calls.Add($".AcceptsBinary(\"{EscapeString(field.BinaryRequestContentType)}\")");
+                calls.Add($".AcceptsBinary({StringLiteral(field.BinaryRequestContentType)})");
             }
         }
 
@@ -1036,12 +1029,12 @@ internal static class CSharpWriter
         // overrides — the schema is unchanged, only the declared media type.
         if (field.RequestContentType is not null)
         {
-            calls.Add($".AcceptsContentType(\"{EscapeString(field.RequestContentType)}\")");
+            calls.Add($".AcceptsContentType({StringLiteral(field.RequestContentType)})");
         }
 
         if (field.ResponseContentType is not null)
         {
-            calls.Add($".ProducesContentType(\"{EscapeString(field.ResponseContentType)}\")");
+            calls.Add($".ProducesContentType({StringLiteral(field.ResponseContentType)})");
         }
 
         if (field.FileContentType is not null)
@@ -1051,7 +1044,7 @@ internal static class CSharpWriter
                 // File endpoints use .ContentType() instead of .ProducesFile()
                 if (field.FileContentType != "application/octet-stream")
                 {
-                    calls.Add($".ContentType(\"{EscapeString(field.FileContentType)}\")");
+                    calls.Add($".ContentType({StringLiteral(field.FileContentType)})");
                 }
             }
             else
@@ -1062,7 +1055,7 @@ internal static class CSharpWriter
                 }
                 else
                 {
-                    calls.Add($".ProducesFile(\"{EscapeString(field.FileContentType)}\")");
+                    calls.Add($".ProducesFile({StringLiteral(field.FileContentType)})");
                 }
             }
         }
@@ -1075,7 +1068,7 @@ internal static class CSharpWriter
             }
             else
             {
-                calls.Add($".QueryAuth(\"{EscapeString(field.QueryAuthParameterName)}\")");
+                calls.Add($".QueryAuth({StringLiteral(field.QueryAuthParameterName)})");
             }
         }
 
@@ -1085,7 +1078,7 @@ internal static class CSharpWriter
         }
         else if (field.SecurityScheme is not null)
         {
-            calls.Add($".Secure(\"{EscapeString(field.SecurityScheme)}\")");
+            calls.Add($".Secure({StringLiteral(field.SecurityScheme)})");
         }
 
         if (field.SecurityRequirements is { } securityRequirements)
@@ -1116,15 +1109,14 @@ internal static class CSharpWriter
         {
             var schemaRef = content.SchemaRef is null
                 ? ""
-                : $", schemaRef: \"{EscapeString(content.SchemaRef)}\"";
+                : $", schemaRef: {StringLiteral(content.SchemaRef)}";
             var leaf = content.SchemaType is null
                 ? ""
-                : $", schemaType: \"{EscapeString(content.SchemaType)}\", format: \"{EscapeString(content.Format ?? "")}\"";
+                : $", schemaType: {StringLiteral(content.SchemaType)}, format: {StringLiteral(content.Format ?? "")}";
             calls.Add(
-                content.IsBinary ? $".RequestBinaryContent(\"{EscapeString(content.MediaType)}\")"
-                : content.TypeName is null
-                    ? $".RequestContent(\"{EscapeString(content.MediaType)}\")"
-                : $".RequestContent<{content.TypeName}>(\"{EscapeString(content.MediaType)}\"{schemaRef}{leaf})"
+                content.IsBinary ? $".RequestBinaryContent({StringLiteral(content.MediaType)})"
+                : content.TypeName is null ? $".RequestContent({StringLiteral(content.MediaType)})"
+                : $".RequestContent<{content.TypeName}>({StringLiteral(content.MediaType)}{schemaRef}{leaf})"
             );
         }
 
@@ -1135,51 +1127,48 @@ internal static class CSharpWriter
 
         if (field.RequestBodyRequired is { } requestBodyRequired)
         {
-            calls.Add($".RequestBodyRequired({requestBodyRequired.ToString().ToLowerInvariant()})");
+            calls.Add($".RequestBodyRequired({Literal(requestBodyRequired)})");
         }
 
         foreach (var parameter in field.Parameters)
         {
             var format = parameter.IsFormatSpecified
-                ? $", \"{EscapeString(parameter.Format ?? "")}\""
+                ? $", {StringLiteral(parameter.Format ?? "")}"
                 : "";
             var schemaType = parameter.SchemaType is null
                 ? format.Length == 0
                     ? ""
                     : ", null"
-                : $", \"{EscapeString(parameter.SchemaType)}\"";
+                : $", {StringLiteral(parameter.SchemaType)}";
             var metadata = parameter.MetadataJson is null
                 ? ""
-                : $", metadataJson: \"{EscapeString(parameter.MetadataJson)}\"";
+                : $", metadataJson: {StringLiteral(parameter.MetadataJson)}";
             var schemaRef = parameter.SchemaRef is null
                 ? ""
-                : $", schemaRef: \"{EscapeString(parameter.SchemaRef)}\"";
+                : $", schemaRef: {StringLiteral(parameter.SchemaRef)}";
             calls.Add(
-                $".Parameter<{parameter.TypeName}>(\"{EscapeString(parameter.Name)}\", \"{parameter.Location}\", {parameter.Required.ToString().ToLowerInvariant()}{schemaType}{format}{metadata}{schemaRef})"
+                $".Parameter<{parameter.TypeName}>({StringLiteral(parameter.Name)}, \"{parameter.Location}\", {Literal(parameter.Required)}{schemaType}{format}{metadata}{schemaRef})"
             );
         }
 
         foreach (var content in field.ResponseContents)
         {
-            var statusArgument =
-                content.StatusCode == 0
-                    ? $"\"{EscapeString(content.StatusKey)}\""
-                    : content.StatusCode.ToString();
+            var statusArgument = StatusArgument(content.StatusKey);
             var schemaRef = content.Content.SchemaRef is null
                 ? ""
-                : $", schemaRef: \"{EscapeString(content.Content.SchemaRef)}\"";
+                : $", schemaRef: {StringLiteral(content.Content.SchemaRef)}";
             var leaf = content.Content.SchemaType is null
                 ? ""
-                : $", schemaType: \"{EscapeString(content.Content.SchemaType)}\", format: \"{EscapeString(content.Content.Format ?? "")}\"";
+                : $", schemaType: {StringLiteral(content.Content.SchemaType)}, format: {StringLiteral(content.Content.Format ?? "")}";
             var schemaDescription = content.SchemaDescription is null
                 ? ""
-                : $", schemaDescription: \"{EscapeString(content.SchemaDescription)}\"";
+                : $", schemaDescription: {StringLiteral(content.SchemaDescription)}";
             calls.Add(
                 content.Content.IsBinary
-                    ? $".ResponseBinaryContent({statusArgument}, \"{EscapeString(content.Content.MediaType)}\")"
+                    ? $".ResponseBinaryContent({statusArgument}, {StringLiteral(content.Content.MediaType)})"
                 : content.Content.TypeName is null
-                    ? $".ResponseContent({statusArgument}, \"{EscapeString(content.Content.MediaType)}\")"
-                : $".ResponseContent<{content.Content.TypeName}>({statusArgument}, \"{EscapeString(content.Content.MediaType)}\"{schemaRef}{leaf}{schemaDescription})"
+                    ? $".ResponseContent({statusArgument}, {StringLiteral(content.Content.MediaType)})"
+                : $".ResponseContent<{content.Content.TypeName}>({statusArgument}, {StringLiteral(content.Content.MediaType)}{schemaRef}{leaf}{schemaDescription})"
             );
         }
 
@@ -1188,17 +1177,13 @@ internal static class CSharpWriter
 
     private static string BuildResponseHeaderCall(GeneratedResponseHeader header)
     {
-        var statusArgument =
-            header.StatusCode == 0
-                ? $"\"{EscapeString(header.StatusKey)}\""
-                : header.StatusCode.ToString();
+        var statusArgument = StatusArgument(header.StatusKey);
         var method = header.StatusCode == 0 ? "WithResponseHeaderKey" : "WithResponseHeader";
-        var call =
-            $".{method}<{header.TypeName}>({statusArgument}, \"{EscapeString(header.Name)}\"";
+        var call = $".{method}<{header.TypeName}>({statusArgument}, {StringLiteral(header.Name)}";
 
         if (header.Description is not null)
         {
-            call += $", \"{EscapeString(header.Description)}\"";
+            call += $", {StringLiteral(header.Description)}";
         }
 
         if (header.Required)
@@ -1208,25 +1193,25 @@ internal static class CSharpWriter
 
         if (header.SchemaType is not null)
         {
-            call += $", schemaType: \"{EscapeString(header.SchemaType)}\"";
+            call += $", schemaType: {StringLiteral(header.SchemaType)}";
         }
 
         if (header.IsFormatSpecified)
         {
-            call += $", format: \"{EscapeString(header.Format ?? "")}\"";
+            call += $", format: {StringLiteral(header.Format ?? "")}";
         }
 
         if (header.SchemaExamplesJson is not null)
         {
-            call += $", schemaExamplesJson: \"{EscapeString(header.SchemaExamplesJson)}\"";
+            call += $", schemaExamplesJson: {StringLiteral(header.SchemaExamplesJson)}";
         }
         if (header.ExampleJson is not null)
         {
-            call += $", exampleJson: \"{EscapeString(header.ExampleJson)}\"";
+            call += $", exampleJson: {StringLiteral(header.ExampleJson)}";
         }
         if (header.ExamplesJson is not null)
         {
-            call += $", examplesJson: \"{EscapeString(header.ExamplesJson)}\"";
+            call += $", examplesJson: {StringLiteral(header.ExamplesJson)}";
         }
         if (header.Deprecated)
         {
@@ -1234,11 +1219,11 @@ internal static class CSharpWriter
         }
         if (header.Style is not null)
         {
-            call += $", style: \"{EscapeString(header.Style)}\"";
+            call += $", style: {StringLiteral(header.Style)}";
         }
         if (header.Explode is { } explode)
         {
-            call += $", explode: {explode.ToString().ToLowerInvariant()}";
+            call += $", explode: {Literal(explode)}";
         }
         if (header.AllowReserved)
         {
@@ -1250,7 +1235,7 @@ internal static class CSharpWriter
         }
         if (header.ContentType is not null)
         {
-            call += $", contentType: \"{EscapeString(header.ContentType)}\"";
+            call += $", contentType: {StringLiteral(header.ContentType)}";
         }
 
         return call + ")";
@@ -1260,12 +1245,12 @@ internal static class CSharpWriter
     {
         if (example.Json is not null)
         {
-            return $".RequestExampleJson(\"{EscapeString(example.Json)}\", mediaType: \"{EscapeString(example.MediaType)}\"{BuildOptionalExampleArguments(example)})";
+            return $".RequestExampleJson({StringLiteral(example.Json)}, mediaType: {StringLiteral(example.MediaType)}{BuildOptionalExampleArguments(example)})";
         }
 
         if (example.ComponentExampleId is not null && example.ResolvedJson is not null)
         {
-            return $".RequestExampleRef(\"{EscapeString(example.ComponentExampleId)}\", \"{EscapeString(example.ResolvedJson)}\", mediaType: \"{EscapeString(example.MediaType)}\"{BuildOptionalExampleArguments(example)})";
+            return $".RequestExampleRef({StringLiteral(example.ComponentExampleId)}, {StringLiteral(example.ResolvedJson)}, mediaType: {StringLiteral(example.MediaType)}{BuildOptionalExampleArguments(example)})";
         }
 
         return null;
@@ -1276,19 +1261,16 @@ internal static class CSharpWriter
     )
     {
         var example = responseExample.Example;
-        var statusArgument =
-            responseExample.StatusCode == 0
-                ? $"\"{EscapeString(responseExample.StatusKey)}\""
-                : responseExample.StatusCode.ToString();
+        var statusArgument = StatusArgument(responseExample.StatusKey);
 
         if (example.Json is not null)
         {
-            return $".ResponseExampleJson({statusArgument}, \"{EscapeString(example.Json)}\", mediaType: \"{EscapeString(example.MediaType)}\"{BuildOptionalExampleArguments(example)})";
+            return $".ResponseExampleJson({statusArgument}, {StringLiteral(example.Json)}, mediaType: {StringLiteral(example.MediaType)}{BuildOptionalExampleArguments(example)})";
         }
 
         if (example.ComponentExampleId is not null && example.ResolvedJson is not null)
         {
-            return $".ResponseExampleRef({statusArgument}, \"{EscapeString(example.ComponentExampleId)}\", \"{EscapeString(example.ResolvedJson)}\", mediaType: \"{EscapeString(example.MediaType)}\"{BuildOptionalExampleArguments(example)})";
+            return $".ResponseExampleRef({statusArgument}, {StringLiteral(example.ComponentExampleId)}, {StringLiteral(example.ResolvedJson)}, mediaType: {StringLiteral(example.MediaType)}{BuildOptionalExampleArguments(example)})";
         }
 
         return null;
@@ -1296,11 +1278,11 @@ internal static class CSharpWriter
 
     private static string BuildOptionalExampleArguments(Rivet.Tool.Model.TsEndpointExample example)
     {
-        var arguments = example.Name is not null ? $", name: \"{EscapeString(example.Name)}\"" : "";
+        var arguments = example.Name is not null ? $", name: {StringLiteral(example.Name)}" : "";
         if (example.ReferencedComponents is not null)
         {
             arguments +=
-                $", referencedComponentsJson: \"{EscapeString(JsonSerializer.Serialize(example.ReferencedComponents))}\"";
+                $", referencedComponentsJson: {StringLiteral(JsonSerializer.Serialize(example.ReferencedComponents))}";
         }
         return arguments;
     }
@@ -1322,16 +1304,16 @@ internal static class CSharpWriter
         if (c.MinLength.HasValue && c.MaxLength.HasValue)
         {
             sb.AppendLine(
-                $"    [{target}StringLength({c.MaxLength}, MinimumLength = {c.MinLength})]"
+                $"    [{target}StringLength({Literal(c.MaxLength.Value)}, MinimumLength = {Literal(c.MinLength.Value)})]"
             );
         }
         else if (c.MinLength.HasValue)
         {
-            sb.AppendLine($"    [{target}MinLength({c.MinLength})]");
+            sb.AppendLine($"    [{target}MinLength({Literal(c.MinLength.Value)})]");
         }
         else if (c.MaxLength.HasValue)
         {
-            sb.AppendLine($"    [{target}MaxLength({c.MaxLength})]");
+            sb.AppendLine($"    [{target}MaxLength({Literal(c.MaxLength.Value)})]");
         }
 
         // Range when minimum or maximum are present
@@ -1358,7 +1340,7 @@ internal static class CSharpWriter
         // Pattern
         if (c.Pattern is not null)
         {
-            sb.AppendLine($"    [{target}RegularExpression(\"{EscapeString(c.Pattern)}\")]");
+            sb.AppendLine($"    [{target}RegularExpression({StringLiteral(c.Pattern)})]");
         }
 
         // Exotic constraints → RivetConstraints
@@ -1386,12 +1368,12 @@ internal static class CSharpWriter
 
         if (c.MinItems.HasValue)
         {
-            exoticParts.Add($"MinItems = {c.MinItems}");
+            exoticParts.Add($"MinItems = {Literal(c.MinItems.Value)}");
         }
 
         if (c.MaxItems.HasValue)
         {
-            exoticParts.Add($"MaxItems = {c.MaxItems}");
+            exoticParts.Add($"MaxItems = {Literal(c.MaxItems.Value)}");
         }
 
         if (c.UniqueItems == true)
@@ -1405,14 +1387,20 @@ internal static class CSharpWriter
         }
     }
 
-    private static string EscapeString(string value)
-    {
-        var literal = SymbolDisplay.FormatLiteral(value, quote: true);
-        // Strip the surrounding quotes — callers already provide their own delimiters
-        return literal[1..^1];
-    }
+    private static string StringLiteral(string value) =>
+        SymbolDisplay.FormatLiteral(value, quote: true);
 
-    private static string StringLiteral(string value) => $"\"{EscapeString(value)}\"";
+    private static string Literal(bool value) =>
+        SymbolDisplay.FormatPrimitive(value, quoteStrings: false, useHexadecimalNumbers: false)!;
+
+    private static string Literal(int value) =>
+        SymbolDisplay.FormatPrimitive(value, quoteStrings: false, useHexadecimalNumbers: false)!;
+
+    /// <summary>A numeric response status is an int argument; "4XX"/"default" stay strings.</summary>
+    private static string StatusArgument(string statusKey) =>
+        ResponseStatus.Code(statusKey) is var code and not 0
+            ? Literal(code)
+            : StringLiteral(statusKey);
 
     private static string NullableStringLiteral(string? value) =>
         value is null ? "null" : StringLiteral(value);

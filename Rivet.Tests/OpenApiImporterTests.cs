@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.CodeAnalysis;
@@ -7037,5 +7038,47 @@ public sealed class OpenApiImporterTests
         Assert.Contains("A_2,", mode);
         Assert.Contains("A_2_2", mode);
         CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void Import_Output_Does_Not_Depend_On_The_Current_Culture()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Reading": {
+              "type": "object",
+              "required": ["value"],
+              "properties": {
+                "value": { "type": "number", "multipleOf": 0.5, "minimum": -1.5, "maximum": 1000000.25 },
+                "ratio": { "type": "number", "exclusiveMinimum": 0.125 },
+                "level": { "type": "integer", "enum": [-3, 0, 5000000000] },
+                "tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 3 }
+              }
+            }
+            """
+        );
+
+        var invariant = ImportUnder(CultureInfo.InvariantCulture);
+        foreach (var culture in new[] { "sv-SE", "de-DE", "ar-SA", "fa-IR" })
+        {
+            Assert.Equal(invariant, ImportUnder(new CultureInfo(culture)));
+        }
+
+        string ImportUnder(CultureInfo culture)
+        {
+            var previous = CultureInfo.CurrentCulture;
+            CultureInfo.CurrentCulture = culture;
+            try
+            {
+                return string.Join(
+                    "\n",
+                    CompilationHelper.Import(spec).Files.Select(f => f.FileName + "\n" + f.Content)
+                );
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = previous;
+            }
+        }
     }
 }
