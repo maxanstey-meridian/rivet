@@ -1,5 +1,6 @@
 namespace Rivet;
 
+using System.Collections.Immutable;
 using Microsoft.Net.Http.Headers;
 
 /// <summary>
@@ -41,37 +42,43 @@ public sealed record RouteResponseHeader(
 );
 
 /// <summary>
+/// Everything a route definition's builder methods record. Immutable, so a converted
+/// definition (<c>.Accepts&lt;T&gt;()</c>) takes the whole state in one assignment.
+/// </summary>
+internal sealed record RouteState(int SuccessStatus)
+{
+    public bool StatusSet { get; init; }
+    public string? Summary { get; init; }
+    public string? Description { get; init; }
+    public bool Anonymous { get; init; }
+    public string? SecurityScheme { get; init; }
+    public string? FileContentType { get; init; }
+    public bool AcceptsFile { get; init; }
+    public bool FormEncoded { get; init; }
+    public string? BinaryRequestContentType { get; init; }
+    public string? RequestContentType { get; init; }
+    public string? ResponseContentType { get; init; }
+    public string? QueryAuthParameterName { get; init; }
+    public ImmutableList<RouteErrorResponse> ErrorResponses { get; init; } = [];
+    public ImmutableList<RouteResponseHeader> ResponseHeaders { get; init; } = [];
+    public ImmutableList<RouteResponseContent> ResponseContents { get; init; } = [];
+    public string? SuccessStatusKey { get; init; }
+    public bool SuppressImplicitResponse { get; init; }
+}
+
+/// <summary>
 /// Shared builder state and fluent methods for all RouteDefinition variants.
 /// Uses CRTP so each builder method returns the concrete type for chaining.
 /// </summary>
 public abstract class RouteDefinitionBase<TSelf>
     where TSelf : RouteDefinitionBase<TSelf>
 {
-    private int _successStatus;
-    private bool _statusSet;
-    private string? _summary;
-    private string? _description;
-    private bool _anonymous;
-    private string? _securityScheme;
-    private string? _fileContentType;
-    private bool _acceptsFile;
-    private bool _formEncoded;
-    private string? _binaryRequestContentType;
-    private string? _requestContentType;
-    private string? _responseContentType;
-    private string? _queryAuthParameterName;
-    private List<RouteErrorResponse>? _errorResponses;
-    private List<RouteResponseHeader>? _responseHeaders;
-    private List<RouteResponseContent>? _responseContents;
-    private string? _successStatusKey;
-    private bool _suppressImplicitResponse;
-
-    // R3: contract definitions are stored in shared static readonly fields; once a
-    // definition has been published by a terminal any builder mutation would silently
-    // change global state for all requests. Published definitions throw instead.
-    private bool _published;
-    private readonly object _publicationLock = new();
-    private EndpointContract? _publishedContract;
+    // Definitions live in shared static readonly fields, so once a terminal has published
+    // the contract a later builder call would silently change it for every request.
+    // Mutation and publication share one gate, and mutation after publication throws.
+    private readonly object _gate = new();
+    private RouteState _state;
+    private volatile EndpointContract? _publishedContract;
 
     /// <summary>The HTTP method (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS).</summary>
     public string Method { get; }
@@ -79,165 +86,181 @@ public abstract class RouteDefinitionBase<TSelf>
     /// <summary>The route template from the contract definition.</summary>
     public string Route { get; }
 
-    public string? EndpointSummary => _summary;
-    public string? EndpointDescription => _description;
-    public bool IsAnonymous => _anonymous;
-    public string? SecurityScheme => _securityScheme;
-    public string? FileContentType => _fileContentType;
-    public bool IsFormEncoded => _formEncoded;
-    public string? BinaryRequestContentType => _binaryRequestContentType;
-    public string? RequestContentType => _requestContentType;
-    public string? ResponseContentType => _responseContentType;
-    public bool IsQueryAuth => _queryAuthParameterName is not null;
-    public string? QueryAuthParameterName => _queryAuthParameterName;
-    public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses => _errorResponses;
-    public IReadOnlyList<RouteResponseHeader>? ResponseHeaders => _responseHeaders;
+    public string? EndpointSummary => _state.Summary;
+    public string? EndpointDescription => _state.Description;
+    public bool IsAnonymous => _state.Anonymous;
+    public string? SecurityScheme => _state.SecurityScheme;
+    public string? FileContentType => _state.FileContentType;
+    public bool IsFormEncoded => _state.FormEncoded;
+    public string? BinaryRequestContentType => _state.BinaryRequestContentType;
+    public string? RequestContentType => _state.RequestContentType;
+    public string? ResponseContentType => _state.ResponseContentType;
+    public bool IsQueryAuth => _state.QueryAuthParameterName is not null;
+    public string? QueryAuthParameterName => _state.QueryAuthParameterName;
+    public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses =>
+        _state.ErrorResponses.IsEmpty ? null : _state.ErrorResponses;
+    public IReadOnlyList<RouteResponseHeader>? ResponseHeaders =>
+        _state.ResponseHeaders.IsEmpty ? null : _state.ResponseHeaders;
 
     /// <summary>The resolved success status code for this endpoint.</summary>
-    public int SuccessStatusCode => _successStatus;
+    public int SuccessStatusCode => _state.SuccessStatus;
 
     /// <summary>The resolved success status code used during publication.</summary>
-    protected int SuccessStatus => _successStatus;
+    protected int SuccessStatus => _state.SuccessStatus;
 
     protected RouteDefinitionBase(string method, string route, int defaultStatus)
+        : this(method, route, new RouteState(defaultStatus)) { }
+
+    private protected RouteDefinitionBase(string method, string route, RouteState state)
     {
         Method = method;
         Route = route;
-        _successStatus = defaultStatus;
+        _state = state;
     }
 
-    /// <summary>
-    /// Copy all builder state from this instance to another RouteDefinitionBase.
-    /// Used by RouteDefinition.Accepts&lt;T&gt;() to transfer state during type conversion.
-    /// </summary>
-    protected void CopyStateTo<TOther>(RouteDefinitionBase<TOther> target)
-        where TOther : RouteDefinitionBase<TOther>
+    /// <summary>The builder state, for handing to a converted definition. Throws once published.</summary>
+    private protected RouteState CurrentState()
     {
-        using var mutation = target.BeginMutation();
-        target._summary = _summary;
-        target._description = _description;
-        target._anonymous = _anonymous;
-        target._securityScheme = _securityScheme;
-        target._fileContentType = _fileContentType;
-        target._acceptsFile = _acceptsFile;
-        target._formEncoded = _formEncoded;
-        target._binaryRequestContentType = _binaryRequestContentType;
-        target._requestContentType = _requestContentType;
-        target._responseContentType = _responseContentType;
-        target._queryAuthParameterName = _queryAuthParameterName;
-        target._errorResponses = _errorResponses?.ToList();
-        target._responseHeaders = _responseHeaders?.ToList();
-        target._responseContents = _responseContents?.ToList();
-        target._successStatusKey = _successStatusKey;
-        target._suppressImplicitResponse = _suppressImplicitResponse;
-        target._statusSet = _statusSet;
+        lock (_gate)
+        {
+            ThrowIfPublished();
+            return _state;
+        }
+    }
+
+    private TSelf Mutate(Func<RouteState, RouteState> change)
+    {
+        lock (_gate)
+        {
+            ThrowIfPublished();
+            _state = change(_state);
+        }
+
+        return (TSelf)this;
+    }
+
+    private void ThrowIfPublished()
+    {
+        if (_publishedContract is not null)
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: contract definitions are immutable once published — "
+                    + "builder methods cannot be called after a terminal publishes the endpoint. "
+                    + "Configure the definition fully in its static readonly initializer."
+            );
+        }
     }
 
     internal EndpointContract Publish(Type? successPayloadType)
     {
-        lock (_publicationLock)
+        if (_publishedContract is { } published)
         {
-            if (_publishedContract is not null)
-            {
-                return _publishedContract;
-            }
+            return published;
+        }
 
-            if (_successStatus is < 100 or > 599)
-            {
-                throw new InvalidOperationException(
-                    $"{Method} {Route}: success status {_successStatus} is not a valid HTTP status code."
-                );
-            }
-
-            if (
-                _errorResponses?.Any(response => GetExactStatus(response) == _successStatus) is true
-            )
-            {
-                throw new InvalidOperationException(
-                    $"Status {_successStatus} is declared as both the success status and via .Returns() — "
-                        + "success and error responses cannot share a status."
-                );
-            }
-
-            var success = _suppressImplicitResponse
-                ? null
-                : BuildResponse(
-                    _successStatusKey ?? _successStatus.ToString(),
-                    _successStatus,
-                    successPayloadType,
-                    isSuccess: true
-                );
-            var exact = new Dictionary<int, ResponseContract>();
-            var ranges = new Dictionary<int, ResponseContract>();
-            ResponseContract? fallback = null;
-
-            foreach (var response in _errorResponses ?? [])
-            {
-                var statusKey = response.EffectiveStatusKey;
-                var exactStatus = GetExactStatus(response);
-                if (exactStatus is not null)
-                {
-                    exact.Add(
-                        exactStatus.Value,
-                        BuildResponse(
-                            statusKey,
-                            exactStatus.Value,
-                            response.ResponseType,
-                            isSuccess: false
-                        )
-                    );
-                    continue;
-                }
-
-                if (statusKey.Equals("default", StringComparison.OrdinalIgnoreCase))
-                {
-                    fallback = BuildResponse(
-                        statusKey,
-                        null,
-                        response.ResponseType,
-                        isSuccess: false
-                    );
-                    continue;
-                }
-
-                if (
-                    statusKey.Length == 3
-                    && statusKey[0] is >= '1' and <= '5'
-                    && statusKey[1..].Equals("XX", StringComparison.OrdinalIgnoreCase)
-                )
-                {
-                    ranges.Add(
-                        statusKey[0] - '0',
-                        BuildResponse(statusKey, null, response.ResponseType, isSuccess: false)
-                    );
-                    continue;
-                }
-
-                throw new InvalidOperationException(
-                    $"{Method} {Route}: response status key '{statusKey}' is not an exact status, nXX range, or default."
-                );
-            }
-
-            _publishedContract = new EndpointContract(
-                Method,
-                Route,
-                success,
-                new ResponseSet(exact, ranges, fallback)
-            );
-            _published = true;
-            return _publishedContract;
+        lock (_gate)
+        {
+            return _publishedContract ??= BuildContract(_state, successPayloadType);
         }
     }
 
+    private EndpointContract BuildContract(RouteState state, Type? successPayloadType)
+    {
+        if (state.SuccessStatus is < 100 or > 599)
+        {
+            throw new InvalidOperationException(
+                $"{Method} {Route}: success status {state.SuccessStatus} is not a valid HTTP status code."
+            );
+        }
+
+        if (state.ErrorResponses.Any(response => GetExactStatus(response) == state.SuccessStatus))
+        {
+            throw new InvalidOperationException(
+                $"Status {state.SuccessStatus} is declared as both the success status and via .Returns() — "
+                    + "success and error responses cannot share a status."
+            );
+        }
+
+        var success = state.SuppressImplicitResponse
+            ? null
+            : BuildResponse(
+                state,
+                state.SuccessStatusKey ?? state.SuccessStatus.ToString(),
+                state.SuccessStatus,
+                successPayloadType,
+                isSuccess: true
+            );
+        var exact = new Dictionary<int, ResponseContract>();
+        var ranges = new Dictionary<int, ResponseContract>();
+        ResponseContract? fallback = null;
+
+        foreach (var response in state.ErrorResponses)
+        {
+            var statusKey = response.EffectiveStatusKey;
+            var exactStatus = GetExactStatus(response);
+            if (exactStatus is not null)
+            {
+                exact.Add(
+                    exactStatus.Value,
+                    BuildResponse(
+                        state,
+                        statusKey,
+                        exactStatus.Value,
+                        response.ResponseType,
+                        isSuccess: false
+                    )
+                );
+                continue;
+            }
+
+            if (statusKey.Equals("default", StringComparison.OrdinalIgnoreCase))
+            {
+                fallback = BuildResponse(
+                    state,
+                    statusKey,
+                    null,
+                    response.ResponseType,
+                    isSuccess: false
+                );
+                continue;
+            }
+
+            if (
+                statusKey.Length == 3
+                && statusKey[0] is >= '1' and <= '5'
+                && statusKey[1..].Equals("XX", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                ranges.Add(
+                    statusKey[0] - '0',
+                    BuildResponse(state, statusKey, null, response.ResponseType, isSuccess: false)
+                );
+                continue;
+            }
+
+            throw new InvalidOperationException(
+                $"{Method} {Route}: response status key '{statusKey}' is not an exact status, nXX range, or default."
+            );
+        }
+
+        return new EndpointContract(
+            Method,
+            Route,
+            success,
+            new ResponseSet(exact, ranges, fallback)
+        );
+    }
+
     private ResponseContract BuildResponse(
+        RouteState state,
         string statusKey,
         int? statusCode,
         Type? payloadType,
         bool isSuccess
     )
     {
-        var matchingContents = (_responseContents ?? [])
-            .Where(content =>
+        var matchingContents = state
+            .ResponseContents.Where(content =>
                 content.StatusKey.Equals(statusKey, StringComparison.OrdinalIgnoreCase)
             )
             .ToArray();
@@ -249,14 +272,17 @@ public abstract class RouteDefinitionBase<TSelf>
                 StringComparer.OrdinalIgnoreCase
             );
 
-        if (_fileContentType is not null && isSuccess)
+        if (state.FileContentType is not null && isSuccess)
         {
-            representations[_fileContentType] = new ResponseRepresentation(_fileContentType, true);
+            representations[state.FileContentType] = new ResponseRepresentation(
+                state.FileContentType,
+                true
+            );
         }
-        else if (_responseContentType is not null && isSuccess)
+        else if (state.ResponseContentType is not null && isSuccess)
         {
-            representations[_responseContentType] = new ResponseRepresentation(
-                _responseContentType,
+            representations[state.ResponseContentType] = new ResponseRepresentation(
+                state.ResponseContentType,
                 false
             );
         }
@@ -302,83 +328,46 @@ public abstract class RouteDefinitionBase<TSelf>
             statusKey,
             statusCode,
             payloadType,
-            isSuccess ? _responseContentType : null,
+            isSuccess ? state.ResponseContentType : null,
             representations
         );
     }
 
-    protected IDisposable BeginMutation()
-    {
-        Monitor.Enter(_publicationLock);
-        if (_published)
+    public TSelf Summary(string summary) => Mutate(state => state with { Summary = summary });
+
+    public TSelf Description(string description) =>
+        Mutate(state => state with { Description = description });
+
+    public TSelf Status(int statusCode) =>
+        Mutate(state =>
         {
-            Monitor.Exit(_publicationLock);
-            throw new InvalidOperationException(
-                $"{Method} {Route}: contract definitions are immutable once published — "
-                    + "builder methods cannot be called after a terminal publishes the endpoint. "
-                    + "Configure the definition fully in its static readonly initializer."
-            );
-        }
-
-        return new MutationLease(_publicationLock);
-    }
-
-    private sealed class MutationLease(object syncRoot) : IDisposable
-    {
-        private object? _syncRoot = syncRoot;
-
-        public void Dispose()
-        {
-            var syncRoot = Interlocked.Exchange(ref _syncRoot, null);
-            if (syncRoot is not null)
+            if (statusCode is < 100 or > 599)
             {
-                Monitor.Exit(syncRoot);
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: success status {statusCode} is not a valid HTTP status code."
+                );
             }
-        }
-    }
 
-    public TSelf Summary(string summary)
-    {
-        using var mutation = BeginMutation();
-        _summary = summary;
-        return (TSelf)this;
-    }
+            if (state.StatusSet)
+            {
+                throw new InvalidOperationException(
+                    $"Status already set to {state.SuccessStatus} — cannot set to {statusCode}. Call .Status() only once."
+                );
+            }
 
-    public TSelf Description(string description)
-    {
-        using var mutation = BeginMutation();
-        _description = description;
-        return (TSelf)this;
-    }
+            if (state.ErrorResponses.Any(response => GetExactStatus(response) == statusCode))
+            {
+                throw new InvalidOperationException(
+                    $"Status {statusCode} is already declared via .Returns() — success and error responses cannot share a status."
+                );
+            }
 
-    public TSelf Status(int statusCode)
-    {
-        using var mutation = BeginMutation();
-        if (statusCode is < 100 or > 599)
-        {
-            throw new InvalidOperationException(
-                $"{Method} {Route}: success status {statusCode} is not a valid HTTP status code."
-            );
-        }
-
-        if (_statusSet)
-        {
-            throw new InvalidOperationException(
-                $"Status already set to {_successStatus} — cannot set to {statusCode}. Call .Status() only once."
-            );
-        }
-
-        if (_errorResponses?.Any(response => GetExactStatus(response) == statusCode) is true)
-        {
-            throw new InvalidOperationException(
-                $"Status {statusCode} is already declared via .Returns() — success and error responses cannot share a status."
-            );
-        }
-
-        _successStatus = statusCode;
-        _statusSet = true;
-        return (TSelf)this;
-    }
+            return state with
+            {
+                SuccessStatus = statusCode,
+                StatusSet = true,
+            };
+        });
 
     /// <summary>
     /// Carries the source OpenAPI response key and primary response description through
@@ -386,37 +375,33 @@ public abstract class RouteDefinitionBase<TSelf>
     /// </summary>
     public TSelf StatusKey(string statusKey, string? description = null)
     {
-        using var mutation = BeginMutation();
-        _successStatusKey = statusKey;
         _ = description;
-        return (TSelf)this;
+        return Mutate(state => state with { SuccessStatusKey = statusKey });
     }
 
     /// <summary>
     /// Suppresses Rivet's authored method-default response. Intended for imported
     /// operations whose source response set contains no concrete success response.
     /// </summary>
-    public TSelf SuppressImplicitResponse()
-    {
-        using var mutation = BeginMutation();
-        _suppressImplicitResponse = true;
-        return (TSelf)this;
-    }
+    public TSelf SuppressImplicitResponse() =>
+        Mutate(state => state with { SuppressImplicitResponse = true });
 
-    public TSelf FormEncoded()
-    {
-        using var mutation = BeginMutation();
-        if (_binaryRequestContentType is not null)
+    public TSelf FormEncoded() =>
+        Mutate(state =>
         {
-            throw new InvalidOperationException(
-                $"{Method} {Route}: .FormEncoded() cannot be combined with .AcceptsBinary() — "
-                    + "a request body is either raw binary or form-encoded, not both."
-            );
-        }
+            if (state.BinaryRequestContentType is not null)
+            {
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: .FormEncoded() cannot be combined with .AcceptsBinary() — "
+                        + "a request body is either raw binary or form-encoded, not both."
+                );
+            }
 
-        _formEncoded = true;
-        return (TSelf)this;
-    }
+            return state with
+            {
+                FormEncoded = true,
+            };
+        });
 
     /// <summary>
     /// Declares the request body's media type when it is not application/json
@@ -424,20 +409,22 @@ public abstract class RouteDefinitionBase<TSelf>
     /// this overrides only the content-type key the spec declares. For raw
     /// binary bodies use .AcceptsBinary(); for forms use .FormEncoded().
     /// </summary>
-    public TSelf AcceptsContentType(string contentType)
-    {
-        using var mutation = BeginMutation();
-        if (_formEncoded || _binaryRequestContentType is not null)
+    public TSelf AcceptsContentType(string contentType) =>
+        Mutate(state =>
         {
-            throw new InvalidOperationException(
-                $"{Method} {Route}: .AcceptsContentType() cannot be combined with "
-                    + ".FormEncoded() or .AcceptsBinary() — those already declare the body media type."
-            );
-        }
+            if (state.FormEncoded || state.BinaryRequestContentType is not null)
+            {
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: .AcceptsContentType() cannot be combined with "
+                        + ".FormEncoded() or .AcceptsBinary() — those already declare the body media type."
+                );
+            }
 
-        _requestContentType = contentType;
-        return (TSelf)this;
-    }
+            return state with
+            {
+                RequestContentType = contentType,
+            };
+        });
 
     /// <summary>
     /// Declares the success response's media type when it is not
@@ -445,20 +432,22 @@ public abstract class RouteDefinitionBase<TSelf>
     /// SCHEMA is unchanged — this overrides only the content-type key the spec
     /// declares. For binary/file responses use .ProducesFile().
     /// </summary>
-    public TSelf ProducesContentType(string contentType)
-    {
-        using var mutation = BeginMutation();
-        if (_fileContentType is not null)
+    public TSelf ProducesContentType(string contentType) =>
+        Mutate(state =>
         {
-            throw new InvalidOperationException(
-                $"{Method} {Route}: .ProducesContentType() cannot be combined with .ProducesFile() — "
-                    + "the file content type already declares the response media type."
-            );
-        }
+            if (state.FileContentType is not null)
+            {
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: .ProducesContentType() cannot be combined with .ProducesFile() — "
+                        + "the file content type already declares the response media type."
+                );
+            }
 
-        _responseContentType = contentType;
-        return (TSelf)this;
-    }
+            return state with
+            {
+                ResponseContentType = contentType,
+            };
+        });
 
     public TSelf Returns<TResponse>(int statusCode) => Returns<TResponse>(statusCode, null);
 
@@ -476,60 +465,61 @@ public abstract class RouteDefinitionBase<TSelf>
     public TSelf Returns(string statusKey, string? description = null) =>
         AddErrorResponse(new RouteErrorResponse(0, null, description, statusKey));
 
-    private TSelf AddErrorResponse(RouteErrorResponse response)
-    {
-        using var mutation = BeginMutation();
-        _errorResponses ??= [];
-        var exactStatus = GetExactStatus(response);
-
-        if (
-            response.StatusKey is { } statusKey
-            && exactStatus is null
-            && !statusKey.Equals("default", StringComparison.OrdinalIgnoreCase)
-            && !IsRangeStatusKey(statusKey)
-        )
+    private TSelf AddErrorResponse(RouteErrorResponse response) =>
+        Mutate(state =>
         {
-            throw new InvalidOperationException(
-                $"{Method} {Route}: response status key '{statusKey}' is not an exact status, nXX range, or default."
-            );
-        }
+            var exactStatus = GetExactStatus(response);
 
-        if (exactStatus is < 100 or > 599)
-        {
-            throw new InvalidOperationException(
-                $"{Method} {Route}: response status {exactStatus} is not a valid HTTP status code."
-            );
-        }
-
-        if (_statusSet && exactStatus == _successStatus)
-        {
-            throw new InvalidOperationException(
-                $"Status {exactStatus} is already declared as the success status — success and error responses cannot share a status."
-            );
-        }
-
-        if (
-            _errorResponses.Any(existing =>
-                exactStatus is not null
-                    ? GetExactStatus(existing) == exactStatus
-                    : GetExactStatus(existing) is null
-                        && string.Equals(
-                            existing.EffectiveStatusKey,
-                            response.EffectiveStatusKey,
-                            StringComparison.OrdinalIgnoreCase
-                        )
+            if (
+                response.StatusKey is { } statusKey
+                && exactStatus is null
+                && !statusKey.Equals("default", StringComparison.OrdinalIgnoreCase)
+                && !IsRangeStatusKey(statusKey)
             )
-        )
-        {
-            throw new InvalidOperationException(
-                $"Status {response.EffectiveStatusKey} is already declared via .Returns() — a status carries a single response shape. "
-                    + "For multiple shapes at one status, declare a [RivetUnion] type and return it once."
-            );
-        }
+            {
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: response status key '{statusKey}' is not an exact status, nXX range, or default."
+                );
+            }
 
-        _errorResponses.Add(response);
-        return (TSelf)this;
-    }
+            if (exactStatus is < 100 or > 599)
+            {
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: response status {exactStatus} is not a valid HTTP status code."
+                );
+            }
+
+            if (state.StatusSet && exactStatus == state.SuccessStatus)
+            {
+                throw new InvalidOperationException(
+                    $"Status {exactStatus} is already declared as the success status — success and error responses cannot share a status."
+                );
+            }
+
+            if (
+                state.ErrorResponses.Any(existing =>
+                    exactStatus is not null
+                        ? GetExactStatus(existing) == exactStatus
+                        : GetExactStatus(existing) is null
+                            && string.Equals(
+                                existing.EffectiveStatusKey,
+                                response.EffectiveStatusKey,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                )
+            )
+            {
+                throw new InvalidOperationException(
+                    $"Status {response.EffectiveStatusKey} is already declared via .Returns() — a status carries a single response shape. "
+                        + "For multiple shapes at one status, declare a [RivetUnion] type and return it once."
+                );
+            }
+
+            return state with
+            {
+                ErrorResponses = state.ErrorResponses.Add(response),
+            };
+        });
 
     private static int? GetExactStatus(RouteErrorResponse response)
     {
@@ -707,31 +697,31 @@ public abstract class RouteDefinitionBase<TSelf>
             )
         );
 
-    private TSelf AddResponseHeader(RouteResponseHeader header)
-    {
-        using var mutation = BeginMutation();
-        _responseHeaders ??= [];
-
-        if (
-            _responseHeaders.Any(existing =>
-                existing.StatusCode == header.StatusCode
-                && string.Equals(
-                    existing.StatusKey,
-                    header.StatusKey,
-                    StringComparison.OrdinalIgnoreCase
-                )
-                && string.Equals(existing.Name, header.Name, StringComparison.OrdinalIgnoreCase)
-            )
-        )
+    private TSelf AddResponseHeader(RouteResponseHeader header) =>
+        Mutate(state =>
         {
-            throw new InvalidOperationException(
-                $"Response header '{header.Name}' is already declared for this status via .WithResponseHeader() — declare each header only once per status."
-            );
-        }
+            if (
+                state.ResponseHeaders.Any(existing =>
+                    existing.StatusCode == header.StatusCode
+                    && string.Equals(
+                        existing.StatusKey,
+                        header.StatusKey,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    && string.Equals(existing.Name, header.Name, StringComparison.OrdinalIgnoreCase)
+                )
+            )
+            {
+                throw new InvalidOperationException(
+                    $"Response header '{header.Name}' is already declared for this status via .WithResponseHeader() — declare each header only once per status."
+                );
+            }
 
-        _responseHeaders.Add(header);
-        return (TSelf)this;
-    }
+            return state with
+            {
+                ResponseHeaders = state.ResponseHeaders.Add(header),
+            };
+        });
 
     public TSelf RequestExampleJson(
         string json,
@@ -740,13 +730,12 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
-        using var mutation = BeginMutation();
         // Example metadata is consumed by the Roslyn analyzer, not at runtime.
         _ = json;
         _ = name;
         _ = mediaType;
         _ = referencedComponentsJson;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
     public TSelf RequestExampleRef(
@@ -757,13 +746,12 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
-        using var mutation = BeginMutation();
         _ = componentExampleId;
         _ = resolvedJson;
         _ = name;
         _ = mediaType;
         _ = referencedComponentsJson;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
     public TSelf ResponseExampleJson(
@@ -774,13 +762,12 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
-        using var mutation = BeginMutation();
         _ = statusCode;
         _ = json;
         _ = name;
         _ = mediaType;
         _ = referencedComponentsJson;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
     public TSelf ResponseExampleJson(
@@ -791,13 +778,12 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
-        using var mutation = BeginMutation();
         _ = statusKey;
         _ = json;
         _ = name;
         _ = mediaType;
         _ = referencedComponentsJson;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
     public TSelf ResponseExampleRef(
@@ -809,14 +795,13 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
-        using var mutation = BeginMutation();
         _ = statusCode;
         _ = componentExampleId;
         _ = resolvedJson;
         _ = name;
         _ = mediaType;
         _ = referencedComponentsJson;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
     public TSelf ResponseExampleRef(
@@ -828,50 +813,33 @@ public abstract class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     )
     {
-        using var mutation = BeginMutation();
         _ = statusKey;
         _ = componentExampleId;
         _ = resolvedJson;
         _ = name;
         _ = mediaType;
         _ = referencedComponentsJson;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
-    public TSelf Anonymous()
-    {
-        using var mutation = BeginMutation();
-        _anonymous = true;
-        return (TSelf)this;
-    }
+    public TSelf Anonymous() => Mutate(static state => state with { Anonymous = true });
 
-    public TSelf Secure(string scheme)
-    {
-        using var mutation = BeginMutation();
-        _securityScheme = scheme;
-        return (TSelf)this;
-    }
+    public TSelf Secure(string scheme) => Mutate(state => state with { SecurityScheme = scheme });
 
-    public TSelf SecurityRequirements()
-    {
-        using var mutation = BeginMutation();
-        return (TSelf)this;
-    }
+    public TSelf SecurityRequirements() => Mutate(static state => state);
 
     public TSelf SecurityRequirement(int requirementOrder)
     {
-        using var mutation = BeginMutation();
         _ = requirementOrder;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
     public TSelf SecurityRequirement(int requirementOrder, string scheme, string? scope = null)
     {
-        using var mutation = BeginMutation();
         _ = requirementOrder;
         _ = scheme;
         _ = scope;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
     public TSelf RequestContent<T>(
@@ -881,40 +849,32 @@ public abstract class RouteDefinitionBase<TSelf>
         string? format = null
     )
     {
-        using var mutation = BeginMutation();
         _ = mediaType;
         _ = schemaRef;
         _ = schemaType;
         _ = format;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
     public TSelf RequestContent(string mediaType)
     {
-        using var mutation = BeginMutation();
         _ = mediaType;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
     public TSelf RequestBinaryContent(string mediaType)
     {
-        using var mutation = BeginMutation();
         _ = mediaType;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
     public TSelf RequestBodyRequired(bool required)
     {
-        using var mutation = BeginMutation();
         _ = required;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
-    public TSelf RequestBody()
-    {
-        using var mutation = BeginMutation();
-        return (TSelf)this;
-    }
+    public TSelf RequestBody() => Mutate(static state => state);
 
     public TSelf Parameter<T>(
         string name,
@@ -926,7 +886,6 @@ public abstract class RouteDefinitionBase<TSelf>
         string? schemaRef = null
     )
     {
-        using var mutation = BeginMutation();
         _ = name;
         _ = location;
         _ = required;
@@ -934,7 +893,7 @@ public abstract class RouteDefinitionBase<TSelf>
         _ = format;
         _ = metadataJson;
         _ = schemaRef;
-        return (TSelf)this;
+        return Mutate(static state => state);
     }
 
     public TSelf ResponseContent<T>(
@@ -946,13 +905,11 @@ public abstract class RouteDefinitionBase<TSelf>
         string? schemaDescription = null
     )
     {
-        using var mutation = BeginMutation();
-        AddResponseContent(statusCode.ToString(), mediaType, typeof(T), isBinary: false);
         _ = schemaRef;
         _ = schemaType;
         _ = format;
         _ = schemaDescription;
-        return (TSelf)this;
+        return AddResponseContent(statusCode.ToString(), mediaType, typeof(T), isBinary: false);
     }
 
     public TSelf ResponseContent<T>(
@@ -964,107 +921,91 @@ public abstract class RouteDefinitionBase<TSelf>
         string? schemaDescription = null
     )
     {
-        using var mutation = BeginMutation();
-        AddResponseContent(statusKey, mediaType, typeof(T), isBinary: false);
         _ = schemaRef;
         _ = schemaType;
         _ = format;
         _ = schemaDescription;
-        return (TSelf)this;
+        return AddResponseContent(statusKey, mediaType, typeof(T), isBinary: false);
     }
 
-    public TSelf ResponseContent(int statusCode, string mediaType)
-    {
-        using var mutation = BeginMutation();
+    public TSelf ResponseContent(int statusCode, string mediaType) =>
         AddResponseContent(statusCode.ToString(), mediaType, null, isBinary: false);
-        return (TSelf)this;
-    }
 
-    public TSelf ResponseContent(string statusKey, string mediaType)
-    {
-        using var mutation = BeginMutation();
+    public TSelf ResponseContent(string statusKey, string mediaType) =>
         AddResponseContent(statusKey, mediaType, null, isBinary: false);
-        return (TSelf)this;
-    }
 
-    public TSelf ResponseBinaryContent(int statusCode, string mediaType)
-    {
-        using var mutation = BeginMutation();
+    public TSelf ResponseBinaryContent(int statusCode, string mediaType) =>
         AddResponseContent(statusCode.ToString(), mediaType, null, isBinary: true);
-        return (TSelf)this;
-    }
 
-    public TSelf ResponseBinaryContent(string statusKey, string mediaType)
-    {
-        using var mutation = BeginMutation();
+    public TSelf ResponseBinaryContent(string statusKey, string mediaType) =>
         AddResponseContent(statusKey, mediaType, null, isBinary: true);
-        return (TSelf)this;
-    }
 
-    private void AddResponseContent(
+    private TSelf AddResponseContent(
         string statusKey,
         string mediaType,
         Type? payloadType,
         bool isBinary
-    )
-    {
-        _responseContents ??= [];
-        _responseContents.Add(
-            new RouteResponseContent(statusKey, mediaType, payloadType, isBinary)
+    ) =>
+        Mutate(state =>
+            state with
+            {
+                ResponseContents = state.ResponseContents.Add(
+                    new RouteResponseContent(statusKey, mediaType, payloadType, isBinary)
+                ),
+            }
         );
-    }
 
     /// <summary>
     /// Opts this endpoint into query-based authentication, where the auth token is passed
     /// as a query parameter instead of a header. Primarily intended for media players
     /// (ExoPlayer, HLS.js) that cannot inject custom headers on segment requests.
     /// </summary>
-    public TSelf QueryAuth(string parameterName = "token")
-    {
-        using var mutation = BeginMutation();
-        _queryAuthParameterName = parameterName;
-        return (TSelf)this;
-    }
+    public TSelf QueryAuth(string parameterName = "token") =>
+        Mutate(state => state with { QueryAuthParameterName = parameterName });
 
     /// <summary>
     /// Marks this endpoint as returning a file download instead of JSON.
     /// The generated TS client returns Blob; the OpenAPI spec emits the given content type with format: binary.
     /// </summary>
-    public TSelf ProducesFile(string contentType = "application/octet-stream")
-    {
-        using var mutation = BeginMutation();
-        if (
-            string.IsNullOrWhiteSpace(contentType)
-            || !MediaTypeHeaderValue.TryParse(contentType, out _)
-        )
+    public TSelf ProducesFile(string contentType = "application/octet-stream") =>
+        Mutate(state =>
         {
-            throw new InvalidOperationException(
-                $"{Method} {Route}: .ProducesFile() requires a valid content type."
-            );
-        }
+            if (
+                string.IsNullOrWhiteSpace(contentType)
+                || !MediaTypeHeaderValue.TryParse(contentType, out _)
+            )
+            {
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: .ProducesFile() requires a valid content type."
+                );
+            }
 
-        _fileContentType = contentType;
-        return (TSelf)this;
-    }
+            return state with
+            {
+                FileContentType = contentType,
+            };
+        });
 
     /// <summary>
     /// Marks this endpoint as accepting a file upload (multipart/form-data).
     /// The generated TS client will accept a File parameter.
     /// </summary>
-    public TSelf AcceptsFile()
-    {
-        using var mutation = BeginMutation();
-        if (_binaryRequestContentType is not null)
+    public TSelf AcceptsFile() =>
+        Mutate(state =>
         {
-            throw new InvalidOperationException(
-                $"{Method} {Route}: .AcceptsFile() cannot be combined with .AcceptsBinary() — "
-                    + "a request body is either raw binary or multipart/form-data, not both."
-            );
-        }
+            if (state.BinaryRequestContentType is not null)
+            {
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: .AcceptsFile() cannot be combined with .AcceptsBinary() — "
+                        + "a request body is either raw binary or multipart/form-data, not both."
+                );
+            }
 
-        _acceptsFile = true;
-        return (TSelf)this;
-    }
+            return state with
+            {
+                AcceptsFile = true,
+            };
+        });
 
     /// <summary>
     /// Marks this endpoint as accepting a raw binary request body (application/octet-stream
@@ -1073,28 +1014,30 @@ public abstract class RouteDefinitionBase<TSelf>
     /// into the OpenAPI spec, and on contract definitions the TInput properties lower to
     /// route/query parameters instead of a JSON body.
     /// </summary>
-    public TSelf AcceptsBinary(string contentType = "application/octet-stream")
-    {
-        using var mutation = BeginMutation();
-        if (_acceptsFile)
+    public TSelf AcceptsBinary(string contentType = "application/octet-stream") =>
+        Mutate(state =>
         {
-            throw new InvalidOperationException(
-                $"{Method} {Route}: .AcceptsBinary() cannot be combined with .AcceptsFile() — "
-                    + "a request body is either raw binary or multipart/form-data, not both."
-            );
-        }
+            if (state.AcceptsFile)
+            {
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: .AcceptsBinary() cannot be combined with .AcceptsFile() — "
+                        + "a request body is either raw binary or multipart/form-data, not both."
+                );
+            }
 
-        if (_formEncoded)
-        {
-            throw new InvalidOperationException(
-                $"{Method} {Route}: .AcceptsBinary() cannot be combined with .FormEncoded() — "
-                    + "a request body is either raw binary or form-encoded, not both."
-            );
-        }
+            if (state.FormEncoded)
+            {
+                throw new InvalidOperationException(
+                    $"{Method} {Route}: .AcceptsBinary() cannot be combined with .FormEncoded() — "
+                        + "a request body is either raw binary or form-encoded, not both."
+                );
+            }
 
-        _binaryRequestContentType = contentType;
-        return (TSelf)this;
-    }
+            return state with
+            {
+                BinaryRequestContentType = contentType,
+            };
+        });
 }
 
 /// <summary>
@@ -1247,8 +1190,8 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
 /// </summary>
 public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRouteDefinition<TInput>>
 {
-    internal InputRouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
-        : base(method, route, defaultStatus) { }
+    internal InputRouteDefinition(string method, string route, RouteState state)
+        : base(method, route, state) { }
 
     public BoundRouteDefinition Bind(TInput input)
     {
@@ -1382,13 +1325,7 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
     /// <summary>
     /// Convert to an input-only endpoint (accepts a body, returns void).
     /// </summary>
-    public InputRouteDefinition<TInput> Accepts<TInput>()
-    {
-        using var mutation = BeginMutation();
-        var def = new InputRouteDefinition<TInput>(Method, Route, SuccessStatus);
-        CopyStateTo(def);
-        return def;
-    }
+    public InputRouteDefinition<TInput> Accepts<TInput>() => new(Method, Route, CurrentState());
 
     public static implicit operator Define(RouteDefinition _) => default!;
 }

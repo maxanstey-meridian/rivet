@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -380,45 +379,37 @@ public sealed class TerminalAndAdapterTests
     }
 
     [Fact]
-    public async Task Publication_and_mutation_synchronize_on_the_same_gate()
+    public async Task Racing_mutation_either_reaches_the_published_contract_or_throws()
     {
-        var route = Define.Get<Response>("/items");
-        var gate = route
-            .GetType()
-            .BaseType!.GetField("_publicationLock", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(route)!;
-        using var ready = new CountdownEvent(2);
-
-        Monitor.Enter(gate);
-        Task<Exception?> mutation;
-        Task<Exception?> publication;
-        try
+        for (var attempt = 0; attempt < 200; attempt++)
         {
-            mutation = Task.Run(() =>
-            {
-                ready.Signal();
-                return (Exception?)Record.Exception(() => route.Summary("racing"));
-            });
-            publication = Task.Run(() =>
-            {
-                ready.Signal();
-                return (Exception?)Record.Exception(() => route.Success(new Response("item_1")));
-            });
+            var route = Define.Get<Response>("/items");
+            using var barrier = new Barrier(2);
+            Exception? mutationError = null;
 
-            Assert.True(ready.Wait(TimeSpan.FromSeconds(5)));
-            Thread.Sleep(TimeSpan.FromMilliseconds(100));
-            Assert.False(mutation.IsCompleted);
-            Assert.False(publication.IsCompleted);
-        }
-        finally
-        {
-            Monitor.Exit(gate);
-        }
+            var mutation = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                mutationError = Record.Exception(() => route.Returns(404));
+            });
+            var publication = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                return route.Success(new Response("item_1"));
+            });
+            await mutation;
 
-        var exceptions = await Task.WhenAll(mutation, publication);
-        Assert.Null(exceptions[1]);
-        Assert.True(exceptions[0] is null or InvalidOperationException);
-        Assert.Throws<InvalidOperationException>(() => route.Description("too late"));
+            Assert.NotNull(await publication);
+            if (mutationError is null)
+            {
+                Assert.NotNull(route.Error(404));
+            }
+            else
+            {
+                Assert.IsType<InvalidOperationException>(mutationError);
+                Assert.Throws<RivetContractViolationException>(() => route.Error(404));
+            }
+        }
     }
 
     [Fact]
