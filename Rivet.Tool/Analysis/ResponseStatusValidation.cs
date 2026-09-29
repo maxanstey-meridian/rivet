@@ -60,17 +60,6 @@ internal static class ResponseStatusValidation
 
     internal static List<TsResponseType> NormalizeIrAndEnsureResponse(
         IEnumerable<TsResponseType> responses,
-        TsEndpointDefinition endpoint
-    ) =>
-        NormalizeIrAndEnsureResponse(
-            responses,
-            endpoint.Name,
-            endpoint.HttpMethod,
-            endpoint.ReturnType
-        );
-
-    internal static List<TsResponseType> NormalizeIrAndEnsureResponse(
-        IEnumerable<TsResponseType> responses,
         string endpointName,
         string httpMethod,
         TsType? returnType

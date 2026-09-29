@@ -58,7 +58,9 @@ public sealed class OpenApiEmitter
                 {
                     Responses = ResponseStatusValidation.NormalizeIrAndEnsureResponse(
                         endpoint.Responses,
-                        endpoint
+                        endpoint.Name,
+                        endpoint.HttpMethod,
+                        endpoint.ReturnType
                     ),
                 }
             )
