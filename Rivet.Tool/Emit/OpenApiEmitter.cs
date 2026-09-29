@@ -1,56 +1,47 @@
-using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Emit;
 
 /// <summary>
-/// Emits an OpenAPI 3.1 JSON spec from the Rivet model.
+/// Emits an OpenAPI 3.1 JSON spec from the Rivet model. One instance per emit call holds
+/// the model and the naming state: component names must be unique per shape, and the pure
+/// name suffixes are lossy in places ("Enum", "Object"), so a pre-pass assigns every
+/// distinct shape a deterministic name that every $ref emission site then consults.
 /// </summary>
-public static class OpenApiEmitter
+public sealed class OpenApiEmitter
 {
-    private static readonly JsonSerializerOptions _jsonOptions = new()
+    private static readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true };
+
+    private readonly IReadOnlyDictionary<string, TsTypeDefinition> _definitions;
+    private readonly IReadOnlyDictionary<string, TsType.Brand> _brands;
+    private readonly IReadOnlyDictionary<string, TsType> _enums;
+    private readonly HashSet<string> _inliningSyntheticTypes = new(StringComparer.Ordinal);
+
+    /// <summary>Canonical shape hash → assigned component name for monomorphised generics.</summary>
+    private readonly Dictionary<string, string> _genericNames = [];
+
+    /// <summary>Canonical shape hash → base component name for tagged unions.</summary>
+    private readonly Dictionary<string, string> _taggedUnionNames = [];
+
+    /// <summary>Controller/endpoint/shape identity → assigned route-filtered body component name.</summary>
+    private readonly Dictionary<string, string> _filteredBodyNames = [];
+
+    /// <summary>Variant component schemas synthesized for tagged unions.</summary>
+    private readonly Dictionary<string, JsonObject> _extraComponents = [];
+
+    private OpenApiEmitter(
+        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
+        IReadOnlyDictionary<string, TsType.Brand> brands,
+        IReadOnlyDictionary<string, TsType> enums
+    )
     {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
-
-    /// <summary>
-    /// Per-Emit-call naming state. Component names must be unique per shape — the pure
-    /// name suffixes are lossy in places ("Enum", "Object"), so a pre-pass assigns every
-    /// distinct shape a distinct deterministic name (numeric suffix on residual collisions)
-    /// that all $ref emission sites then consult. Also accumulates tagged-union variant
-    /// component schemas discovered while mapping types.
-    /// </summary>
-    private sealed class EmitContext
-    {
-        public IReadOnlyDictionary<string, TsTypeDefinition> Definitions { get; init; } =
-            new Dictionary<string, TsTypeDefinition>();
-
-        public IReadOnlyDictionary<string, TsType.Brand> Brands { get; init; } =
-            new Dictionary<string, TsType.Brand>();
-
-        public IReadOnlyDictionary<string, TsType> Enums { get; init; } =
-            new Dictionary<string, TsType>();
-
-        public HashSet<string> InliningSyntheticTypes { get; } = new(StringComparer.Ordinal);
-
-        /// <summary>Canonical shape hash → assigned component name for monomorphised generics.</summary>
-        public Dictionary<string, string> GenericNames { get; } = [];
-
-        /// <summary>Canonical shape hash → base component name for tagged unions.</summary>
-        public Dictionary<string, string> TaggedUnionNames { get; } = [];
-
-        /// <summary>Controller/endpoint/shape identity → assigned route-filtered body component name.</summary>
-        public Dictionary<string, string> FilteredBodyNames { get; } = [];
-
-        /// <summary>Variant component schemas synthesized for tagged unions.</summary>
-        public Dictionary<string, object> ExtraComponents { get; } = [];
+        _definitions = definitions;
+        _brands = brands;
+        _enums = enums;
     }
-
-    [ThreadStatic]
-    private static EmitContext? _ctx;
 
     public static string Emit(
         IReadOnlyList<TsEndpointDefinition> endpoints,
@@ -61,46 +52,28 @@ public static class OpenApiEmitter
         OpenApiDocumentInfo? documentInfo = null
     )
     {
-        _ctx = new EmitContext
-        {
-            Definitions = definitions,
-            Brands = brands,
-            Enums = enums,
-        };
-        try
-        {
-            var normalizedEndpoints = endpoints
-                .Select(endpoint =>
-                    endpoint with
-                    {
-                        Responses = ResponseStatusValidation.NormalizeIrAndEnsureResponse(
-                            endpoint.Responses,
-                            endpoint
-                        ),
-                    }
-                )
-                .ToList();
-            AssignComponentNames(normalizedEndpoints, definitions, brands, enums, _ctx);
-            return EmitCore(
-                normalizedEndpoints,
-                definitions,
-                brands,
-                enums,
-                security,
-                documentInfo ?? new OpenApiDocumentInfo()
-            );
-        }
-        finally
-        {
-            _ctx = null;
-        }
+        var normalizedEndpoints = endpoints
+            .Select(endpoint =>
+                endpoint with
+                {
+                    Responses = ResponseStatusValidation.NormalizeIrAndEnsureResponse(
+                        endpoint.Responses,
+                        endpoint
+                    ),
+                }
+            )
+            .ToList();
+        var emitter = new OpenApiEmitter(definitions, brands, enums);
+        emitter.AssignComponentNames(normalizedEndpoints);
+        return emitter.EmitCore(
+            normalizedEndpoints,
+            security,
+            documentInfo ?? new OpenApiDocumentInfo()
+        );
     }
 
-    private static string EmitCore(
+    private string EmitCore(
         IReadOnlyList<TsEndpointDefinition> endpoints,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
-        IReadOnlyDictionary<string, TsType.Brand> brands,
-        IReadOnlyDictionary<string, TsType> enums,
         ContractSecurityMetadata? security,
         OpenApiDocumentInfo documentInfo
     )
@@ -110,7 +83,6 @@ public static class OpenApiEmitter
         var responseComponents = documentInfo.Provenance?.ComponentResponses ?? [];
         var paths = BuildPaths(
             endpoints,
-            definitions,
             requestBodyComponents
                 .Select(component => component.Name)
                 .ToHashSet(StringComparer.Ordinal),
@@ -119,7 +91,7 @@ public static class OpenApiEmitter
                 .ToHashSet(StringComparer.Ordinal),
             responseComponents.Select(component => component.Name).ToHashSet(StringComparer.Ordinal)
         );
-        var schemas = BuildSchemas(endpoints, definitions, brands, enums);
+        var schemas = BuildSchemas(endpoints);
         foreach (var schema in documentInfo.Provenance?.ComponentSchemas ?? [])
         {
             schemas[schema.Name] = ParseSchemaObject(
@@ -135,21 +107,18 @@ public static class OpenApiEmitter
         var requestBodies = BuildComponentRequestBodies(requestBodyComponents);
 
         // Tagged-union variant components synthesized while mapping types above
-        if (_ctx is not null)
+        foreach (var (name, schema) in _extraComponents)
         {
-            foreach (var (name, schema) in _ctx.ExtraComponents)
+            if (!schemas.TryAdd(name, schema))
             {
-                if (!schemas.TryAdd(name, schema))
-                {
-                    Diagnostics.Warn(
-                        Diagnostics.TaggedUnionComponentCollision,
-                        $"tagged-union variant component '{name}' collides with an existing schema — existing schema wins"
-                    );
-                }
+                Diagnostics.Warn(
+                    Diagnostics.TaggedUnionComponentCollision,
+                    $"tagged-union variant component '{name}' collides with an existing schema — existing schema wins"
+                );
             }
         }
 
-        var info = new Dictionary<string, object>
+        var info = new JsonObject
         {
             ["title"] = documentInfo.Title,
             ["version"] = documentInfo.Version,
@@ -164,7 +133,7 @@ public static class OpenApiEmitter
         }
         if (documentInfo.Provenance?.Info.Contact is { } contact)
         {
-            var contactValue = new Dictionary<string, object>();
+            var contactValue = new JsonObject();
             AddOptionalString(contactValue, "name", contact.Name);
             AddOptionalString(contactValue, "url", contact.Url);
             AddOptionalString(contactValue, "email", contact.Email);
@@ -172,23 +141,23 @@ public static class OpenApiEmitter
         }
         if (documentInfo.Provenance?.Info.License is { } license)
         {
-            var licenseValue = new Dictionary<string, object> { ["name"] = license.Name };
+            var licenseValue = new JsonObject { ["name"] = license.Name };
             AddOptionalString(licenseValue, "url", license.Url);
             AddOptionalString(licenseValue, "identifier", license.Identifier);
             info["license"] = licenseValue;
         }
 
-        var doc = new Dictionary<string, object> { ["openapi"] = "3.1.0", ["info"] = info };
+        var doc = new JsonObject { ["openapi"] = "3.1.0", ["info"] = info };
 
         if (documentInfo.Servers is { Count: > 0 })
         {
-            doc["servers"] = documentInfo
-                .Servers.Select(object (url) => new Dictionary<string, object> { ["url"] = url })
-                .ToList();
+            doc["servers"] = ArrayOf(
+                documentInfo.Servers.Select(url => new JsonObject { ["url"] = url })
+            );
         }
         else if (documentInfo.Provenance?.Servers is { Count: > 0 } provenanceServers)
         {
-            doc["servers"] = provenanceServers.Select(BuildServer).ToList();
+            doc["servers"] = ArrayOf(provenanceServers.Select(BuildServer));
         }
 
         // W4: operations carry tags — declare them in the global tags array
@@ -197,7 +166,7 @@ public static class OpenApiEmitter
         {
             if (documentProvenance.Tags.Count > 0)
             {
-                doc["tags"] = documentProvenance.Tags.Select(BuildTag).ToList();
+                doc["tags"] = ArrayOf(documentProvenance.Tags.Select(BuildTag));
             }
             if (documentProvenance.ExternalDocs is { } externalDocs)
             {
@@ -207,22 +176,19 @@ public static class OpenApiEmitter
         else
         {
             var tags = endpoints
-                .Select(ep => UpperFirst(ep.ControllerName))
+                .Select(ep => Naming.ToPascalCase(ep.ControllerName))
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(tag => tag, StringComparer.Ordinal)
                 .ToList();
             if (tags.Count > 0)
             {
-                doc["tags"] = tags.Select(
-                        object (tag) => new Dictionary<string, object> { ["name"] = tag }
-                    )
-                    .ToList();
+                doc["tags"] = ArrayOf(tags.Select(tag => new JsonObject { ["name"] = tag }));
             }
         }
 
         doc["paths"] = paths;
 
-        var components = new Dictionary<string, object>();
+        var components = new JsonObject();
 
         if (schemas.Count > 0)
         {
@@ -249,7 +215,7 @@ public static class OpenApiEmitter
             responseComponents.Select(value => (value.Name, value.Json))
         );
 
-        var securitySchemes = new Dictionary<string, object>();
+        var securitySchemes = new JsonObject();
 
         if (security is not null)
         {
@@ -303,7 +269,7 @@ public static class OpenApiEmitter
         }
 
         EnsureReferencedSchemaComponents(paths, components, schemas);
-        if (schemas.Count > 0)
+        if (schemas.Count > 0 && !components.ContainsKey("schemas"))
         {
             components["schemas"] = schemas;
         }
@@ -317,13 +283,13 @@ public static class OpenApiEmitter
         RetainVendorExtensionPathItemOwners(paths, vendorExtensions);
         AttachVendorExtensions(doc, vendorExtensions);
 
-        return JsonSerializer.Serialize(doc, _jsonOptions);
+        return doc.ToJsonString(_jsonOptions);
     }
 
     private static void EnsureReferencedSchemaComponents(
-        Dictionary<string, object> paths,
-        Dictionary<string, object> components,
-        Dictionary<string, object> schemas
+        JsonObject paths,
+        JsonObject components,
+        JsonObject schemas
     )
     {
         var referenced = new HashSet<string>(StringComparer.Ordinal);
@@ -340,18 +306,22 @@ public static class OpenApiEmitter
                 Diagnostics.UnknownTypeUntypedSchema,
                 $"schema component '{componentId}' is referenced by emitted OpenAPI but has no recovered definition — emitting an untyped fallback component"
             );
-            schemas[componentId] = new Dictionary<string, object>();
+            schemas[componentId] = new JsonObject();
         }
     }
 
-    private static void CollectSchemaReferences(object value, HashSet<string> referenced)
+    private static void CollectSchemaReferences(JsonNode? node, HashSet<string> referenced)
     {
-        switch (value)
+        switch (node)
         {
-            case Dictionary<string, object> dictionary:
-                foreach (var (name, child) in dictionary)
+            case JsonObject obj:
+                foreach (var (name, child) in obj)
                 {
-                    if (name == "$ref" && child is string reference)
+                    if (
+                        name == "$ref"
+                        && child is JsonValue value
+                        && value.TryGetValue<string>(out var reference)
+                    )
                     {
                         AddSchemaReference(reference, referenced);
                     }
@@ -361,30 +331,8 @@ public static class OpenApiEmitter
                     }
                 }
                 break;
-            case IEnumerable<object> sequence:
-                foreach (var child in sequence)
-                {
-                    CollectSchemaReferences(child, referenced);
-                }
-                break;
-            case JsonElement { ValueKind: JsonValueKind.Object } element:
-                foreach (var property in element.EnumerateObject())
-                {
-                    if (
-                        property.NameEquals("$ref")
-                        && property.Value.ValueKind == JsonValueKind.String
-                    )
-                    {
-                        AddSchemaReference(property.Value.GetString()!, referenced);
-                    }
-                    else
-                    {
-                        CollectSchemaReferences(property.Value, referenced);
-                    }
-                }
-                break;
-            case JsonElement { ValueKind: JsonValueKind.Array } element:
-                foreach (var child in element.EnumerateArray())
+            case JsonArray array:
+                foreach (var child in array)
                 {
                     CollectSchemaReferences(child, referenced);
                 }
@@ -401,7 +349,7 @@ public static class OpenApiEmitter
     }
 
     private static void RetainVendorExtensionPathItemOwners(
-        Dictionary<string, object> paths,
+        JsonObject paths,
         IReadOnlyList<OpenApiVendorExtensionProvenance> extensions
     )
     {
@@ -409,20 +357,22 @@ public static class OpenApiEmitter
         {
             if (JsonPointer.FromUriFragment(extension.OwnerPointer) is ["paths", var path])
             {
-                paths.TryAdd(path, new Dictionary<string, object>());
+                paths.TryAdd(path, new JsonObject());
             }
         }
     }
 
     private static void AttachVendorExtensions(
-        Dictionary<string, object> document,
+        JsonObject document,
         IReadOnlyList<OpenApiVendorExtensionProvenance> extensions
     )
     {
         foreach (var extension in extensions)
         {
-            var owner = ResolveObjectPointer(document, extension.OwnerPointer);
-            if (owner is null)
+            if (
+                !JsonPointer.TryResolve(document, extension.OwnerPointer, out var target)
+                || target is not JsonObject owner
+            )
             {
                 throw new RivetUserException(
                     $"Cannot attach preserved vendor extension '{extension.Name}': emitted owner '{extension.OwnerPointer}' does not exist or is not an object."
@@ -437,9 +387,7 @@ public static class OpenApiEmitter
 
             try
             {
-                owner[extension.Name] = JsonSerializer.Deserialize<JsonElement>(
-                    extension.JsonValue
-                );
+                owner[extension.Name] = JsonNode.Parse(extension.JsonValue);
             }
             catch (JsonException exception)
             {
@@ -450,40 +398,9 @@ public static class OpenApiEmitter
         }
     }
 
-    private static Dictionary<string, object>? ResolveObjectPointer(
-        Dictionary<string, object> document,
-        string pointer
-    )
+    private static JsonObject BuildSecurityScheme(SecuritySchemeDefinition definition)
     {
-        if (JsonPointer.FromUriFragment(pointer) is not { } tokens)
-        {
-            return null;
-        }
-
-        object? current = document;
-        foreach (var token in tokens)
-        {
-            current = current switch
-            {
-                Dictionary<string, object> obj when obj.TryGetValue(token, out var child) => child,
-                List<object> array when JsonPointer.TryIndex(token, array.Count, out var index) =>
-                    array[index],
-                _ => null,
-            };
-            if (current is null)
-            {
-                return null;
-            }
-        }
-
-        return current as Dictionary<string, object>;
-    }
-
-    private static Dictionary<string, object> BuildSecurityScheme(
-        SecuritySchemeDefinition definition
-    )
-    {
-        var result = new Dictionary<string, object>();
+        var result = new JsonObject();
         if (definition.Description is not null)
         {
             result["description"] = definition.Description;
@@ -506,10 +423,10 @@ public static class OpenApiEmitter
                 break;
             case OAuth2SecurityScheme oauth2:
                 result["type"] = "oauth2";
-                result["flows"] = oauth2.Flows.ToDictionary(
-                    flow => OAuthFlowName(flow.Type),
-                    BuildOAuthFlow,
-                    StringComparer.Ordinal
+                result["flows"] = ObjectOf(
+                    oauth2.Flows.Select(flow =>
+                        (OAuthFlowName(flow.Type), (JsonNode?)BuildOAuthFlow(flow))
+                    )
                 );
                 break;
             case OpenIdConnectSecurityScheme openId:
@@ -528,9 +445,12 @@ public static class OpenApiEmitter
         return result;
     }
 
-    private static Dictionary<string, object> BuildOAuthFlow(OAuth2Flow flow)
+    private static JsonObject BuildOAuthFlow(OAuth2Flow flow)
     {
-        var result = new Dictionary<string, object> { ["scopes"] = flow.Scopes };
+        var result = new JsonObject
+        {
+            ["scopes"] = ObjectOf(flow.Scopes.Select(scope => (scope.Key, (JsonNode?)scope.Value))),
+        };
         if (flow.AuthorizationUrl is not null)
         {
             result["authorizationUrl"] = flow.AuthorizationUrl;
@@ -556,17 +476,16 @@ public static class OpenApiEmitter
             _ => throw new ArgumentOutOfRangeException(nameof(type)),
         };
 
-    private static List<object> BuildSecurityRequirements(SecurityRequirements requirements) =>
-        requirements
-            .Alternatives.Select(
-                object (requirement) =>
-                    requirement.Schemes.ToDictionary(
-                        scheme => scheme.Name,
-                        scheme => (object)scheme.Scopes,
-                        StringComparer.Ordinal
+    private static JsonArray BuildSecurityRequirements(SecurityRequirements requirements) =>
+        ArrayOf(
+            requirements.Alternatives.Select(requirement =>
+                ObjectOf(
+                    requirement.Schemes.Select(scheme =>
+                        (scheme.Name, (JsonNode?)StringArray(scheme.Scopes))
                     )
+                )
             )
-            .ToList();
+        );
 
     private static void ValidateSecurityRequirements(
         SecurityRequirements requirements,
@@ -598,15 +517,14 @@ public static class OpenApiEmitter
         || name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
         || name.Equals("Authorization", StringComparison.OrdinalIgnoreCase);
 
-    private static Dictionary<string, object> BuildPaths(
+    private JsonObject BuildPaths(
         IReadOnlyList<TsEndpointDefinition> endpoints,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlySet<string> requestBodyComponentIds,
         IReadOnlySet<string> parameterComponentIds,
         IReadOnlySet<string> responseComponentIds
     )
     {
-        var paths = new Dictionary<string, object>();
+        var paths = new JsonObject();
 
         // Order-independent operationId allocation: unique endpoint names keep the
         // baseline {Controller}_{Name}; a colliding name group gets a deterministic
@@ -617,13 +535,12 @@ public static class OpenApiEmitter
         {
             var pathKey = ep.RouteTemplate;
 
-            if (!paths.TryGetValue(pathKey, out var existing))
+            if (paths[pathKey] is not JsonObject pathItem)
             {
-                existing = new Dictionary<string, object>();
-                paths[pathKey] = existing;
+                pathItem = [];
+                paths[pathKey] = pathItem;
             }
 
-            var pathItem = (Dictionary<string, object>)existing;
             var methodKey = ep.HttpMethod.ToLowerInvariant();
             if (pathItem.ContainsKey(methodKey))
             {
@@ -661,7 +578,6 @@ public static class OpenApiEmitter
             var operation = BuildOperation(
                 ep,
                 operationIds,
-                definitions,
                 requestBodyComponentIds,
                 parameterComponentIds,
                 responseComponentIds
@@ -731,16 +647,15 @@ public static class OpenApiEmitter
         return joined.Length == 0 ? "root" : joined;
     }
 
-    private static Dictionary<string, object> BuildOperation(
+    private JsonObject BuildOperation(
         TsEndpointDefinition ep,
         IReadOnlyDictionary<TsEndpointDefinition, string> operationIds,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlySet<string> requestBodyComponentIds,
         IReadOnlySet<string> parameterComponentIds,
         IReadOnlySet<string> responseComponentIds
     )
     {
-        var operation = new Dictionary<string, object>();
+        var operation = new JsonObject();
         if (ep.Provenance is null)
         {
             // Rivet identity is independent of authored operationId/tags. Imported documents
@@ -761,7 +676,7 @@ public static class OpenApiEmitter
             }
             if (provenance.Tags.Count > 0)
             {
-                operation["tags"] = provenance.Tags;
+                operation["tags"] = StringArray(provenance.Tags);
             }
             if (provenance.Deprecated)
             {
@@ -769,13 +684,13 @@ public static class OpenApiEmitter
             }
             if (provenance.ServerOverride is { } serverOverride)
             {
-                operation["servers"] = serverOverride.Select(BuildServer).ToList();
+                operation["servers"] = ArrayOf(serverOverride.Select(BuildServer));
             }
         }
         else
         {
             operation["operationId"] = operationIds[ep];
-            operation["tags"] = new List<string> { UpperFirst(ep.ControllerName) };
+            operation["tags"] = new JsonArray { Naming.ToPascalCase(ep.ControllerName) };
         }
 
         if (ep.Summary is not null)
@@ -789,7 +704,7 @@ public static class OpenApiEmitter
         }
 
         // Parameters (route + query)
-        var parameters = new List<object>();
+        var parameters = new JsonArray();
         TsEndpointParam? bodyParam = null;
         var fileParams = new List<TsEndpointParam>();
         var formFieldParams = new List<TsEndpointParam>();
@@ -798,63 +713,6 @@ public static class OpenApiEmitter
         {
             switch (param.Source)
             {
-                case ParamSource.Route:
-                    parameters.Add(
-                        BuildParameter(
-                            param,
-                            "path",
-                            required: true,
-                            $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                        )
-                    );
-                    break;
-
-                case ParamSource.Query:
-                    parameters.Add(
-                        BuildParameter(
-                            param,
-                            "query",
-                            param.Type is not TsType.Nullable && !param.IsOptional,
-                            $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                        )
-                    );
-                    break;
-
-                case ParamSource.Header:
-                    // OpenAPI 3.x: Accept/Content-Type/Authorization are not legal header
-                    // parameters (they belong to content negotiation / securitySchemes) —
-                    // diagnose and skip rather than emit an invalid spec.
-                    if (IsReservedHeaderName(param.Name))
-                    {
-                        Diagnostics.Warn(
-                            Diagnostics.ReservedHeaderParameterSkipped,
-                            $"header param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}' is reserved by OpenAPI "
-                                + "(Accept/Content-Type/Authorization are described by content/securitySchemes) — omitted from the spec"
-                        );
-                        break;
-                    }
-
-                    parameters.Add(
-                        BuildParameter(
-                            param,
-                            "header",
-                            param.Type is not TsType.Nullable && !param.IsOptional,
-                            $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                        )
-                    );
-                    break;
-
-                case ParamSource.Cookie:
-                    parameters.Add(
-                        BuildParameter(
-                            param,
-                            "cookie",
-                            param.Type is not TsType.Nullable && !param.IsOptional,
-                            $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                        )
-                    );
-                    break;
-
                 case ParamSource.Body:
                     bodyParam = param;
                     break;
@@ -866,6 +724,29 @@ public static class OpenApiEmitter
                 case ParamSource.FormField:
                     formFieldParams.Add(param);
                     break;
+
+                // OpenAPI 3.x: Accept/Content-Type/Authorization are not legal header
+                // parameters (they belong to content negotiation / securitySchemes) —
+                // diagnose and skip rather than emit an invalid spec.
+                case ParamSource.Header when IsReservedHeaderName(param.Name):
+                    Diagnostics.Warn(
+                        Diagnostics.ReservedHeaderParameterSkipped,
+                        $"header param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}' is reserved by OpenAPI "
+                            + "(Accept/Content-Type/Authorization are described by content/securitySchemes) — omitted from the spec"
+                    );
+                    break;
+
+                default:
+                    parameters.Add(
+                        BuildParameter(
+                            param,
+                            ParameterLocation(param.Source),
+                            param.Source == ParamSource.Route
+                                || (param.Type is not TsType.Nullable && !param.IsOptional),
+                            $"param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+                        )
+                    );
+                    break;
             }
         }
 
@@ -873,12 +754,12 @@ public static class OpenApiEmitter
         if (ep.QueryAuth is not null)
         {
             parameters.Add(
-                new Dictionary<string, object>
+                new JsonObject
                 {
                     ["name"] = ep.QueryAuth.ParameterName,
                     ["in"] = "query",
                     ["required"] = true,
-                    ["schema"] = new Dictionary<string, object> { ["type"] = "string" },
+                    ["schema"] = new JsonObject { ["type"] = "string" },
                 }
             );
         }
@@ -891,15 +772,16 @@ public static class OpenApiEmitter
                 {
                     continue;
                 }
-                var index = parameters.FindIndex(value =>
+                var match = parameters.FirstOrDefault(value =>
+                    (string?)value!["name"] == reference.Name
+                    && (string?)value["in"] == reference.Location
+                );
+                if (match is not null)
                 {
-                    var parameter = (Dictionary<string, object>)value;
-                    return parameter.GetValueOrDefault("name") as string == reference.Name
-                        && parameter.GetValueOrDefault("in") as string == reference.Location;
-                });
-                if (index >= 0)
-                {
-                    parameters[index] = ComponentReference("parameters", reference.ComponentId);
+                    parameters[parameters.IndexOf(match)] = ComponentReference(
+                        "parameters",
+                        reference.ComponentId
+                    );
                 }
             }
             operation["parameters"] = parameters;
@@ -940,57 +822,32 @@ public static class OpenApiEmitter
         // Request body
         if (ep.RequestContents is not null)
         {
-            var content = new Dictionary<string, object>();
-            foreach (var entry in ep.RequestContents)
-            {
-                var media = new Dictionary<string, object>();
-                if (entry.IsBinary)
-                {
-                    media["schema"] = BinarySchema();
-                }
-                else if (entry.Schema is not null)
-                {
-                    media["schema"] = BuildSchemaWithLeafProvenance(
-                        entry.Schema,
-                        entry.SchemaType,
-                        entry.Format,
-                        entry.IsFormatSpecified,
-                        $"request content '{entry.MediaType}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                    );
-                }
-
-                content[entry.MediaType] = media;
-            }
-
             var primaryRequestType = ep.RequestType ?? bodyParam?.Type;
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                ["required"] =
-                    ep.RequestBodyRequired ?? (primaryRequestType is not TsType.Nullable),
-                ["content"] = WithExamples(content, ep.RequestExamples),
-            };
+            operation["requestBody"] = RequestBody(
+                ep.RequestBodyRequired ?? (primaryRequestType is not TsType.Nullable),
+                MediaContent(
+                    ep.RequestContents,
+                    entry =>
+                        $"request content '{entry.MediaType}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+                ),
+                ep.RequestExamples
+            );
         }
         else if (ep.BinaryRequestContentType is not null)
         {
             // .AcceptsBinary(): the body is the raw bytes — never a JSON/multipart schema,
             // even if a Body param somehow survived upstream (the walker prevents it).
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                ["required"] = ep.RequestBodyRequired ?? true,
-                ["content"] = new Dictionary<string, object>
-                {
-                    [ep.BinaryRequestContentType] = new Dictionary<string, object>
-                    {
-                        ["schema"] = BinarySchema(),
-                    },
-                },
-            };
+            operation["requestBody"] = RequestBody(
+                ep.RequestBodyRequired ?? true,
+                MediaContent(ep.BinaryRequestContentType, BinarySchema()),
+                examples: null
+            );
         }
         else if (fileParams.Count > 0)
         {
-            Dictionary<string, object> multipartSchema;
+            JsonObject multipartSchema;
 
-            if (ep.InputTypeName is not null && definitions.ContainsKey(ep.InputTypeName))
+            if (ep.InputTypeName is not null && _definitions.ContainsKey(ep.InputTypeName))
             {
                 multipartSchema = MapTypeReference(
                     new TsType.TypeRef(ep.InputTypeName),
@@ -999,9 +856,8 @@ public static class OpenApiEmitter
             }
             else
             {
-                // BUG-2 (mirrors the E6 generic fallback): the TS lowerer decomposes the
-                // multipart input into params and never ships the input type definition, so
-                // a $ref to ep.InputTypeName would dangle — every consumer rejects that.
+                // The TS lowerer decomposes the multipart input into params and never ships
+                // the input type definition, so a $ref to ep.InputTypeName would dangle.
                 // Build the multipart request schema inline from the endpoint's params instead.
                 if (ep.InputTypeName is not null)
                 {
@@ -1013,166 +869,49 @@ public static class OpenApiEmitter
                     );
                 }
 
-                // Anonymous file upload — inline the schema. Single files emit the
-                // binary File schema; collection-of-file params (List<IFormFile>,
-                // FABLE_GAPS §7 item 12) emit array-of-binary — both via the File
-                // primitive mapping.
-                var multipartProps = new Dictionary<string, object>();
-                foreach (var fp in fileParams)
-                {
-                    multipartProps[fp.Name] = MapTsTypeToJsonSchema(
-                        fp.Type,
-                        $"file param '{fp.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                    );
-                }
-                foreach (var ff in formFieldParams)
-                {
-                    multipartProps[ff.Name] = MapTsTypeToJsonSchema(
-                        ff.Type,
-                        $"form field '{ff.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                    );
-                }
-
-                var requiredFields = new List<string>();
-                foreach (var fp in fileParams)
-                {
-                    // N1/E8: honour explicit optionality (rivet-ts `file?: Blob`)
-                    if (!fp.IsOptional)
-                    {
-                        requiredFields.Add(fp.Name);
-                    }
-                }
-                foreach (var ff in formFieldParams)
-                {
-                    if (ff.Type is not TsType.Nullable && !ff.IsOptional)
-                    {
-                        requiredFields.Add(ff.Name);
-                    }
-                }
-
-                multipartSchema = new Dictionary<string, object>
-                {
-                    ["type"] = "object",
-                    ["properties"] = multipartProps,
-                };
-
-                if (requiredFields.Count > 0)
-                {
-                    multipartSchema["required"] = requiredFields;
-                }
-
-                // WP-1.1: pin the record name the importer synthesizes for this inline
-                // body — without the extension it falls back to the operationId-derived
-                // {fieldName}Request convention, which breaks under hand-edited ids.
-                // A declared-but-undefined input type name (TS lowerer) takes precedence.
-                multipartSchema["x-rivet-input-type"] =
-                    ep.InputTypeName ?? SynthesizedInputTypeName(ep);
+                multipartSchema = FormSchema(ep, fileParams, formFieldParams);
+                // Pin the record name the importer synthesizes for this inline body; without
+                // the extension it falls back to the operationId-derived {fieldName}Request
+                // convention, which breaks under hand-edited ids.
+                multipartSchema["x-rivet-input-type"] = SynthesizedInputTypeName(ep);
             }
 
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                ["required"] = ep.RequestBodyRequired ?? true,
-                ["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [formContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = multipartSchema,
-                        },
-                    },
-                    ep.RequestExamples
-                ),
-            };
+            operation["requestBody"] = RequestBody(
+                ep.RequestBodyRequired ?? true,
+                MediaContent(formContentType, multipartSchema),
+                ep.RequestExamples
+            );
         }
         else if (formFieldParams.Count > 0)
         {
-            var formSchema = new Dictionary<string, object>
-            {
-                ["type"] = "object",
-                ["properties"] = new Dictionary<string, object>(),
-            };
-            var formProps = (Dictionary<string, object>)formSchema["properties"];
-            var requiredFields = new List<string>();
-            foreach (var ff in formFieldParams)
-            {
-                formProps[ff.Name] = MapTsTypeToJsonSchema(
-                    ff.Type,
-                    $"form field '{ff.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                );
-                if (ff.Type is not TsType.Nullable && !ff.IsOptional)
-                {
-                    requiredFields.Add(ff.Name);
-                }
-            }
-            if (requiredFields.Count > 0)
-            {
-                formSchema["required"] = requiredFields;
-            }
-
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                ["required"] = ep.RequestBodyRequired ?? true,
-                ["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [formContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = formSchema,
-                        },
-                    },
-                    ep.RequestExamples
-                ),
-            };
+            operation["requestBody"] = RequestBody(
+                ep.RequestBodyRequired ?? true,
+                MediaContent(formContentType, FormSchema(ep, [], formFieldParams)),
+                ep.RequestExamples
+            );
         }
-        else if (bodyParam is not null)
+        else if ((bodyParam?.Type ?? ep.RequestType) is { } bodyType)
         {
-            var bodyContentType = ep.IsFormEncoded
-                ? formContentType
-                : ep.RequestContentTypeOverride ?? "application/json";
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                // E11: a Nullable body type means the request body is optional
-                ["required"] = ep.RequestBodyRequired ?? (bodyParam.Type is not TsType.Nullable),
-                ["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [bodyContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = BuildBodySchema(bodyParam.Type, ep, definitions),
-                        },
-                    },
-                    ep.RequestExamples
+            operation["requestBody"] = RequestBody(
+                // A Nullable body type means the request body is optional
+                ep.RequestBodyRequired
+                    ?? (bodyType is not TsType.Nullable),
+                MediaContent(
+                    ep.IsFormEncoded
+                        ? formContentType
+                        : ep.RequestContentTypeOverride ?? "application/json",
+                    BuildBodySchema(bodyType, ep)
                 ),
-            };
-        }
-        else if (ep.RequestType is not null)
-        {
-            var requestTypeContentType = ep.IsFormEncoded
-                ? "application/x-www-form-urlencoded"
-                : ep.RequestContentTypeOverride ?? "application/json";
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                // E11: a Nullable body type means the request body is optional
-                ["required"] = ep.RequestBodyRequired ?? (ep.RequestType is not TsType.Nullable),
-                ["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [requestTypeContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = BuildBodySchema(ep.RequestType, ep, definitions),
-                        },
-                    },
-                    ep.RequestExamples
-                ),
-            };
+                ep.RequestExamples
+            );
         }
         else if (ep.RequestBodyPresent)
         {
-            operation["requestBody"] = new Dictionary<string, object>
-            {
-                ["required"] = ep.RequestBodyRequired ?? false,
-                ["content"] = WithExamples(new Dictionary<string, object>(), ep.RequestExamples),
-            };
+            operation["requestBody"] = RequestBody(
+                ep.RequestBodyRequired ?? false,
+                [],
+                ep.RequestExamples
+            );
         }
 
         if (
@@ -1180,7 +919,7 @@ public static class OpenApiEmitter
             && requestBodyComponentIds.Contains(requestBodyComponentId)
         )
         {
-            var requestBodyReference = new Dictionary<string, object>
+            var requestBodyReference = new JsonObject
             {
                 ["$ref"] =
                     $"#/components/requestBodies/{JsonPointer.Escape(requestBodyComponentId)}",
@@ -1194,14 +933,14 @@ public static class OpenApiEmitter
         }
         else if (
             ep.Provenance?.RequestBodyDescription is { } requestBodyDescription
-            && operation.TryGetValue("requestBody", out var requestBodyValue)
+            && operation["requestBody"] is JsonObject requestBody
         )
         {
-            ((Dictionary<string, object>)requestBodyValue)["description"] = requestBodyDescription;
+            requestBody["description"] = requestBodyDescription;
         }
 
         // Responses
-        var responses = new Dictionary<string, object>();
+        var responses = new JsonObject();
         var fileResponseStatusKey = ep.FileContentType is null
             ? null
             : ep
@@ -1210,7 +949,7 @@ public static class OpenApiEmitter
 
         foreach (var resp in ep.Responses)
         {
-            var respObj = new Dictionary<string, object>();
+            var respObj = new JsonObject();
 
             // RIV1102 defense in depth: HTTP forbids a message body on 1xx/204/205/304.
             // Authored examples or contents there could never reach the wire, so
@@ -1249,10 +988,10 @@ public static class OpenApiEmitter
             // so defaulting it would over-promise.
             if (resp.Headers is { Count: > 0 })
             {
-                var headerObjs = new Dictionary<string, object>();
+                var headerObjs = new JsonObject();
                 foreach (var header in resp.Headers)
                 {
-                    var headerObj = new Dictionary<string, object>();
+                    var headerObj = new JsonObject();
                     if (header.Description is not null)
                     {
                         headerObj["description"] = header.Description;
@@ -1285,11 +1024,11 @@ public static class OpenApiEmitter
                     }
                     if (header.Example is { } example)
                     {
-                        headerObj["example"] = example;
+                        headerObj["example"] = Node(example);
                     }
                     if (header.Examples is { } examples)
                     {
-                        headerObj["examples"] = examples;
+                        headerObj["examples"] = Node(examples);
                     }
 
                     var headerSchema = MapTsTypeToJsonSchema(
@@ -1298,17 +1037,11 @@ public static class OpenApiEmitter
                     );
                     if (header.SchemaExamples is { } schemaExamples)
                     {
-                        headerSchema["examples"] = schemaExamples;
+                        headerSchema["examples"] = Node(schemaExamples);
                     }
                     if (header.ContentType is not null)
                     {
-                        headerObj["content"] = new Dictionary<string, object>
-                        {
-                            [header.ContentType] = new Dictionary<string, object>
-                            {
-                                ["schema"] = headerSchema,
-                            },
-                        };
+                        headerObj["content"] = MediaContent(header.ContentType, headerSchema);
                     }
                     else
                     {
@@ -1322,34 +1055,14 @@ public static class OpenApiEmitter
 
             if (resp.Contents is { Count: > 0 })
             {
-                var content = new Dictionary<string, object>();
-                foreach (var entry in resp.Contents)
-                {
-                    var media = new Dictionary<string, object>();
-                    if (entry.IsBinary)
-                    {
-                        media["schema"] = BinarySchema();
-                    }
-                    else if (entry.Schema is not null)
-                    {
-                        var responseSchema = BuildSchemaWithLeafProvenance(
-                            entry.Schema,
-                            entry.SchemaType,
-                            entry.Format,
-                            entry.IsFormatSpecified,
+                respObj["content"] = WithExamples(
+                    MediaContent(
+                        resp.Contents,
+                        entry =>
                             $"response {resp.StatusCode} content '{entry.MediaType}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                        );
-                        if (entry.SchemaDescription is not null)
-                        {
-                            responseSchema["description"] = entry.SchemaDescription;
-                        }
-                        media["schema"] = responseSchema;
-                    }
-
-                    content[entry.MediaType] = media;
-                }
-
-                respObj["content"] = WithExamples(content, resp.Examples);
+                    ),
+                    resp.Examples
+                );
             }
             else if (resp.DataType is not null && !bodyForbidden)
             {
@@ -1359,16 +1072,13 @@ public static class OpenApiEmitter
                     ? ep.ResponseContentTypeOverride ?? "application/json"
                     : "application/json";
                 respObj["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [responseContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = MapTsTypeToJsonSchema(
-                                resp.DataType,
-                                $"response {resp.StatusCode} on endpoint '{ep.ControllerName}.{ep.Name}'"
-                            ),
-                        },
-                    },
+                    MediaContent(
+                        responseContentType,
+                        MapTsTypeToJsonSchema(
+                            resp.DataType,
+                            $"response {resp.StatusCode} on endpoint '{ep.ControllerName}.{ep.Name}'"
+                        )
+                    ),
                     resp.Examples
                 );
             }
@@ -1378,19 +1088,13 @@ public static class OpenApiEmitter
             )
             {
                 respObj["content"] = WithExamples(
-                    new Dictionary<string, object>
-                    {
-                        [ep.FileContentType] = new Dictionary<string, object>
-                        {
-                            ["schema"] = BinarySchema(),
-                        },
-                    },
+                    MediaContent(ep.FileContentType, BinarySchema()),
                     resp.Examples
                 );
             }
             else if (resp.Examples is not null)
             {
-                var content = WithExamples(new Dictionary<string, object>(), resp.Examples);
+                var content = WithExamples(new JsonObject(), resp.Examples);
                 if (content.Count > 0)
                 {
                     respObj["content"] = content;
@@ -1425,13 +1129,13 @@ public static class OpenApiEmitter
         {
             if (ep.Security.IsAnonymous)
             {
-                operation["security"] = new List<object>();
+                operation["security"] = new JsonArray();
             }
             else if (ep.Security.Scheme is not null)
             {
-                operation["security"] = new List<object>
+                operation["security"] = new JsonArray
                 {
-                    new Dictionary<string, object> { [ep.Security.Scheme] = Array.Empty<string>() },
+                    new JsonObject { [ep.Security.Scheme] = new JsonArray() },
                 };
             }
         }
@@ -1439,7 +1143,7 @@ public static class OpenApiEmitter
         // QueryAuth: emit extension for round-trip fidelity
         if (ep.QueryAuth is not null)
         {
-            operation["x-rivet-query-auth"] = new Dictionary<string, object>
+            operation["x-rivet-query-auth"] = new JsonObject
             {
                 ["parameterName"] = ep.QueryAuth.ParameterName,
             };
@@ -1451,7 +1155,7 @@ public static class OpenApiEmitter
     }
 
     private static void ApplyOperationSchemaProvenance(
-        Dictionary<string, object> operation,
+        JsonObject operation,
         OpenApiOperationSchemaProvenance? provenance
     )
     {
@@ -1460,16 +1164,15 @@ public static class OpenApiEmitter
             return;
         }
 
-        if (operation.TryGetValue("parameters", out var parameterValue))
+        if (operation["parameters"] is JsonArray parameters)
         {
-            var parameters = (List<object>)parameterValue;
             foreach (var source in provenance.Parameters)
             {
                 var parameter = parameters
-                    .OfType<Dictionary<string, object>>()
+                    .OfType<JsonObject>()
                     .FirstOrDefault(candidate =>
-                        candidate.GetValueOrDefault("name") as string == source.Name
-                        && candidate.GetValueOrDefault("in") as string == source.Location
+                        (string?)candidate["name"] == source.Name
+                        && (string?)candidate["in"] == source.Location
                     );
                 if (parameter is not null)
                 {
@@ -1481,19 +1184,11 @@ public static class OpenApiEmitter
             }
         }
 
-        if (
-            operation.TryGetValue("requestBody", out var requestBodyValue)
-            && requestBodyValue is Dictionary<string, object> requestBody
-            && requestBody.TryGetValue("content", out var requestContentValue)
-            && requestContentValue is Dictionary<string, object> requestContent
-        )
+        if (operation["requestBody"]?["content"] is JsonObject requestContent)
         {
             foreach (var source in provenance.Requests)
             {
-                if (
-                    requestContent.TryGetValue(source.MediaType, out var mediaValue)
-                    && mediaValue is Dictionary<string, object> media
-                )
+                if (requestContent[source.MediaType] is JsonObject media)
                 {
                     media["schema"] = ParseSchemaObject(
                         source.Json,
@@ -1503,21 +1198,11 @@ public static class OpenApiEmitter
             }
         }
 
-        if (
-            operation.TryGetValue("responses", out var responseValue)
-            && responseValue is Dictionary<string, object> responses
-        )
+        if (operation["responses"] is JsonObject responses)
         {
             foreach (var source in provenance.Responses)
             {
-                if (
-                    responses.TryGetValue(source.StatusKey, out var statusValue)
-                    && statusValue is Dictionary<string, object> status
-                    && status.TryGetValue("content", out var contentValue)
-                    && contentValue is Dictionary<string, object> content
-                    && content.TryGetValue(source.MediaType, out var mediaValue)
-                    && mediaValue is Dictionary<string, object> media
-                )
+                if (responses[source.StatusKey]?["content"]?[source.MediaType] is JsonObject media)
                 {
                     media["schema"] = ParseSchemaObject(
                         source.Json,
@@ -1528,40 +1213,35 @@ public static class OpenApiEmitter
         }
     }
 
-    private static Dictionary<string, object> ParseSchemaObject(string json, string context) =>
-        JsonSerializer.Deserialize<Dictionary<string, object>>(json)
+    private static JsonObject ParseSchemaObject(string json, string context) =>
+        JsonSerializer.Deserialize<JsonObject>(json)
         ?? throw new RivetUserException($"{context} is not a JSON object.");
 
-    private static Dictionary<string, object> BuildServer(OpenApiServerProvenance server)
+    private static JsonObject BuildServer(OpenApiServerProvenance server)
     {
-        var result = new Dictionary<string, object> { ["url"] = server.Url };
+        var result = new JsonObject { ["url"] = server.Url };
         AddOptionalString(result, "description", server.Description);
         if (server.Variables.Count > 0)
         {
-            result["variables"] = server.Variables.ToDictionary(
-                variable => variable.Name,
-                variable =>
+            result["variables"] = ObjectOf(
+                server.Variables.Select(variable =>
                 {
-                    var value = new Dictionary<string, object>
-                    {
-                        ["default"] = variable.DefaultValue,
-                    };
+                    var value = new JsonObject { ["default"] = variable.DefaultValue };
                     if (variable.AllowedValues.Count > 0)
                     {
-                        value["enum"] = variable.AllowedValues;
+                        value["enum"] = StringArray(variable.AllowedValues);
                     }
                     AddOptionalString(value, "description", variable.Description);
-                    return (object)value;
-                },
-                StringComparer.Ordinal
+                    return (variable.Name, (JsonNode?)value);
+                })
             );
         }
         return result;
     }
 
-    private static Dictionary<string, object> BuildTag(OpenApiTagProvenance tag)
+    private static JsonObject BuildTag(OpenApiTagProvenance tag)
     {
-        var result = new Dictionary<string, object> { ["name"] = tag.Name };
+        var result = new JsonObject { ["name"] = tag.Name };
         AddOptionalString(result, "description", tag.Description);
         if (tag.ExternalDocs is { } externalDocs)
         {
@@ -1570,20 +1250,14 @@ public static class OpenApiEmitter
         return result;
     }
 
-    private static Dictionary<string, object> BuildExternalDocs(
-        OpenApiExternalDocsProvenance externalDocs
-    )
+    private static JsonObject BuildExternalDocs(OpenApiExternalDocsProvenance externalDocs)
     {
-        var result = new Dictionary<string, object> { ["url"] = externalDocs.Url };
+        var result = new JsonObject { ["url"] = externalDocs.Url };
         AddOptionalString(result, "description", externalDocs.Description);
         return result;
     }
 
-    private static void AddOptionalString(
-        Dictionary<string, object> target,
-        string name,
-        string? value
-    )
+    private static void AddOptionalString(JsonObject target, string name, string? value)
     {
         if (value is not null)
         {
@@ -1591,7 +1265,7 @@ public static class OpenApiEmitter
         }
     }
 
-    private static Dictionary<string, object> BuildParameter(
+    private JsonObject BuildParameter(
         TsEndpointParam parameter,
         string location,
         bool required,
@@ -1607,15 +1281,18 @@ public static class OpenApiEmitter
         );
         if (parameter.DefaultValue is not null)
         {
-            schema["default"] = JsonSerializer.Deserialize<JsonElement>(parameter.DefaultValue);
+            schema["default"] = SchemaEnricher.ParseJsonLiteral(
+                parameter.DefaultValue,
+                $"default of {context}"
+            );
         }
         SchemaEnricher.EnrichConstraints(schema, parameter.Constraints);
         if (parameter.SchemaExamples is { } schemaExamples)
         {
-            schema["examples"] = schemaExamples;
+            schema["examples"] = Node(schemaExamples);
         }
 
-        var result = new Dictionary<string, object>
+        var result = new JsonObject
         {
             ["name"] = parameter.Name,
             ["in"] = location,
@@ -1632,11 +1309,11 @@ public static class OpenApiEmitter
         }
         if (parameter.Example is { } example)
         {
-            result["example"] = example;
+            result["example"] = Node(example);
         }
         if (parameter.Examples is { } examples)
         {
-            result["examples"] = examples;
+            result["examples"] = Node(examples);
         }
         if (parameter.Style is not null)
         {
@@ -1654,7 +1331,7 @@ public static class OpenApiEmitter
         return result;
     }
 
-    private static Dictionary<string, object> BuildSchemaWithLeafProvenance(
+    private JsonObject BuildSchemaWithLeafProvenance(
         TsType type,
         string? schemaType,
         string? format,
@@ -1664,10 +1341,10 @@ public static class OpenApiEmitter
     {
         if (schemaType is not null)
         {
-            var schema = new Dictionary<string, object>
+            var schema = new JsonObject
             {
                 ["type"] =
-                    type is TsType.Nullable ? new List<string> { schemaType, "null" } : schemaType,
+                    type is TsType.Nullable ? new JsonArray { schemaType, "null" } : schemaType,
             };
             if (format is not null)
             {
@@ -1700,41 +1377,138 @@ public static class OpenApiEmitter
     private static string SynthesizedInputTypeName(TsEndpointDefinition ep) =>
         ep.InputTypeName ?? Naming.ToPascalCaseFromSegments(ep.Name) + "Request";
 
-    private static Dictionary<string, object> BinarySchema() =>
+    private static JsonNode? Node(JsonElement value) => JsonSerializer.SerializeToNode(value);
+
+    private static JsonArray ArrayOf(IEnumerable<JsonNode?> items) => new([.. items]);
+
+    private static JsonArray StringArray(IEnumerable<string> values) =>
+        ArrayOf(values.Select(value => (JsonNode?)value));
+
+    /// <summary>Duplicate names throw, as <c>ToDictionary</c> did.</summary>
+    private static JsonObject ObjectOf(IEnumerable<(string Name, JsonNode? Value)> properties) =>
+        new(properties.Select(property => KeyValuePair.Create(property.Name, property.Value)));
+
+    private static JsonObject BinarySchema() =>
         new() { ["type"] = "string", ["format"] = "binary" };
+
+    private static string ParameterLocation(ParamSource source) =>
+        source switch
+        {
+            ParamSource.Route => "path",
+            ParamSource.Query => "query",
+            ParamSource.Header => "header",
+            ParamSource.Cookie => "cookie",
+            _ => throw new ArgumentOutOfRangeException(nameof(source), source, null),
+        };
+
+    private static JsonObject RequestBody(
+        bool required,
+        JsonObject content,
+        IReadOnlyList<TsEndpointExample>? examples
+    ) => new() { ["required"] = required, ["content"] = WithExamples(content, examples) };
+
+    private static JsonObject MediaContent(string mediaType, JsonObject schema) =>
+        new() { [mediaType] = new JsonObject { ["schema"] = schema } };
+
+    private JsonObject MediaContent(
+        IReadOnlyList<TsMediaTypeContent> entries,
+        Func<TsMediaTypeContent, string> context
+    )
+    {
+        var content = new JsonObject();
+        foreach (var entry in entries)
+        {
+            var media = new JsonObject();
+            if (entry.IsBinary)
+            {
+                media["schema"] = BinarySchema();
+            }
+            else if (entry.Schema is not null)
+            {
+                var schema = BuildSchemaWithLeafProvenance(
+                    entry.Schema,
+                    entry.SchemaType,
+                    entry.Format,
+                    entry.IsFormatSpecified,
+                    context(entry)
+                );
+                if (entry.SchemaDescription is not null)
+                {
+                    schema["description"] = entry.SchemaDescription;
+                }
+                media["schema"] = schema;
+            }
+
+            content[entry.MediaType] = media;
+        }
+
+        return content;
+    }
+
+    /// <summary>
+    /// The object schema of a form body: file parts first, then form fields. A file part is
+    /// required unless explicitly optional; a form field also becomes optional when nullable.
+    /// </summary>
+    private JsonObject FormSchema(
+        TsEndpointDefinition ep,
+        IReadOnlyList<TsEndpointParam> fileParams,
+        IReadOnlyList<TsEndpointParam> formFieldParams
+    )
+    {
+        var properties = new JsonObject();
+        var required = new List<string>();
+        foreach (var file in fileParams)
+        {
+            properties[file.Name] = MapTsTypeToJsonSchema(
+                file.Type,
+                $"file param '{file.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+            );
+            if (!file.IsOptional)
+            {
+                required.Add(file.Name);
+            }
+        }
+        foreach (var field in formFieldParams)
+        {
+            properties[field.Name] = MapTsTypeToJsonSchema(
+                field.Type,
+                $"form field '{field.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
+            );
+            if (field.Type is not TsType.Nullable && !field.IsOptional)
+            {
+                required.Add(field.Name);
+            }
+        }
+
+        var schema = new JsonObject { ["type"] = "object", ["properties"] = properties };
+        if (required.Count > 0)
+        {
+            schema["required"] = StringArray(required);
+        }
+
+        return schema;
+    }
 
     /// <summary>
     /// Maps a request-body type to its schema; inline object bodies get
     /// <c>x-rivet-input-type</c> so the importer synthesizes the same record name
     /// every loop ($ref bodies carry their name in the reference itself).
     /// </summary>
-    private static Dictionary<string, object> BuildBodySchema(
-        TsType bodyType,
-        TsEndpointDefinition ep,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions
-    )
+    private JsonObject BuildBodySchema(TsType bodyType, TsEndpointDefinition ep)
     {
-        if (
-            TryBuildRouteFilteredBodySchema(
-                bodyType,
-                ep,
-                definitions,
-                out _,
-                out var filteredSchema
-            )
-        )
+        if (BuildRouteFilteredBodySchema(bodyType, ep) is { } filteredSchema)
         {
             if (bodyType is not TsType.Nullable)
             {
                 return filteredSchema;
             }
 
-            return new Dictionary<string, object>
+            return new JsonObject
             {
-                ["oneOf"] = new List<object>
+                ["oneOf"] = new JsonArray
                 {
                     filteredSchema,
-                    new Dictionary<string, object> { ["type"] = "null" },
+                    new JsonObject { ["type"] = "null" },
                 },
             };
         }
@@ -1751,37 +1525,28 @@ public static class OpenApiEmitter
         return schema;
     }
 
-    private static bool TryBuildRouteFilteredBodySchema(
-        TsType bodyType,
-        TsEndpointDefinition ep,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
-        out string inputTypeName,
-        out Dictionary<string, object> schema
-    )
+    private JsonObject? BuildRouteFilteredBodySchema(TsType bodyType, TsEndpointDefinition ep)
     {
-        inputTypeName = null!;
-        schema = null!;
-        if (!TryResolveBodyProperties(bodyType, definitions, out _, out var sourceTypeName))
+        if (
+            !TryGetRouteFilteredBodyProperties(
+                bodyType,
+                ep,
+                out var bodyProperties,
+                out var sourceTypeName
+            )
+        )
         {
-            return false;
+            return null;
         }
 
-        if (!TryGetRouteFilteredBodyProperties(bodyType, ep, definitions, out var bodyProperties))
-        {
-            return false;
-        }
-
-        var identity = FilteredBodyIdentity(ep, bodyProperties);
-        if (_ctx is null || !_ctx.FilteredBodyNames.TryGetValue(identity, out var assignedName))
+        if (!_filteredBodyNames.ContainsKey(FilteredBodyIdentity(ep, bodyProperties)))
         {
             throw new RivetUserException(
                 $"route-filtered request body name was not allocated for endpoint '{ep.ControllerName}.{ep.Name}'"
             );
         }
 
-        inputTypeName = assignedName;
-        schema = BuildObjectSchema(bodyProperties, typeName: sourceTypeName);
-        return true;
+        return BuildObjectSchema(bodyProperties, typeName: sourceTypeName);
     }
 
     private static string FilteredBodyIdentity(
@@ -1805,15 +1570,15 @@ public static class OpenApiEmitter
             + InlineTypeExtractor.CanonicalHash(shape);
     }
 
-    private static bool TryGetRouteFilteredBodyProperties(
+    private bool TryGetRouteFilteredBodyProperties(
         TsType? bodyType,
         TsEndpointDefinition ep,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
-        out IReadOnlyList<TsPropertyDefinition> bodyProperties
+        out IReadOnlyList<TsPropertyDefinition> bodyProperties,
+        out string sourceTypeName
     )
     {
         bodyProperties = [];
-        if (!TryResolveBodyProperties(bodyType, definitions, out var sourceProperties, out _))
+        if (!TryResolveBodyProperties(bodyType, out var sourceProperties, out sourceTypeName))
         {
             return false;
         }
@@ -1839,9 +1604,8 @@ public static class OpenApiEmitter
         return bodyProperties.Count != sourceProperties.Count;
     }
 
-    private static bool TryResolveBodyProperties(
+    private bool TryResolveBodyProperties(
         TsType? bodyType,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         out IReadOnlyList<TsPropertyDefinition> properties,
         out string typeName
     )
@@ -1849,24 +1613,16 @@ public static class OpenApiEmitter
         properties = [];
         typeName = null!;
         var unwrapped = bodyType is TsType.Nullable nullable ? nullable.Inner : bodyType;
-        string definitionName;
-        IReadOnlyList<TsType>? typeArguments = null;
-
-        switch (unwrapped)
+        var (definitionName, generic) = unwrapped switch
         {
-            case TsType.TypeRef typeRef:
-                definitionName = typeRef.Name;
-                break;
-            case TsType.Generic generic:
-                definitionName = generic.Name;
-                typeArguments = generic.TypeArguments;
-                break;
-            default:
-                return false;
-        }
+            TsType.TypeRef typeRef => (typeRef.Name, null),
+            TsType.Generic g => (g.Name, g),
+            _ => ((string?)null, (TsType.Generic?)null),
+        };
 
         if (
-            !definitions.TryGetValue(definitionName, out var definition)
+            definitionName is null
+            || !_definitions.TryGetValue(definitionName, out var definition)
             || definition.Type is not null
         )
         {
@@ -1874,20 +1630,18 @@ public static class OpenApiEmitter
         }
 
         typeName = definition.Name;
-        if (typeArguments is null)
+        if (generic is null)
         {
             properties = definition.Properties;
             return true;
         }
 
-        if (definition.TypeParameters.Count != typeArguments.Count)
+        if (definition.TypeParameters.Count != generic.TypeArguments.Count)
         {
             return false;
         }
 
-        var substitutions = definition
-            .TypeParameters.Select((name, index) => (name, typeArguments[index]))
-            .ToDictionary(pair => pair.name, pair => pair.Item2, StringComparer.Ordinal);
+        var substitutions = TypeParameterMap(definition, generic);
         properties = definition
             .Properties.Select(property =>
                 property with
@@ -1899,13 +1653,13 @@ public static class OpenApiEmitter
         return true;
     }
 
-    private static Dictionary<string, object> BuildComponentExamples(
+    private static JsonObject BuildComponentExamples(
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyList<OpenApiComponentExampleProvenance> authoredExamples,
         IReadOnlyList<OpenApiComponentRequestBodyProvenance> requestBodies
     )
     {
-        var examples = new Dictionary<string, object>();
+        var examples = new JsonObject();
 
         foreach (var example in authoredExamples)
         {
@@ -1929,17 +1683,17 @@ public static class OpenApiEmitter
         return examples;
     }
 
-    private static Dictionary<string, object> BuildComponentRequestBodies(
+    private JsonObject BuildComponentRequestBodies(
         IReadOnlyList<OpenApiComponentRequestBodyProvenance> requestBodies
     )
     {
-        var result = new Dictionary<string, object>(StringComparer.Ordinal);
+        var result = new JsonObject();
         foreach (var requestBody in requestBodies)
         {
-            var content = new Dictionary<string, object>(StringComparer.Ordinal);
+            var content = new JsonObject();
             foreach (var entry in requestBody.Contents)
             {
-                var media = new Dictionary<string, object>();
+                var media = new JsonObject();
                 if (entry.IsBinary)
                 {
                     media["schema"] = BinarySchema();
@@ -1964,11 +1718,7 @@ public static class OpenApiEmitter
                 content[entry.MediaType] = media;
             }
 
-            var value = new Dictionary<string, object>
-            {
-                ["required"] = requestBody.Required,
-                ["content"] = WithExamples(content, requestBody.Examples),
-            };
+            var value = RequestBody(requestBody.Required, content, requestBody.Examples);
             AddOptionalString(value, "description", requestBody.Description);
             result.Add(requestBody.Name, value);
         }
@@ -1976,17 +1726,17 @@ public static class OpenApiEmitter
     }
 
     private static void AddJsonComponents(
-        Dictionary<string, object> components,
+        JsonObject components,
         string kind,
         IEnumerable<(string Name, string Json)> values
     )
     {
-        var result = new Dictionary<string, object>(StringComparer.Ordinal);
+        var result = new JsonObject();
         foreach (var (name, json) in values)
         {
             result.Add(
                 name,
-                JsonSerializer.Deserialize<Dictionary<string, object>>(json)
+                JsonSerializer.Deserialize<JsonObject>(json)
                     ?? throw new RivetUserException(
                         $"Preserved component {kind} '{name}' is not a JSON object."
                     )
@@ -1998,16 +1748,14 @@ public static class OpenApiEmitter
         }
     }
 
-    private static Dictionary<string, object> BuildComponentExample(
-        OpenApiComponentExampleProvenance example
-    )
+    private static JsonObject BuildComponentExample(OpenApiComponentExampleProvenance example)
     {
-        var result = new Dictionary<string, object>();
+        var result = new JsonObject();
         AddOptionalString(result, "summary", example.Summary);
         AddOptionalString(result, "description", example.Description);
         if (example.JsonValue is { } jsonValue)
         {
-            result["value"] = ParseJson(jsonValue)!;
+            result["value"] = ParseJson(jsonValue);
         }
         else
         {
@@ -2018,7 +1766,7 @@ public static class OpenApiEmitter
     }
 
     private static void AddComponentExamples(
-        Dictionary<string, object> target,
+        JsonObject target,
         IReadOnlyList<TsEndpointExample>? examples
     )
     {
@@ -2034,10 +1782,7 @@ public static class OpenApiEmitter
                     ?? new Dictionary<string, string>()
             )
             {
-                target.TryAdd(
-                    componentId,
-                    new Dictionary<string, object> { ["value"] = ParseJson(json)! }
-                );
+                target.TryAdd(componentId, new JsonObject { ["value"] = ParseJson(json) });
             }
 
             if (
@@ -2050,15 +1795,15 @@ public static class OpenApiEmitter
             }
 
             // null is a legal example value (`value: null`) — see ParseJson.
-            target[example.ComponentExampleId] = new Dictionary<string, object>
+            target[example.ComponentExampleId] = new JsonObject
             {
-                ["value"] = ParseJson(example.ResolvedJson)!,
+                ["value"] = ParseJson(example.ResolvedJson),
             };
         }
     }
 
-    private static Dictionary<string, object> WithExamples(
-        Dictionary<string, object> content,
+    private static JsonObject WithExamples(
+        JsonObject content,
         IReadOnlyList<TsEndpointExample>? examples
     )
     {
@@ -2068,27 +1813,24 @@ public static class OpenApiEmitter
         }
 
         var templateSchema = content
-            .Values.OfType<Dictionary<string, object>>()
-            .Select(entry => entry.TryGetValue("schema", out var schema) ? schema : null)
+            .Select(entry => entry.Value?["schema"])
             .FirstOrDefault(schema => schema is not null);
 
         foreach (var group in examples.GroupBy(example => example.MediaType))
         {
             var createdMediaContent = false;
-            if (!content.TryGetValue(group.Key, out var mediaContentObj))
+            if (content[group.Key] is not JsonObject mediaContentDict)
             {
-                var mediaContent = new Dictionary<string, object>();
+                mediaContentDict = [];
                 if (templateSchema is not null)
                 {
-                    mediaContent["schema"] = templateSchema;
+                    mediaContentDict["schema"] = templateSchema.DeepClone();
                 }
 
-                content[group.Key] = mediaContent;
-                mediaContentObj = mediaContent;
+                content[group.Key] = mediaContentDict;
                 createdMediaContent = true;
             }
 
-            var mediaContentDict = (Dictionary<string, object>)mediaContentObj;
             var groupedExamples = group.ToList();
 
             if (
@@ -2100,11 +1842,11 @@ public static class OpenApiEmitter
             {
                 var inlineExampleJson = groupedExamples[0].Json;
                 // null is a legal example value (`example: null`) — see ParseJson.
-                mediaContentDict["example"] = ParseJson(inlineExampleJson!)!;
+                mediaContentDict["example"] = ParseJson(inlineExampleJson!);
                 continue;
             }
 
-            var examplesDict = new Dictionary<string, object>();
+            var examplesDict = new JsonObject();
             for (var index = 0; index < groupedExamples.Count; index++)
             {
                 var example = groupedExamples[index];
@@ -2132,7 +1874,7 @@ public static class OpenApiEmitter
         return content;
     }
 
-    private static object? ToOpenApiExample(TsEndpointExample example)
+    private static JsonObject? ToOpenApiExample(TsEndpointExample example)
     {
         if (example.ComponentExampleId is not null && example.ResolvedJson is not null)
         {
@@ -2146,19 +1888,14 @@ public static class OpenApiEmitter
         }
 
         // null is a legal example value (`value: null`) — see ParseJson.
-        return new Dictionary<string, object> { ["value"] = ParseJson(json)! };
+        return new JsonObject { ["value"] = ParseJson(json) };
     }
 
-    // Returns null only for the JSON literal `null` — a legal example value
-    // (the importer converts Microsoft.OpenApi's null sentinel back to it);
-    // malformed JSON throws JsonException. Callers store the null in an
-    // object-valued dictionary slot, which System.Text.Json serializes as null.
-    private static object? ParseJson(string json) => JsonSerializer.Deserialize<object>(json);
+    // Returns null only for the JSON literal `null`, a legal example value (the importer
+    // converts Microsoft.OpenApi's null sentinel back to it); malformed JSON throws.
+    private static JsonNode? ParseJson(string json) => JsonNode.Parse(json);
 
-    public static Dictionary<string, object> MapTsTypeToJsonSchema(
-        TsType type,
-        string? context = null
-    )
+    private JsonObject MapTsTypeToJsonSchema(TsType type, string? context = null)
     {
         return type switch
         {
@@ -2174,14 +1911,14 @@ public static class OpenApiEmitter
 
             TsType.IntUnion iu => MapIntUnion(iu),
 
-            TsType.Literal literal => new Dictionary<string, object>
+            TsType.Literal literal => new JsonObject
             {
                 ["const"] = JsonElementValue(literal.Value),
             },
 
             TsType.TypeRef r => MapTypeReference(r, context),
 
-            TsType.Generic g => new Dictionary<string, object>
+            TsType.Generic g => new JsonObject
             {
                 ["$ref"] = $"#/components/schemas/{MonomorphisedName(g)}",
             },
@@ -2196,27 +1933,24 @@ public static class OpenApiEmitter
 
             // Undiscriminated union ([RivetUnion] wrapper): a plain oneOf — no
             // discriminator, variants may be inline primitive schemas.
-            TsType.Union u => new Dictionary<string, object>
+            TsType.Union u => new JsonObject
             {
-                ["oneOf"] = u
-                    .Variants.Select(object (variant) => MapTsTypeToJsonSchema(variant, context))
-                    .ToList(),
+                ["oneOf"] = ArrayOf(
+                    u.Variants.Select(variant => MapTsTypeToJsonSchema(variant, context))
+                ),
             },
 
-            _ => new Dictionary<string, object> { ["type"] = "object" },
+            _ => new JsonObject { ["type"] = "object" },
         };
     }
 
-    private static Dictionary<string, object> MapTypeReference(
-        TsType.TypeRef reference,
-        string? context
-    )
+    private JsonObject MapTypeReference(TsType.TypeRef reference, string? context)
     {
-        if (_ctx?.Definitions.TryGetValue(reference.Name, out var definition) == true)
+        if (_definitions.TryGetValue(reference.Name, out var definition))
         {
             if (definition.Metadata?.Provenance == TsTypeProvenance.Synthetic)
             {
-                if (_ctx is null || !_ctx.InliningSyntheticTypes.Add(reference.Name))
+                if (!_inliningSyntheticTypes.Add(reference.Name))
                 {
                     throw new RivetUserException(
                         $"synthetic type '{reference.Name}' is recursive and cannot be inlined without recursive schema algebra"
@@ -2229,14 +1963,14 @@ public static class OpenApiEmitter
                 }
                 finally
                 {
-                    _ctx.InliningSyntheticTypes.Remove(reference.Name);
+                    _inliningSyntheticTypes.Remove(reference.Name);
                 }
             }
 
             return ComponentReference(definition.Metadata?.ComponentId ?? reference.Name);
         }
 
-        if (_ctx?.Enums.TryGetValue(reference.Name, out var enumType) == true)
+        if (_enums.TryGetValue(reference.Name, out var enumType))
         {
             var metadata = GetMetadata(enumType);
             if (metadata?.Provenance == TsTypeProvenance.Synthetic)
@@ -2247,7 +1981,7 @@ public static class OpenApiEmitter
             return ComponentReference(metadata?.ComponentId ?? reference.Name);
         }
 
-        if (_ctx?.Brands.TryGetValue(reference.Name, out var brand) == true)
+        if (_brands.TryGetValue(reference.Name, out var brand))
         {
             return MapBrandReference(brand, context);
         }
@@ -2255,7 +1989,7 @@ public static class OpenApiEmitter
         return ComponentReference(reference.Name);
     }
 
-    private static Dictionary<string, object> MapBrandReference(TsType.Brand brand, string? context)
+    private JsonObject MapBrandReference(TsType.Brand brand, string? context)
     {
         if (brand.Metadata?.Provenance == TsTypeProvenance.Synthetic)
         {
@@ -2274,24 +2008,20 @@ public static class OpenApiEmitter
             _ => null,
         };
 
-    private static Dictionary<string, object> ComponentReference(string componentId) =>
+    private static JsonObject ComponentReference(string componentId) =>
         new() { ["$ref"] = $"#/components/schemas/{JsonPointer.Escape(componentId)}" };
 
-    private static Dictionary<string, object> ComponentReference(string kind, string componentId) =>
+    private static JsonObject ComponentReference(string kind, string componentId) =>
         new() { ["$ref"] = $"#/components/{kind}/{JsonPointer.Escape(componentId)}" };
 
-    private static Dictionary<string, object> MapIntUnion(TsType.IntUnion union)
+    private static JsonObject MapIntUnion(TsType.IntUnion union)
     {
-        // Member literals are decimal strings in the IR so legal enum constants
-        // beyond Int32 survive; parse them to wide numbers so OpenAPI emits exact
-        // digits, not quoted strings
-        // (acceptance:numeric-enums-cover-all-legal-underlying-values).
-        var enumValues = union.Members.Select(ParseEnumLiteral).ToList<object>();
-        var schema = new Dictionary<string, object>
+        var enumValues = ArrayOf(union.Members.Select(IntEnumLiteral.ToJson));
+        var schema = new JsonObject
         {
             ["type"] =
                 union.ScalarMetadata?.IsNullable == true
-                    ? new List<string> { "integer", "null" }
+                    ? new JsonArray { "integer", "null" }
                     : "integer",
             ["enum"] = enumValues,
         };
@@ -2308,47 +2038,15 @@ public static class OpenApiEmitter
         return schema;
     }
 
-    /// <summary>
-    /// Parses an exact signed or unsigned enum integer; invalid carriers are refused.
-    /// </summary>
-    private static object ParseEnumLiteral(string literal)
+    private static JsonObject MapStringUnion(TsType.StringUnion union)
     {
-        if (
-            long.TryParse(
-                literal,
-                NumberStyles.Integer,
-                CultureInfo.InvariantCulture,
-                out var signed
-            )
-        )
-        {
-            return signed;
-        }
-
-        if (
-            ulong.TryParse(
-                literal,
-                NumberStyles.Integer,
-                CultureInfo.InvariantCulture,
-                out var unsigned
-            )
-        )
-        {
-            return unsigned;
-        }
-
-        throw new JsonException($"Invalid integer enum literal '{literal}'.");
-    }
-
-    private static Dictionary<string, object> MapStringUnion(TsType.StringUnion union)
-    {
-        var schema = new Dictionary<string, object>
+        var schema = new JsonObject
         {
             ["type"] =
                 union.ScalarMetadata?.IsNullable == true
-                    ? new List<string> { "string", "null" }
+                    ? new JsonArray { "string", "null" }
                     : "string",
-            ["enum"] = union.Members.ToList(),
+            ["enum"] = StringArray(union.Members),
         };
         if (union.Format is not null)
         {
@@ -2369,25 +2067,24 @@ public static class OpenApiEmitter
         return schema;
     }
 
-    private static object JsonElementValue(JsonElement value) =>
+    private static JsonValue JsonElementValue(JsonElement value) =>
         value.ValueKind switch
         {
-            JsonValueKind.String => value.GetString()!,
-            JsonValueKind.Number when value.TryGetInt64(out var integer) => integer,
-            JsonValueKind.Number => value.GetDouble(),
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
+            JsonValueKind.String => JsonValue.Create(value.GetString()!),
+            JsonValueKind.Number when value.TryGetInt64(out var integer) => JsonValue.Create(
+                integer
+            ),
+            JsonValueKind.Number => JsonValue.Create(value.GetDouble()),
+            JsonValueKind.True => JsonValue.Create(true),
+            JsonValueKind.False => JsonValue.Create(false),
             _ => throw new InvalidOperationException(
                 $"Unsupported scalar literal kind '{value.ValueKind}'."
             ),
         };
 
-    private static Dictionary<string, object> BuildInlineObjectSchema(
-        TsType.InlineObject obj,
-        string? context = null
-    )
+    private JsonObject BuildInlineObjectSchema(TsType.InlineObject obj, string? context = null)
     {
-        var properties = new Dictionary<string, object>();
+        var properties = new JsonObject();
         var required = new List<string>();
 
         foreach (var field in obj.Fields)
@@ -2411,61 +2108,55 @@ public static class OpenApiEmitter
             }
         }
 
-        var schema = new Dictionary<string, object>
-        {
-            ["type"] = "object",
-            ["properties"] = properties,
-        };
+        var schema = new JsonObject { ["type"] = "object", ["properties"] = properties };
 
         if (required.Count > 0)
         {
-            schema["required"] = required;
+            schema["required"] = StringArray(required);
         }
 
         return schema;
     }
 
-    private static Dictionary<string, object> BuildTaggedUnionSchema(
-        TsType.TaggedUnion tu,
-        string? context = null
-    )
+    private JsonObject BuildTaggedUnionSchema(TsType.TaggedUnion tu, string? context = null)
     {
         // OpenAPI `discriminator` is only meaningful on a oneOf of $ref'd named schemas with
         // a tag→$ref mapping — consumers reject or ignore a discriminator over inline schemas
         // (E11). Each inline variant becomes a named component schema referenced via $ref.
         var baseName =
-            _ctx?.TaggedUnionNames.GetValueOrDefault(InlineTypeExtractor.CanonicalHash(tu))
+            _taggedUnionNames.GetValueOrDefault(InlineTypeExtractor.CanonicalHash(tu))
             ?? TsType.GetNameSuffix(tu);
 
-        var oneOf = new List<object>();
-        var mapping = new Dictionary<string, object>();
+        var oneOf = new JsonArray();
+        var mapping = new JsonObject();
 
         foreach (var variant in tu.Variants)
         {
             var variantSchema = MapTsTypeToJsonSchema(variant.Type, context);
 
             string refPath;
-            if (variantSchema.Count == 1 && variantSchema.TryGetValue("$ref", out var existingRef))
+            if (variantSchema.Count == 1 && variantSchema["$ref"] is JsonValue existingRef)
             {
                 // Variant is already a named schema (TypeRef/Generic/Brand) — ref it directly.
-                refPath = (string)existingRef;
+                refPath = existingRef.GetValue<string>();
             }
             else
             {
                 var componentName =
-                    variant.Metadata?.ComponentId ?? $"{baseName}_{UpperFirst(variant.Tag)}";
-                _ctx?.ExtraComponents.TryAdd(componentName, variantSchema);
+                    variant.Metadata?.ComponentId
+                    ?? $"{baseName}_{Naming.ToPascalCase(variant.Tag)}";
+                _extraComponents.TryAdd(componentName, variantSchema);
                 refPath = $"#/components/schemas/{JsonPointer.Escape(componentName)}";
             }
 
-            oneOf.Add(new Dictionary<string, object> { ["$ref"] = refPath });
+            oneOf.Add(new JsonObject { ["$ref"] = refPath });
             mapping[variant.Tag] = refPath;
         }
 
-        return new Dictionary<string, object>
+        return new JsonObject
         {
             ["oneOf"] = oneOf,
-            ["discriminator"] = new Dictionary<string, object>
+            ["discriminator"] = new JsonObject
             {
                 ["propertyName"] = tu.Discriminator,
                 ["mapping"] = mapping,
@@ -2473,14 +2164,11 @@ public static class OpenApiEmitter
         };
     }
 
-    private static Dictionary<string, object> MapPrimitive(
-        TsType.Primitive p,
-        string? context = null
-    )
+    private static JsonObject MapPrimitive(TsType.Primitive p, string? context = null)
     {
         if (p.Name == "File")
         {
-            return new Dictionary<string, object>
+            return new JsonObject
             {
                 ["x-rivet-file"] = true,
                 ["type"] = "string",
@@ -2500,7 +2188,7 @@ public static class OpenApiEmitter
                 );
             }
 
-            var unknownSchema = new Dictionary<string, object>();
+            var unknownSchema = new JsonObject();
             // JsonNode gets x-rivet-csharp-type on the primitive itself.
             // JsonObject/JsonArray are handled by BuildDictionarySchema/BuildArraySchema on the parent.
             if (p.CSharpType is "JsonNode")
@@ -2517,7 +2205,7 @@ public static class OpenApiEmitter
         // for lossless import round-trips.
         if (p is { Name: "string", Format: "base64" })
         {
-            var base64Schema = new Dictionary<string, object>
+            var base64Schema = new JsonObject
             {
                 ["type"] = "string",
                 ["contentEncoding"] = "base64",
@@ -2535,7 +2223,7 @@ public static class OpenApiEmitter
         // import round-trips (a plain length-1 string stays a C# string).
         if (p is { Name: "string", CSharpType: "char" })
         {
-            return new Dictionary<string, object>
+            return new JsonObject
             {
                 ["type"] = "string",
                 ["minLength"] = 1,
@@ -2560,7 +2248,7 @@ public static class OpenApiEmitter
                 ? "integer"
                 : p.Name;
 
-        var schema = new Dictionary<string, object> { ["type"] = type };
+        var schema = new JsonObject { ["type"] = type };
 
         if (p.Format is not null)
         {
@@ -2575,15 +2263,15 @@ public static class OpenApiEmitter
         return schema;
     }
 
-    private static Dictionary<string, object> MapNullable(TsType.Nullable n, string? context = null)
+    private JsonObject MapNullable(TsType.Nullable n, string? context = null)
     {
         var inner = MapTsTypeToJsonSchema(n.Inner, context);
 
         // OpenAPI 3.1 / JSON Schema 2020-12: null is a type. Schemas with a single
         // type become a type array; everything else gets an explicit null branch.
-        if (inner.TryGetValue("type", out var typeValue) && typeValue is string typeName)
+        if (inner["type"] is JsonValue typeValue && typeValue.TryGetValue<string>(out var typeName))
         {
-            inner["type"] = new List<string> { typeName, "null" };
+            inner["type"] = new JsonArray { typeName, "null" };
             return inner;
         }
 
@@ -2591,12 +2279,12 @@ public static class OpenApiEmitter
         // 2020-12, so the null alternative must be a oneOf branch instead.
         if (inner.ContainsKey("$ref"))
         {
-            return new Dictionary<string, object>
+            return new JsonObject
             {
-                ["oneOf"] = new List<object>
+                ["oneOf"] = new JsonArray
                 {
                     inner,
-                    new Dictionary<string, object> { ["type"] = "null" },
+                    new JsonObject { ["type"] = "null" },
                 },
             };
         }
@@ -2610,39 +2298,33 @@ public static class OpenApiEmitter
         // Remaining typeless composites (tagged-union oneOf, x-rivet-csharp-type
         // untyped schemas): anyOf, because an untyped branch also matches null and
         // would make a oneOf ambiguous.
-        return new Dictionary<string, object>
+        return new JsonObject
         {
-            ["anyOf"] = new List<object>
+            ["anyOf"] = new JsonArray
             {
                 inner,
-                new Dictionary<string, object> { ["type"] = "null" },
+                new JsonObject { ["type"] = "null" },
             },
         };
     }
 
-    private static Dictionary<string, object> FallbackTypeParam(
-        TsType.TypeParam tp,
-        string? context = null
-    )
+    private static JsonObject FallbackTypeParam(TsType.TypeParam tp, string? context = null)
     {
         Diagnostics.Warn(
             Diagnostics.UnresolvedTypeParameter,
             $"unresolved type parameter '{tp.Name}' in OpenAPI schema{AtContext(context)} — emitting as object"
         );
-        return new Dictionary<string, object> { ["type"] = "object" };
+        return new JsonObject { ["type"] = "object" };
     }
 
     private static string AtContext(string? context) => context is null ? "" : $" at {context}";
 
-    private static string MonomorphisedName(TsType.Generic g)
+    private string MonomorphisedName(TsType.Generic g)
     {
         // The pure suffix scheme is lossy in places (4+-member unions → "Enum", 4+-field
         // inline objects → "Object"), so distinct instantiations can share a pure name.
         // The per-emit registry assigns each distinct shape a distinct deterministic name.
-        if (
-            _ctx is not null
-            && _ctx.GenericNames.TryGetValue(InlineTypeExtractor.CanonicalHash(g), out var assigned)
-        )
+        if (_genericNames.TryGetValue(InlineTypeExtractor.CanonicalHash(g), out var assigned))
         {
             return assigned;
         }
@@ -2656,128 +2338,56 @@ public static class OpenApiEmitter
     /// Identical shapes share a name; distinct shapes whose pure names collide get a
     /// deterministic numeric suffix (discovery order).
     /// </summary>
-    private static void AssignComponentNames(
-        IReadOnlyList<TsEndpointDefinition> endpoints,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
-        IReadOnlyDictionary<string, TsType.Brand> brands,
-        IReadOnlyDictionary<string, TsType> enums,
-        EmitContext ctx
-    )
+    private void AssignComponentNames(IReadOnlyList<TsEndpointDefinition> endpoints)
     {
+        var roots = endpoints
+            .SelectMany(endpoint => endpoint.AllTypes().Select(site => site.Type))
+            .Concat(
+                _definitions.Values.SelectMany(def =>
+                    def.Type is not null ? [def.Type] : def.Properties.Select(prop => prop.Type)
+                )
+            )
+            .Concat(_brands.Values.Select(brand => brand.Inner))
+            .Concat(_enums.Values);
         var generics = new List<TsType.Generic>();
         var taggedUnions = new List<TsType.TaggedUnion>();
-
-        void Walk(TsType? type)
+        foreach (var type in roots.SelectMany(root => root.SelfAndDescendants()))
         {
             switch (type)
             {
                 case TsType.Generic g:
                     generics.Add(g);
-                    foreach (var arg in g.TypeArguments)
-                    {
-                        Walk(arg);
-                    }
-
                     break;
                 case TsType.TaggedUnion tu:
                     taggedUnions.Add(tu);
-                    foreach (var v in tu.Variants)
-                    {
-                        Walk(v.Type);
-                    }
-
-                    break;
-                case TsType.Array a:
-                    Walk(a.Element);
-                    break;
-                case TsType.Nullable n:
-                    Walk(n.Inner);
-                    break;
-                case TsType.Dictionary d:
-                    Walk(d.Value);
-                    if (d.Key is not null)
-                    {
-                        Walk(d.Key);
-                    }
-
-                    break;
-                case TsType.Brand b:
-                    Walk(b.Inner);
-                    break;
-                case TsType.InlineObject obj:
-                    foreach (var field in obj.Fields)
-                    {
-                        Walk(field.Type);
-                    }
-
                     break;
             }
-        }
-
-        foreach (var ep in endpoints)
-        {
-            foreach (var p in ep.Params)
-            {
-                Walk(p.Type);
-            }
-
-            Walk(ep.ReturnType);
-            foreach (var r in ep.Responses)
-            {
-                Walk(r.DataType);
-            }
-
-            Walk(ep.RequestType);
-        }
-
-        foreach (var (_, def) in definitions)
-        {
-            if (def.Type is not null)
-            {
-                Walk(def.Type);
-                continue;
-            }
-
-            foreach (var prop in def.Properties)
-            {
-                Walk(prop.Type);
-            }
-        }
-
-        foreach (var (_, brand) in brands)
-        {
-            Walk(brand.Inner);
-        }
-
-        foreach (var (_, enumType) in enums)
-        {
-            Walk(enumType);
         }
 
         // Names already claimed by emitted definition/brand/enum schemas
         var usedNames = new HashSet<string>(
-            definitions.Where(kv => kv.Value.TypeParameters.Count == 0).Select(kv => kv.Key)
+            _definitions.Where(kv => kv.Value.TypeParameters.Count == 0).Select(kv => kv.Key)
         );
-        usedNames.UnionWith(brands.Keys);
-        usedNames.UnionWith(enums.Keys);
+        usedNames.UnionWith(_brands.Keys);
+        usedNames.UnionWith(_enums.Keys);
 
         foreach (var g in generics)
         {
             var hash = InlineTypeExtractor.CanonicalHash(g);
-            if (ctx.GenericNames.ContainsKey(hash))
+            if (_genericNames.ContainsKey(hash))
             {
                 continue;
             }
 
-            ctx.GenericNames[hash] = ClaimName(TsType.MonomorphisedName(g), usedNames);
+            _genericNames[hash] = ClaimName(TsType.MonomorphisedName(g), usedNames);
         }
 
         // Tagged unions that ARE a named type alias keep the alias as base name
-        foreach (var (name, def) in definitions)
+        foreach (var (name, def) in _definitions)
         {
             if (def.Type is TsType.TaggedUnion aliased)
             {
-                ctx.TaggedUnionNames.TryAdd(
+                _taggedUnionNames.TryAdd(
                     InlineTypeExtractor.CanonicalHash(aliased),
                     def.Metadata?.ComponentId ?? name
                 );
@@ -2787,12 +2397,12 @@ public static class OpenApiEmitter
         foreach (var tu in taggedUnions)
         {
             var hash = InlineTypeExtractor.CanonicalHash(tu);
-            if (ctx.TaggedUnionNames.ContainsKey(hash))
+            if (_taggedUnionNames.ContainsKey(hash))
             {
                 continue;
             }
 
-            ctx.TaggedUnionNames[hash] = ClaimName(TsType.GetNameSuffix(tu), usedNames);
+            _taggedUnionNames[hash] = ClaimName(TsType.GetNameSuffix(tu), usedNames);
         }
 
         foreach (var endpoint in endpoints)
@@ -2800,20 +2410,13 @@ public static class OpenApiEmitter
             var bodyType =
                 endpoint.Params.FirstOrDefault(param => param.Source == ParamSource.Body)?.Type
                 ?? endpoint.RequestType;
-            if (
-                !TryGetRouteFilteredBodyProperties(
-                    bodyType,
-                    endpoint,
-                    definitions,
-                    out var properties
-                )
-            )
+            if (!TryGetRouteFilteredBodyProperties(bodyType, endpoint, out var properties, out _))
             {
                 continue;
             }
 
             var identity = FilteredBodyIdentity(endpoint, properties);
-            if (ctx.FilteredBodyNames.ContainsKey(identity))
+            if (_filteredBodyNames.ContainsKey(identity))
             {
                 continue;
             }
@@ -2821,10 +2424,13 @@ public static class OpenApiEmitter
             var endpointName = Naming.ToPascalCaseFromSegments(endpoint.Name) + "Request";
             var controllerName =
                 Naming.ToPascalCaseFromSegments(endpoint.ControllerName) + endpointName;
-            var matchingDefinitionName = definitions
+            var matchingDefinitionName = _definitions
                 .Where(pair => pair.Value.TypeParameters.Count == 0 && pair.Value.Type is null)
                 .Where(pair =>
-                    SchemasEqual(BuildDefinitionSchema(pair.Value), BuildObjectSchema(properties))
+                    JsonNode.DeepEquals(
+                        BuildDefinitionSchema(pair.Value),
+                        BuildObjectSchema(properties)
+                    )
                 )
                 .OrderByDescending(pair => pair.Key == endpointName)
                 .ThenBy(pair => pair.Key, StringComparer.Ordinal)
@@ -2832,21 +2438,16 @@ public static class OpenApiEmitter
                 .FirstOrDefault();
             if (matchingDefinitionName is not null)
             {
-                ctx.FilteredBodyNames[identity] = matchingDefinitionName;
+                _filteredBodyNames[identity] = matchingDefinitionName;
             }
             else
             {
-                ctx.FilteredBodyNames[identity] = usedNames.Add(endpointName)
+                _filteredBodyNames[identity] = usedNames.Add(endpointName)
                     ? endpointName
                     : ClaimName(controllerName, usedNames);
             }
         }
     }
-
-    private static bool SchemasEqual(
-        Dictionary<string, object> left,
-        Dictionary<string, object> right
-    ) => JsonSerializer.Serialize(left) == JsonSerializer.Serialize(right);
 
     private static string ClaimName(string pureName, HashSet<string> usedNames)
     {
@@ -2861,16 +2462,11 @@ public static class OpenApiEmitter
         return name;
     }
 
-    private static Dictionary<string, object> BuildSchemas(
-        IReadOnlyList<TsEndpointDefinition> endpoints,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
-        IReadOnlyDictionary<string, TsType.Brand> brands,
-        IReadOnlyDictionary<string, TsType> enums
-    )
+    private JsonObject BuildSchemas(IReadOnlyList<TsEndpointDefinition> endpoints)
     {
-        var schemas = new Dictionary<string, object>();
+        var schemas = new JsonObject();
 
-        foreach (var (name, def) in definitions)
+        foreach (var (name, def) in _definitions)
         {
             if (def.TypeParameters.Count > 0)
             {
@@ -2886,7 +2482,7 @@ public static class OpenApiEmitter
 
         // Monomorphised generics: find all Generic type refs used across definitions and endpoints
         var genericInstances = new Dictionary<string, TsType.Generic>();
-        CollectGenericInstances(endpoints, definitions, genericInstances);
+        CollectGenericInstances(endpoints, genericInstances);
 
         // E6: templates are skipped during collection (their unresolved Generic refs are
         // garbage like PagedResult_T), so nested instantiations only surface when a
@@ -2896,31 +2492,29 @@ public static class OpenApiEmitter
         while (pending.Count > 0)
         {
             var instance = pending.Dequeue();
-            if (!definitions.TryGetValue(instance.Name, out var template))
+            if (!_definitions.TryGetValue(instance.Name, out var template))
             {
                 continue;
             }
 
-            var instanceMap = new Dictionary<string, TsType>();
-            for (
-                var i = 0;
-                i < Math.Min(template.TypeParameters.Count, instance.TypeArguments.Count);
-                i++
-            )
-            {
-                instanceMap[template.TypeParameters[i]] = instance.TypeArguments[i];
-            }
+            var instanceMap = TypeParameterMap(template, instance);
 
             var discovered = new Dictionary<string, TsType.Generic>();
             if (template.Type is not null)
             {
-                CollectGenericsFromType(ResolveTypeParams(template.Type, instanceMap), discovered);
+                CollectGenericsFromType(
+                    TsType.ResolveTypeParams(template.Type, instanceMap),
+                    discovered
+                );
             }
             else
             {
                 foreach (var prop in template.Properties)
                 {
-                    CollectGenericsFromType(ResolveTypeParams(prop.Type, instanceMap), discovered);
+                    CollectGenericsFromType(
+                        TsType.ResolveTypeParams(prop.Type, instanceMap),
+                        discovered
+                    );
                 }
             }
 
@@ -2935,7 +2529,7 @@ public static class OpenApiEmitter
 
         foreach (var (monoName, generic) in genericInstances)
         {
-            if (!definitions.TryGetValue(generic.Name, out var genericDef))
+            if (!_definitions.TryGetValue(generic.Name, out var genericDef))
             {
                 // E6: a generic instantiation whose template is absent from definitions used
                 // to emit a $ref with no matching component — a dangling reference every
@@ -2946,7 +2540,7 @@ public static class OpenApiEmitter
                     $"generic template '{generic.Name}' (instantiated as '{monoName}') is not present in the contract's type definitions — emitting a free-form object schema; fix the upstream producer to include the template definition"
                 );
 
-                schemas[monoName] = new Dictionary<string, object>
+                schemas[monoName] = new JsonObject
                 {
                     ["type"] = "object",
                     ["description"] =
@@ -2955,32 +2549,36 @@ public static class OpenApiEmitter
                 continue;
             }
 
-            // Build a type parameter → concrete type mapping
-            var typeParamMap = new Dictionary<string, TsType>();
-            for (
-                var i = 0;
-                i < Math.Min(genericDef.TypeParameters.Count, generic.TypeArguments.Count);
-                i++
-            )
-            {
-                typeParamMap[genericDef.TypeParameters[i]] = generic.TypeArguments[i];
-            }
-
-            var monoSchema = BuildMonomorphisedSchema(genericDef, typeParamMap);
-            monoSchema["x-rivet-generic"] = new Dictionary<string, object>
+            var typeParamMap = TypeParameterMap(genericDef, generic);
+            var monoSchema = genericDef.Type is not null
+                ? MapTsTypeToJsonSchema(
+                    TsType.ResolveTypeParams(genericDef.Type, typeParamMap),
+                    $"type '{genericDef.Name}'"
+                )
+                : BuildObjectSchema(
+                    genericDef
+                        .Properties.Select(prop =>
+                            prop with
+                            {
+                                Type = TsType.ResolveTypeParams(prop.Type, typeParamMap),
+                            }
+                        )
+                        .ToList(),
+                    typeName: genericDef.Name
+                );
+            monoSchema["x-rivet-generic"] = new JsonObject
             {
                 ["name"] = generic.Name,
-                ["typeParams"] = genericDef.TypeParameters.ToList(),
-                ["args"] = typeParamMap.ToDictionary(
-                    kv => kv.Key,
-                    kv => (object)GetCSharpTypeName(kv.Value)
+                ["typeParams"] = StringArray(genericDef.TypeParameters),
+                ["args"] = ObjectOf(
+                    typeParamMap.Select(kv => (kv.Key, (JsonNode?)GetCSharpTypeName(kv.Value)))
                 ),
             };
             schemas[monoName] = monoSchema;
         }
 
         // Brands as schemas with x-rivet-brand extension
-        foreach (var (name, brand) in brands)
+        foreach (var (name, brand) in _brands)
         {
             if (brand.Metadata?.Provenance == TsTypeProvenance.Synthetic)
             {
@@ -2996,7 +2594,7 @@ public static class OpenApiEmitter
         }
 
         // Enums as schemas
-        foreach (var (name, enumType) in enums)
+        foreach (var (name, enumType) in _enums)
         {
             var metadata = GetMetadata(enumType);
             if (metadata?.Provenance == TsTypeProvenance.Synthetic)
@@ -3004,11 +2602,11 @@ public static class OpenApiEmitter
                 continue;
             }
             var enumSchema = MapTsTypeToJsonSchema(enumType, $"enum '{name}'");
-            if (definitions.TryGetValue(name, out var scalarDefinition))
+            if (_definitions.TryGetValue(name, out var scalarDefinition))
             {
                 if (scalarDefinition.Type is TsType.Nullable)
                 {
-                    enumSchema["type"] = new List<string>
+                    enumSchema["type"] = new JsonArray
                     {
                         enumType is TsType.IntUnion ? "integer" : "string",
                         "null",
@@ -3022,7 +2620,7 @@ public static class OpenApiEmitter
         return schemas;
     }
 
-    private static Dictionary<string, object> BuildDefinitionSchema(TsTypeDefinition def)
+    private JsonObject BuildDefinitionSchema(TsTypeDefinition def)
     {
         if (def.Type is not null)
         {
@@ -3040,10 +2638,7 @@ public static class OpenApiEmitter
         return BuildObjectSchema(def.Properties, def.Description, def.Name, def.ScalarMetadata);
     }
 
-    private static void EnrichScalarSchema(
-        Dictionary<string, object> schema,
-        TsScalarMetadata? metadata
-    )
+    private static void EnrichScalarSchema(JsonObject schema, TsScalarMetadata? metadata)
     {
         if (metadata is null)
         {
@@ -3079,20 +2674,29 @@ public static class OpenApiEmitter
         }
         if (metadata.Required is { Count: > 0 })
         {
-            schema["required"] = metadata.Required;
+            schema["required"] = StringArray(metadata.Required);
         }
 
         if (metadata.DefaultValue is not null)
         {
-            schema["default"] = JsonSerializer.Deserialize<JsonElement>(metadata.DefaultValue);
+            schema["default"] = SchemaEnricher.ParseJsonLiteral(
+                metadata.DefaultValue,
+                "schema metadata default"
+            );
         }
         if (metadata.Example is not null)
         {
-            schema["example"] = JsonSerializer.Deserialize<JsonElement>(metadata.Example);
+            schema["example"] = SchemaEnricher.ParseJsonLiteral(
+                metadata.Example,
+                "schema metadata example"
+            );
         }
         if (metadata.Examples is not null)
         {
-            schema["examples"] = JsonSerializer.Deserialize<JsonElement>(metadata.Examples);
+            schema["examples"] = SchemaEnricher.ParseJsonLiteral(
+                metadata.Examples,
+                "schema metadata examples"
+            );
         }
         if (metadata.IsDeprecated)
         {
@@ -3109,7 +2713,7 @@ public static class OpenApiEmitter
         SchemaEnricher.EnrichConstraints(schema, metadata.Constraints);
         if (metadata.Xml is { } xml)
         {
-            var value = new Dictionary<string, object>();
+            var value = new JsonObject();
             AddOptionalString(value, "name", xml.Name);
             AddOptionalString(value, "namespace", xml.Namespace);
             AddOptionalString(value, "prefix", xml.Prefix);
@@ -3125,35 +2729,34 @@ public static class OpenApiEmitter
         }
     }
 
-    private static void ApplyNullableMetadata(Dictionary<string, object> schema)
+    private static void ApplyNullableMetadata(JsonObject schema)
     {
-        if (schema.TryGetValue("type", out var value) && value is string type)
+        switch (schema["type"])
         {
-            schema["type"] = new List<string> { type, "null" };
-            return;
-        }
-        if (value is IEnumerable<string> types && types.Contains("null", StringComparer.Ordinal))
-        {
-            return;
+            case JsonValue value when value.TryGetValue<string>(out var type):
+                schema["type"] = new JsonArray { type, "null" };
+                return;
+            case JsonArray types when types.Any(type => (string?)type == "null"):
+                return;
         }
 
-        var inner = new Dictionary<string, object>(schema);
+        var inner = schema.DeepClone().AsObject();
         schema.Clear();
-        schema[inner.ContainsKey("$ref") ? "oneOf" : "anyOf"] = new List<object>
+        schema[inner.ContainsKey("$ref") ? "oneOf" : "anyOf"] = new JsonArray
         {
             inner,
-            new Dictionary<string, object> { ["type"] = "null" },
+            new JsonObject { ["type"] = "null" },
         };
     }
 
-    private static Dictionary<string, object> BuildObjectSchema(
+    private JsonObject BuildObjectSchema(
         IReadOnlyList<TsPropertyDefinition> propertiesDefinition,
         string? description = null,
         string? typeName = null,
         TsScalarMetadata? metadata = null
     )
     {
-        var properties = new Dictionary<string, object>();
+        var properties = new JsonObject();
         var required = new List<string>();
 
         foreach (var prop in propertiesDefinition)
@@ -3172,11 +2775,7 @@ public static class OpenApiEmitter
             }
         }
 
-        var schema = new Dictionary<string, object>
-        {
-            ["type"] = "object",
-            ["properties"] = properties,
-        };
+        var schema = new JsonObject { ["type"] = "object", ["properties"] = properties };
 
         if (description is not null)
         {
@@ -3185,7 +2784,7 @@ public static class OpenApiEmitter
 
         if (required.Count > 0)
         {
-            schema["required"] = required;
+            schema["required"] = StringArray(required);
         }
 
         if (properties.Count == 0)
@@ -3198,14 +2797,11 @@ public static class OpenApiEmitter
         return schema;
     }
 
-    private static Dictionary<string, object> BuildArraySchema(
-        TsType.Array a,
-        string? context = null
-    )
+    private JsonObject BuildArraySchema(TsType.Array a, string? context = null)
     {
         var items = MapTsTypeToJsonSchema(a.Element, context);
         EnrichScalarSchema(items, a.ElementMetadata);
-        var schema = new Dictionary<string, object> { ["type"] = "array", ["items"] = items };
+        var schema = new JsonObject { ["type"] = "array", ["items"] = items };
 
         // JsonArray is represented internally as an array of unknown values.
         // Other element-side CLR tags describe the item, not its parent.
@@ -3217,18 +2813,11 @@ public static class OpenApiEmitter
         return schema;
     }
 
-    private static Dictionary<string, object> BuildDictionarySchema(
-        TsType.Dictionary d,
-        string? context = null
-    )
+    private JsonObject BuildDictionarySchema(TsType.Dictionary d, string? context = null)
     {
         var value = MapTsTypeToJsonSchema(d.Value, context);
         EnrichScalarSchema(value, d.ValueMetadata);
-        var schema = new Dictionary<string, object>
-        {
-            ["type"] = "object",
-            ["additionalProperties"] = value,
-        };
+        var schema = new JsonObject { ["type"] = "object", ["additionalProperties"] = value };
 
         // Non-string key types constrain the keys via propertyNames (OpenAPI 3.1 /
         // JSON Schema 2020-12): enum/brand keys $ref their component schema; primitive
@@ -3249,14 +2838,14 @@ public static class OpenApiEmitter
         return schema;
     }
 
-    private static Dictionary<string, object> BuildDictionaryKeySchema(TsType key, string? context)
+    private JsonObject BuildDictionaryKeySchema(TsType key, string? context)
     {
         // Primitive keys are built inline rather than via MapPrimitive: property names
         // are always strings, but a numeric format (int32, …) would flip MapPrimitive's
         // emitted type to integer — invalid under propertyNames.
         if (key is TsType.Primitive p)
         {
-            var schema = new Dictionary<string, object> { ["type"] = "string" };
+            var schema = new JsonObject { ["type"] = "string" };
             if (p.Format is not null)
             {
                 schema["format"] = p.Format;
@@ -3279,85 +2868,26 @@ public static class OpenApiEmitter
         return MapTsTypeToJsonSchema(key, context);
     }
 
-    private static Dictionary<string, object> BuildMonomorphisedSchema(
-        TsTypeDefinition genericDef,
-        Dictionary<string, TsType> typeParamMap
-    )
-    {
-        var properties = new Dictionary<string, object>();
-        var required = new List<string>();
+    private static Dictionary<string, TsType> TypeParameterMap(
+        TsTypeDefinition template,
+        TsType.Generic instance
+    ) =>
+        template
+            .TypeParameters.Zip(instance.TypeArguments)
+            .ToDictionary(pair => pair.First, pair => pair.Second, StringComparer.Ordinal);
 
-        if (genericDef.Type is not null)
-        {
-            return MapTsTypeToJsonSchema(
-                ResolveTypeParams(genericDef.Type, typeParamMap),
-                $"type '{genericDef.Name}'"
-            );
-        }
-
-        foreach (var prop in genericDef.Properties)
-        {
-            var resolvedType = ResolveTypeParams(prop.Type, typeParamMap);
-            var propSchema = MapTsTypeToJsonSchema(
-                resolvedType,
-                $"property '{genericDef.Name}.{prop.Name}'"
-            );
-            SchemaEnricher.EnrichPropertySchema(propSchema, prop);
-            properties[prop.Name] = propSchema;
-
-            if (!prop.IsOptional)
-            {
-                required.Add(prop.Name);
-            }
-        }
-
-        var schema = new Dictionary<string, object>
-        {
-            ["type"] = "object",
-            ["properties"] = properties,
-        };
-
-        if (required.Count > 0)
-        {
-            schema["required"] = required;
-        }
-
-        return schema;
-    }
-
-    private static TsType ResolveTypeParams(TsType type, Dictionary<string, TsType> map) =>
-        TsType.ResolveTypeParams(type, map);
-
-    private static void CollectGenericInstances(
+    private void CollectGenericInstances(
         IReadOnlyList<TsEndpointDefinition> endpoints,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         Dictionary<string, TsType.Generic> genericInstances
     )
     {
-        // Walk endpoint params and responses for Generic type usages
-        foreach (var ep in endpoints)
+        foreach (var (_, type) in endpoints.SelectMany(endpoint => endpoint.AllTypes()))
         {
-            foreach (var param in ep.Params)
-            {
-                CollectGenericsFromType(param.Type, genericInstances);
-            }
-
-            foreach (var resp in ep.Responses)
-            {
-                if (resp.DataType is not null)
-                {
-                    CollectGenericsFromType(resp.DataType, genericInstances);
-                }
-            }
-
-            if (ep.RequestType is not null)
-            {
-                CollectGenericsFromType(ep.RequestType, genericInstances);
-            }
+            CollectGenericsFromType(type, genericInstances);
         }
 
-        // Walk all definitions' properties (all schemas are emitted, so all generics must be monomorphised)
-        foreach (var (_, def) in definitions)
+        // Every definition schema is emitted, so every generic it uses must be monomorphised.
+        foreach (var (_, def) in _definitions)
         {
             // E6: skip generic TEMPLATE definitions — their Generic refs still contain
             // unresolved TypeParams and used to register garbage Foo_T instances. Only
@@ -3380,48 +2910,11 @@ public static class OpenApiEmitter
         }
     }
 
-    private static void CollectGenericsFromType(
-        TsType type,
-        Dictionary<string, TsType.Generic> instances
-    )
+    private void CollectGenericsFromType(TsType type, Dictionary<string, TsType.Generic> instances)
     {
-        switch (type)
+        foreach (var generic in type.SelfAndDescendants().OfType<TsType.Generic>())
         {
-            case TsType.Generic g:
-                instances.TryAdd(MonomorphisedName(g), g);
-                foreach (var arg in g.TypeArguments)
-                {
-                    CollectGenericsFromType(arg, instances);
-                }
-                break;
-            case TsType.Array a:
-                CollectGenericsFromType(a.Element, instances);
-                break;
-            case TsType.Nullable n:
-                CollectGenericsFromType(n.Inner, instances);
-                break;
-            case TsType.Dictionary d:
-                CollectGenericsFromType(d.Value, instances);
-                if (d.Key is not null)
-                {
-                    CollectGenericsFromType(d.Key, instances);
-                }
-                break;
-            case TsType.InlineObject obj:
-                foreach (var field in obj.Fields)
-                {
-                    CollectGenericsFromType(field.Type, instances);
-                }
-                break;
-            case TsType.TaggedUnion tu:
-                foreach (var variant in tu.Variants)
-                {
-                    CollectGenericsFromType(variant.Type, instances);
-                }
-                break;
-            case TsType.Brand b:
-                CollectGenericsFromType(b.Inner, instances);
-                break;
+            instances.TryAdd(MonomorphisedName(generic), generic);
         }
     }
 
@@ -3484,6 +2977,4 @@ public static class OpenApiEmitter
             _ => "object",
         };
     }
-
-    private static string UpperFirst(string s) => Naming.ToPascalCase(s);
 }

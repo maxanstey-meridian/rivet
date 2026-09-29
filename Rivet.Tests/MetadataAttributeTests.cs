@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Rivet.Tool;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
@@ -748,10 +750,10 @@ public sealed class MetadataAttributeTests
         Assert.Equal(1, page.GetProperty("default").GetInt32());
     }
 
-    // ========== SchemaEnricher invalid JSON default fallback ==========
+    // ========== Invalid JSON default is a user error ==========
 
     [Fact]
-    public void RivetDefault_Invalid_Json_Falls_Back_To_Raw_String()
+    public void RivetDefault_Invalid_Json_Is_Refused()
     {
         var source = """
             using Rivet;
@@ -768,19 +770,11 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        using var doc = CompilationHelper.EmitOpenApi(source);
-        var prop = doc
-            .RootElement.GetProperty("components")
-            .GetProperty("schemas")
-            .GetProperty("ConfigDto")
-            .GetProperty("properties")
-            .GetProperty("mode");
-
-        Assert.True(
-            prop.TryGetProperty("default", out var def),
-            "default should be present even for invalid JSON"
+        var exception = Assert.Throws<RivetUserException>(() => CompilationHelper.EmitOpenApi(source));
+        Assert.Contains(
+            "default of property 'mode' must be a JSON literal, got 'not-valid-json'",
+            exception.Message
         );
-        Assert.Equal("not-valid-json", def.GetString());
     }
 
     // ========== Constraints override integer range ==========

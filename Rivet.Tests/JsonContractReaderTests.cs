@@ -985,7 +985,7 @@ public sealed class JsonContractReaderTests
                     "dataType": { "kind": "primitive", "type": "string" },
                     "description": "first",
                     "examples": [{ "mediaType": "application/json", "name": "first", "json": "{}" }],
-                    "headers": [{ "name": "X-First", "description": "first header", "required": true }]
+                    "headers": [{ "name": "X-First", "type": { "kind": "primitive", "type": "string" }, "description": "first header", "required": true }]
                   },
                   { "statusCode": 404, "dataType": { "kind": "primitive", "type": "number" }, "description": "second" },
                   { "statusCode": 200, "description": "success" }
@@ -1014,6 +1014,52 @@ public sealed class JsonContractReaderTests
         Assert.Equal("first", Assert.Single(response404.Examples!).Name);
         Assert.Equal("X-First", Assert.Single(response404.Headers!).Name);
         Assert.Equal(1, stderr.Split("warning RIV2010:").Length - 1);
+    }
+
+    [Theory]
+    [InlineData(
+        """{ "name": "X-Page", "description": "no type" }""",
+        "[]",
+        "[]",
+        "TsResponseHeader' was missing required properties including: 'type'"
+    )]
+    [InlineData(
+        "null",
+        """[{ "name": "id", "source": "route" }]""",
+        "[]",
+        "TsEndpointParam' was missing required properties including: 'type'"
+    )]
+    [InlineData(
+        "null",
+        "[]",
+        """[{ "name": "User", "typeParameters": [], "properties": [{ "name": "id", "optional": false }] }]""",
+        "TsPropertyDefinition' was missing required properties including: 'type'"
+    )]
+    public void Missing_Required_Type_Is_Refused(
+        string header,
+        string parameters,
+        string types,
+        string expected
+    )
+    {
+        var headers = header == "null" ? "" : $", \"headers\": [{header}]";
+        var json = $$"""
+            {
+              "types": {{types}},
+              "enums": [],
+              "endpoints": [{
+                "name": "getUser",
+                "httpMethod": "GET",
+                "routeTemplate": "/api/users/{id}",
+                "params": {{parameters}},
+                "controllerName": "users",
+                "responses": [{ "statusCode": 200, "description": "ok"{{headers}} }]
+              }]
+            }
+            """;
+
+        var exception = Assert.Throws<JsonException>(() => JsonContractReader.Read(json));
+        Assert.Contains(expected, exception.Message);
     }
 
     [Fact]

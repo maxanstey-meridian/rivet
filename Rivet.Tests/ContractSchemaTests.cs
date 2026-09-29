@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Json.Schema;
-using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;

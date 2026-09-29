@@ -1,18 +1,23 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Emit;
 
 /// <summary>
-/// Shared logic for enriching a JSON/OpenAPI property schema dictionary
-/// with metadata from a TsPropertyDefinition.
+/// Shared logic for enriching a JSON/OpenAPI property schema with metadata from a
+/// TsPropertyDefinition.
 /// </summary>
 internal static class SchemaEnricher
 {
-    public static void EnrichPropertySchema(
-        Dictionary<string, object> propSchema,
-        TsPropertyDefinition prop
-    )
+    private static readonly JsonSerializerOptions _constraintOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    public static void EnrichPropertySchema(JsonObject propSchema, TsPropertyDefinition prop)
     {
         if (prop.Description is not null)
         {
@@ -26,33 +31,19 @@ internal static class SchemaEnricher
 
         if (prop.DefaultValue is not null)
         {
-            try
-            {
-                propSchema["default"] = JsonSerializer.Deserialize<object>(prop.DefaultValue)!;
-            }
-            catch (JsonException)
-            {
-                // Invalid JSON literal — emit as raw string rather than crashing
-                propSchema["default"] = prop.DefaultValue;
-            }
+            propSchema["default"] = ParseJsonLiteral(
+                prop.DefaultValue,
+                $"default of property '{prop.Name}'"
+            );
         }
 
         if (prop.Example is not null)
         {
             // OpenAPI 3.1 / JSON Schema 2020-12: schema-level `example` is replaced by
             // the `examples` keyword (an array of example values).
-            object exampleValue;
-            try
-            {
-                exampleValue = JsonSerializer.Deserialize<object>(prop.Example)!;
-            }
-            catch (JsonException)
-            {
-                // Invalid JSON literal — emit as raw string rather than crashing
-                exampleValue = prop.Example;
-            }
-
-            propSchema["examples"] = new List<object> { exampleValue };
+            propSchema["examples"] = new JsonArray(
+                ParseJsonLiteral(prop.Example, $"example of property '{prop.Name}'")
+            );
         }
 
         if (prop.IsReadOnly)
@@ -73,67 +64,40 @@ internal static class SchemaEnricher
         }
     }
 
-    public static void EnrichConstraints(
-        Dictionary<string, object> schema,
-        TsPropertyConstraints? constraints
-    )
+    public static void EnrichConstraints(JsonObject schema, TsPropertyConstraints? constraints)
     {
-        if (constraints is { } cc)
+        if (constraints is null)
         {
-            if (cc.MinLength.HasValue)
-            {
-                schema["minLength"] = cc.MinLength.Value;
-            }
+            return;
+        }
 
-            if (cc.MaxLength.HasValue)
+        var keywords = JsonSerializer.SerializeToNode(constraints, _constraintOptions)!.AsObject();
+        foreach (var (keyword, value) in keywords.ToList())
+        {
+            keywords.Remove(keyword);
+            // uniqueItems: false is the JSON Schema default, so only true is a constraint.
+            if (keyword != "uniqueItems" || value!.GetValue<bool>())
             {
-                schema["maxLength"] = cc.MaxLength.Value;
+                schema[keyword] = value;
             }
+        }
+    }
 
-            if (cc.Pattern is not null)
-            {
-                schema["pattern"] = cc.Pattern;
-            }
-
-            if (cc.Minimum.HasValue)
-            {
-                schema["minimum"] = cc.Minimum.Value;
-            }
-
-            if (cc.Maximum.HasValue)
-            {
-                schema["maximum"] = cc.Maximum.Value;
-            }
-
-            if (cc.ExclusiveMinimum.HasValue)
-            {
-                schema["exclusiveMinimum"] = cc.ExclusiveMinimum.Value;
-            }
-
-            if (cc.ExclusiveMaximum.HasValue)
-            {
-                schema["exclusiveMaximum"] = cc.ExclusiveMaximum.Value;
-            }
-
-            if (cc.MultipleOf.HasValue)
-            {
-                schema["multipleOf"] = cc.MultipleOf.Value;
-            }
-
-            if (cc.MinItems.HasValue)
-            {
-                schema["minItems"] = cc.MinItems.Value;
-            }
-
-            if (cc.MaxItems.HasValue)
-            {
-                schema["maxItems"] = cc.MaxItems.Value;
-            }
-
-            if (cc.UniqueItems == true)
-            {
-                schema["uniqueItems"] = true;
-            }
+    /// <summary>
+    /// Parses an authored JSON literal (<c>[RivetDefault]</c>, <c>[RivetExample]</c>, scalar
+    /// metadata); anything else is a user error rather than a guess.
+    /// </summary>
+    public static JsonNode? ParseJsonLiteral(string json, string what)
+    {
+        try
+        {
+            return JsonNode.Parse(json);
+        }
+        catch (JsonException exception)
+        {
+            throw new RivetUserException(
+                $"error: {what} must be a JSON literal, got '{json}' ({exception.Message})"
+            );
         }
     }
 }

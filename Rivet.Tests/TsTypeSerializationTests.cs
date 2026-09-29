@@ -1,17 +1,12 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
 public sealed class TsTypeSerializationTests
 {
-    private static readonly JsonSerializerOptions _options = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new TsTypeJsonConverter() },
-    };
+    private static readonly JsonSerializerOptions _options = JsonContractReader.Options;
 
     [Fact]
     public void Primitive_Serializes_With_Kind_And_Type()
@@ -447,7 +442,22 @@ public sealed class TsTypeSerializationTests
     [Fact]
     public void Deserialize_MissingKind_Throws()
     {
-        var json = """{"type":"string"}""";
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<TsType>(json, _options));
+        var json = """
+            {
+              "types": [{ "name": "User", "typeParameters": [], "type": { "type": "string" } }],
+              "enums": []
+            }
+            """;
+        Assert.Throws<JsonException>(() => JsonContractReader.Read(json));
+    }
+
+    [Fact]
+    public void Deserialize_Kind_Need_Not_Come_First()
+    {
+        var json = """{"type":"string","format":"uuid","kind":"primitive"}""";
+        Assert.Equal(
+            new TsType.Primitive("string", "uuid"),
+            JsonSerializer.Deserialize<TsType>(json, _options)
+        );
     }
 }

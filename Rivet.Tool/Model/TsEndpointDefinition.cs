@@ -49,7 +49,64 @@ public sealed record TsEndpointDefinition(
         bool RequestBodyPresent = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         OpenApiOperationProvenance? Provenance = null
-);
+)
+{
+    /// <summary>
+    /// Every type on the endpoint surface, each with its site relative to the endpoint
+    /// ("return", "response.200", "param.id", ...): the return type, each response's data
+    /// type, content schemas and headers, then the params, request type and request contents.
+    /// </summary>
+    public IEnumerable<(string Site, TsType Type)> AllTypes()
+    {
+        if (ReturnType is not null)
+        {
+            yield return ("return", ReturnType);
+        }
+
+        foreach (var response in Responses)
+        {
+            if (response.DataType is not null)
+            {
+                yield return ($"response.{response.StatusCode}", response.DataType);
+            }
+            foreach (var content in response.Contents ?? [])
+            {
+                if (content.Schema is not null)
+                {
+                    yield return (
+                        $"response.{response.EffectiveStatusKey}.content.{content.MediaType}",
+                        content.Schema
+                    );
+                }
+            }
+            foreach (var header in response.Headers ?? [])
+            {
+                yield return (
+                    $"response.{response.EffectiveStatusKey}.header.{header.Name}",
+                    header.Type
+                );
+            }
+        }
+
+        foreach (var param in Params)
+        {
+            yield return ($"param.{param.Name}", param.Type);
+        }
+
+        if (RequestType is not null)
+        {
+            yield return ("requestType", RequestType);
+        }
+
+        foreach (var content in RequestContents ?? [])
+        {
+            if (content.Schema is not null)
+            {
+                yield return ($"requestContent.{content.MediaType}", content.Schema);
+            }
+        }
+    }
+}
 
 /// <summary>
 /// Security metadata for an endpoint. null = inherit CLI default.
@@ -60,7 +117,8 @@ public sealed record EndpointSecurity(bool IsAnonymous, string? Scheme = null);
 /// A typed response for a given status code.
 /// </summary>
 public sealed record TsResponseType(
-    int StatusCode,
+    // 0 means "no numeric status" (default/range keys) and is absent on the wire.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int StatusCode,
     TsType? DataType,
     string? Description = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -72,6 +130,7 @@ public sealed record TsResponseType(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StatusKey = null
 )
 {
+    [JsonIgnore]
     public string EffectiveStatusKey => StatusKey ?? StatusCode.ToString();
 }
 
@@ -95,7 +154,7 @@ public sealed record TsMediaTypeContent(
 /// </summary>
 public sealed record TsResponseHeader(
     string Name,
-    TsType Type,
+    [property: JsonRequired] TsType Type,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? Description = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
@@ -124,7 +183,7 @@ public sealed record TsResponseHeader(
 /// </summary>
 public sealed record TsEndpointParam(
     string Name,
-    TsType Type,
+    [property: JsonRequired] TsType Type,
     ParamSource Source,
     bool IsOptional = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

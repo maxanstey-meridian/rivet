@@ -6,20 +6,38 @@ using Rivet.Tool.Model;
 namespace Rivet.Tool.Emit;
 
 /// <summary>
-/// Deserializes a Rivet contract JSON string into typed definitions and enums.
-/// Reuses TsTypeJsonConverter for all TsType variant handling.
+/// Reads Rivet contract JSON (<c>--from</c>; the shape rivet-ts produces and
+/// <c>rivet-contract-schema.json</c> describes) straight into the IR records.
 /// </summary>
 public static class JsonContractReader
 {
-    private static readonly JsonSerializerOptions _options = new()
+    internal static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters =
-        {
-            new TsTypeJsonConverter(),
-            new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
-        },
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        // Producers need not write "kind" first.
+        AllowOutOfOrderMetadataProperties = true,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
+
+    internal sealed record RivetContract(
+        IReadOnlyList<TsTypeDefinition> Types,
+        IReadOnlyList<ContractEnum> Enums,
+        IReadOnlyList<TsEndpointDefinition>? Endpoints = null
+    );
+
+    /// <summary>An enum declaration: string members in <c>values</c> or integer members in <c>intValues</c>.</summary>
+    internal sealed record ContractEnum(
+        string Name,
+        IReadOnlyList<string>? Values = null,
+        [property: JsonConverter(typeof(IntEnumValuesJsonConverter))]
+            IReadOnlyList<string>? IntValues = null,
+        string? Format = null,
+        string? Description = null,
+        TsTypeMetadata? Metadata = null,
+        TsScalarMetadata? ScalarMetadata = null,
+        string? NamingPolicy = null
+    );
 
     public static (
         IReadOnlyList<TsTypeDefinition> Types,
@@ -28,26 +46,31 @@ public static class JsonContractReader
         Dictionary<string, TsType.Brand> Brands
     ) Read(string json)
     {
-        var contract =
-            JsonSerializer.Deserialize<ContractEmitter.RivetContract>(json, _options)
-            ?? throw new JsonException("Failed to deserialize contract JSON.");
+        RivetContract contract;
+        try
+        {
+            contract =
+                JsonSerializer.Deserialize<RivetContract>(json, Options)
+                ?? throw new JsonException("Failed to deserialize contract JSON.");
+        }
+        catch (NotSupportedException exception)
+        {
+            // A TsType without "kind" can only bind to the abstract base.
+            throw new JsonException(exception.Message, exception);
+        }
 
         var enums = new Dictionary<string, TsType>();
         foreach (var e in contract.Enums)
         {
-            if (e.IntValues is not null)
-            {
-                enums[e.Name] = new TsType.IntUnion(
+            enums[e.Name] = e.IntValues is not null
+                ? new TsType.IntUnion(
                     e.IntValues,
                     e.Format,
                     e.Metadata,
                     e.Description,
                     e.ScalarMetadata
-                );
-            }
-            else
-            {
-                enums[e.Name] = new TsType.StringUnion(
+                )
+                : new TsType.StringUnion(
                     e.Values!,
                     e.Metadata,
                     e.Format,
@@ -55,253 +78,62 @@ public static class JsonContractReader
                     e.ScalarMetadata,
                     e.NamingPolicy
                 );
-            }
         }
 
-        var endpoints = contract.Endpoints?.Select(ToEndpointDefinition).ToList() ?? [];
-        var types = contract.Types.Select(ToTypeDefinition).ToList();
+        var endpoints = (contract.Endpoints ?? []).Select(NormalizeResponses).ToList();
 
-        // BUG-1: the contract JSON has no top-level brands dictionary — brands exist
-        // only as inline kind:"brand" nodes (the TS lowerer emits them that way). The
-        // OpenAPI emitter $refs every brand by name, so dropping them here produced
-        // dangling $refs. Collect every inline Brand node into the brands registry.
-        var brands = CollectBrands(types, endpoints);
+        // The contract JSON has no top-level brands dictionary: brands exist only as inline
+        // kind:"brand" nodes, and the OpenAPI emitter $refs every brand by name.
+        var brands = CollectBrands(contract.Types, endpoints);
 
-        return (types, enums, endpoints, brands);
+        return (contract.Types, enums, endpoints, brands);
     }
+
+    private static TsEndpointDefinition NormalizeResponses(TsEndpointDefinition endpoint) =>
+        endpoint with
+        {
+            Responses = ResponseStatusValidation.NormalizeIrAndEnsureResponse(
+                endpoint.Responses.Select(response =>
+                    response.StatusCode == 0 && int.TryParse(response.StatusKey, out var code)
+                        ? response with
+                        {
+                            StatusCode = code,
+                        }
+                        : response
+                ),
+                endpoint.Name,
+                endpoint.HttpMethod,
+                endpoint.ReturnType
+            ),
+        };
 
     private static Dictionary<string, TsType.Brand> CollectBrands(
         IReadOnlyList<TsTypeDefinition> types,
         IReadOnlyList<TsEndpointDefinition> endpoints
     )
     {
+        var roots = types
+            .SelectMany(type =>
+                type.Type is null ? type.Properties.Select(prop => prop.Type) : [type.Type]
+            )
+            .Concat(
+                endpoints.SelectMany(endpoint => endpoint.AllTypes().Select(site => site.Type))
+            );
+
         var brands = new Dictionary<string, TsType.Brand>();
-
-        foreach (var type in types)
+        foreach (
+            var brand in roots.SelectMany(root => root.SelfAndDescendants()).OfType<TsType.Brand>()
+        )
         {
-            if (type.Type is not null)
+            if (!brands.TryAdd(brand.Name, brand) && brands[brand.Name] != brand)
             {
-                WalkForBrands(type.Type, brands);
-            }
-
-            foreach (var prop in type.Properties)
-            {
-                WalkForBrands(prop.Type, brands);
-            }
-        }
-
-        foreach (var endpoint in endpoints)
-        {
-            foreach (var param in endpoint.Params)
-            {
-                WalkForBrands(param.Type, brands);
-            }
-
-            if (endpoint.ReturnType is not null)
-            {
-                WalkForBrands(endpoint.ReturnType, brands);
-            }
-
-            if (endpoint.RequestType is not null)
-            {
-                WalkForBrands(endpoint.RequestType, brands);
-            }
-
-            foreach (var content in endpoint.RequestContents ?? [])
-            {
-                if (content.Schema is not null)
-                {
-                    WalkForBrands(content.Schema, brands);
-                }
-            }
-
-            foreach (var response in endpoint.Responses)
-            {
-                if (response.DataType is not null)
-                {
-                    WalkForBrands(response.DataType, brands);
-                }
-
-                foreach (var content in response.Contents ?? [])
-                {
-                    if (content.Schema is not null)
-                    {
-                        WalkForBrands(content.Schema, brands);
-                    }
-                }
-
-                foreach (var header in response.Headers ?? [])
-                {
-                    WalkForBrands(header.Type, brands);
-                }
+                Diagnostics.Warn(
+                    Diagnostics.BrandConflictingUnderlyingTypes,
+                    $"brand '{brand.Name}' declared with conflicting underlying types — first declaration wins"
+                );
             }
         }
 
         return brands;
-    }
-
-    private static void WalkForBrands(TsType type, Dictionary<string, TsType.Brand> brands)
-    {
-        switch (type)
-        {
-            case TsType.Brand b:
-                if (brands.TryGetValue(b.Name, out var existing))
-                {
-                    if (existing != b)
-                    {
-                        Diagnostics.Warn(
-                            Diagnostics.BrandConflictingUnderlyingTypes,
-                            $"brand '{b.Name}' declared with conflicting underlying types — first declaration wins"
-                        );
-                    }
-                }
-                else
-                {
-                    brands[b.Name] = b;
-                }
-
-                WalkForBrands(b.Inner, brands);
-                break;
-            case TsType.Nullable n:
-                WalkForBrands(n.Inner, brands);
-                break;
-            case TsType.Array a:
-                WalkForBrands(a.Element, brands);
-                break;
-            case TsType.Dictionary d:
-                WalkForBrands(d.Value, brands);
-                if (d.Key is not null)
-                {
-                    WalkForBrands(d.Key, brands);
-                }
-                break;
-            case TsType.Generic g:
-                foreach (var arg in g.TypeArguments)
-                {
-                    WalkForBrands(arg, brands);
-                }
-
-                break;
-            case TsType.InlineObject obj:
-                foreach (var field in obj.Fields)
-                {
-                    WalkForBrands(field.Type, brands);
-                }
-
-                break;
-            case TsType.TaggedUnion tu:
-                foreach (var variant in tu.Variants)
-                {
-                    WalkForBrands(variant.Type, brands);
-                }
-
-                break;
-            case TsType.Union u:
-                foreach (var variant in u.Variants)
-                {
-                    WalkForBrands(variant, brands);
-                }
-
-                break;
-        }
-    }
-
-    private static TsEndpointDefinition ToEndpointDefinition(
-        ContractEmitter.ContractEndpoint endpoint
-    )
-    {
-        var responses = ResponseStatusValidation.NormalizeIrAndEnsureResponse(
-            endpoint.Responses.Select(ToResponseType),
-            endpoint.Name,
-            endpoint.HttpMethod,
-            endpoint.ReturnType
-        );
-
-        return new TsEndpointDefinition(
-            endpoint.Name,
-            endpoint.HttpMethod,
-            endpoint.RouteTemplate,
-            endpoint.Params,
-            endpoint.ReturnType,
-            endpoint.ControllerName,
-            responses,
-            endpoint.Summary,
-            endpoint.Description,
-            endpoint.Security,
-            endpoint.FileContentType,
-            endpoint.InputTypeName,
-            endpoint.IsFormEncoded,
-            endpoint.RequestType,
-            endpoint.RequestExamples?.Select(ToEndpointExample).ToList(),
-            // E5/N3: these were serialized by ContractEmitter but silently dropped on read —
-            // file endpoints and query-auth must survive the JSON contract round-trip.
-            endpoint.IsFileEndpoint,
-            endpoint.QueryAuth is { } qa ? new QueryAuthMetadata(qa.ParameterName) : null,
-            // Raw-binary request bodies (rivet-ts pipeline) must survive the
-            // contract-JSON round-trip like IsFileEndpoint/QueryAuth above.
-            endpoint.BinaryRequestContentType,
-            endpoint.RequestContentTypeOverride,
-            endpoint.ResponseContentTypeOverride,
-            SecurityRequirements: endpoint.SecurityRequirements,
-            RequestContents: endpoint.RequestContents,
-            RequestBodyRequired: endpoint.RequestBodyRequired,
-            RequestBodyPresent: endpoint.RequestBodyPresent,
-            Provenance: endpoint.Provenance
-        );
-    }
-
-    private static TsResponseType ToResponseType(ContractEmitter.ContractResponseType response)
-    {
-        return new TsResponseType(
-            response.StatusCode ?? ParseStatusCode(response.StatusKey),
-            response.DataType,
-            response.Description,
-            response.Examples?.Select(ToEndpointExample).ToList(),
-            // P2 wave 5: headers are optional in contract JSON — absence (old contracts,
-            // TS lowerer output) deserializes to null and is tolerated everywhere.
-            response.Headers,
-            response.Contents,
-            response.StatusKey
-        );
-    }
-
-    private static int ParseStatusCode(string? statusKey) =>
-        int.TryParse(statusKey, out var statusCode) ? statusCode : 0;
-
-    private static TsEndpointExample ToEndpointExample(
-        ContractEmitter.ContractEndpointExample example
-    )
-    {
-        return new TsEndpointExample(
-            example.MediaType,
-            example.Name,
-            example.Json,
-            example.ComponentExampleId,
-            example.ResolvedJson,
-            example.ReferencedComponents
-        );
-    }
-
-    private static TsTypeDefinition ToTypeDefinition(
-        ContractEmitter.ContractTypeDefinition definition
-    )
-    {
-        return definition.Type is not null
-            ? new TsTypeDefinition(
-                definition.Name,
-                definition.TypeParameters,
-                definition.Type,
-                definition.Description,
-                definition.Metadata,
-                definition.ScalarMetadata
-            )
-            : new TsTypeDefinition(
-                definition.Name,
-                definition.TypeParameters,
-                definition.Properties ?? [],
-                definition.Description,
-                definition.Metadata,
-                definition.ScalarMetadata
-            );
     }
 }

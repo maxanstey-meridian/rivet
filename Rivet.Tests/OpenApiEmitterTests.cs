@@ -8,6 +8,39 @@ namespace Rivet.Tests;
 
 public sealed class OpenApiEmitterTests
 {
+    /// <summary>The emitted schema for <paramref name="type"/> as a 200 response body.</summary>
+    internal static JsonElement ResponseSchemaOf(TsType type)
+    {
+        var json = OpenApiEmitter.Emit(
+            [
+                new TsEndpointDefinition(
+                    "probe",
+                    "GET",
+                    "/probe",
+                    [],
+                    null,
+                    "probe",
+                    [new TsResponseType(200, type)]
+                ),
+            ],
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            null
+        );
+        using var document = JsonDocument.Parse(json);
+        return document
+            .RootElement.GetProperty("paths")
+            .GetProperty("/probe")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema")
+            .Clone();
+    }
+
     private static JsonDocument EmitOpenApiFromController(
         string source,
         ContractSecurityMetadata? security = null
@@ -454,15 +487,7 @@ public sealed class OpenApiEmitterTests
             BodyPropertyName: "member_key"
         );
 
-        var options = new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        };
-        options.Converters.Add(new TsTypeJsonConverter());
-        options.Converters.Add(
-            new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.CamelCase)
-        );
-        var json = JsonSerializer.Serialize(parameter, options);
+        var json = JsonSerializer.Serialize(parameter, JsonContractReader.Options);
 
         Assert.Equal(
             "member_key",
@@ -2134,11 +2159,9 @@ public sealed class OpenApiEmitterTests
     public void Nullable_Inline_Schema_Gets_Type_Array_With_Null()
     {
         // Nullable array, nullable dictionary — verify the type becomes a ["T", "null"] array
-        var nullableArray = OpenApiEmitter.MapTsTypeToJsonSchema(
+        var doc = ResponseSchemaOf(
             new TsType.Nullable(new TsType.Array(new TsType.Primitive("string")))
         );
-        var json = JsonSerializer.Serialize(nullableArray);
-        var doc = JsonSerializer.Deserialize<JsonElement>(json);
 
         Assert.Equal(
             ["array", "null"],
@@ -2146,11 +2169,9 @@ public sealed class OpenApiEmitterTests
         );
         Assert.False(doc.TryGetProperty("nullable", out _));
 
-        var nullableDict = OpenApiEmitter.MapTsTypeToJsonSchema(
+        var dictDoc = ResponseSchemaOf(
             new TsType.Nullable(new TsType.Dictionary(new TsType.Primitive("number")))
         );
-        var dictJson = JsonSerializer.Serialize(nullableDict);
-        var dictDoc = JsonSerializer.Deserialize<JsonElement>(dictJson);
 
         Assert.Equal(
             ["object", "null"],
@@ -2163,47 +2184,22 @@ public sealed class OpenApiEmitterTests
     public void Array_Dictionary_StringUnion_Brand_Schemas()
     {
         // Test Array, Dictionary, StringUnion, and Brand type mappings directly
-        var arraySchema = OpenApiEmitter.MapTsTypeToJsonSchema(
-            new TsType.Array(new TsType.Primitive("string"))
-        );
-        Assert.Equal(
-            "array",
-            (
-                (JsonElement)
-                    JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(arraySchema))
-            )
-                .GetProperty("type")
-                .GetString()
-        );
+        var arraySchema = ResponseSchemaOf(new TsType.Array(new TsType.Primitive("string")));
+        Assert.Equal("array", arraySchema.GetProperty("type").GetString());
 
-        var dictSchema = OpenApiEmitter.MapTsTypeToJsonSchema(
-            new TsType.Dictionary(new TsType.Primitive("number"))
-        );
-        var dictJson = JsonSerializer.Deserialize<JsonElement>(
-            JsonSerializer.Serialize(dictSchema)
-        );
+        var dictJson = ResponseSchemaOf(new TsType.Dictionary(new TsType.Primitive("number")));
         Assert.Equal("object", dictJson.GetProperty("type").GetString());
         Assert.Equal(
             "number",
             dictJson.GetProperty("additionalProperties").GetProperty("type").GetString()
         );
 
-        var unionSchema = OpenApiEmitter.MapTsTypeToJsonSchema(
-            new TsType.StringUnion(["Active", "Archived"])
-        );
-        var unionJson = JsonSerializer.Deserialize<JsonElement>(
-            JsonSerializer.Serialize(unionSchema)
-        );
+        var unionJson = ResponseSchemaOf(new TsType.StringUnion(["Active", "Archived"]));
         Assert.Equal("string", unionJson.GetProperty("type").GetString());
         Assert.Equal("Active", unionJson.GetProperty("enum")[0].GetString());
         Assert.Equal("Archived", unionJson.GetProperty("enum")[1].GetString());
 
-        var brandSchema = OpenApiEmitter.MapTsTypeToJsonSchema(
-            new TsType.Brand("Email", new TsType.Primitive("string"))
-        );
-        var brandJson = JsonSerializer.Deserialize<JsonElement>(
-            JsonSerializer.Serialize(brandSchema)
-        );
+        var brandJson = ResponseSchemaOf(new TsType.Brand("Email", new TsType.Primitive("string")));
         Assert.Equal("#/components/schemas/Email", brandJson.GetProperty("$ref").GetString());
     }
 
@@ -2897,14 +2893,12 @@ public sealed class OpenApiEmitterTests
     [Fact]
     public void InlineObject_In_Schema()
     {
-        var inlineSchema = OpenApiEmitter.MapTsTypeToJsonSchema(
+        var doc = ResponseSchemaOf(
             new TsType.InlineObject([
                 ("key", new TsType.Primitive("string")),
                 ("value", new TsType.Primitive("number")),
             ])
         );
-        var json = JsonSerializer.Serialize(inlineSchema);
-        var doc = JsonSerializer.Deserialize<JsonElement>(json);
 
         Assert.Equal("object", doc.GetProperty("type").GetString());
         var props = doc.GetProperty("properties");
@@ -2987,13 +2981,179 @@ public sealed class OpenApiEmitterTests
         Assert.True(schemas.TryGetProperty("PagedResult_AB", out _));
     }
 
+    private static Dictionary<string, TsTypeDefinition> WrapperDefinitions() =>
+        new()
+        {
+            ["Wrapper"] = new(
+                "Wrapper",
+                ["T"],
+                [new TsPropertyDefinition("value", new TsType.TypeParam("T"), false)]
+            ),
+        };
+
+    private static JsonElement EmitSchemasFor(params TsResponseType[] responses)
+    {
+        using var doc = EmitOpenApiFromModel(
+            [new TsEndpointDefinition("probe", "GET", "/probe", [], null, "probe", responses)],
+            WrapperDefinitions(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>()
+        );
+        return doc.RootElement.GetProperty("components").GetProperty("schemas").Clone();
+    }
+
+    [Fact]
+    public void Generic_Used_Only_Inside_A_Union_Gets_Its_Component()
+    {
+        var firstEnum = new TsType.StringUnion(["A", "B", "C", "D"]);
+        var secondEnum = new TsType.StringUnion(["E", "F", "G", "H"]);
+
+        var schemas = EmitSchemasFor(
+            new TsResponseType(200, new TsType.Generic("Wrapper", [firstEnum])),
+            new TsResponseType(
+                201,
+                new TsType.Union([
+                    new TsType.Generic("Wrapper", [secondEnum]),
+                    new TsType.Primitive("string"),
+                ])
+            )
+        );
+
+        // Both instantiations share the lossy pure name "Wrapper_Enum", so the one reached
+        // only through the union must still be registered to get its own name and schema.
+        Assert.Equal(
+            ["A", "B", "C", "D"],
+            schemas
+                .GetProperty("Wrapper_Enum")
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(value => value.GetString())
+        );
+        Assert.Equal(
+            ["E", "F", "G", "H"],
+            schemas
+                .GetProperty("Wrapper_Enum2")
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(value => value.GetString())
+        );
+    }
+
+    [Fact]
+    public void Generic_Used_Only_In_Response_Content_Or_Header_Gets_Its_Component()
+    {
+        var schemas = EmitSchemasFor(
+            new TsResponseType(
+                200,
+                null,
+                Headers:
+                [
+                    new TsResponseHeader(
+                        "X-Page",
+                        new TsType.Generic("Wrapper", [new TsType.Primitive("number")])
+                    ),
+                ],
+                Contents:
+                [
+                    new TsMediaTypeContent(
+                        "application/json",
+                        new TsType.Generic("Wrapper", [new TsType.Primitive("string")])
+                    ),
+                ]
+            )
+        );
+
+        Assert.Equal(
+            "string",
+            schemas
+                .GetProperty("Wrapper_String")
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("type")
+                .GetString()
+        );
+        Assert.Equal(
+            "number",
+            schemas
+                .GetProperty("Wrapper_Number")
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("type")
+                .GetString()
+        );
+    }
+
+    [Fact]
+    public void Generic_Instance_Carries_Property_Scalar_Metadata_Like_A_Plain_Record()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Wrapper"] = new(
+                "Wrapper",
+                ["T"],
+                [
+                    new TsPropertyDefinition(
+                        "value",
+                        new TsType.TypeParam("T"),
+                        false,
+                        ScalarMetadata: new TsScalarMetadata(Title: "The value")
+                    ),
+                ]
+            ),
+            ["Empty"] = new("Empty", ["T"], []),
+        };
+
+        using var doc = EmitOpenApiFromModel(
+            [
+                new TsEndpointDefinition(
+                    "probe",
+                    "GET",
+                    "/probe",
+                    [],
+                    null,
+                    "probe",
+                    [
+                        new TsResponseType(
+                            200,
+                            new TsType.Generic("Wrapper", [new TsType.Primitive("string")])
+                        ),
+                        new TsResponseType(
+                            201,
+                            new TsType.Generic("Empty", [new TsType.Primitive("string")])
+                        ),
+                    ]
+                ),
+            ],
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>()
+        );
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.Equal(
+            "The value",
+            schemas
+                .GetProperty("Wrapper_String")
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("title")
+                .GetString()
+        );
+        Assert.True(
+            schemas.GetProperty("Empty_String").GetProperty("x-rivet-empty-record").GetBoolean()
+        );
+    }
+
     [Fact]
     public void GetTypeNameSuffix_Distinct_Instantiations_Get_Distinct_Names()
     {
         // StringUnion inside a generic should produce a readable suffix
         var genericWithUnion = new TsType.Generic("Wrapper", [new TsType.StringUnion(["A", "B"])]);
-        var schema = OpenApiEmitter.MapTsTypeToJsonSchema(genericWithUnion);
-        var parsed = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(schema));
+        var parsed = ResponseSchemaOf(genericWithUnion);
         Assert.Equal("#/components/schemas/Wrapper_AB", parsed.GetProperty("$ref").GetString());
 
         // E2 root: inline-object suffixes must incorporate field TYPES, not just names —
@@ -3009,33 +3169,18 @@ public sealed class OpenApiEmitterTests
             [new TsType.InlineObject([("value", new TsType.Primitive("number"))])]
         );
 
-        var refString = JsonSerializer
-            .Deserialize<JsonElement>(
-                JsonSerializer.Serialize(OpenApiEmitter.MapTsTypeToJsonSchema(wrapperOfString))
-            )
-            .GetProperty("$ref")
-            .GetString();
-        var refNumber = JsonSerializer
-            .Deserialize<JsonElement>(
-                JsonSerializer.Serialize(OpenApiEmitter.MapTsTypeToJsonSchema(wrapperOfNumber))
-            )
-            .GetProperty("$ref")
-            .GetString();
+        var refString = ResponseSchemaOf(wrapperOfString).GetProperty("$ref").GetString();
+        var refNumber = ResponseSchemaOf(wrapperOfNumber).GetProperty("$ref").GetString();
 
         Assert.Equal("#/components/schemas/Wrapper_Value_String", refString);
         Assert.Equal("#/components/schemas/Wrapper_Value_Number", refNumber);
         Assert.NotEqual(refString, refNumber);
 
         // Determinism: the same instantiation always maps to the same name
-        var refStringAgain = JsonSerializer
-            .Deserialize<JsonElement>(
-                JsonSerializer.Serialize(
-                    OpenApiEmitter.MapTsTypeToJsonSchema(
-                        new TsType.Generic(
-                            "Wrapper",
-                            [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]
-                        )
-                    )
+        var refStringAgain = ResponseSchemaOf(
+                new TsType.Generic(
+                    "Wrapper",
+                    [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]
                 )
             )
             .GetProperty("$ref")
@@ -3047,8 +3192,7 @@ public sealed class OpenApiEmitterTests
             "Wrapper",
             [new TsType.Dictionary(new TsType.Primitive("string"))]
         );
-        var schema3 = OpenApiEmitter.MapTsTypeToJsonSchema(genericWithDict);
-        var parsed3 = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(schema3));
+        var parsed3 = ResponseSchemaOf(genericWithDict);
         Assert.Equal(
             "#/components/schemas/Wrapper_RecordString",
             parsed3.GetProperty("$ref").GetString()
@@ -4425,6 +4569,7 @@ public sealed class OpenApiEmitterTests
         // 1. Loud, named diagnostic — never a silent drop.
         Assert.Contains("generic template 'Collection'", stderr);
         Assert.Contains("Collection_ProductDto", stderr);
+        Assert.Contains("is not present in the contract's type definitions", stderr);
 
         using var doc = JsonDocument.Parse(spec);
 

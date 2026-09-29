@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -435,15 +436,22 @@ public sealed class DictionaryKeyTests
             new TsType.TypeRef("Color")
         );
 
-        var json = JsonSerializer.Serialize<TsType>(withKey);
+        var json = JsonSerializer.Serialize<TsType>(withKey, JsonContractReader.Options);
         Assert.Contains("\"key\"", json);
-        var back = Assert.IsType<TsType.Dictionary>(JsonSerializer.Deserialize<TsType>(json));
+        var back = Assert.IsType<TsType.Dictionary>(
+            JsonSerializer.Deserialize<TsType>(json, JsonContractReader.Options)
+        );
         Assert.Equal(withKey, back);
 
         // Old contract JSON (TS lowerer) never carries "key" — must keep deserializing
         var legacy = """{"kind":"dictionary","value":{"kind":"primitive","type":"string"}}""";
-        var dict = Assert.IsType<TsType.Dictionary>(JsonSerializer.Deserialize<TsType>(legacy));
+        var dict = Assert.IsType<TsType.Dictionary>(
+            JsonSerializer.Deserialize<TsType>(legacy, JsonContractReader.Options)
+        );
         Assert.Null(dict.Key);
-        Assert.DoesNotContain("\"key\"", JsonSerializer.Serialize<TsType>(dict));
+        Assert.DoesNotContain(
+            "\"key\"",
+            JsonSerializer.Serialize<TsType>(dict, JsonContractReader.Options)
+        );
     }
 }

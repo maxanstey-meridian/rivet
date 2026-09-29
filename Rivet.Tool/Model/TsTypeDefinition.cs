@@ -20,7 +20,8 @@ public sealed record TsTypeDefinition
     {
         this.Name = Name;
         this.TypeParameters = TypeParameters;
-        this.Properties = Properties ?? [];
+        // An alias carries its shape in Type; any properties beside it are ignored.
+        this.Properties = Type is null ? Properties ?? [] : [];
         this.Type = Type;
         this.Description = Description;
         this.Metadata = Metadata;
@@ -126,7 +127,7 @@ public sealed record TsSchemaXmlMetadata(
 /// </summary>
 public sealed record TsPropertyDefinition(
     string Name,
-    TsType Type,
+    [property: JsonRequired] TsType Type,
     [property: JsonPropertyName("optional")] bool IsOptional,
     [property:
         JsonPropertyName("deprecated"),
