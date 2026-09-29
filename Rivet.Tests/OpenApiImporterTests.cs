@@ -2669,7 +2669,7 @@ public sealed class OpenApiImporterTests
         );
 
         Assert.Contains("Define.File", content);
-        Assert.Contains(".ContentType(\"image/png\")", content);
+        Assert.Contains(".ProducesFile(\"image/png\")", content);
         Assert.Contains("public static readonly FileRouteDefinition Get", content);
     }
 
@@ -4808,7 +4808,7 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains("Define.File", content);
         Assert.Contains(".QueryAuth()", content);
-        Assert.Contains(".ContentType(\"video/mp4\")", content);
+        Assert.Contains(".ProducesFile(\"video/mp4\")", content);
         Assert.Contains("FileRouteDefinition", content);
         // Token param should not appear as an input field
         Assert.DoesNotContain("Token", content);
@@ -4946,9 +4946,8 @@ public sealed class OpenApiImporterTests
 
         Assert.Contains("Define.File", content);
         Assert.Contains("FileRouteDefinition", content);
-        Assert.Contains(".ContentType(\"image/png\")", content);
+        Assert.Contains(".ProducesFile(\"image/png\")", content);
         Assert.DoesNotContain("QueryAuth", content);
-        Assert.DoesNotContain("ProducesFile", content);
     }
 
     [Fact]

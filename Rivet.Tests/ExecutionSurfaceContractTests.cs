@@ -48,12 +48,12 @@ public sealed class ExecutionSurfaceContractTests
 
             public static readonly FileRouteDefinition File =
                 Define.File("/file")
-                    .ContentType("text/plain")
+                    .ProducesFile("text/plain")
                     .Returns<Problem>(404);
 
             public static readonly FileRouteDefinition<Input> InputFile =
                 Define.File<Input>("/input-file")
-                    .ContentType("application/octet-stream")
+                    .ProducesFile("application/octet-stream")
                     .Returns<Problem>(404);
 
             public static readonly RouteDefinition<Input, Output> OrdinaryBinary =

@@ -17,7 +17,7 @@ public sealed class FileMediaTypeTests
     {
         var route = Define
             .File("/image")
-            .ContentType("image/png")
+            .ProducesFile("image/png")
             .ResponseBinaryContent(200, "image/jpeg");
         var result = route.File([1, 2, 3], contentType: mediaType);
         var context = await ExecuteAsync(result, mvc);
@@ -32,7 +32,7 @@ public sealed class FileMediaTypeTests
     {
         var route = Define
             .File("/image")
-            .ContentType("image/png")
+            .ProducesFile("image/png")
             .ResponseBinaryContent(200, "image/jpeg");
         var stream = new MemoryStream([4, 5, 6]);
         var streamed = await ExecuteAsync(
@@ -65,7 +65,7 @@ public sealed class FileMediaTypeTests
     {
         var route = Define
             .File("/image")
-            .ContentType("image/png")
+            .ProducesFile("image/png")
             .ResponseBinaryContent(200, "image/jpeg");
         Assert.Throws<RivetContractViolationException>(() =>
             route.File([1], contentType: mediaType)
@@ -77,7 +77,7 @@ public sealed class FileMediaTypeTests
     {
         var route = Define
             .File("/image")
-            .ContentType("image/png")
+            .ProducesFile("image/png")
             .ResponseBinaryContent(200, "image/jpeg");
         Assert.Throws<RivetContractViolationException>(() => route.File([1]));
         Assert.Throws<RivetContractViolationException>(() =>
@@ -115,7 +115,7 @@ public sealed class FileMediaTypeTests
         Assert.NotNull(
             Define
                 .File<Input>("/file/{id}")
-                .ContentType("image/png")
+                .ProducesFile("image/png")
                 .Bind(new Input("1"))
                 .File([1], contentType: "image/png")
         );

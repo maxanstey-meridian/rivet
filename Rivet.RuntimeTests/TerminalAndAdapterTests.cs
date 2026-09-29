@@ -494,7 +494,7 @@ public sealed class TerminalAndAdapterTests
     {
         var result = Define
             .File("/file")
-            .ContentType("text/plain")
+            .ProducesFile("text/plain")
             .File(Encoding.UTF8.GetBytes("abcdef"), enableRangeProcessing: true);
 
         var response = await ExecuteAsync(
@@ -520,7 +520,7 @@ public sealed class TerminalAndAdapterTests
     {
         var result = Define
             .File("/file")
-            .ContentType("text/plain")
+            .ProducesFile("text/plain")
             .File(Encoding.UTF8.GetBytes("abcdef"), enableRangeProcessing: true);
 
         var response = await ExecuteAsync(
@@ -544,7 +544,7 @@ public sealed class TerminalAndAdapterTests
     public async Task Stream_file_transfers_ownership_to_the_host(bool mvc)
     {
         var stream = new TrackingStream(Encoding.UTF8.GetBytes("stream"));
-        var result = Define.File("/file").ContentType("text/plain").File(stream, "stream.txt");
+        var result = Define.File("/file").ProducesFile("text/plain").File(stream, "stream.txt");
 
         var response = await ExecuteAsync(result, mvc);
 
@@ -561,7 +561,7 @@ public sealed class TerminalAndAdapterTests
         try
         {
             await File.WriteAllTextAsync(path, "physical");
-            var result = Define.File("/file").ContentType("text/plain").File(path, "physical.txt");
+            var result = Define.File("/file").ProducesFile("text/plain").File(path, "physical.txt");
 
             var response = await ExecuteAsync(result, mvc);
 
@@ -625,10 +625,10 @@ public sealed class TerminalAndAdapterTests
         Assert.Throws<RivetContractViolationException>(() => route.File(" "));
         Assert.Throws<RivetContractViolationException>(() => route.File([1], entityTag: "*"));
         Assert.Throws<InvalidOperationException>(() =>
-            Define.File("/empty-content-type").ContentType(" ")
+            Define.File("/empty-content-type").ProducesFile(" ")
         );
         Assert.Throws<InvalidOperationException>(() =>
-            Define.File("/malformed-content-type").ContentType("invalid")
+            Define.File("/malformed-content-type").ProducesFile("invalid")
         );
         Assert.Throws<RivetContractViolationException>(() =>
             Define.Get("/imported-malformed").ResponseBinaryContent(200, "invalid").File([1])

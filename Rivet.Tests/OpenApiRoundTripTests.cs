@@ -3290,7 +3290,7 @@ public sealed class OpenApiRoundTripTests
                 {
                     public static readonly FileRouteDefinition<StreamInput> Stream =
                         Define.File<StreamInput>("/api/media/{id}/stream")
-                            .ContentType("video/mp4")
+                            .ProducesFile("video/mp4")
                             .QueryAuth("secret")
                             .Returns<ErrorDto>(404, "Not found")
                             .Description("Stream a media file");
@@ -3339,7 +3339,7 @@ public sealed class OpenApiRoundTripTests
         var importResult = CompilationHelper.Import(openApiJson);
         var contractFile = CompilationHelper.FindFile(importResult, "MediaContract.cs");
         Assert.Contains("Define.File<", contractFile);
-        Assert.Contains(".ContentType(\"video/mp4\")", contractFile);
+        Assert.Contains(".ProducesFile(\"video/mp4\")", contractFile);
         Assert.Contains(".QueryAuth(\"secret\")", contractFile);
         Assert.Contains("FileRouteDefinition<", contractFile);
 

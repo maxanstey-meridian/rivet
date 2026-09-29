@@ -175,7 +175,7 @@ public sealed class EnforcementHonestyTests
     [Fact]
     public async Task File_MatchingContentType_Passes()
     {
-        var route = Define.File("/api/items/{id}/photo").ContentType("image/jpeg");
+        var route = Define.File("/api/items/{id}/photo").ProducesFile("image/jpeg");
 
         var result = await ExecuteAsync(route.File(new byte[] { 0xFF, 0xD8 }));
 
@@ -185,7 +185,7 @@ public sealed class EnforcementHonestyTests
     [Fact]
     public async Task File_ContentTypeIsOwnedByContract()
     {
-        var route = Define.File("/api/items/{id}/photo").ContentType("image/jpeg");
+        var route = Define.File("/api/items/{id}/photo").ProducesFile("image/jpeg");
 
         var result = await ExecuteAsync(route.File(new byte[] { 0x25 }));
 
@@ -197,7 +197,7 @@ public sealed class EnforcementHonestyTests
     public void FileRoute_HasNoJsonSuccessTerminal()
     {
         // A file route exposes File(), not Success(payload), so JSON cannot be returned.
-        var route = Define.File("/api/items/{id}/photo").ContentType("image/jpeg");
+        var route = Define.File("/api/items/{id}/photo").ProducesFile("image/jpeg");
 
         Assert.DoesNotContain(route.GetType().GetMethods(), method => method.Name == "Success");
     }
@@ -205,7 +205,7 @@ public sealed class EnforcementHonestyTests
     [Fact]
     public void File_UndeclaredErrorStatus_Throws()
     {
-        var route = Define.File("/api/items/{id}/photo").ContentType("image/jpeg");
+        var route = Define.File("/api/items/{id}/photo").ProducesFile("image/jpeg");
 
         var exception = Assert.Throws<RivetContractViolationException>(() =>
             route.Error(StatusCodes.Status404NotFound)
@@ -219,7 +219,7 @@ public sealed class EnforcementHonestyTests
     {
         var route = Define
             .File("/api/items/{id}/photo")
-            .ContentType("image/jpeg")
+            .ProducesFile("image/jpeg")
             .Returns<Animal>(StatusCodes.Status404NotFound, "No photo");
 
         var result = await ExecuteAsync(
@@ -233,7 +233,7 @@ public sealed class EnforcementHonestyTests
     [Fact]
     public async Task BoundFile_WithInput_UsesDeclaredContentType()
     {
-        var route = Define.File<PhotoRequest>("/api/photos").ContentType("image/png");
+        var route = Define.File<PhotoRequest>("/api/photos").ProducesFile("image/png");
 
         var result = await ExecuteAsync(
             route.Bind(new PhotoRequest("p1")).File(new byte[] { 0x00 })

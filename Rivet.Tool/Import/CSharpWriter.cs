@@ -1036,27 +1036,17 @@ internal static class CSharpWriter
             calls.Add($".ProducesContentType({StringLiteral(field.ResponseContentType)})");
         }
 
-        if (field.FileContentType is not null)
+        // Define.File(...) already produces application/octet-stream.
+        if (
+            field.FileContentType is not null
+            && !(field.IsFileEndpoint && field.FileContentType == "application/octet-stream")
+        )
         {
-            if (field.IsFileEndpoint)
-            {
-                // File endpoints use .ContentType() instead of .ProducesFile()
-                if (field.FileContentType != "application/octet-stream")
-                {
-                    calls.Add($".ContentType({StringLiteral(field.FileContentType)})");
-                }
-            }
-            else
-            {
-                if (field.FileContentType == "application/octet-stream")
-                {
-                    calls.Add(".ProducesFile()");
-                }
-                else
-                {
-                    calls.Add($".ProducesFile({StringLiteral(field.FileContentType)})");
-                }
-            }
+            calls.Add(
+                field.FileContentType == "application/octet-stream"
+                    ? ".ProducesFile()"
+                    : $".ProducesFile({StringLiteral(field.FileContentType)})"
+            );
         }
 
         if (field.QueryAuthParameterName is not null)

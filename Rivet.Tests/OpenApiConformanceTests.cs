@@ -610,19 +610,19 @@ public sealed class OpenApiConformanceTests : IDisposable
             {
                 public static readonly FileRouteDefinition Stream =
                     Define.File("/api/streams/{id}")
-                        .ContentType("video/mp4")
+                        .ProducesFile("video/mp4")
                         .QueryAuth()
                         .Description("Stream a video file");
 
                 public static readonly FileRouteDefinition Preview =
                     Define.File("/api/streams/{id}/preview")
-                        .ContentType("image/jpeg")
+                        .ProducesFile("image/jpeg")
                         .QueryAuth("key")
                         .Returns<ErrorDto>(404, "Not found");
 
                 public static readonly FileRouteDefinition<StreamInput> Media =
                     Define.File<StreamInput>("/api/media/{id}/stream")
-                        .ContentType("video/mp4")
+                        .ProducesFile("video/mp4")
                         .QueryAuth("secret")
                         .Returns<ErrorDto>(404, "Not found")
                         .Description("Stream a media file");

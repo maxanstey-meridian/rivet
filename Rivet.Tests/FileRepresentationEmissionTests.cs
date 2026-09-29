@@ -3,11 +3,11 @@ namespace Rivet.Tests;
 public sealed class FileRepresentationEmissionTests
 {
     [Theory]
-    [InlineData("FileRouteDefinition", "Define.File(\"/image\").ContentType(\"image/png\")", 200)]
+    [InlineData("FileRouteDefinition", "Define.File(\"/image\").ProducesFile(\"image/png\")", 200)]
     [InlineData("RouteDefinition", "Define.Get(\"/image\").ProducesFile(\"image/png\")", 200)]
     [InlineData(
         "FileRouteDefinition",
-        "Define.File(\"/image\").ContentType(\"image/png\").Status(201)",
+        "Define.File(\"/image\").ProducesFile(\"image/png\").Status(201)",
         201
     )]
     public void Additional_representation_preserves_factory_default(

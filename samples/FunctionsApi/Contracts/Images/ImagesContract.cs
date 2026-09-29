@@ -11,7 +11,7 @@ public static class ImagesContract
 
     public static readonly FileRouteDefinition<ImageInput> Download = Define
         .File<ImageInput>(Route)
-        .ContentType("image/png")
+        .ProducesFile("image/png")
         .ResponseBinaryContent(200, "image/jpeg")
         .Returns<ErrorResponse>(404)
         .Anonymous();

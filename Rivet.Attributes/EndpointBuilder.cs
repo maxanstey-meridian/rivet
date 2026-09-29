@@ -671,12 +671,6 @@ public sealed class FileRouteDefinition : TerminalRouteDefinitionBase<FileRouteD
     {
         ProducesFile();
     }
-
-    /// <summary>
-    /// Sets the response content type for this file endpoint.
-    /// Alias for ProducesFile — preferred on FileRouteDefinition for readability.
-    /// </summary>
-    public FileRouteDefinition ContentType(string mediaType) => ProducesFile(mediaType);
 }
 
 /// <summary>
@@ -696,10 +690,4 @@ public sealed class FileRouteDefinition<TInput> : RouteDefinitionBase<FileRouteD
         ArgumentNullException.ThrowIfNull(input);
         return new BoundFileRouteDefinition(Publish(null));
     }
-
-    /// <summary>
-    /// Sets the response content type for this file endpoint.
-    /// Alias for ProducesFile — preferred on FileRouteDefinition for readability.
-    /// </summary>
-    public FileRouteDefinition<TInput> ContentType(string mediaType) => ProducesFile(mediaType);
 }

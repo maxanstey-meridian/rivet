@@ -27,7 +27,7 @@ public sealed class ContractWalkerFileEndpointTests
             {
                 public static readonly FileRouteDefinition<StreamInput> Stream =
                     Define.File<StreamInput>("/api/media/{id}/stream")
-                        .ContentType("video/mp4")
+                        .ProducesFile("video/mp4")
                         .QueryAuth();
             }
             """;
@@ -236,7 +236,7 @@ public sealed class ContractWalkerFileEndpointTests
             {
                 public static readonly FileRouteDefinition<StreamInput> GetVideo =
                     Define.File<StreamInput>("/api/media/{id}/video")
-                        .ContentType("video/mp4");
+                        .ProducesFile("video/mp4");
             }
             """;
 
@@ -294,7 +294,7 @@ public sealed class ContractWalkerFileEndpointTests
             {
                 public static readonly FileRouteDefinition<StreamInput> Stream =
                     Define.File<StreamInput>("/api/media/{id}/stream")
-                        .ContentType("video/mp4")
+                        .ProducesFile("video/mp4")
                         .QueryAuth();
             }
             """;

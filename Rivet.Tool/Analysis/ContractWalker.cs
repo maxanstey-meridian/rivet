@@ -385,9 +385,6 @@ public static class ContractWalker
                 case "ProducesFile":
                     fileContentType = call.StringArg("contentType") ?? "application/octet-stream";
                     break;
-                case "ContentType":
-                    fileContentType = call.StringArg("mediaType") ?? "application/octet-stream";
-                    break;
                 case "QueryAuth":
                     queryAuth = new QueryAuthMetadata(call.StringArg("parameterName") ?? "token");
                     break;

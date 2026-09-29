@@ -25,16 +25,16 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public async Task File_ContentType_OverridesDefault()
     {
-        var route = Define.File("/api/stream").ContentType("video/mp4");
+        var route = Define.File("/api/stream").ProducesFile("video/mp4");
 
         Assert.Equal("video/mp4", await WireContentType(route.File([1])));
     }
 
     [Fact]
-    public void File_ContentType_IsFluent()
+    public void File_ProducesFile_IsFluent()
     {
         var route = Define.File("/api/stream");
-        var returned = route.ContentType("audio/mpeg");
+        var returned = route.ProducesFile("audio/mpeg");
 
         Assert.Same(route, returned);
     }
@@ -62,7 +62,7 @@ public sealed class FileRouteDefinitionTests
     [Fact]
     public async Task File_Generic_ContentType_OverridesDefault()
     {
-        var route = Define.File<FileDownloadInput>("/api/stream").ContentType("video/mp4");
+        var route = Define.File<FileDownloadInput>("/api/stream").ProducesFile("video/mp4");
 
         Assert.Equal(
             "video/mp4",
@@ -75,7 +75,7 @@ public sealed class FileRouteDefinitionTests
     {
         var route = Define
             .File("/api/stream")
-            .ContentType("video/mp4")
+            .ProducesFile("video/mp4")
             .Summary("Download a video")
             .Anonymous()
             .QueryAuth();
@@ -88,7 +88,7 @@ public sealed class FileRouteDefinitionTests
     {
         var route = Define
             .File<FileDownloadInput>("/api/stream")
-            .ContentType("audio/mpeg")
+            .ProducesFile("audio/mpeg")
             .Description("Stream audio content")
             .Secure("Bearer")
             .QueryAuth("session");
@@ -183,7 +183,7 @@ public sealed class FileRouteDefinitionTests
     public async Task R3_BuilderChain_BeforePublication_StillMutable()
     {
         // The generation-time fluent chain is unaffected
-        var route = Define.File("/api/stream").ContentType("video/mp4").Summary("ok").QueryAuth();
+        var route = Define.File("/api/stream").ProducesFile("video/mp4").Summary("ok").QueryAuth();
 
         Assert.Equal("video/mp4", await WireContentType(route.File([1])));
     }

@@ -84,7 +84,7 @@ await client.PUT("/api/things/{id}/chunks/{chunkIndex}", {
 ```csharp
 public static readonly FileRouteDefinition Avatar =
     Define.File("/api/members/{id}/avatar")
-        .ContentType("image/jpeg")
+        .ProducesFile("image/jpeg")
         .QueryAuth();             // auth token as ?token=... for media players
 ```
 
@@ -124,7 +124,7 @@ When an endpoint can return different file formats, declare each representation:
 
 ```csharp
 public static readonly FileRouteDefinition Image = Define.File("/images/{id}")
-    .ContentType("image/png")
+    .ProducesFile("image/png")
     .ResponseBinaryContent(200, "image/jpeg");
 ```
 
