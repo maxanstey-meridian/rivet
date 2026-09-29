@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rivet.Tool;
 using Rivet.Tool.Emit;
 
 namespace Rivet.Tests;
@@ -154,7 +155,7 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.Import(spec, "ReferenceNormalization")
         );
 
@@ -188,7 +189,7 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.Import(spec, "ReferenceNormalization")
         );
 
@@ -212,7 +213,7 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.Import(spec, "ReferenceNormalization")
         );
 
@@ -665,7 +666,7 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.Import(spec, "ReferenceNormalization")
         );
 
@@ -700,7 +701,7 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.Import(spec, "ReferenceNormalization")
         );
 

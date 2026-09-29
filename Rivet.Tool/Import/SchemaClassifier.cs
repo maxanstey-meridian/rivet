@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -20,6 +19,22 @@ internal static class SchemaClassifier
         "url",
         "uri-reference",
     ];
+
+    /// <summary>The JSON Schema keyword of a single declared type (null ignored).</summary>
+    internal static string? TypeKeyword(JsonSchemaType type) =>
+        (type & ~JsonSchemaType.Null) switch
+        {
+            JsonSchemaType.String => "string",
+            JsonSchemaType.Integer => "integer",
+            JsonSchemaType.Number => "number",
+            JsonSchemaType.Boolean => "boolean",
+            JsonSchemaType.Object => "object",
+            JsonSchemaType.Array => "array",
+            _ => null,
+        };
+
+    internal static string? ScalarTypeKeyword(JsonSchemaType type) =>
+        TypeKeyword(type) is "object" or "array" ? null : TypeKeyword(type);
 
     // --- Predicates ---
 
@@ -73,25 +88,15 @@ internal static class SchemaClassifier
             return false;
         }
 
-        if (schema.Type.HasValue && schema.Type.Value.HasFlag(JsonSchemaType.Integer))
-        {
-            return schema.Enum.All(v => v is JsonNode node && IsWholeInt64(node));
-        }
-
-        // No explicit type — infer from values
-        if (!schema.Type.HasValue)
-        {
-            return schema.Enum.All(v => v is JsonNode node && IsWholeInt64(node));
-        }
-
-        return false;
+        // An undeclared type is inferred from the values.
+        return (schema.Type is not { } type || type.HasFlag(JsonSchemaType.Integer))
+            && schema.Enum.All(v => v is JsonNode node && IsWholeInt64(node));
     }
 
     /// <summary>
     /// True for any whole JSON number inside the signed/unsigned 64-bit ranges —
     /// the widest exact carrier the generated C# enum emitter guarantees, so legal
-    /// enum constants beyond Int32 survive import instead of being dropped
-    /// (planner-constraint:generated-enum-underlying-type).
+    /// enum constants beyond Int32 survive import instead of being dropped.
     /// </summary>
     internal static bool IsWholeInt64(JsonNode node)
     {
@@ -193,7 +198,7 @@ internal static class SchemaClassifier
 
         if (schema.AllOf is { Count: > 0 })
         {
-            // Must agree with MapSchemas (I2): an allOf whose merged record would have zero
+            // Must agree with MapSchemas: an allOf whose merged record would have zero
             // properties is SKIPPED there, so refs to it must not resolve to the (never
             // emitted) record name. Mirrors ResolveAllOfRecord + MergeWithSiblingProperties.
             return AllOfYieldsProperties(schema);
@@ -256,7 +261,7 @@ internal static class SchemaClassifier
         }
 
         // ResolveAllOfRecord recurses into a REF element's allOf when present AND merges the
-        // target's own sibling properties (I4 fix); all other elements contribute their own
+        // target's own sibling properties; all other elements contribute their own
         // properties only.
         if (element is OpenApiSchemaReference && element.AllOf is { Count: > 0 })
         {
@@ -387,20 +392,14 @@ internal static class SchemaClassifier
         return schema.Extensions is not null && schema.Extensions.ContainsKey(key);
     }
 
-    internal static string? GetExtensionString(IOpenApiSchema schema, string key)
-    {
-        if (schema.Extensions is null || !schema.Extensions.TryGetValue(key, out var ext))
-        {
-            return null;
-        }
-
-        if (ext is JsonNodeExtension jsonExt)
-        {
-            return jsonExt.Node?.GetValue<string>();
-        }
-
-        return null;
-    }
+    internal static string? GetExtensionString(
+        IDictionary<string, IOpenApiExtension>? extensions,
+        string key
+    ) =>
+        extensions?.TryGetValue(key, out var extension) == true
+        && extension is JsonNodeExtension { Node: { } node }
+            ? node.GetValue<string>()
+            : null;
 
     internal static List<string>? GetExtensionStringArray(IOpenApiSchema schema, string key)
     {
@@ -486,30 +485,27 @@ internal static class SchemaClassifier
 
     // --- Naming / dedup ---
 
+    /// <summary>
+    /// The import's one disambiguation scheme: <c>Name</c>, then <c>Name_2</c>, <c>Name_3</c>…
+    /// The separator keeps a suffix from reading as part of a name that already ends in a digit.
+    /// </summary>
+    internal static IEnumerable<string> NameCandidates(string baseName)
+    {
+        yield return baseName;
+        for (var suffix = 2; ; suffix++)
+        {
+            yield return $"{baseName}_{suffix}";
+        }
+    }
+
+    /// <summary>The first free <see cref="NameCandidates"/> entry, claimed in <paramref name="used"/>.</summary>
+    internal static string UniqueName(string baseName, ISet<string> used) =>
+        NameCandidates(baseName).First(used.Add);
+
     internal static List<RecordProperty> DeduplicateProperties(List<RecordProperty> properties)
     {
         var used = new HashSet<string>(StringComparer.Ordinal);
-        var nextSuffix = new Dictionary<string, int>(StringComparer.Ordinal);
-        var result = new List<RecordProperty>(properties.Count);
-
-        foreach (var prop in properties)
-        {
-            var name = prop.Name;
-            if (!used.Add(name))
-            {
-                var suffix = nextSuffix.GetValueOrDefault(name, 2);
-                do
-                {
-                    name = $"{prop.Name}_{suffix++}";
-                } while (!used.Add(name));
-
-                nextSuffix[prop.Name] = suffix;
-            }
-
-            result.Add(prop with { Name = name });
-        }
-
-        return result;
+        return properties.Select(prop => prop with { Name = UniqueName(prop.Name, used) }).ToList();
     }
 
     // --- Enum / Brand builders ---
@@ -522,13 +518,13 @@ internal static class SchemaClassifier
         // from the policy-cased name. An unknown token is ignored (not guessed):
         // the schema then imports through the exact-pin path like any foreign
         // spec.
-        var policyToken = GetExtensionString(schema, "x-rivet-enum-naming-policy");
+        var policyToken = GetExtensionString(schema.Extensions, "x-rivet-enum-naming-policy");
         var policy =
             policyToken is not null && Naming.TryPolicyFromToken(policyToken, out var parsed)
                 ? parsed
                 : (RivetNamingPolicy?)null;
 
-        var seen = new Dictionary<string, int>();
+        var used = new HashSet<string>();
         var members = new List<GeneratedEnumMember>();
         foreach (var member in schema.Enum!)
         {
@@ -539,23 +535,19 @@ internal static class SchemaClassifier
 
             var original = member.ToString();
             var sanitized = Naming.ToPascalCaseFromSegments(original);
-            if (seen.TryGetValue(sanitized, out var count))
+            var memberName = UniqueName(sanitized, used);
+            if (memberName != sanitized)
             {
-                count++;
-                seen[sanitized] = count;
-                var deduped = $"{sanitized}_{count}";
-                members.Add(new GeneratedEnumMember(deduped, original));
+                members.Add(new GeneratedEnumMember(memberName, original));
             }
             else
             {
-                seen[sanitized] = 1;
                 // Pin when the EMITTED wire value would differ from the original.
                 // The emitted casing follows the enum's declared converter: the
                 // policy-cased member name when a policy is declared, otherwise
                 // the emitter's camelCase (TypeWalker). 'Ready' (Pascal ==
                 // original, old check skipped the pin) still emits as 'ready' —
-                // a silent case-mangle both directions
-                // (FABLE_ROUNDTRIP #3, 63 properties on the github corpus).
+                // a silent case-mangle both directions.
                 var derived = policy is null
                     ? Naming.ToCamelCase(sanitized)
                     : Naming.ToPolicyCase(sanitized, policy.Value);
@@ -580,7 +572,7 @@ internal static class SchemaClassifier
         var varnames = GetExtensionStringArray(schema, "x-enum-varnames");
         var useVarnames = varnames is not null && varnames.Count == schema.Enum!.Count;
 
-        var emitted = new HashSet<string>();
+        var used = new HashSet<string>();
         var members = new List<GeneratedEnumMember>();
         var index = 0;
         foreach (var member in schema.Enum!)
@@ -594,8 +586,7 @@ internal static class SchemaClassifier
             // Naming magnitude only — the member value below keeps raw digits.
             // GetValue<long> throws above long.MaxValue even though IsWholeInt64
             // admits those digits, and Math.Abs overflows at long.MinValue, so
-            // derive the name from a defensive magnitude read instead
-            // (acceptance:numeric-enums-cover-all-legal-underlying-values).
+            // derive the name from a defensive magnitude read instead.
             string namingMagnitude;
             if (memberNode.AsValue().TryGetValue<long>(out var signedValue))
             {
@@ -607,22 +598,12 @@ internal static class SchemaClassifier
                 namingMagnitude = memberNode.ToJsonString().Trim();
             }
 
-            var csharpName =
+            var csharpName = UniqueName(
                 useVarnames ? Naming.ToPascalCaseFromSegments(varnames![index])
-                : namingMagnitude.StartsWith('-') ? $"ValueNeg{namingMagnitude.TrimStart('-')}"
-                : $"Value{namingMagnitude}";
-
-            if (!emitted.Add(csharpName))
-            {
-                var suffix = 2;
-                var deduped = $"{csharpName}_{suffix}";
-                while (!emitted.Add(deduped))
-                {
-                    suffix++;
-                    deduped = $"{csharpName}_{suffix}";
-                }
-                csharpName = deduped;
-            }
+                    : namingMagnitude.StartsWith('-') ? $"ValueNeg{namingMagnitude.TrimStart('-')}"
+                    : $"Value{namingMagnitude}",
+                used
+            );
 
             members.Add(
                 new GeneratedEnumMember(
@@ -641,7 +622,7 @@ internal static class SchemaClassifier
 
     internal static GeneratedBrand MapBrand(string name, IOpenApiSchema schema)
     {
-        var brandName = GetExtensionString(schema, "x-rivet-brand") ?? name;
+        var brandName = GetExtensionString(schema.Extensions, "x-rivet-brand") ?? name;
         var innerType = ResolvePrimitiveType(schema) ?? "string";
         return new GeneratedBrand(brandName, innerType, schema.Format, schema.Description);
     }
@@ -674,147 +655,62 @@ internal static class SchemaClassifier
         return result;
     }
 
-    // --- Structural fingerprinting ---
+    private static readonly HashSet<string> _schemaNameMaps =
+    [
+        "properties",
+        "patternProperties",
+        "$defs",
+        "dependentSchemas",
+        "mapping",
+    ];
+
+    private static readonly HashSet<string> _schemaDataKeywords =
+    [
+        "const",
+        "default",
+        "enum",
+        "example",
+        "examples",
+    ];
 
     /// <summary>
-    /// Computes a structural fingerprint for an inline schema.
+    /// Identity of an inline schema for synthetic-type reuse: its OpenAPI 3.1 serialisation
+    /// (<c>$ref</c>s kept as references), canonicalised so that key order and
+    /// <c>required</c> order do not split one shape into two types. Vendor extensions are
+    /// left out: they do not change the generated type.
     /// </summary>
     internal static string ComputeSchemaFingerprint(IOpenApiSchema schema)
     {
-        var sb = new StringBuilder();
-        AppendSchemaFingerprint(sb, schema, 0);
-        return sb.ToString();
-    }
-
-    private static void AppendSchemaFingerprint(StringBuilder sb, IOpenApiSchema schema, int depth)
-    {
-        if (depth > 10)
-        {
-            sb.Append("...");
-            return;
-        }
-
-        sb.Append('{');
-        sb.Append("t:").Append(schema.Type.HasValue ? (int)schema.Type.Value : -1);
-        sb.Append(",apa:").Append(schema.AdditionalPropertiesAllowed);
-
-        if (schema.Format is not null)
-        {
-            sb.Append(",f:").Append(schema.Format);
-        }
-
-        AppendSemanticFacets(sb, schema);
-
-        if (schema.Properties is { Count: > 0 })
-        {
-            sb.Append(",p:{");
-            foreach (var (k, v) in schema.Properties.OrderBy(p => p.Key))
-            {
-                sb.Append(k).Append(':');
-                if (v is OpenApiSchemaReference propRef)
-                {
-                    sb.Append("$ref:").Append(propRef.Reference.Id);
-                }
-                else
-                {
-                    AppendSchemaFingerprint(sb, v, depth + 1);
-                }
-
-                sb.Append(',');
-            }
-
-            sb.Append('}');
-        }
-
-        if (schema.Required is { Count: > 0 })
-        {
-            sb.Append(",r:").Append(string.Join(",", schema.Required.OrderBy(r => r)));
-        }
-
-        if (schema.Items is not null)
-        {
-            sb.Append(",i:");
-            if (schema.Items is OpenApiSchemaReference itemRef)
-            {
-                sb.Append("$ref:").Append(itemRef.Reference.Id);
-            }
-            else
-            {
-                AppendSchemaFingerprint(sb, schema.Items, depth + 1);
-            }
-        }
-
-        if (schema.Enum is { Count: > 0 })
-        {
-            sb.Append(",e:").Append(string.Join(",", schema.Enum.Select(e => e?.ToString())));
-        }
-
-        if (schema.AdditionalProperties is not null)
-        {
-            sb.Append(",ap:");
-            if (schema.AdditionalProperties is OpenApiSchemaReference apRef)
-            {
-                sb.Append("$ref:").Append(apRef.Reference.Id);
-            }
-            else
-            {
-                AppendSchemaFingerprint(sb, schema.AdditionalProperties, depth + 1);
-            }
-        }
-
-        sb.Append('}');
-    }
-
-    private static void AppendSemanticFacets(StringBuilder sb, IOpenApiSchema schema)
-    {
-        void Append(string name, object? value)
-        {
-            if (value is not null)
-            {
-                sb.Append(',').Append(name).Append(':').Append(value);
-            }
-        }
-
-        Append("title", schema.Title);
-        Append("description", schema.Description);
-        Append("default", schema.Default?.ToJsonString());
-        Append(
-            "example",
-            schema.Example is null ? null : OpenApiJsonNodeSerializer.Serialize(schema.Example)
+        using var writer = new StringWriter(CultureInfo.InvariantCulture);
+        schema.SerializeAsV31(
+            new OpenApiJsonWriter(writer, new OpenApiJsonWriterSettings { Terse = true })
         );
-        if (schema.Examples is { Count: > 0 })
-        {
-            Append(
-                "examples",
-                string.Join(
-                    "|",
-                    schema.Examples.Select(example =>
-                        example is null ? null : OpenApiJsonNodeSerializer.Serialize(example)
-                    )
-                )
-            );
-        }
-        Append("deprecated", schema.Deprecated ? true : null);
-        Append("readOnly", schema.ReadOnly ? true : null);
-        Append("writeOnly", schema.WriteOnly ? true : null);
-        Append("minLength", schema.MinLength);
-        Append("maxLength", schema.MaxLength);
-        Append("pattern", schema.Pattern);
-        Append("minimum", schema.Minimum);
-        Append("maximum", schema.Maximum);
-        Append("exclusiveMinimum", schema.ExclusiveMinimum);
-        Append("exclusiveMaximum", schema.ExclusiveMaximum);
-        Append("multipleOf", schema.MultipleOf);
-        Append("minItems", schema.MinItems);
-        Append("maxItems", schema.MaxItems);
-        Append("uniqueItems", schema.UniqueItems == true ? true : null);
-        if (schema.Xml is { } xml)
-        {
-            Append("xml.name", xml.Name);
-            Append("xml.namespace", xml.Namespace);
-            Append("xml.prefix", xml.Prefix);
-            Append("xml.attribute", xml.Attribute ? true : null);
-            Append("xml.wrapped", xml.Wrapped ? true : null);
-        }
+        return Canonical(JsonNode.Parse(writer.ToString()), null)?.ToJsonString() ?? "null";
+
+        static JsonNode? Canonical(JsonNode? node, string? key) =>
+            node switch
+            {
+                _ when key is not null && _schemaDataKeywords.Contains(key) => node?.DeepClone(),
+                JsonObject obj => new JsonObject(
+                    obj.Where(entry =>
+                            key is not null && _schemaNameMaps.Contains(key)
+                            || !entry.Key.StartsWith("x-", StringComparison.Ordinal)
+                        )
+                        .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                        .Select(entry =>
+                            KeyValuePair.Create(entry.Key, Canonical(entry.Value, entry.Key))
+                        )
+                ),
+                JsonArray array when key == "required" => new JsonArray(
+                    array
+                        .Select(item => item?.DeepClone())
+                        .OrderBy(item => item?.ToJsonString(), StringComparer.Ordinal)
+                        .ToArray()
+                ),
+                JsonArray array => new JsonArray(
+                    array.Select(item => Canonical(item, null)).ToArray()
+                ),
+                _ => node?.DeepClone(),
+            };
     }
 }

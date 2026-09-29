@@ -11,3 +11,7 @@
 - `Rivet.Attributes`: `RouteErrorResponse` and `RivetUnionJsonConverter<T>` are now internal (`[RivetUnion]` still constructs the converter).
 - `Rivet.Attributes`: a subtype payload where a concrete type is declared is now rejected when the result executes, not when `Success(...)`/`Error(...)` is called. The check uses the host's serializer options, so polymorphism configured through a `TypeInfoResolver` is honoured, not only `[JsonPolymorphic]`/`[JsonDerivedType]` attributes.
 - `Rivet.Attributes`: declared response media types match on the type without parameters, so `text/csv; charset=utf-8` and `text/csv` are one representation. A body response whose selected content type is malformed is now a contract violation.
+- Import: every disambiguated name now uses one `Name_2`, `Name_3`… scheme. Synthetic types that used to be `Foo2` are now `Foo_2` (for example, slack's `InfoResponseDefaultContent12` is now `InfoResponseDefaultContent1_2`). Enum members and contract fields also skip a suffix that the spec already authored.
+- Import: inline schemas that differ in `oneOf`/`anyOf`/`allOf`/`const`/`not` now get distinct synthetic types instead of silently sharing the first one.
+- Import: a Swagger 2 `basic` security definition now imports as HTTP `basic`; before, it was refused.
+- Import: a malformed spec (invalid JSON, missing required fields) now exits 1 with `error: invalid OpenAPI document: …` instead of a stack trace.

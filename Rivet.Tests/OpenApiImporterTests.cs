@@ -1,6 +1,8 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.CodeAnalysis;
+using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
 using Rivet.Tool.Model;
@@ -3173,13 +3175,13 @@ public sealed class OpenApiImporterTests
         Assert.Contains("long Page", componentContent);
         Assert.Contains("long Limit", componentContent);
 
-        var synthesizedContent = CompilationHelper.FindFile(result, "Types/ListItemsInput2.cs");
+        var synthesizedContent = CompilationHelper.FindFile(result, "Types/ListItemsInput_2.cs");
         Assert.Contains("long Page", synthesizedContent);
         Assert.DoesNotContain("Limit", synthesizedContent);
 
         // The endpoint references the disambiguated synthesized input, not the component
         var contractContent = CompilationHelper.FindFile(result, "DefaultContract.cs");
-        Assert.Contains("ListItemsInput2", contractContent);
+        Assert.Contains("ListItemsInput_2", contractContent);
 
         CompilationHelper.CompileImportResult(result);
     }
@@ -3189,8 +3191,8 @@ public sealed class OpenApiImporterTests
     {
         // GAP-2 (I3 residual): the spec a previous emit∘import loop produced already
         // contains both the colliding component (ListItemsInput {page, limit}) and the
-        // disambiguated synthesized input (ListItemsInput2 {page}). Re-importing must
-        // reuse ListItemsInput2 — minting ListItemsInput3 every loop makes emit∘import
+        // disambiguated synthesized input (ListItemsInput_2 {page}). Re-importing must
+        // reuse ListItemsInput_2 — minting ListItemsInput_3 every loop makes emit∘import
         // grow a fresh numbered record unboundedly.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -3202,7 +3204,7 @@ public sealed class OpenApiImporterTests
                 },
                 "required": ["page", "limit"]
             },
-            "ListItemsInput2": {
+            "ListItemsInput_2": {
                 "type": "object",
                 "properties": {
                     "page": { "type": "integer" }
@@ -3251,10 +3253,10 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
 
         // No third variant is minted — the identically-shaped numbered component is reused.
-        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("ListItemsInput3"));
+        Assert.DoesNotContain(result.Files, f => f.FileName.Contains("ListItemsInput_3"));
 
         var contractContent = CompilationHelper.FindFile(result, "DefaultContract.cs");
-        Assert.Contains("ListItemsInput2", contractContent);
+        Assert.Contains("ListItemsInput_2", contractContent);
 
         CompilationHelper.CompileImportResult(result);
     }
@@ -3337,14 +3339,14 @@ public sealed class OpenApiImporterTests
         var memberInput = CompilationHelper.FindFile(result, "Types/GetByIdInput.cs");
         Assert.Contains("string MemberId", memberInput);
 
-        var orderInput = CompilationHelper.FindFile(result, "Types/GetByIdInput2.cs");
+        var orderInput = CompilationHelper.FindFile(result, "Types/GetByIdInput_2.cs");
         Assert.Contains("long OrderNumber", orderInput);
 
         // Each contract references its own input type
         Assert.Contains("GetByIdInput", CompilationHelper.FindFile(result, "MembersContract.cs"));
-        Assert.Contains("GetByIdInput2", CompilationHelper.FindFile(result, "OrdersContract.cs"));
+        Assert.Contains("GetByIdInput_2", CompilationHelper.FindFile(result, "OrdersContract.cs"));
         Assert.DoesNotContain(
-            "GetByIdInput2",
+            "GetByIdInput_2",
             CompilationHelper.FindFile(result, "MembersContract.cs")
         );
 
@@ -6744,5 +6746,202 @@ public sealed class OpenApiImporterTests
 
         var parameter = Assert.Single(parameters);
         Assert.Equal("limit", parameter!["name"]!.GetValue<string>());
+    }
+
+    // ========== Malformed specs are user errors ==========
+
+    [Theory]
+    [InlineData("{")]
+    [InlineData("""{ "openapi": "3.1.0", "info": { "version": "1" }, "paths": {} }""")]
+    [InlineData(
+        """{ "openapi": "3.1.0", "info": { "title": "T", "version": "1" }, "paths": {}, "components": { "examples": { "Both": { "value": 1, "externalValue": "https://x" } } } }"""
+    )]
+    [InlineData(
+        """{ "openapi": "3.1.0", "info": { "title": "T", "version": "1" }, "paths": {}, "components": { "securitySchemes": { "odd": { "type": "magic" } } } }"""
+    )]
+    public void Malformed_Spec_Is_A_User_Error(string spec)
+    {
+        Assert.Throws<RivetUserException>(() => CompilationHelper.Import(spec));
+    }
+
+    // ========== Escaped component names ==========
+
+    [Fact]
+    public void Component_Refs_With_Escaped_Slash_And_Tilde_Resolve()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "T", "version": "1" },
+              "paths": {
+                "/items": {
+                  "get": {
+                    "operationId": "getItem",
+                    "responses": {
+                      "200": { "$ref": "#/components/responses/item~1ok" },
+                      "201": {
+                        "description": "created",
+                        "content": {
+                          "application/json": {
+                            "schema": { "$ref": "#/components/schemas/Item" },
+                            "examples": { "default": { "$ref": "#/components/examples/ex~1one~0two" } }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "components": {
+                "schemas": {
+                  "Item": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } }
+                },
+                "examples": { "ex/one~two": { "value": { "id": "1" } } },
+                "responses": {
+                  "item/ok": {
+                    "description": "the item",
+                    "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "DefaultContract.cs");
+
+        Assert.Contains("the item", contract);
+        Assert.Contains(".ResponseContent<Item>(200, \"application/json\")", contract);
+        Assert.DoesNotContain("unresolved-ref", contract);
+        Assert.Contains("\"ex/one~two\"", contract);
+    }
+
+    // ========== Inline schema identity ==========
+
+    [Fact]
+    public void Inline_Objects_Differing_Only_In_A_Nested_OneOf_Get_Distinct_Records()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Cat": { "type": "object", "properties": { "meow": { "type": "string" } } },
+            "Dog": { "type": "object", "properties": { "bark": { "type": "string" } } },
+            "Holder": {
+              "type": "object",
+              "properties": {
+                "first": { "type": "object", "properties": { "pet": { "oneOf": [ { "$ref": "#/components/schemas/Cat" } ] } } },
+                "second": { "type": "object", "properties": { "pet": { "oneOf": [ { "$ref": "#/components/schemas/Dog" } ] } } }
+              }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        var holder = CompilationHelper.FindFile(result, "Types/Holder.cs");
+
+        Assert.Contains("HolderFirst First", holder);
+        Assert.Contains("HolderSecond Second", holder);
+    }
+
+    [Fact]
+    public void Swagger2_Basic_Security_Definition_Imports_As_Http_Basic()
+    {
+        const string spec = """
+            {
+              "swagger": "2.0",
+              "info": { "title": "T", "version": "1" },
+              "securityDefinitions": { "basicAuth": { "type": "basic" } },
+              "security": [ { "basicAuth": [] } ],
+              "paths": {}
+            }
+            """;
+
+        var security = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "RivetSecurity.cs"
+        );
+
+        Assert.Contains("\"basicAuth\", \"http\"", security);
+        Assert.Contains("\"basic\"", security);
+    }
+
+    [Fact]
+    public void Swagger2_Definition_Alias_Cycle_Is_Broken_With_A_Warning()
+    {
+        const string spec = """
+            {
+              "swagger": "2.0",
+              "info": { "title": "T", "version": "1" },
+              "paths": {},
+              "definitions": {
+                "A": { "$ref": "#/definitions/B" },
+                "B": { "$ref": "#/definitions/A" },
+                "Holder": { "type": "object", "properties": { "thing": { "$ref": "#/definitions/A" } } }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+
+        Assert.Contains(result.Warnings, w => w.StartsWith(Diagnostics.ImportAliasCycleBroken));
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void String_Enum_Dedup_Suffix_Does_Not_Collide_With_An_Authored_Suffix()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Mode": { "type": "string", "enum": ["a", "A", "A_2"] }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        var mode = CompilationHelper.FindFile(result, "Types/Mode.cs");
+
+        Assert.Contains("A_2,", mode);
+        Assert.Contains("A_2_2", mode);
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void Import_Output_Does_Not_Depend_On_The_Current_Culture()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Reading": {
+              "type": "object",
+              "required": ["value"],
+              "properties": {
+                "value": { "type": "number", "multipleOf": 0.5, "minimum": -1.5, "maximum": 1000000.25 },
+                "ratio": { "type": "number", "exclusiveMinimum": 0.125 },
+                "level": { "type": "integer", "enum": [-3, 0, 5000000000] },
+                "tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 3 }
+              }
+            }
+            """
+        );
+
+        var invariant = ImportUnder(CultureInfo.InvariantCulture);
+        foreach (var culture in new[] { "sv-SE", "de-DE", "ar-SA", "fa-IR" })
+        {
+            Assert.Equal(invariant, ImportUnder(new CultureInfo(culture)));
+        }
+
+        string ImportUnder(CultureInfo culture)
+        {
+            var previous = CultureInfo.CurrentCulture;
+            CultureInfo.CurrentCulture = culture;
+            try
+            {
+                return string.Join(
+                    "\n",
+                    CompilationHelper.Import(spec).Files.Select(f => f.FileName + "\n" + f.Content)
+                );
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = previous;
+            }
+        }
     }
 }

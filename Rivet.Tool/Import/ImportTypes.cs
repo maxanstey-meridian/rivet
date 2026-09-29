@@ -1,3 +1,4 @@
+using System.Globalization;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Import;
@@ -39,7 +40,6 @@ internal sealed record GeneratedRecord(
     // so the walker re-emits oneOf and the runtime serializes the bare variant.
     bool IsUnion = false,
     string? ComponentId = null,
-    bool IsSynthetic = true,
     IReadOnlyList<GeneratedSchemaMetadata>? SchemaMetadata = null,
     bool HasExtensionData = false
 );
@@ -70,7 +70,7 @@ internal sealed record RecordProperty(
     string? Example = null,
     bool IsReadOnly = false,
     bool IsWriteOnly = false,
-    // P2 wave 5: non-null for request-header properties — the wire header name with its
+    // Non-null for request-header properties — the wire header name with its
     // original casing. Written as [property: RivetHeader("...")], never part of JSON.
     string? HeaderName = null,
     // Non-null when camelCase(Name) is not the spec's property key (snake_case keys,
@@ -89,8 +89,7 @@ internal sealed record GeneratedEnumMember(
     string CSharpName,
     string? OriginalName,
     // Decimal literal of the enum constant ("1", "5000000000"): a string carrier
-    // so constants beyond Int32 round-trip byte-for-byte through generated C#
-    // (planner-constraint:generated-enum-underlying-type).
+    // so constants beyond Int32 round-trip byte-for-byte through generated C#.
     string? IntValue = null
 );
 
@@ -100,7 +99,6 @@ internal sealed record GeneratedEnum(
     string? Format = null,
     string? Description = null,
     string? ComponentId = null,
-    bool IsSynthetic = true,
     // The x-rivet-enum-naming-policy token carried from a Rivet-emitted spec —
     // the imported enum re-derives its wire values from the matching family
     // converter instead of blanket member pins.
@@ -112,8 +110,7 @@ internal sealed record GeneratedBrand(
     string InnerType,
     string? Format = null,
     string? Description = null,
-    string? ComponentId = null,
-    bool IsSynthetic = true
+    string? ComponentId = null
 );
 
 internal sealed record GeneratedContract(
@@ -181,31 +178,40 @@ internal sealed record GeneratedMediaTypeContent(
     bool IsFormatSpecified = false
 );
 
+/// <summary>
+/// An OpenAPI response key: a numeric status ("404") or a range/default ("4XX",
+/// "default"), whose code is 0.
+/// </summary>
+internal static class ResponseStatus
+{
+    public static int Code(string statusKey) =>
+        int.TryParse(statusKey, NumberStyles.Integer, CultureInfo.InvariantCulture, out var code)
+            ? code
+            : 0;
+}
+
 internal sealed record GeneratedResponseMediaTypeContent(
-    int StatusCode,
     string StatusKey,
-    string MediaType,
-    string? TypeName,
-    bool IsBinary = false,
-    string? SchemaRef = null,
-    string? SchemaType = null,
-    string? Format = null,
-    bool IsFormatSpecified = false,
+    GeneratedMediaTypeContent Content,
     string? SchemaDescription = null
-);
+)
+{
+    public int StatusCode => ResponseStatus.Code(StatusKey);
+}
 
 internal sealed record GeneratedErrorResponse(
-    int StatusCode,
     string StatusKey,
     string? TypeName,
     string? Description
-);
+)
+{
+    public int StatusCode => ResponseStatus.Code(StatusKey);
+}
 
-internal sealed record GeneratedEndpointResponseExample(
-    int StatusCode,
-    string StatusKey,
-    TsEndpointExample Example
-);
+internal sealed record GeneratedEndpointResponseExample(string StatusKey, TsEndpointExample Example)
+{
+    public int StatusCode => ResponseStatus.Code(StatusKey);
+}
 
 internal sealed record GeneratedEndpointParameter(
     string Name,
@@ -219,9 +225,8 @@ internal sealed record GeneratedEndpointParameter(
     string? SchemaRef = null
 );
 
-/// <summary>P2 wave 5: a response header re-emitted as a .WithResponseHeader(...) chain call.</summary>
+/// <summary>A response header re-emitted as a .WithResponseHeader(...) chain call.</summary>
 internal sealed record GeneratedResponseHeader(
-    int StatusCode,
     string StatusKey,
     string Name,
     string TypeName,
@@ -240,4 +245,7 @@ internal sealed record GeneratedResponseHeader(
     bool AllowReserved = false,
     bool AllowEmptyValue = false,
     string? ContentType = null
-);
+)
+{
+    public int StatusCode => ResponseStatus.Code(StatusKey);
+}

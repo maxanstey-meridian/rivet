@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 using Rivet.Tool.Model;
@@ -15,10 +17,10 @@ internal sealed class SchemaMapper
     private readonly ResolutionContext _ctx;
     private readonly RecordSynthesizer _synth;
 
-    // I1: component alias resolution ("Alias": {"$ref": "#/components/schemas/Real"}).
-    // Alias keys map to their FINAL (non-reference) target key; cyclic/missing chains are
-    // recorded separately so consumers fall back loudly instead of overflowing the stack
-    // chasing the library's reference proxies.
+    // Component alias resolution ("Alias": {"$ref": "#/components/schemas/Real"}).
+    // Alias keys map to their FINAL (non-reference) target key; chains to a missing target
+    // are recorded separately so consumers fall back loudly instead of chasing the
+    // library's reference proxies.
     private readonly Dictionary<string, string> _aliasTargets = new(StringComparer.Ordinal);
     private readonly HashSet<string> _unresolvableAliases = new(StringComparer.Ordinal);
     private readonly HashSet<string> _skippedComponentTypes = new(StringComparer.Ordinal);
@@ -26,7 +28,7 @@ internal sealed class SchemaMapper
     private readonly HashSet<string> _unsupportedNamedScalarsWarned = new(StringComparer.Ordinal);
     private readonly HashSet<string> _requiredComponentSchemas = new(StringComparer.Ordinal);
 
-    // P2 wave 4: oneOf + discriminator + usable mapping reverses to an abstract
+    // A oneOf + discriminator + usable mapping reverses to an abstract
     // [JsonPolymorphic] base record with [JsonDerivedType] registrations. Bases are
     // keyed by schema key; each conforming variant key maps back to its base key;
     // bases whose mapping could NOT be reversed record the reason for the loud
@@ -49,13 +51,7 @@ internal sealed class SchemaMapper
     public SchemaMapper(List<string> warnings)
     {
         _ctx = new ResolutionContext(warnings);
-        _synth = new RecordSynthesizer(
-            _ctx,
-            ResolveCSharpType,
-            ResolveFormat,
-            ResolveSchemaType,
-            ResolveScalarReferenceName
-        );
+        _synth = new RecordSynthesizer(_ctx, this);
     }
 
     /// <summary>
@@ -69,16 +65,14 @@ internal sealed class SchemaMapper
     public IReadOnlyList<GeneratedEnum> ExtraEnums => _ctx.ExtraEnums;
 
     /// <summary>
-    /// Register a synthetic record (e.g. parameter input records built by ContractBuilder).
-    /// </summary>
-    /// <summary>
-    /// Dedup-with-shape-check (I3 guard): identical shape reuses the existing record;
-    /// a name collision with a different shape gets a suffixed name. Returns the name to reference.
+    /// Registers a synthetic record (e.g. a parameter input record built by ContractBuilder).
+    /// An identical shape reuses the existing record; a name collision with a different shape
+    /// gets a suffixed name. Returns the name to reference.
     /// </summary>
     public string AddExtraRecord(GeneratedRecord record) => _ctx.AddOrReuseExtraRecord(record);
 
     /// <summary>
-    /// P2 wave 5: the header-augmented replacement for a component record, or null when
+    /// The header-augmented replacement for a component record, or null when
     /// the record was not augmented. Consulted by OpenApiImporter when writing Types/.
     /// </summary>
     public GeneratedRecord? GetComponentRecordOverride(string name) =>
@@ -106,7 +100,7 @@ internal sealed class SchemaMapper
                 !byName.TryGetValue(prop.Name, out var existing)
                 || existing.CSharpType != prop.CSharpType
                 || existing.IsRequired != prop.IsRequired
-                // P2 wave 5: a header-bound property is a different shape from a plain
+                // A header-bound property is a different shape from a plain
                 // one of the same name/type — headers never enter the JSON schema.
                 || existing.HeaderName != prop.HeaderName
             )
@@ -119,7 +113,7 @@ internal sealed class SchemaMapper
     }
 
     /// <summary>
-    /// P2 wave 5: header-aware component reuse for synthesized inputs. [RivetHeader]
+    /// Header-aware component reuse for synthesized inputs. [RivetHeader]
     /// properties never enter a JSON schema, so the component a previous emit∘import loop
     /// produced for a header-bearing input carries only the NON-header subset. When that
     /// subset matches (base name first, then numbered variants), the component record is
@@ -188,32 +182,25 @@ internal sealed class SchemaMapper
     /// <c>{baseName}3</c>, …) whose shape matches exactly, lowest suffix first.
     /// A prior emit∘import loop may already have disambiguated a synthesized input to a
     /// numbered name — reusing it (instead of minting a fresh suffix every loop) keeps
-    /// emit∘import a fixed point (GAP-2, I3 residual). Null when nothing matches.
+    /// emit∘import a fixed point. Null when nothing matches.
     /// </summary>
     public string? FindNumberedSchemaWithShape(
         string baseName,
         IReadOnlyList<RecordProperty> properties
-    )
-    {
-        return _ctx
-            .MappedComponentRecords.Keys.Select(name =>
-                (Name: name, Suffix: ParseNumberedSuffix(name, baseName))
-            )
-            .Where(entry => entry.Suffix is not null)
-            .OrderBy(entry => entry.Suffix!.Value)
-            .Where(entry => HasMappedSchemaWithShape(entry.Name, properties))
-            .Select(entry => entry.Name)
-            .FirstOrDefault();
-    }
+    ) =>
+        ComponentCandidates(baseName)
+            .Skip(1)
+            .FirstOrDefault(name => HasMappedSchemaWithShape(name, properties));
 
+    /// <summary>The N of a <see cref="SchemaClassifier.NameCandidates"/> name <c>{baseName}_N</c>.</summary>
     private static int? ParseNumberedSuffix(string name, string baseName)
     {
-        if (name.Length <= baseName.Length || !name.StartsWith(baseName, StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        return int.TryParse(name.AsSpan(baseName.Length), out var suffix) ? suffix : null;
+        var prefix = baseName + "_";
+        return
+            name.StartsWith(prefix, StringComparison.Ordinal)
+            && int.TryParse(name.AsSpan(prefix.Length), out var suffix)
+            ? suffix
+            : null;
     }
 
     /// <summary>
@@ -233,7 +220,7 @@ internal sealed class SchemaMapper
         // (cloudflare: ...CustomHostname vs ...Customhostname left a dangling type).
         var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // I1: resolve alias chains first, using raw reference ids only (never proxied
+        // Resolve alias chains first, using raw reference ids only (never proxied
         // members — a cyclic alias would overflow the stack inside the library's proxy)
         _componentSchemas = schemas;
         if (requiredComponentSchemas is not null)
@@ -248,7 +235,7 @@ internal sealed class SchemaMapper
 
         foreach (var (key, schema) in schemas)
         {
-            // I1: alias entries are resolved via _aliasTargets; touching their proxied
+            // Alias entries are resolved via _aliasTargets; touching their proxied
             // members here would recurse on cyclic chains
             if (schema is OpenApiSchemaReference)
             {
@@ -279,35 +266,25 @@ internal sealed class SchemaMapper
 
         // Pre-pass: claim every component schema's C# name BEFORE any type resolution runs,
         // so synthetic records/enums created during resolution can never reuse a component
-        // name with a different shape (I3 — two types in one Types/{Name}.cs file).
+        // name with a different shape (two types in one Types/{Name}.cs file).
         foreach (var (key, schema) in schemas)
         {
-            // I1: aliases produce no file of their own and must NOT claim a name — they
+            // Aliases produce no file of their own and must NOT claim a name — they
             // map to their target's name in the follow-up loop below
             if (schema is OpenApiSchemaReference)
             {
                 continue;
             }
 
-            var name = SanitizeName(key);
-
             // Deduplicate schema names that collide after PascalCase sanitization
-            if (!usedNames.Add(name))
-            {
-                var suffix = 2;
-                while (!usedNames.Add($"{name}_{suffix}"))
-                {
-                    suffix++;
-                }
-                name = $"{name}_{suffix}";
-            }
+            var name = SchemaClassifier.UniqueName(_ctx.TypeName(key), usedNames);
 
             // Track mapping from original OpenAPI key to (possibly deduped) C# name
             _ctx.SchemaNameMap[key] = name;
             _ctx.ReservedTypeNames.Add(name);
         }
 
-        // I1: alias keys map to the FINAL target's mapped name so every consumer of the
+        // Alias keys map to the FINAL target's mapped name so every consumer of the
         // alias resolves to a type that actually exists. Unresolvable aliases (cycles,
         // missing targets) get no mapping — their consumers fall back loudly.
         foreach (var (key, schema) in schemas)
@@ -319,16 +296,7 @@ internal sealed class SchemaMapper
 
             if (TryGetScalarAliasTarget(key, schemas, out _, out _))
             {
-                var name = SanitizeName(key);
-                if (!usedNames.Add(name))
-                {
-                    var suffix = 2;
-                    while (!usedNames.Add($"{name}_{suffix}"))
-                    {
-                        suffix++;
-                    }
-                    name = $"{name}_{suffix}";
-                }
+                var name = SchemaClassifier.UniqueName(_ctx.TypeName(key), usedNames);
                 _ctx.SchemaNameMap[key] = name;
                 _ctx.ReservedTypeNames.Add(name);
                 continue;
@@ -343,7 +311,7 @@ internal sealed class SchemaMapper
             }
         }
 
-        // P2 wave 4: detect reversible polymorphic unions BEFORE mapping so variant
+        // Detect reversible polymorphic unions BEFORE mapping so variant
         // schemas can be generated as derived records regardless of iteration order.
         DetectPolymorphicUnions(schemas);
 
@@ -366,7 +334,7 @@ internal sealed class SchemaMapper
 
         foreach (var (key, schema) in schemas)
         {
-            // Skip $ref aliases — resolved via the alias-target map (I1); unresolvable
+            // Skip $ref aliases — resolved via the alias-target map; unresolvable
             // aliases have no SchemaNameMap entry at all
             if (schema is OpenApiSchemaReference)
             {
@@ -419,7 +387,7 @@ internal sealed class SchemaMapper
                 ? null
                 : schema.Description;
 
-            // P2 wave 4: a schema claimed as a polymorphic union variant becomes a
+            // A schema claimed as a polymorphic union variant becomes a
             // derived record: the discriminator property is STRIPPED (System.Text.Json
             // re-adds it on the wire — keeping it would double-emit) and the record
             // inherits from the abstract base.
@@ -478,7 +446,7 @@ internal sealed class SchemaMapper
                     continue;
                 }
 
-                // P2 wave 4: oneOf + discriminator + usable mapping reverses to an
+                // A oneOf + discriminator + usable mapping reverses to an
                 // abstract [JsonPolymorphic] base record with one [JsonDerivedType]
                 // registration per mapping entry.
                 if (_polymorphicBases.TryGetValue(key, out var poly))
@@ -560,7 +528,7 @@ internal sealed class SchemaMapper
                     continue;
                 }
 
-                // Named diagnostic (I.A-17): a discriminator on a plain object schema (no oneOf
+                // Named diagnostic: a discriminator on a plain object schema (no oneOf
                 // union to dispatch over) has no C# contract representation — the record is
                 // generated but the polymorphic dispatch semantics are dropped.
                 if (schema.Discriminator?.PropertyName is { } discriminatorProperty)
@@ -606,33 +574,42 @@ internal sealed class SchemaMapper
             );
         }
 
-        // Register component records for shape-checked reuse (I3 residual)
+        // Register component records for shape-checked reuse
         var componentIdsByName = _ctx
             .SchemaNameMap.Where(pair => schemas[pair.Key] is not OpenApiSchemaReference)
             .GroupBy(pair => pair.Value, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First().Key, StringComparer.Ordinal);
 
-        for (var i = 0; i < records.Count; i++)
-        {
-            if (componentIdsByName.TryGetValue(records[i].Name, out var componentId))
-            {
-                records[i] = records[i] with { ComponentId = componentId, IsSynthetic = false };
-            }
-        }
-        for (var i = 0; i < enums.Count; i++)
-        {
-            if (componentIdsByName.TryGetValue(enums[i].Name, out var componentId))
-            {
-                enums[i] = enums[i] with { ComponentId = componentId, IsSynthetic = false };
-            }
-        }
-        for (var i = 0; i < brands.Count; i++)
-        {
-            if (componentIdsByName.TryGetValue(brands[i].Name, out var componentId))
-            {
-                brands[i] = brands[i] with { ComponentId = componentId, IsSynthetic = false };
-            }
-        }
+        records = records
+            .Select(record =>
+                componentIdsByName.TryGetValue(record.Name, out var id)
+                    ? record with
+                    {
+                        ComponentId = id,
+                    }
+                    : record
+            )
+            .ToList();
+        enums = enums
+            .Select(value =>
+                componentIdsByName.TryGetValue(value.Name, out var id)
+                    ? value with
+                    {
+                        ComponentId = id,
+                    }
+                    : value
+            )
+            .ToList();
+        brands = brands
+            .Select(value =>
+                componentIdsByName.TryGetValue(value.Name, out var id)
+                    ? value with
+                    {
+                        ComponentId = id,
+                    }
+                    : value
+            )
+            .ToList();
 
         var representedComponentIds = records
             .Select(record => record.ComponentId)
@@ -695,14 +672,7 @@ internal sealed class SchemaMapper
         }
 
         var nonNull = declared & ~JsonSchemaType.Null;
-        var schemaType = nonNull switch
-        {
-            JsonSchemaType.String => "string",
-            JsonSchemaType.Integer => "integer",
-            JsonSchemaType.Number => "number",
-            JsonSchemaType.Boolean => "boolean",
-            _ => null,
-        };
+        var schemaType = SchemaClassifier.ScalarTypeKeyword(nonNull);
         if (schemaType is null)
         {
             if (
@@ -1042,116 +1012,57 @@ internal sealed class SchemaMapper
         }
     }
 
-    internal string? ResolveFormat(IOpenApiSchema schema)
-    {
-        if (schema.Format is not null)
-        {
-            return schema.Format;
-        }
+    internal string? ResolveFormat(IOpenApiSchema schema) =>
+        schema.Format ?? (Unwrap(schema) is { } inner ? ResolveFormat(inner) : null);
 
+    internal string? ResolveSchemaType(IOpenApiSchema schema) =>
+        (schema.Type is { } type ? SchemaClassifier.TypeKeyword(type) : null)
+        ?? (Unwrap(schema) is { } inner ? ResolveSchemaType(inner) : null);
+
+    /// <summary>
+    /// The schema that carries <paramref name="schema"/>'s leaf metadata: a component
+    /// reference's (alias-chased) target, the value branch of a two-branch nullable
+    /// oneOf/anyOf, or a single allOf entry. Null when there is nothing to look through.
+    /// </summary>
+    private IOpenApiSchema? Unwrap(IOpenApiSchema schema)
+    {
         if (
             schema is OpenApiSchemaReference { Reference.Id: { } refId }
-            && _componentSchemas is not null
+            && TryResolveComponent(refId, out var target)
         )
         {
-            var finalKey = _aliasTargets.GetValueOrDefault(refId, refId);
-            if (
-                _componentSchemas.TryGetValue(finalKey, out var target)
-                && target is not OpenApiSchemaReference
-            )
-            {
-                return ResolveFormat(target);
-            }
+            return target;
         }
 
         foreach (var branches in new[] { schema.OneOf, schema.AnyOf })
         {
-            if (branches is not { Count: 2 })
-            {
-                continue;
-            }
-
-            var valueBranch = branches.FirstOrDefault(branch =>
-                branch.Type is not { } type || type != JsonSchemaType.Null
-            );
             if (
-                valueBranch is not null
+                branches is { Count: 2 }
                 && branches.Any(branch => branch.Type == JsonSchemaType.Null)
+                && branches.FirstOrDefault(branch =>
+                    branch.Type is not { } type || type != JsonSchemaType.Null
+                )
+                    is { } valueBranch
             )
             {
-                return ResolveFormat(valueBranch);
+                return valueBranch;
             }
         }
 
-        if (schema.AllOf is [var only])
-        {
-            return ResolveFormat(only);
-        }
-
-        return null;
+        return schema.AllOf is [var only] ? only : null;
     }
 
-    internal string? ResolveSchemaType(IOpenApiSchema schema)
+    /// <summary>The non-alias component a reference id resolves to, chasing aliases.</summary>
+    private bool TryResolveComponent(string refId, [NotNullWhen(true)] out IOpenApiSchema? target)
     {
-        if (schema.Type is { } declaredType)
-        {
-            var type = declaredType & ~JsonSchemaType.Null;
-            var name = type switch
-            {
-                JsonSchemaType.String => "string",
-                JsonSchemaType.Integer => "integer",
-                JsonSchemaType.Number => "number",
-                JsonSchemaType.Boolean => "boolean",
-                JsonSchemaType.Object => "object",
-                JsonSchemaType.Array => "array",
-                _ => null,
-            };
-            if (name is not null)
-            {
-                return name;
-            }
-        }
-
-        if (
-            schema is OpenApiSchemaReference { Reference.Id: { } refId }
-            && _componentSchemas is not null
-        )
-        {
-            var finalKey = _aliasTargets.GetValueOrDefault(refId, refId);
-            if (
-                _componentSchemas.TryGetValue(finalKey, out var target)
-                && target is not OpenApiSchemaReference
+        target = null;
+        var componentId = DecodeComponentId(refId)!;
+        return _componentSchemas is not null
+            && _componentSchemas.TryGetValue(
+                _aliasTargets.GetValueOrDefault(componentId, componentId),
+                out target
             )
-            {
-                return ResolveSchemaType(target);
-            }
-        }
-
-        foreach (var branches in new[] { schema.OneOf, schema.AnyOf })
-        {
-            if (branches is not { Count: 2 })
-            {
-                continue;
-            }
-
-            var valueBranch = branches.FirstOrDefault(branch =>
-                branch.Type is not { } type || type != JsonSchemaType.Null
-            );
-            if (
-                valueBranch is not null
-                && branches.Any(branch => branch.Type == JsonSchemaType.Null)
-            )
-            {
-                return ResolveSchemaType(valueBranch);
-            }
-        }
-
-        if (schema.AllOf is [var only])
-        {
-            return ResolveSchemaType(only);
-        }
-
-        return null;
+            && target is not OpenApiSchemaReference;
     }
 
     private string ResolveCSharpTypeCore(IOpenApiSchema schema, string? context)
@@ -1191,9 +1102,9 @@ internal sealed class SchemaMapper
     // --- Resolution dispatch methods (order matters — earlier branches take precedence) ---
 
     /// <summary>
-    /// I1: walks every component alias entry's $ref chain using raw reference ids
-    /// (never proxied members) and records the final non-reference target, or marks
-    /// the alias unresolvable (cycle / missing target) with a loud warning.
+    /// Maps each $ref alias component to the non-alias component at the end of its chain.
+    /// Alias cycles never reach here: <c>OpenApiImporter.BreakAliasCycles</c> replaces them
+    /// before the document is parsed.
     /// </summary>
     private void ResolveAliasTargets(IDictionary<string, IOpenApiSchema> schemas)
     {
@@ -1204,18 +1115,10 @@ internal sealed class SchemaMapper
                 continue;
             }
 
-            var visited = new HashSet<string>(StringComparer.Ordinal) { key };
-            var current = key;
-
-            while (true)
+            string? current = key;
+            while (schemas[current] is OpenApiSchemaReference reference)
             {
-                if (schemas[current] is not OpenApiSchemaReference reference)
-                {
-                    _aliasTargets[key] = current;
-                    break;
-                }
-
-                var targetId = reference.Reference.Id;
+                var targetId = DecodeComponentId(reference.Reference.Id);
                 if (targetId is null || !schemas.ContainsKey(targetId))
                 {
                     _ctx.Warnings.Add(
@@ -1225,28 +1128,22 @@ internal sealed class SchemaMapper
                         )
                     );
                     _unresolvableAliases.Add(key);
-                    break;
-                }
-
-                if (!visited.Add(targetId))
-                {
-                    _ctx.Warnings.Add(
-                        Diagnostics.Prefix(
-                            Diagnostics.ImportAliasRefCycle,
-                            $"Alias schema '{key}' is part of a $ref cycle ({string.Join(" -> ", visited)}) — consumers fall back to JsonElement."
-                        )
-                    );
-                    _unresolvableAliases.Add(key);
+                    current = null;
                     break;
                 }
 
                 current = targetId;
             }
+
+            if (current is not null)
+            {
+                _aliasTargets[key] = current;
+            }
         }
     }
 
     /// <summary>
-    /// P2 wave 4: detects oneOf schemas whose <c>discriminator.propertyName</c> +
+    /// Detects oneOf schemas whose <c>discriminator.propertyName</c> +
     /// <c>mapping</c> can be reversed into a [JsonPolymorphic] base with
     /// [JsonDerivedType] registrations. A union qualifies only when every mapped
     /// variant resolves to a plain object component carrying a conforming tag
@@ -1450,7 +1347,7 @@ internal sealed class SchemaMapper
 
         var refId = DecodeComponentId(schemaRef.Reference.Id);
 
-        // I1: refs to unresolvable aliases (cycle/missing target) — loud fallback,
+        // Refs to unresolvable aliases (missing target) — loud fallback,
         // and never touch the proxy (a cyclic chain overflows the stack)
         if (refId is not null && _unresolvableAliases.Contains(refId))
         {
@@ -1464,7 +1361,7 @@ internal sealed class SchemaMapper
             return true;
         }
 
-        // I1: refs to alias entries resolve against the FINAL target schema and name
+        // Refs to alias entries resolve against the FINAL target schema and name
         var effective = (IOpenApiSchema)schemaRef;
         var effectiveId = refId;
         if (
@@ -1536,9 +1433,9 @@ internal sealed class SchemaMapper
                 effectiveId is not null
                 && _ctx.SchemaNameMap.TryGetValue(effectiveId, out var mapped)
                     ? mapped
-                    : SanitizeName(effectiveId ?? schemaRef.Reference.Id!);
+                    : _ctx.TypeName(effectiveId ?? DecodeComponentId(schemaRef.Reference.Id)!);
 
-            // FABLE_ROUNDTRIP #6: a component that is itself nullable (3.0
+            // A component that is itself nullable (3.0
             // `nullable: true` / 3.1 null in the type array — both parse to the
             // Null flag) makes every bare $ref use-site nullable. Dropping this
             // typed 139 github-corpus properties non-nullable that the API can
@@ -1555,7 +1452,7 @@ internal sealed class SchemaMapper
         return false;
     }
 
-    private static string? DecodeComponentId(string? value) =>
+    internal static string? DecodeComponentId(string? value) =>
         value is null ? null : JsonPointer.Unescape(Uri.UnescapeDataString(value));
 
     private bool TryResolveNullableType(IOpenApiSchema schema, string? context, out string result)
@@ -1584,7 +1481,7 @@ internal sealed class SchemaMapper
                 && schema.Properties is not { Count: > 0 }
             )
             {
-                result = SanitizeName(nullableRef.Reference.Id!) + "?";
+                result = _ctx.TypeName(DecodeComponentId(nullableRef.Reference.Id)!) + "?";
                 return true;
             }
 
@@ -1603,7 +1500,7 @@ internal sealed class SchemaMapper
 
             // x-rivet-csharp-type on nullable untyped schema
             var nullableCsharpType = SchemaClassifier.GetExtensionString(
-                schema,
+                schema.Extensions,
                 "x-rivet-csharp-type"
             );
             if (nullableCsharpType is not null)
@@ -1788,12 +1685,12 @@ internal sealed class SchemaMapper
         {
             if (SchemaClassifier.IsIntEnum(schema))
             {
-                return SynthesizeInlineIntEnum(schema, context);
+                return SynthesizeInlineEnum(schema, context, SchemaClassifier.MapIntEnum);
             }
 
             if (SchemaClassifier.IsStringEnum(schema))
             {
-                return SynthesizeInlineEnum(schema, context);
+                return SynthesizeInlineEnum(schema, context, SchemaClassifier.MapEnum);
             }
 
             WarnEnumConstraintDropped(schema, context, "string");
@@ -1821,7 +1718,10 @@ internal sealed class SchemaMapper
         }
 
         // x-rivet-csharp-type on untyped schemas (e.g. JsonNode, JsonObject, JsonArray)
-        var untypedCsharpType = SchemaClassifier.GetExtensionString(schema, "x-rivet-csharp-type");
+        var untypedCsharpType = SchemaClassifier.GetExtensionString(
+            schema.Extensions,
+            "x-rivet-csharp-type"
+        );
         if (untypedCsharpType is not null)
         {
             return QualifyFrameworkScalarIfShadowed(
@@ -1848,12 +1748,19 @@ internal sealed class SchemaMapper
             return "bool";
         }
 
-        if (int.TryParse(constValue, out _))
+        if (int.TryParse(constValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
         {
             return "int";
         }
 
-        if (double.TryParse(constValue, out _))
+        if (
+            double.TryParse(
+                constValue,
+                NumberStyles.Float | NumberStyles.AllowThousands,
+                CultureInfo.InvariantCulture,
+                out _
+            )
+        )
         {
             return "double";
         }
@@ -1866,7 +1773,10 @@ internal sealed class SchemaMapper
     private string ResolveSingleType(JsonSchemaType type, IOpenApiSchema schema, string? context)
     {
         // x-rivet-csharp-type takes precedence — exact C# type for lossless round-trips
-        var csharpType = SchemaClassifier.GetExtensionString(schema, "x-rivet-csharp-type");
+        var csharpType = SchemaClassifier.GetExtensionString(
+            schema.Extensions,
+            "x-rivet-csharp-type"
+        );
         if (csharpType is not null)
         {
             return QualifyFrameworkScalarIfShadowed(
@@ -1878,7 +1788,7 @@ internal sealed class SchemaMapper
         {
             if (schema.Enum is { Count: > 0 })
             {
-                return SynthesizeInlineEnum(schema, context);
+                return SynthesizeInlineEnum(schema, context, SchemaClassifier.MapEnum);
             }
 
             return QualifyFrameworkScalarIfShadowed(SchemaClassifier.ResolveStringType(schema));
@@ -1888,7 +1798,7 @@ internal sealed class SchemaMapper
         {
             if (schema.Enum is { Count: > 0 } && SchemaClassifier.IsIntEnum(schema))
             {
-                return SynthesizeInlineIntEnum(schema, context);
+                return SynthesizeInlineEnum(schema, context, SchemaClassifier.MapIntEnum);
             }
 
             var integerType = SchemaClassifier.ResolveIntegerType(schema);
@@ -1926,16 +1836,6 @@ internal sealed class SchemaMapper
         );
     }
 
-    private string SanitizeName(string name)
-    {
-        if (_ctx.SchemaNameMap.TryGetValue(name, out var mapped))
-        {
-            return mapped;
-        }
-
-        return Naming.ToPascalCaseFromSegments(name);
-    }
-
     private string WarnAndFallback(string diagnosticId, string reason)
     {
         _ctx.Warnings.Add(Diagnostics.Prefix(diagnosticId, $"{reason} — mapped to 'JsonElement'."));
@@ -1943,7 +1843,7 @@ internal sealed class SchemaMapper
     }
 
     /// <summary>
-    /// Named diagnostic (I.A-15): an enum constraint that cannot be represented as a C# enum
+    /// Named diagnostic: an enum constraint that cannot be represented as a C# enum
     /// (single value, mixed/float values, out-of-int32-range values) degrades to a primitive.
     /// Never silent — the values are dropped from the generated contract.
     /// </summary>
@@ -1974,7 +1874,11 @@ internal sealed class SchemaMapper
         return $"List<{WarnAndFallback(Diagnostics.ImportArrayMissingItems, "Array schema missing 'items'")}>";
     }
 
-    private string SynthesizeInlineEnum(IOpenApiSchema schema, string? context)
+    private string SynthesizeInlineEnum(
+        IOpenApiSchema schema,
+        string? context,
+        Func<string, IOpenApiSchema, GeneratedEnum> map
+    )
     {
         var fingerprint = SchemaClassifier.ComputeSchemaFingerprint(schema);
         if (_ctx.SchemaFingerprints.TryGetValue(fingerprint, out var existingName))
@@ -1983,23 +1887,7 @@ internal sealed class SchemaMapper
         }
 
         var name = context ?? _ctx.NextSyntheticName("Enum");
-        var enumDef = SchemaClassifier.MapEnum(name, schema);
-        var finalName = _ctx.AddOrReuseExtraEnum(enumDef);
-        _ctx.SchemaFingerprints[fingerprint] = finalName;
-        return finalName;
-    }
-
-    private string SynthesizeInlineIntEnum(IOpenApiSchema schema, string? context)
-    {
-        var fingerprint = SchemaClassifier.ComputeSchemaFingerprint(schema);
-        if (_ctx.SchemaFingerprints.TryGetValue(fingerprint, out var existingName))
-        {
-            return existingName;
-        }
-
-        var name = context ?? _ctx.NextSyntheticName("Enum");
-        var enumDef = SchemaClassifier.MapIntEnum(name, schema);
-        var finalName = _ctx.AddOrReuseExtraEnum(enumDef);
+        var finalName = _ctx.AddOrReuseExtraEnum(map(name, schema));
         _ctx.SchemaFingerprints[fingerprint] = finalName;
         return finalName;
     }

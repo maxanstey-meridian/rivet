@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.OpenApi;
 using Rivet.Tool.Model;
 
@@ -5,15 +6,8 @@ namespace Rivet.Tool.Import;
 
 /// <summary>
 /// Builds GeneratedRecord instances from OpenAPI composition schemas (allOf, oneOf, anyOf).
-/// Receives a type resolution callback to avoid circular dependency with SchemaMapper.
 /// </summary>
-internal sealed class RecordSynthesizer(
-    ResolutionContext ctx,
-    Func<IOpenApiSchema, string?, string> resolveType,
-    Func<IOpenApiSchema, string?> resolveFormat,
-    Func<IOpenApiSchema, string?> resolveSchemaType,
-    Func<IOpenApiSchema, string?> resolveScalarReference
-)
+internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapper)
 {
     public GeneratedRecord ResolveAllOfRecord(
         string name,
@@ -39,7 +33,9 @@ internal sealed class RecordSynthesizer(
 
             if (element is OpenApiSchemaReference elementRef)
             {
-                var refName = SanitizeName(elementRef.Reference.Id!);
+                var refName = ctx.TypeName(
+                    SchemaMapper.DecodeComponentId(elementRef.Reference.Id)!
+                );
 
                 if (visited.Contains(refName))
                 {
@@ -47,7 +43,7 @@ internal sealed class RecordSynthesizer(
                 }
 
                 // If the ref target itself has allOf, recurse — and merge the target's own
-                // sibling properties too (I4: middle inheritance layers contribute their
+                // sibling properties too (middle inheritance layers contribute their
                 // declared properties, not just their composed bases).
                 if (element.AllOf is { Count: > 0 })
                 {
@@ -100,12 +96,14 @@ internal sealed class RecordSynthesizer(
                 && SchemaClassifier.WouldGenerateType(variantRef)
             )
             {
-                var refName = SanitizeName(variantRef.Reference.Id!);
+                var refName = ctx.TypeName(
+                    SchemaMapper.DecodeComponentId(variantRef.Reference.Id)!
+                );
                 properties.Add(new RecordProperty($"As{refName}", $"{refName}?", false));
             }
             else if (variant.Properties is { Count: > 0 })
             {
-                // Inline object → synthesize sub-record (dedup-with-shape-check, I3 guard)
+                // Inline object → synthesize sub-record (dedup-with-shape-check)
                 var subName = $"{name}Option{optionIndex}";
                 var record = MapRecord(subName, variant);
                 var finalSubName = ctx.AddOrReuseExtraRecord(record);
@@ -115,7 +113,7 @@ internal sealed class RecordSynthesizer(
             else
             {
                 // Inline primitive
-                var csharpType = resolveType(variant, null);
+                var csharpType = mapper.ResolveCSharpType(variant, null);
                 var nullableType = csharpType.EndsWith("?") ? csharpType : $"{csharpType}?";
                 var typeName = SchemaClassifier.PrimitiveDisplayName(csharpType.TrimEnd('?'));
                 properties.Add(new RecordProperty($"As{typeName}", nullableType, false));
@@ -136,7 +134,7 @@ internal sealed class RecordSynthesizer(
     )
     {
         var properties = new List<RecordProperty>();
-        // I8: a composing schema's top-level `required` applies to the whole composed
+        // A composing schema's top-level `required` applies to the whole composed
         // instance — union it with the element's own `required` so requiredness is
         // decided before the "?" suffix is appended.
         var requiredSet =
@@ -155,14 +153,14 @@ internal sealed class RecordSynthesizer(
 
                 var propContext = $"{context}{propName}";
                 var isRequired = requiredSet.Contains(propKey);
-                var csharpType = resolveType(propSchema, propContext);
-                var scalarReference = resolveScalarReference(propSchema);
+                var csharpType = mapper.ResolveCSharpType(propSchema, propContext);
+                var scalarReference = mapper.ResolveScalarReferenceName(propSchema);
 
                 var isDeprecated = propSchema.Deprecated;
 
                 // Preserve both an explicit format and its explicit absence. CLR
                 // primitives otherwise invent defaults such as int64 and double.
-                var format = resolveFormat(propSchema);
+                var format = mapper.ResolveFormat(propSchema);
                 var isFormatSpecified =
                     format is not null
                     || csharpType.TrimEnd('?')
@@ -245,7 +243,9 @@ internal sealed class RecordSynthesizer(
                         isWriteOnly,
                         WireName: wireName,
                         IsFormatSpecified: isFormatSpecified,
-                        SchemaType: scalarReference is null ? resolveSchemaType(propSchema) : null,
+                        SchemaType: scalarReference is null
+                            ? mapper.ResolveSchemaType(propSchema)
+                            : null,
                         SchemaRef: scalarReference,
                         SchemaMetadata: SchemaMapper.CollectGeneratedSchemaMetadata(propSchema)
                     )
@@ -381,61 +381,21 @@ internal sealed class RecordSynthesizer(
             MinLength: schema.MinLength.HasValue ? (int)schema.MinLength.Value : null,
             MaxLength: schema.MaxLength.HasValue ? (int)schema.MaxLength.Value : null,
             Pattern: schema.Pattern,
-            Minimum: double.TryParse(
-                schema.Minimum?.ToString(),
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out var min
-            )
-                ? min
-                : null,
-            Maximum: double.TryParse(
-                schema.Maximum?.ToString(),
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out var max
-            )
-                ? max
-                : null,
-            ExclusiveMinimum: double.TryParse(
-                schema.ExclusiveMinimum?.ToString(),
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out var exMin
-            )
-                ? exMin
-                : null,
-            ExclusiveMaximum: double.TryParse(
-                schema.ExclusiveMaximum?.ToString(),
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out var exMax
-            )
-                ? exMax
-                : null,
-            MultipleOf: double.TryParse(
-                schema.MultipleOf?.ToString(),
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out var mulOf
-            )
-                ? mulOf
-                : null,
+            Minimum: Number(schema.Minimum),
+            Maximum: Number(schema.Maximum),
+            ExclusiveMinimum: Number(schema.ExclusiveMinimum),
+            ExclusiveMaximum: Number(schema.ExclusiveMaximum),
+            MultipleOf: (double?)schema.MultipleOf,
             MinItems: schema.MinItems.HasValue ? (int)schema.MinItems.Value : null,
             MaxItems: schema.MaxItems.HasValue ? (int)schema.MaxItems.Value : null,
             UniqueItems: schema.UniqueItems == true ? true : null
         );
 
         return c.HasAny ? c : null;
-    }
 
-    private string SanitizeName(string name)
-    {
-        if (ctx.SchemaNameMap.TryGetValue(name, out var mapped))
-        {
-            return mapped;
-        }
-
-        return Naming.ToPascalCaseFromSegments(name);
+        static double? Number(string? value) =>
+            double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
+                ? number
+                : null;
     }
 }
