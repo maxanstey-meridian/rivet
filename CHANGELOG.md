@@ -29,3 +29,4 @@
 - `Rivet.Attributes`: `Error` and `File` terminals are declared once, on the new abstract `TerminalRouteDefinitionBase<TSelf>` (base of `RouteDefinition`, `RouteDefinition<T>` and `FileRouteDefinition`) and `BoundRouteDefinitionBase` (base of the three `Bound*` types). Source calls are unchanged; assemblies compiled against the old declaring types must be rebuilt.
 - `Rivet.Attributes`: removed the `FileRouteDefinition.ContentType(…)` and `FileRouteDefinition<TInput>.ContentType(…)` aliases. Use `.ProducesFile(…)`. Import now scaffolds `.ProducesFile("…")` on `Define.File(...)` endpoints.
 - Analysis: a contract endpoint that declares the same response header twice for one status (case-insensitively, e.g. `ETag` and `etag`) now fails with `RIV1109`. Before, both spellings were emitted.
+- `Rivet.Attributes`: removed the no-argument `.SecurityRequirements()` builder method; it declared the same `security: []` as `.Anonymous()`. Use `.Anonymous()`.

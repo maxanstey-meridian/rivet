@@ -192,8 +192,6 @@ public abstract partial class RouteDefinitionBase<TSelf>
 
     public TSelf Secure(string scheme) => Marker();
 
-    public TSelf SecurityRequirements() => Marker();
-
     public TSelf SecurityRequirement(int requirementOrder) => Marker();
 
     public TSelf SecurityRequirement(int requirementOrder, string scheme, string? scope = null) =>

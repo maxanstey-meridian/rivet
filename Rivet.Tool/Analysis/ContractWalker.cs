@@ -164,7 +164,6 @@ public static class ContractWalker
         string? endpointSummary = null;
         string? endpointDescription = null;
         EndpointSecurity? security = null;
-        SecurityRequirements? securityRequirements = null;
         var securityRequirementsBuilder = new SecurityRequirementsBuilder();
         bool? requestBodyRequired = null;
         var requestBodyPresent = false;
@@ -301,9 +300,6 @@ public static class ContractWalker
                     break;
                 case "Secure" when call.StringArg("scheme") is { } scheme:
                     security = new EndpointSecurity(false, scheme);
-                    break;
-                case "SecurityRequirements":
-                    securityRequirements = new SecurityRequirements([]);
                     break;
                 case "SecurityRequirement" when call.IntArg("requirementOrder") is int order:
                     securityRequirementsBuilder.AddRequirement(order);
@@ -553,7 +549,7 @@ public static class ContractWalker
                     )
                     .ToList();
 
-        securityRequirements = securityRequirementsBuilder.Build() ?? securityRequirements;
+        var securityRequirements = securityRequirementsBuilder.Build();
 
         return new TsEndpointDefinition(
             name,
