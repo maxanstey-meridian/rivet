@@ -27,7 +27,7 @@ public sealed class ContentTypeOverrideAndRedirectTests
             [RivetContract]
             public static class RenderContract
             {
-                public static readonly Define RenderRaw =
+                public static readonly RouteDefinition<string, string> RenderRaw =
                     Define.Post<string, string>("/render/raw")
                         .Status(200)
                         .AcceptsContentType("text/plain")

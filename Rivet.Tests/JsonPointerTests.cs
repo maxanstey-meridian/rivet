@@ -85,7 +85,7 @@ public sealed class JsonPointerTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define GetItem =
+                public static readonly RouteDefinition<ItemDto> GetItem =
                     Define.Get<ItemDto>("/api/items")
                         .ResponseExampleRef(200, "ex/one~two", "{\"id\":\"1\"}", name: "default");
             }

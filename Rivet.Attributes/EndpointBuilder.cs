@@ -539,8 +539,6 @@ public sealed class RouteDefinition<TInput, TOutput>
         ArgumentNullException.ThrowIfNull(input);
         return new BoundRouteDefinition<TOutput>(Publish(typeof(TOutput)));
     }
-
-    public static implicit operator Define(RouteDefinition<TInput, TOutput> _) => default!;
 }
 
 /// <summary>
@@ -613,8 +611,6 @@ public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefiniti
             entityTag,
             contentType
         );
-
-    public static implicit operator Define(RouteDefinition<TOutput> _) => default!;
 }
 
 /// <summary>
@@ -631,8 +627,6 @@ public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRout
         ArgumentNullException.ThrowIfNull(input);
         return new BoundRouteDefinition(Publish(null));
     }
-
-    public static implicit operator Define(InputRouteDefinition<TInput> _) => default!;
 }
 
 /// <summary>
@@ -708,8 +702,6 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
     /// Convert to an input-only endpoint (accepts a body, returns void).
     /// </summary>
     public InputRouteDefinition<TInput> Accepts<TInput>() => new(Method, Route, CurrentState());
-
-    public static implicit operator Define(RouteDefinition _) => default!;
 }
 
 /// <summary>
@@ -788,8 +780,6 @@ public sealed class FileRouteDefinition : RouteDefinitionBase<FileRouteDefinitio
     /// Alias for ProducesFile — preferred on FileRouteDefinition for readability.
     /// </summary>
     public FileRouteDefinition ContentType(string mediaType) => ProducesFile(mediaType);
-
-    public static implicit operator Define(FileRouteDefinition _) => default!;
 }
 
 /// <summary>
@@ -815,6 +805,4 @@ public sealed class FileRouteDefinition<TInput> : RouteDefinitionBase<FileRouteD
     /// Alias for ProducesFile — preferred on FileRouteDefinition for readability.
     /// </summary>
     public FileRouteDefinition<TInput> ContentType(string mediaType) => ProducesFile(mediaType);
-
-    public static implicit operator Define(FileRouteDefinition<TInput> _) => default!;
 }

@@ -262,7 +262,7 @@ public sealed class DictionaryKeyTests
         [RivetContract]
         public static class MapsContract
         {
-            public static readonly Define Get = Define.Get<MapsDto>("/api/maps");
+            public static readonly RouteDefinition<MapsDto> Get = Define.Get<MapsDto>("/api/maps");
         }
         """;
 

@@ -88,7 +88,7 @@ public sealed class AcceptsBinaryTests
         [RivetContract]
         public static class ThingsContract
         {
-            public static readonly Define UploadChunk =
+            public static readonly RouteDefinition<ChunkInput, ChunkResponse> UploadChunk =
                 Define.Put<ChunkInput, ChunkResponse>("/api/things/{id}/chunks/{chunkIndex}")
                     .AcceptsBinary();
         }
@@ -129,7 +129,7 @@ public sealed class AcceptsBinaryTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly Define UploadChunk =
+                public static readonly InputRouteDefinition<ChunkInput> UploadChunk =
                     Define.Put("/api/things/{id}/chunks/{chunkIndex}")
                         .Accepts<ChunkInput>()
                         .AcceptsBinary("video/mp4");
@@ -160,7 +160,7 @@ public sealed class AcceptsBinaryTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly Define UploadChunk =
+                public static readonly InputRouteDefinition<ChunkInput> UploadChunk =
                     Define.Put("/api/things/{id}/chunks/{chunkIndex}")
                         .Accepts<ChunkInput>()
                         .AcceptsBinary();
@@ -186,7 +186,7 @@ public sealed class AcceptsBinaryTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly Define Broken =
+                public static readonly RouteDefinition Broken =
                     Define.Post("/api/upload")
                         .AcceptsFile()
                         .AcceptsBinary();
@@ -209,7 +209,7 @@ public sealed class AcceptsBinaryTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly Define Broken =
+                public static readonly RouteDefinition Broken =
                     Define.Post("/api/upload")
                         .AcceptsBinary()
                         .FormEncoded();
@@ -264,7 +264,7 @@ public sealed class AcceptsBinaryTests
             [RivetContract]
             public static class RecordingsContract
             {
-                public static readonly Define UploadAudio =
+                public static readonly InputRouteDefinition<AudioInput> UploadAudio =
                     Define.Put("/api/recordings/{id}/audio")
                         .Accepts<AudioInput>()
                         .AcceptsBinary("audio/mpeg");

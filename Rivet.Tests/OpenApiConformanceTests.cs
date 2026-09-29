@@ -566,15 +566,15 @@ public sealed class OpenApiConformanceTests : IDisposable
             [RivetContract]
             public static class MembersContract
             {
-                public static readonly Define List =
+                public static readonly RouteDefinition<MemberDto> List =
                     Define.Get<MemberDto>("/api/members");
 
-                public static readonly Define Invite =
+                public static readonly RouteDefinition<InviteMemberRequest, InviteMemberResponse> Invite =
                     Define.Post<InviteMemberRequest, InviteMemberResponse>("/api/members")
                         .Status(201)
                         .Returns<ValidationErrorDto>(422);
 
-                public static readonly Define Remove =
+                public static readonly RouteDefinition Remove =
                     Define.Delete("/api/members/{id}")
                         .Returns<NotFoundDto>(404);
             }
@@ -707,7 +707,7 @@ public sealed class OpenApiConformanceTests : IDisposable
             public static readonly RouteDefinition<ProductDto> Get =
                 Define.Get<ProductDto>("/api/products/{id}");
 
-            public static readonly Define Login =
+            public static readonly RouteDefinition<LoginInput, LoginResult> Login =
                 Define.Post<LoginInput, LoginResult>("/api/auth/login")
                     .FormEncoded();
         }
@@ -749,18 +749,18 @@ public sealed class OpenApiConformanceTests : IDisposable
         [RivetContract]
         public static class PagesContract
         {
-            public static readonly Define ListPages =
+            public static readonly RouteDefinition<ListPagesInput, PageDto> ListPages =
                 Define.Get<ListPagesInput, PageDto>("/api/pages")
                     .WithResponseHeader("X-Request-Cost", "Units consumed by this call");
 
-            public static readonly Define CreatePage =
+            public static readonly RouteDefinition<CreatePageRequest, PageDto> CreatePage =
                 Define.Post<CreatePageRequest, PageDto>("/api/pages")
                     .WithResponseHeader("Location", "URL of the created page", required: true)
                     .WithResponseHeader(201, "ETag")
                     .Returns<ErrorDto>(429, "Rate limited")
                     .WithResponseHeader(429, "Retry-After", "Seconds to wait before retrying");
 
-            public static readonly Define GetPage =
+            public static readonly RouteDefinition<GetPageInput, PageDto> GetPage =
                 Define.Get<GetPageInput, PageDto>("/api/pages/{Id}")
                     .Returns(304, "Not modified");
         }
@@ -804,22 +804,22 @@ public sealed class OpenApiConformanceTests : IDisposable
         [RivetContract]
         public static class ShapesContract
         {
-            public static readonly Define GetShape =
+            public static readonly RouteDefinition<Shape> GetShape =
                 Define.Get<Shape>("/api/shapes/{id}");
 
-            public static readonly Define CreateShape =
+            public static readonly RouteDefinition<Shape, Shape> CreateShape =
                 Define.Post<Shape, Shape>("/api/shapes")
                     .Status(201);
 
             // Derived type referenced directly — its standalone schema stays untagged
-            public static readonly Define GetCircle =
+            public static readonly RouteDefinition<Circle> GetCircle =
                 Define.Get<Circle>("/api/circles/{id}");
         }
 
         [RivetContract]
         public static class ChannelsContract
         {
-            public static readonly Define GetChannel =
+            public static readonly RouteDefinition<Channel> GetChannel =
                 Define.Get<Channel>("/api/channels/{id}");
         }
         """;

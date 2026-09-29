@@ -34,7 +34,7 @@ public sealed class PolymorphismTests
         [RivetContract]
         public static class ShapesContract
         {
-            public static readonly Define GetShape =
+            public static readonly RouteDefinition<Shape> GetShape =
                 Define.Get<Shape>("/api/shapes/{id}");
         }
         """;
@@ -112,7 +112,7 @@ public sealed class PolymorphismTests
             [RivetContract]
             public static class ChannelsContract
             {
-                public static readonly Define GetChannel =
+                public static readonly RouteDefinition<Channel> GetChannel =
                     Define.Get<Channel>("/api/channels/{id}");
             }
             """;
@@ -153,10 +153,10 @@ public sealed class PolymorphismTests
             [RivetContract]
             public static class ShapesContract
             {
-                public static readonly Define GetShape =
+                public static readonly RouteDefinition<Shape> GetShape =
                     Define.Get<Shape>("/api/shapes/{id}");
 
-                public static readonly Define GetCircle =
+                public static readonly RouteDefinition<Circle> GetCircle =
                     Define.Get<Circle>("/api/circles/{id}");
             }
             """;
@@ -200,7 +200,7 @@ public sealed class PolymorphismTests
             [RivetContract]
             public static class ShapesContract
             {
-                public static readonly Define GetShape =
+                public static readonly RouteDefinition<Shape> GetShape =
                     Define.Get<Shape>("/api/shapes/{id}");
             }
             """;
@@ -240,7 +240,7 @@ public sealed class PolymorphismTests
             [RivetContract]
             public static class ShapesContract
             {
-                public static readonly Define GetShape =
+                public static readonly RouteDefinition<Shape> GetShape =
                     Define.Get<Shape>("/api/shapes/{id}");
             }
             """;
@@ -281,7 +281,7 @@ public sealed class PolymorphismTests
             [RivetContract]
             public static class ShapesContract
             {
-                public static readonly Define GetShape =
+                public static readonly RouteDefinition<Shape> GetShape =
                     Define.Get<Shape>("/api/shapes/{id}");
             }
             """;
@@ -325,7 +325,7 @@ public sealed class PolymorphismTests
             [RivetContract]
             public static class ShapesContract
             {
-                public static readonly Define GetShape =
+                public static readonly RouteDefinition<Shape> GetShape =
                     Define.Get<Shape>("/api/shapes/{id}");
             }
             """;

@@ -32,7 +32,7 @@ public sealed class HeaderSupportTests
             [RivetContract]
             public static class PagesContract
             {
-                public static readonly Define ListPages =
+                public static readonly RouteDefinition<ListInput, string> ListPages =
                     Define.Get<ListInput, string>("/api/pages");
             }
             """;
@@ -61,7 +61,7 @@ public sealed class HeaderSupportTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define ListItems =
+                public static readonly RouteDefinition<ListInput, string> ListItems =
                     Define.Get<ListInput, string>("/api/items");
             }
             """;
@@ -127,7 +127,7 @@ public sealed class HeaderSupportTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define CreateItem =
+                public static readonly RouteDefinition<CreateItemRequest, string> CreateItem =
                     Define.Post<CreateItemRequest, string>("/api/items");
             }
             """;
@@ -162,7 +162,7 @@ public sealed class HeaderSupportTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateTask =
+                public static readonly RouteDefinition<TaskDto, TaskDto> CreateTask =
                     Define.Post<TaskDto, TaskDto>("/api/tasks")
                         .WithResponseHeader("Location", "Where it lives", required: true)
                         .Returns(429)
@@ -202,7 +202,7 @@ public sealed class HeaderSupportTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .WithResponseHeader(404, "X-Lost-And-Found");
             }
@@ -239,7 +239,7 @@ public sealed class HeaderSupportTests
             [RivetContract]
             public static class PagesContract
             {
-                public static readonly Define ListPages =
+                public static readonly RouteDefinition<ListInput, string> ListPages =
                     Define.Get<ListInput, string>("/api/pages");
             }
             """;
@@ -276,7 +276,7 @@ public sealed class HeaderSupportTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define ListItems =
+                public static readonly RouteDefinition<ListInput, string> ListItems =
                     Define.Get<ListInput, string>("/api/items");
             }
             """;
@@ -332,7 +332,7 @@ public sealed class HeaderSupportTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateTask =
+                public static readonly RouteDefinition<TaskDto, TaskDto> CreateTask =
                     Define.Post<TaskDto, TaskDto>("/api/tasks")
                         .WithResponseHeader("Location", "URL of the created task", required: true)
                         .WithResponseHeader(201, "ETag");

@@ -27,8 +27,7 @@ public static class ContractWalker
         IReadOnlyList<INamedTypeSymbol> contractTypes
     )
     {
-        var defineType = compilation.GetTypeByMetadataName("Rivet.Define");
-        if (defineType is null)
+        if (compilation.GetTypeByMetadataName("Rivet.Define") is null)
         {
             return [];
         }
@@ -78,7 +77,7 @@ public static class ContractWalker
                     continue;
                 }
 
-                if (!IsRivetEndpointField(field.Type, defineType))
+                if (!IsRivetEndpointField(field.Type))
                 {
                     continue;
                 }
@@ -1373,24 +1372,13 @@ public static class ContractWalker
         return type is IArrayTypeSymbol { ElementType.SpecialType: SpecialType.System_Byte };
     }
 
-    internal static bool IsRivetEndpointField(ITypeSymbol fieldType, INamedTypeSymbol? defineType)
-    {
-        if (defineType is not null && SymbolEqualityComparer.Default.Equals(fieldType, defineType))
-        {
-            return true;
-        }
-
-        if (
-            fieldType is INamedTypeSymbol named
-            && named.Name is "RouteDefinition" or "InputRouteDefinition" or "FileRouteDefinition"
-            && named.ContainingNamespace?.ToDisplayString() == "Rivet"
-        )
-        {
-            return true;
-        }
-
-        return false;
-    }
+    private static bool IsRivetEndpointField(ITypeSymbol fieldType) =>
+        fieldType
+            is INamedTypeSymbol
+            {
+                Name: "RouteDefinition" or "InputRouteDefinition" or "FileRouteDefinition",
+                ContainingNamespace: { Name: "Rivet", ContainingNamespace.IsGlobalNamespace: true },
+            };
 
     /// <summary>
     /// Strips "Contract" suffix and camelCases. TasksContract → tasks.

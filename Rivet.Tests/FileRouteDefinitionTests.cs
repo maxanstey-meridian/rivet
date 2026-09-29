@@ -99,15 +99,6 @@ public sealed class FileRouteDefinitionTests
         );
     }
 
-    [Fact]
-    public void File_ImplicitConversionToDefine_Compiles()
-    {
-        // This test verifies the implicit operator exists and compiles.
-        // The Define type is used by Roslyn analysis to discover contract fields.
-        Define _ = Define.File("/api/files/{id}");
-        Define __ = Define.File<FileDownloadInput>("/api/files/{id}");
-    }
-
     // --- QueryAuth tests ---
 
     [Fact]

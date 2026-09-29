@@ -514,7 +514,7 @@ public sealed class ResponseFidelityTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define CreateItem =
+                public static readonly RouteDefinition<ItemDto> CreateItem =
                     Define.Post<ItemDto>("/api/items");
             }
             """;
@@ -737,7 +737,7 @@ public sealed class ResponseFidelityTests
             [RivetContract]
             public static class OrdersContract
             {
-                public static readonly Define CreateOrder =
+                public static readonly RouteDefinition<CreateOrderRequest, OrderDto> CreateOrder =
                     Define.Post<CreateOrderRequest, OrderDto>("/api/orders")
                         .ResponseExampleJson(201, "{\"id\":\"ord_123\"}", name: "created");
 
@@ -793,7 +793,7 @@ public sealed class ResponseFidelityTests
             [RivetContract]
             public static class StreamContract
             {
-                public static readonly Define OpenStream =
+                public static readonly RouteDefinition OpenStream =
                     Define.Get("/api/stream").Status(101);
 
                 public static readonly RouteDefinition NotModified =
@@ -836,7 +836,7 @@ public sealed class ResponseFidelityTests
             [RivetContract]
             public static class BlobContract
             {
-                public static readonly Define GetBlob =
+                public static readonly RouteDefinition<byte[]> GetBlob =
                     Define.Get<byte[]>("/api/blobs/{id}");
             }
             """;

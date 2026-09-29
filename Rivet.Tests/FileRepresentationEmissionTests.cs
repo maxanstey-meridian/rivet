@@ -3,17 +3,25 @@ namespace Rivet.Tests;
 public sealed class FileRepresentationEmissionTests
 {
     [Theory]
-    [InlineData("Define.File(\"/image\").ContentType(\"image/png\")", 200)]
-    [InlineData("Define.Get(\"/image\").ProducesFile(\"image/png\")", 200)]
-    [InlineData("Define.File(\"/image\").ContentType(\"image/png\").Status(201)", 201)]
-    public void Additional_representation_preserves_factory_default(string factory, int status)
+    [InlineData("FileRouteDefinition", "Define.File(\"/image\").ContentType(\"image/png\")", 200)]
+    [InlineData("RouteDefinition", "Define.Get(\"/image\").ProducesFile(\"image/png\")", 200)]
+    [InlineData(
+        "FileRouteDefinition",
+        "Define.File(\"/image\").ContentType(\"image/png\").Status(201)",
+        201
+    )]
+    public void Additional_representation_preserves_factory_default(
+        string fieldType,
+        string factory,
+        int status
+    )
     {
         var source = $$"""
             using Rivet;
             [RivetContract]
             public static class ImagesContract
             {
-                public static readonly Define Image = {{factory}}
+                public static readonly {{fieldType}} Image = {{factory}}
                     .ResponseBinaryContent({{status}}, "image/jpeg");
             }
             """;

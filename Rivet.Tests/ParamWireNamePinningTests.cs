@@ -34,7 +34,7 @@ public sealed class ParamWireNamePinningTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly Define GetThing =
+                public static readonly RouteDefinition<GetThingInput, ThingDto> GetThing =
                     Define.Get<GetThingInput, ThingDto>("/things/{thing_id}");
             }
             """;
@@ -61,7 +61,7 @@ public sealed class ParamWireNamePinningTests
             [RivetContract]
             public static class GroupsContract
             {
-                public static readonly Define GetGroupTeam =
+                public static readonly InputRouteDefinition<GetGroupTeamInput> GetGroupTeam =
                     Define.Get("/groups/{group}/teams/{group-team}")
                         .Status(204)
                         .Accepts<GetGroupTeamInput>();
@@ -90,7 +90,7 @@ public sealed class ParamWireNamePinningTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly Define SuspendThing =
+                public static readonly InputRouteDefinition<SuspendThingInput> SuspendThing =
                     Define.Put("/things/{thing_id}/suspended")
                         .Status(204)
                         .Accepts<SuspendThingInput>();
@@ -120,7 +120,7 @@ public sealed class ParamWireNamePinningTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly Define UpdateThing =
+                public static readonly InputRouteDefinition<UpdateThingInput> UpdateThing =
                     Define.Put("/things/{thing_id}")
                         .Status(204)
                         .Accepts<UpdateThingInput>();
@@ -150,7 +150,7 @@ public sealed class ParamWireNamePinningTests
             [RivetContract]
             public static class PostsContract
             {
-                public static readonly Define ListPosts =
+                public static readonly RouteDefinition<ListPostsInput, PostDto> ListPosts =
                     Define.Get<ListPostsInput, PostDto>("/users/{userId}/posts");
             }
             """;
@@ -179,7 +179,7 @@ public sealed class ParamWireNamePinningTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly Define GetThing =
+                public static readonly RouteDefinition<ThingDto> GetThing =
                     Define.Get<ThingDto>("/route-only-no-input-things/{id}");
             }
             """;

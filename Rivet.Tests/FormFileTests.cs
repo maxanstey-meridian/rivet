@@ -350,7 +350,7 @@ public sealed class FormFileTests
             [RivetContract]
             public static class FilesContract
             {
-                public static readonly Define Upload =
+                public static readonly RouteDefinition<Upload<Metadata>, UploadResult> Upload =
                     Define.Post<Upload<Metadata>, UploadResult>("/api/files");
             }
             """;
@@ -456,7 +456,7 @@ public sealed class FormFileTests
             [RivetContract]
             public static class FilesContract
             {
-                public static readonly Define Upload =
+                public static readonly RouteDefinition<UploadRequest, string> Upload =
                     Define.Post<UploadRequest, string>("/api/files");
             }
             """;
@@ -545,7 +545,7 @@ public sealed class FormFileTests
             [RivetContract]
             public static class PhotosContract
             {
-                public static readonly Define Upload =
+                public static readonly RouteDefinition<BatchUploadRequest, string> Upload =
                     Define.Post<BatchUploadRequest, string>("/api/photos");
             }
             """;
@@ -628,7 +628,7 @@ public sealed class FormFileTests
             [RivetContract]
             public static class FilesContract
             {
-                public static readonly Define Upload =
+                public static readonly RouteDefinition<UploadInput, UploadResult> Upload =
                     Define.Post<UploadInput, UploadResult>("/api/files");
             }
             """;
@@ -684,7 +684,7 @@ public sealed class FormFileTests
             [RivetContract]
             public static class FilesContract
             {
-                public static readonly Define Upload =
+                public static readonly RouteDefinition<UploadInput, UploadResult> Upload =
                     Define.Post<UploadInput, UploadResult>("/api/tasks/{taskId}/files");
             }
             """;

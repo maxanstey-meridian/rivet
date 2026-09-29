@@ -578,7 +578,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<GetTaskInput, TaskDto> GetTask =
                     Define.Get<GetTaskInput, TaskDto>("/api/tasks/{id}")
                         .Description("Retrieve a single task by ID");
             }
@@ -644,7 +644,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateTask =
+                public static readonly RouteDefinition<CreateTaskInput, TaskDto> CreateTask =
                     Define.Post<CreateTaskInput, TaskDto>("/api/tasks");
             }
             """;
@@ -685,7 +685,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<NotFoundDto>(404, "Task not found");
             }
@@ -797,7 +797,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define DeleteTask =
+                public static readonly RouteDefinition DeleteTask =
                     Define.Delete("/api/tasks/{id}")
                         .Status(204);
             }
@@ -1202,7 +1202,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class AuthContract
             {
-                public static readonly Define Login =
+                public static readonly RouteDefinition<LoginInput, TokenDto> Login =
                     Define.Post<LoginInput, TokenDto>("/api/login")
                         .FormEncoded()
                         .RequestExampleJson("{\"email\":\"ada@example.com\",\"password\":\"secret\"}");
@@ -1692,7 +1692,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<ProblemDto>(422)
                         .ResponseExampleJson(
@@ -1939,7 +1939,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
@@ -1975,7 +1975,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
@@ -2018,7 +2018,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class PeopleContract
             {
-                public static readonly Define GetPerson =
+                public static readonly RouteDefinition<PersonDto> GetPerson =
                     Define.Get<PersonDto>("/api/people/{id}");
             }
             """;
@@ -2072,7 +2072,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class ProductsContract
             {
-                public static readonly Define GetProduct =
+                public static readonly RouteDefinition<ProductDto> GetProduct =
                     Define.Get<ProductDto>("/api/products/{id}");
             }
             """;
@@ -2110,7 +2110,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class PeopleContract
             {
-                public static readonly Define GetPerson =
+                public static readonly RouteDefinition<PersonDto> GetPerson =
                     Define.Get<PersonDto>("/api/people/{id}");
             }
             """;
@@ -2217,7 +2217,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
@@ -2253,7 +2253,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class HealthContract
             {
-                public static readonly Define Health =
+                public static readonly RouteDefinition<StatusDto> Health =
                     Define.Get<StatusDto>("/api/health")
                         .Anonymous();
             }
@@ -2286,7 +2286,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class AdminContract
             {
-                public static readonly Define DeleteAll =
+                public static readonly RouteDefinition DeleteAll =
                     Define.Delete("/api/admin/tasks")
                         .Status(204)
                         .Secure("admin");
@@ -2320,7 +2320,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class AdminContract
             {
-                public static readonly Define DeleteAll =
+                public static readonly RouteDefinition DeleteAll =
                     Define.Delete("/api/admin/tasks")
                         .Status(204)
                         .Secure("admin");
@@ -2350,7 +2350,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class AdminContract
             {
-                public static readonly Define DeleteAll =
+                public static readonly RouteDefinition DeleteAll =
                     Define.Delete("/api/admin/tasks")
                         .Status(204)
                         .Secure("bearer");
@@ -2388,7 +2388,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
@@ -2423,7 +2423,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Description("Get a task")
                         .Returns<NotFoundDto>(404, "Task not found");
@@ -2658,7 +2658,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<NotFoundDto>(404, "Not found");
             }
@@ -2737,20 +2737,20 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class UsersContract
             {
-                public static readonly Define ListUsers =
+                public static readonly RouteDefinition<PagedResult<UserDto>> ListUsers =
                     Define.Get<PagedResult<UserDto>>("/api/users")
                         .Description("List all users");
 
-                public static readonly Define GetUser =
+                public static readonly RouteDefinition<UserDto> GetUser =
                     Define.Get<UserDto>("/api/users/{id}")
                         .Returns<NotFoundDto>(404, "User not found");
 
-                public static readonly Define CreateUser =
+                public static readonly RouteDefinition<CreateUserRequest, UserDto> CreateUser =
                     Define.Post<CreateUserRequest, UserDto>("/api/users")
                         .Status(201)
                         .Returns<ErrorDto>(400, "Validation error");
 
-                public static readonly Define DeleteUser =
+                public static readonly RouteDefinition DeleteUser =
                     Define.Delete("/api/users/{id}")
                         .Returns<NotFoundDto>(404, "Not found");
             }
@@ -2808,7 +2808,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class SearchContract
             {
-                public static readonly Define Search =
+                public static readonly RouteDefinition<SearchInput, ResultDto> Search =
                     Define.Get<SearchInput, ResultDto>("/api/search");
             }
             """;
@@ -3399,7 +3399,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class UsersContract
             {
-                public static readonly Define GetUser =
+                public static readonly RouteDefinition<UserDto> GetUser =
                     Define.Get<UserDto>("/api/users/{id}");
             }
             """;
@@ -4536,14 +4536,14 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}");
             }
 
             [RivetContract]
             public static class AdminContract
             {
-                public static readonly Define Purge =
+                public static readonly RouteDefinition Purge =
                     Define.Delete("/api/admin/cache").Status(204);
             }
             """;
@@ -4765,7 +4765,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask = Define.Get<TaskDto>("/api/tasks/{id}");
+                public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -4812,7 +4812,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define List = Define.Get<ListQuery, TaskDto[]>("/api/tasks");
+                public static readonly RouteDefinition<ListQuery, TaskDto[]> List = Define.Get<ListQuery, TaskDto[]>("/api/tasks");
             }
             """;
 
@@ -4850,8 +4850,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define Patch = Define.Patch<PatchRequest?, TaskDto>("/api/tasks/{id}");
-                public static readonly Define Update = Define.Put<PatchRequest, TaskDto>("/api/tasks/{id}");
+                public static readonly RouteDefinition<PatchRequest?, TaskDto> Patch = Define.Patch<PatchRequest?, TaskDto>("/api/tasks/{id}");
+                public static readonly RouteDefinition<PatchRequest, TaskDto> Update = Define.Put<PatchRequest, TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -4884,7 +4884,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class FlexContract
             {
-                public static readonly Define Get =
+                public static readonly RouteDefinition<FlexDto> Get =
                     Define.Get<FlexDto>("/api/flex");
             }
             """;
@@ -4920,7 +4920,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TestContract
             {
-                public static readonly Define Get =
+                public static readonly RouteDefinition<WithNullableTuple> Get =
                     Define.Get<WithNullableTuple>("/api/test");
             }
             """;
@@ -4954,7 +4954,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define GetItem =
+                public static readonly RouteDefinition<ItemDto> GetItem =
                     Define.Get<ItemDto>("/api/items/{id}");
             }
             """;
@@ -4990,7 +4990,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class WrapperContract
             {
-                public static readonly Define GetWrapper =
+                public static readonly RouteDefinition<OptionalWrapper> GetWrapper =
                     Define.Get<OptionalWrapper>("/api/wrapper");
             }
             """;

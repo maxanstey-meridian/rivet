@@ -191,7 +191,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<GetTaskInput, TaskDto> GetTask =
                     Define.Get<GetTaskInput, TaskDto>("/api/tasks/{id}");
             }
             """;
@@ -241,7 +241,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateComment =
+                public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
                     Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments");
             }
             """;
@@ -357,7 +357,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateComment =
+                public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
                     Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
                         .RequestExampleJson("{\"text\":\"hello\"}");
             }
@@ -391,7 +391,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<ValidationProblemDto>(422)
                         .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem");
@@ -427,7 +427,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem")
                         .Returns<ValidationProblemDto>(422);
@@ -457,7 +457,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem");
             }
@@ -496,7 +496,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<ValidationProblemDto>(422)
                         .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem")
@@ -533,7 +533,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<ValidationProblemDto>(422)
                         .ResponseExampleJson(
@@ -571,7 +571,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<ValidationProblemDto>(422)
                         .ResponseExampleRef(
@@ -611,7 +611,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<ProblemDto>(422)
                         .ResponseExampleRef(
@@ -652,7 +652,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateComment =
+                public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
                     Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
                         .RequestExampleRef(
                             "create-comment",
@@ -692,7 +692,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class AuthContract
             {
-                public static readonly Define Login =
+                public static readonly RouteDefinition<LoginRequest, TokenDto> Login =
                     Define.Post<LoginRequest, TokenDto>("/api/auth/login")
                         .FormEncoded()
                         .RequestExampleRef(
@@ -753,7 +753,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateComment =
+                public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
                     Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
                         .RequestExampleJson("{\"text\":\"hello\"}", name: "inline")
                         .RequestExampleRef("create-comment", "{\"text\":\"bonjour\"}", name: "refBacked");
@@ -796,7 +796,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateComment =
+                public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
                     Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
                         .RequestExampleJson(
                             "{\"text\":\"hello\"}",
@@ -831,7 +831,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateComment =
+                public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
                     Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
                         .RequestExampleRef(
                             "create-comment",
@@ -870,7 +870,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class UploadsContract
             {
-                public static readonly Define Upload =
+                public static readonly RouteDefinition<UploadInput, UploadResultDto> Upload =
                     Define.Post<UploadInput, UploadResultDto>("/api/uploads")
                         .RequestExampleJson("{\"title\":\"Quarterly report\"}");
             }
@@ -901,7 +901,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class AuthContract
             {
-                public static readonly Define Login =
+                public static readonly RouteDefinition<LoginInput, TokenDto> Login =
                     Define.Post<LoginInput, TokenDto>("/api/login")
                         .FormEncoded()
                         .RequestExampleJson("{\"email\":\"ada@example.com\",\"password\":\"secret\"}");
@@ -933,7 +933,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class AuthContract
             {
-                public static readonly Define Login =
+                public static readonly RouteDefinition<LoginInput, TokenDto> Login =
                     Define.Post<LoginInput, TokenDto>("/api/login")
                         .RequestExampleJson("{\"email\":\"ada@example.com\",\"password\":\"secret\"}")
                         .FormEncoded();
@@ -1097,7 +1097,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class OrdersContract
             {
-                public static readonly Define CreateOrder =
+                public static readonly RouteDefinition<CreateOrderInput, OrderDto> CreateOrder =
                     Define.Post<CreateOrderInput, OrderDto>("/api/orders")
                         .ResponseExampleJson(201, "{\"id\":\"ord_123\"}", name: "created");
             }
@@ -1130,7 +1130,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class OrdersContract
             {
-                public static readonly Define CreateOrder =
+                public static readonly RouteDefinition<CreateOrderInput, OrderDto> CreateOrder =
                     Define.Post<CreateOrderInput, OrderDto>("/api/orders")
                         .Status(202)
                         .ResponseExampleJson(202, "{\"id\":\"ord_123\"}", name: "accepted");
@@ -1197,7 +1197,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateComment =
+                public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
                     Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
                         .RequestExampleRef("create-comment")
                         .Returns<ValidationProblemDto>(422)
@@ -1289,7 +1289,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define ListTasks =
+                public static readonly RouteDefinition<TaskDto> ListTasks =
                     Define.Get<TaskDto>("/api/tasks");
             }
             """;
@@ -1318,7 +1318,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define DeleteTask =
+                public static readonly RouteDefinition DeleteTask =
                     Define.Delete("/api/tasks/{id}");
             }
             """;
@@ -1356,7 +1356,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<NotFoundDto>(404);
             }
@@ -1393,7 +1393,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateTask =
+                public static readonly RouteDefinition<CreateInput, CreatedDto> CreateTask =
                     Define.Post<CreateInput, CreatedDto>("/api/tasks")
                         .Status(201);
             }
@@ -1430,7 +1430,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<NotFoundDto>(404)
                         .Returns<ConflictDto>(409);
@@ -1465,7 +1465,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class CaseStatusesContract
             {
-                public static readonly Define GetItem =
+                public static readonly RouteDefinition<ItemDto> GetItem =
                     Define.Get<ItemDto>("/api/case-statuses");
             }
             """;
@@ -1499,7 +1499,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define ListTasks =
+                public static readonly RouteDefinition<TaskDto> ListTasks =
                     Define.Get<TaskDto>("/api/tasks");
             }
 
@@ -1544,7 +1544,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
@@ -1574,7 +1574,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
@@ -1602,7 +1602,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Description("Retrieve a single task by ID");
             }
@@ -1629,7 +1629,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
@@ -1658,7 +1658,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<NotFoundDto>(404, "Task not found");
             }
@@ -1696,7 +1696,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Description("Retrieve a task")
                         .Returns<NotFoundDto>(404, "Task not found");
@@ -2348,7 +2348,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class UploadsContract
             {
-                public static readonly Define Upload =
+                public static readonly RouteDefinition<UploadInput, UploadResult> Upload =
                     Define.Post<UploadInput, UploadResult>("/api/uploads");
             }
             """;
@@ -3014,7 +3014,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define List = Define.Get<ListTasksQuery, TaskDto[]>("/api/tasks");
+                public static readonly RouteDefinition<ListTasksQuery, TaskDto[]> List = Define.Get<ListTasksQuery, TaskDto[]>("/api/tasks");
             }
             """;
 
@@ -3055,7 +3055,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define Get = Define.Get<GetTaskQuery, TaskDto>("/api/tasks/{id}");
+                public static readonly RouteDefinition<GetTaskQuery, TaskDto> Get = Define.Get<GetTaskQuery, TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -3090,7 +3090,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class FilesContract
             {
-                public static readonly Define Upload = Define.Post<UploadRequest, string>("/api/files");
+                public static readonly RouteDefinition<UploadRequest, string> Upload = Define.Post<UploadRequest, string>("/api/files");
             }
             """;
 
@@ -3275,7 +3275,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define Get = Define.Get<GetTaskQuery, TaskDto>("/api/tasks/{id}");
+                public static readonly RouteDefinition<GetTaskQuery, TaskDto> Get = Define.Get<GetTaskQuery, TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -3321,7 +3321,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class SearchContract
             {
-                public static readonly Define Search =
+                public static readonly RouteDefinition<SearchInput, ResultDto> Search =
                     Define.Get<SearchInput, ResultDto>("/api/search");
             }
             """;
@@ -3353,7 +3353,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class SearchContract
             {
-                public static readonly Define Search =
+                public static readonly RouteDefinition<SearchInput, ResultDto> Search =
                     Define.Get<SearchInput, ResultDto>("/api/search");
             }
             """;
@@ -3383,7 +3383,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define UpdateItem =
+                public static readonly RouteDefinition<UpdateInput, ItemDto> UpdateItem =
                     Define.Post<UpdateInput, ItemDto>("/api/items/{id}");
             }
             """;

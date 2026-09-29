@@ -31,7 +31,7 @@ public sealed class CrossCorpusFindingsTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly Define GetThing =
+                public static readonly RouteDefinition<Dictionary<string, string>, ThingDto> GetThing =
                     Define.Get<Dictionary<string, string>, ThingDto>("/dict-input-things/{thing_id}");
             }
             """;
@@ -64,7 +64,7 @@ public sealed class CrossCorpusFindingsTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly Define PurgeThings =
+                public static readonly InputRouteDefinition<List<string>> PurgeThings =
                     Define.Delete("/list-input-things")
                         .Status(204)
                         .Accepts<List<string>>();
@@ -98,7 +98,7 @@ public sealed class CrossCorpusFindingsTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly Define ListThings =
+                public static readonly RouteDefinition<ListThingsInput, ThingDto> ListThings =
                     Define.Get<ListThingsInput, ThingDto>("/record-input-things");
             }
             """;

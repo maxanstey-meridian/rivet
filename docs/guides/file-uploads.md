@@ -38,7 +38,7 @@ public sealed record UploadChunkInput(string Id, int ChunkIndex);
 [RivetContract]
 public static class ThingsContract
 {
-    public static readonly Define UploadChunk =
+    public static readonly RouteDefinition<UploadChunkInput, ChunkReceipt> UploadChunk =
         Define.Put<UploadChunkInput, ChunkReceipt>("/api/things/{id}/chunks/{chunkIndex}")
             .AcceptsBinary();
 }

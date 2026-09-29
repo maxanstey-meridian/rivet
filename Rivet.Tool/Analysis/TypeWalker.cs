@@ -931,10 +931,7 @@ public sealed class TypeWalker
                 .Where(attribute => attribute.Is(_types.RivetGeneratedSchemaMetadata))
         )
         {
-            if (
-                attribute.ConstructorArguments.Length < 22
-                || attribute.ConstructorArguments[0].Value is not string pointer
-            )
+            if (attribute.ConstructorArguments is not [{ Value: string pointer }, ..])
             {
                 throw new RivetUserException(
                     "Invalid generated schema metadata in RivetGeneratedSchemaMetadataAttribute."
@@ -951,13 +948,6 @@ public sealed class TypeWalker
                     : null;
             string? StringAt(int index) => attribute.ConstructorArguments[index].Value as string;
             bool BoolAt(int index) => attribute.ConstructorArguments[index].Value is true;
-            string? OptionalStringAt(int index) =>
-                attribute.ConstructorArguments.Length > index
-                    ? attribute.ConstructorArguments[index].Value as string
-                    : null;
-            bool OptionalBoolAt(int index) =>
-                attribute.ConstructorArguments.Length > index
-                && attribute.ConstructorArguments[index].Value is true;
 
             var constraints = new TsPropertyConstraints(
                 MinLength: IntAt(6),
@@ -994,13 +984,13 @@ public sealed class TypeWalker
                 Constraints: constraints.HasAny ? constraints : null,
                 Title: StringAt(1),
                 Xml: xml,
-                Format: OptionalStringAt(22),
-                IsFormatSpecified: OptionalBoolAt(23),
-                IsNullable: OptionalBoolAt(24),
-                IsDeprecated: OptionalBoolAt(25),
-                IsReadOnly: OptionalBoolAt(26),
-                IsWriteOnly: OptionalBoolAt(27),
-                Required: OptionalStringAt(28) is { } requiredJson
+                Format: StringAt(22),
+                IsFormatSpecified: BoolAt(23),
+                IsNullable: BoolAt(24),
+                IsDeprecated: BoolAt(25),
+                IsReadOnly: BoolAt(26),
+                IsWriteOnly: BoolAt(27),
+                Required: StringAt(28) is { } requiredJson
                     ? JsonSerializer.Deserialize<List<string>>(requiredJson)
                     : null
             );

@@ -25,7 +25,7 @@ public sealed class ContractWalkerFileEndpointTests
             [RivetContract]
             public static class MediaContract
             {
-                public static readonly Define Stream =
+                public static readonly FileRouteDefinition<StreamInput> Stream =
                     Define.File<StreamInput>("/api/media/{id}/stream")
                         .ContentType("video/mp4")
                         .QueryAuth();
@@ -54,7 +54,7 @@ public sealed class ContractWalkerFileEndpointTests
             [RivetContract]
             public static class MediaContract
             {
-                public static readonly Define Stream =
+                public static readonly FileRouteDefinition Stream =
                     Define.File("/api/media/stream")
                         .QueryAuth("key");
             }
@@ -83,7 +83,7 @@ public sealed class ContractWalkerFileEndpointTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define GetItem =
+                public static readonly RouteDefinition<ItemDto> GetItem =
                     Define.Get<ItemDto>("/api/items/{id}");
             }
             """;
@@ -111,7 +111,7 @@ public sealed class ContractWalkerFileEndpointTests
             [RivetContract]
             public static class DataContract
             {
-                public static readonly Define GetData =
+                public static readonly RouteDefinition<DataDto> GetData =
                     Define.Get<DataDto>("/api/data")
                         .QueryAuth("api_key");
             }
@@ -140,11 +140,11 @@ public sealed class ContractWalkerFileEndpointTests
             [RivetContract]
             public static class DataContract
             {
-                public static readonly Define GetData =
+                public static readonly RouteDefinition<DataInput, string> GetData =
                     Define.Get<DataInput, string>("/api/data/{id}")
                         .QueryAuth();
 
-                public static readonly Define PutData =
+                public static readonly InputRouteDefinition<DataInput> PutData =
                     Define.Put("/api/data/{id}")
                         .QueryAuth("tk")
                         .Accepts<DataInput>();
@@ -174,7 +174,7 @@ public sealed class ContractWalkerFileEndpointTests
             [RivetContract]
             public static class FilesContract
             {
-                public static readonly Define Download =
+                public static readonly FileRouteDefinition Download =
                     Define.File("/api/files/{id}/download");
             }
             """;
@@ -206,7 +206,7 @@ public sealed class ContractWalkerFileEndpointTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define GetItem =
+                public static readonly RouteDefinition<ItemInput, ItemDto> GetItem =
                     Define.Get<ItemInput, ItemDto>("/api/items/{id}");
             }
             """;
@@ -234,7 +234,7 @@ public sealed class ContractWalkerFileEndpointTests
             [RivetContract]
             public static class MediaContract
             {
-                public static readonly Define GetVideo =
+                public static readonly FileRouteDefinition<StreamInput> GetVideo =
                     Define.File<StreamInput>("/api/media/{id}/video")
                         .ContentType("video/mp4");
             }
@@ -262,7 +262,7 @@ public sealed class ContractWalkerFileEndpointTests
             [RivetContract]
             public static class FilesContract
             {
-                public static readonly Define Stream =
+                public static readonly FileRouteDefinition<FileRequest> Stream =
                     Define.File<FileRequest>("/api/files/stream")
                         .QueryAuth();
             }
@@ -292,7 +292,7 @@ public sealed class ContractWalkerFileEndpointTests
             [RivetContract]
             public static class MediaContract
             {
-                public static readonly Define Stream =
+                public static readonly FileRouteDefinition<StreamInput> Stream =
                     Define.File<StreamInput>("/api/media/{id}/stream")
                         .ContentType("video/mp4")
                         .QueryAuth();

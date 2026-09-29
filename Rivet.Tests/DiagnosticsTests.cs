@@ -210,7 +210,7 @@ public sealed class DiagnosticsTests
             [RivetContract]
             public static class PayloadContract
             {
-                public static readonly Define GetPayload =
+                public static readonly RouteDefinition<PayloadDto> GetPayload =
                     Define.Get<PayloadDto>("/api/payload");
             }
             """;

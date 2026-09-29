@@ -100,27 +100,27 @@ internal static class ConformanceSources
         [RivetContract]
         public static class ItemsContract
         {
-            public static readonly Define GetItem =
+            public static readonly RouteDefinition<KitchenSinkDto> GetItem =
                 Define.Get<KitchenSinkDto>("/api/items/{id}")
                     .Description("Retrieve a single item by its unique ID");
 
-            public static readonly Define SearchItems =
+            public static readonly RouteDefinition<SearchInput, PagedResult<KitchenSinkDto>> SearchItems =
                 Define.Get<SearchInput, PagedResult<KitchenSinkDto>>("/api/items");
 
-            public static readonly Define CreateItem =
+            public static readonly RouteDefinition<CreateItemInput, KitchenSinkDto> CreateItem =
                 Define.Post<CreateItemInput, KitchenSinkDto>("/api/items")
                     .Status(201)
                     .Returns<ValidationError>(422, "Validation failed");
 
-            public static readonly Define UpdateItem =
+            public static readonly RouteDefinition<CreateItemInput, KitchenSinkDto> UpdateItem =
                 Define.Put<CreateItemInput, KitchenSinkDto>("/api/items/{id}");
 
-            public static readonly Define DeleteItem =
+            public static readonly RouteDefinition DeleteItem =
                 Define.Delete("/api/items/{id}")
                     .Status(204)
                     .Returns<NotFoundError>(404, "Item not found");
 
-            public static readonly Define PatchItem =
+            public static readonly RouteDefinition<CreateItemInput> PatchItem =
                 Define.Patch<CreateItemInput>("/api/items/{id}")
                     .Status(204);
         }
@@ -128,11 +128,11 @@ internal static class ConformanceSources
         [RivetContract]
         public static class UsersContract
         {
-            public static readonly Define ListUsers =
+            public static readonly RouteDefinition<PagedResult<UserDto>> ListUsers =
                 Define.Get<PagedResult<UserDto>>("/api/users")
                     .Description("List all users with pagination");
 
-            public static readonly Define GetUser =
+            public static readonly RouteDefinition<UserDto> GetUser =
                 Define.Get<UserDto>("/api/users/{userId}")
                     .Returns<NotFoundError>(404, "User not found");
         }
@@ -140,7 +140,7 @@ internal static class ConformanceSources
         [RivetContract]
         public static class FilesContract
         {
-            public static readonly Define Upload =
+            public static readonly RouteDefinition<UploadInput, UploadResult> Upload =
                 Define.Post<UploadInput, UploadResult>("/api/files")
                     .Status(201);
         }
@@ -148,7 +148,7 @@ internal static class ConformanceSources
         [RivetContract]
         public static class HealthContract
         {
-            public static readonly Define Check =
+            public static readonly RouteDefinition Check =
                 Define.Get("/api/health")
                     .Anonymous()
                     .Description("Health check endpoint");
@@ -157,7 +157,7 @@ internal static class ConformanceSources
         [RivetContract]
         public static class AdminContract
         {
-            public static readonly Define Purge =
+            public static readonly RouteDefinition Purge =
                 Define.Delete("/api/admin/cache")
                     .Status(204)
                     .Secure("admin");

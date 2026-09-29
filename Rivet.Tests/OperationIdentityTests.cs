@@ -212,7 +212,7 @@ public sealed class OperationIdentityTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define GetItem =
+                public static readonly RouteDefinition<ItemDto> GetItem =
                     Define.Get<ItemDto>("/api/contract-items/{id}");
             }
 
@@ -262,7 +262,7 @@ public sealed class OperationIdentityTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define GetItems =
+                public static readonly RouteDefinition<ItemDto[]> GetItems =
                     Define.Get<ItemDto[]>("/api/items");
             }
 
@@ -310,7 +310,7 @@ public sealed class OperationIdentityTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define GetItems =
+                public static readonly RouteDefinition<ItemDto> GetItems =
                     Define.Get<ItemDto>("/api/items");
             }
 
@@ -371,7 +371,7 @@ public sealed class OperationIdentityTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define GetItems =
+                public static readonly RouteDefinition<ItemDto> GetItems =
                     Define.Get<ItemDto>("/api/items");
             }
 
@@ -497,7 +497,7 @@ public sealed class OperationIdentityTests
                 [RivetContract]
                 public static class ItemsContract
                 {
-                    public static readonly Define GetItem =
+                    public static readonly RouteDefinition<ItemsQuery, ItemDto> GetItem =
                         Define.Get<ItemsQuery, ItemDto>("/api/items/{id}");
                 }
 
@@ -544,7 +544,7 @@ public sealed class OperationIdentityTests
                 [RivetContract]
                 public static class ItemsContract
                 {
-                    public static readonly Define GetItems =
+                    public static readonly RouteDefinition<ItemsQuery, ItemDto[]> GetItems =
                         Define.Get<ItemsQuery, ItemDto[]>("/api/items");
                 }
 
@@ -589,7 +589,7 @@ public sealed class OperationIdentityTests
                 [RivetContract]
                 public static class ItemsContract
                 {
-                    public static readonly Define GetItems =
+                    public static readonly RouteDefinition<ItemDto> GetItems =
                         Define.Get<ItemDto>("/api/items")
                             .ProducesContentType("text/html");
                 }
@@ -763,7 +763,7 @@ public sealed class OperationIdentityTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define GetItems =
+                public static readonly RouteDefinition<ItemsQuery, ItemDto[]> GetItems =
                     Define.Get<ItemsQuery, ItemDto[]>("/api/items");
             }
 

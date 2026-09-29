@@ -148,17 +148,17 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define ListTasks =
+                public static readonly RouteDefinition<TaskDto> ListTasks =
                     Define.Get<TaskDto>("/api/tasks");
 
-                public static readonly Define CreateTask =
+                public static readonly RouteDefinition<CreateTaskRequest, TaskDto> CreateTask =
                     Define.Post<CreateTaskRequest, TaskDto>("/api/tasks")
                         .Status(201);
 
-                public static readonly Define UpdateTask =
+                public static readonly RouteDefinition<UpdateTaskRequest, TaskDto> UpdateTask =
                     Define.Put<UpdateTaskRequest, TaskDto>("/api/tasks/{id}");
 
-                public static readonly Define DeleteTask =
+                public static readonly RouteDefinition DeleteTask =
                     Define.Delete("/api/tasks/{id}")
                         .Status(204);
             }
@@ -242,7 +242,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
@@ -297,7 +297,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class PeopleContract
             {
-                public static readonly Define GetPerson =
+                public static readonly RouteDefinition<PersonDto> GetPerson =
                     Define.Get<PersonDto>("/api/people/{id}");
             }
             """;
@@ -344,7 +344,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
@@ -415,7 +415,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class ReportsContract
             {
-                public static readonly Define Get =
+                public static readonly RouteDefinition<ReportDto> Get =
                     Define.Get<ReportDto>("/api/reports/current");
             }
             """;
@@ -467,7 +467,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class GradesContract
             {
-                public static readonly Define Get =
+                public static readonly RouteDefinition<GradeDto> Get =
                     Define.Get<GradeDto>("/api/grades/{id}");
             }
             """;
@@ -514,7 +514,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class EnvelopesContract
             {
-                public static readonly Define Get =
+                public static readonly RouteDefinition<EnvelopeDto> Get =
                     Define.Get<EnvelopeDto>("/api/envelopes/{id}");
             }
             """;
@@ -608,7 +608,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class ShapesContract
             {
-                public static readonly Define GetShape =
+                public static readonly RouteDefinition<Shape> GetShape =
                     Define.Get<Shape>("/api/shapes/{id}");
             }
             """;
@@ -692,7 +692,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class AuthContract
             {
-                public static readonly Define Login =
+                public static readonly RouteDefinition<LoginRequest, TokenDto> Login =
                     Define.Post<LoginRequest, TokenDto>("/api/login")
                         .FormEncoded()
                         .RequestExampleJson(
@@ -741,7 +741,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class AuthContract
             {
-                public static readonly Define Login =
+                public static readonly RouteDefinition<LoginRequest, TokenDto> Login =
                     Define.Post<LoginRequest, TokenDto>("/api/login")
                         .FormEncoded()
                         .RequestExampleRef(
@@ -785,7 +785,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class OrdersContract
             {
-                public static readonly Define CreateOrder =
+                public static readonly RouteDefinition<CreateOrderRequest, OrderDto> CreateOrder =
                     Define.Post<CreateOrderRequest, OrderDto>("/api/orders")
                         .ResponseExampleJson(201, "{\"id\":\"ord_123\"}", name: "created");
 
@@ -1024,7 +1024,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Returns<NotFoundDto>(404, "Not found")
                         .Returns<ValidationErrorDto>(422, "Validation failed");
@@ -1081,14 +1081,14 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}");
             }
 
             [RivetContract]
             public static class HealthContract
             {
-                public static readonly Define Check =
+                public static readonly RouteDefinition<StatusDto> Check =
                     Define.Get<StatusDto>("/api/health")
                         .Anonymous();
             }
@@ -1096,7 +1096,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class AdminContract
             {
-                public static readonly Define Purge =
+                public static readonly RouteDefinition Purge =
                     Define.Delete("/api/admin")
                         .Status(204)
                         .Secure("admin");
@@ -1161,7 +1161,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .Description("Retrieve a task by ID");
             }
@@ -1184,7 +1184,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define DeleteTask =
+                public static readonly RouteDefinition DeleteTask =
                     Define.Delete("/api/tasks/{id}")
                         .Status(204);
             }
@@ -1217,7 +1217,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask =
+                public static readonly RouteDefinition<GetTaskInput, TaskDto> GetTask =
                     Define.Get<GetTaskInput, TaskDto>("/api/tasks/{id}");
             }
             """;
@@ -1259,7 +1259,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define SearchTasks =
+                public static readonly RouteDefinition<SearchInput, TaskDto> SearchTasks =
                     Define.Get<SearchInput, TaskDto>("/api/tasks");
             }
             """;
@@ -1313,7 +1313,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class PagesContract
             {
-                public static readonly Define ListPages =
+                public static readonly RouteDefinition<ListPagesInput, PageDto> ListPages =
                     Define.Get<ListPagesInput, PageDto>("/api/{Workspace}/pages");
             }
             """;
@@ -1357,7 +1357,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define CreateTask =
+                public static readonly RouteDefinition<CreateTaskRequest, TaskDto> CreateTask =
                     Define.Post<CreateTaskRequest, TaskDto>("/api/tasks")
                         .WithResponseHeader("Location", "URL of the created task", required: true)
                         .WithResponseHeader(201, "ETag")
@@ -1405,7 +1405,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class UsersContract
             {
-                public static readonly Define GetUser =
+                public static readonly RouteDefinition<UserDto> GetUser =
                     Define.Get<UserDto>("/api/users/{id}");
             }
             """;
@@ -1444,7 +1444,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class FilesContract
             {
-                public static readonly Define Upload =
+                public static readonly RouteDefinition<UploadInput, UploadResult> Upload =
                     Define.Post<UploadInput, UploadResult>("/api/files")
                         .Status(201);
             }
@@ -1523,7 +1523,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define ListTasks =
+                public static readonly RouteDefinition<PagedResult<TaskDto>> ListTasks =
                     Define.Get<PagedResult<TaskDto>>("/api/tasks");
             }
             """;
@@ -1583,14 +1583,14 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define ListTasks =
+                public static readonly RouteDefinition<PagedResult<TaskDto>> ListTasks =
                     Define.Get<PagedResult<TaskDto>>("/api/tasks");
             }
 
             [RivetContract]
             public static class UsersContract
             {
-                public static readonly Define ListUsers =
+                public static readonly RouteDefinition<PagedResult<UserDto>> ListUsers =
                     Define.Get<PagedResult<UserDto>>("/api/users");
             }
             """;
@@ -1627,7 +1627,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class EventsContract
             {
-                public static readonly Define GetEvent =
+                public static readonly RouteDefinition<EventDto> GetEvent =
                     Define.Get<EventDto>("/api/events/{id}");
             }
             """;
@@ -1669,7 +1669,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class MetricsContract
             {
-                public static readonly Define GetMetrics =
+                public static readonly RouteDefinition<MetricsDto> GetMetrics =
                     Define.Get<MetricsDto>("/api/metrics");
             }
             """;
@@ -1703,7 +1703,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class SensorsContract
             {
-                public static readonly Define GetSensor =
+                public static readonly RouteDefinition<SensorDto> GetSensor =
                     Define.Get<SensorDto>("/api/sensors/{id}");
             }
             """;
@@ -1737,7 +1737,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class MixedContract
             {
-                public static readonly Define Get =
+                public static readonly RouteDefinition<MixedDto> Get =
                     Define.Get<MixedDto>("/api/mixed");
             }
             """;
@@ -1811,7 +1811,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class AllTypesContract
             {
-                public static readonly Define Get =
+                public static readonly RouteDefinition<AllTypesDto> Get =
                     Define.Get<AllTypesDto>("/api/all-types");
             }
             """;
@@ -2730,7 +2730,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class PeopleContract
             {
-                public static readonly Define Get =
+                public static readonly RouteDefinition<PersonDto> Get =
                     Define.Get<PersonDto>("/api/people/{id}");
             }
             """;
@@ -3137,7 +3137,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class Legacy_ItemsContract
             {
-                public static readonly Define by_id =
+                public static readonly RouteDefinition<ItemDto> by_id =
                     Define.Get<ItemDto>("/api/legacy-items/{id}");
             }
             """;
@@ -3392,7 +3392,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly Define GetTask = Define.Get<TaskDto>("/api/tasks/{id}");
+                public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>("/api/tasks/{id}");
             }
             """;
 
@@ -3460,7 +3460,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class ItemsContract
             {
-                public static readonly Define GetItem =
+                public static readonly RouteDefinition<ItemDto> GetItem =
                     Define.Get<ItemDto>("/api/items/{id}");
             }
             """;

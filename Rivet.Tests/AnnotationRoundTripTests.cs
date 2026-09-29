@@ -43,7 +43,7 @@ public sealed class AnnotationRoundTripTests
         [RivetContract]
         public static class ConstrainedContract
         {
-            public static readonly Define GetConstrained =
+            public static readonly RouteDefinition<ConstrainedRecord> GetConstrained =
                 Define.Get<ConstrainedRecord>("/api/constrained");
         }
         """;
@@ -67,7 +67,7 @@ public sealed class AnnotationRoundTripTests
         [RivetContract]
         public static class NullabilityContract
         {
-            public static readonly Define GetNullability =
+            public static readonly RouteDefinition<NullabilityRecord> GetNullability =
                 Define.Get<NullabilityRecord>("/api/nullability");
         }
         """;
@@ -366,7 +366,7 @@ public sealed class AnnotationRoundTripTests
             [RivetContract]
             public static class SingleMinContract
             {
-                public static readonly Define GetSingleMin =
+                public static readonly RouteDefinition<SingleMinDto> GetSingleMin =
                     Define.Get<SingleMinDto>("/api/single-min");
             }
             """;
@@ -424,7 +424,7 @@ public sealed class AnnotationRoundTripTests
             [RivetContract]
             public static class SingleMaxContract
             {
-                public static readonly Define GetSingleMax =
+                public static readonly RouteDefinition<SingleMaxDto> GetSingleMax =
                     Define.Get<SingleMaxDto>("/api/single-max");
             }
             """;

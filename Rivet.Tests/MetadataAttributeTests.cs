@@ -896,7 +896,7 @@ public sealed class MetadataAttributeTests
             [RivetContract]
             public static class TestContract
             {
-                public static readonly Define Create = Define.Post<Input, Result>("/api/items");
+                public static readonly RouteDefinition<Input, Result> Create = Define.Post<Input, Result>("/api/items");
             }
             """;
 

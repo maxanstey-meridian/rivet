@@ -270,7 +270,7 @@ public sealed class GenericTypeTests
             [RivetContract]
             public static class MessagesContract
             {
-                public static readonly Define Get = Define.Get<Wrapper<MessageDto>>("/api/messages");
+                public static readonly RouteDefinition<Wrapper<MessageDto>> Get = Define.Get<Wrapper<MessageDto>>("/api/messages");
             }
             """;
 
@@ -339,7 +339,7 @@ public sealed class GenericTypeTests
             [RivetContract]
             public static class WrapperContract
             {
-                public static readonly Define Get =
+                public static readonly RouteDefinition<Wrapper<{{csharpType}}>> Get =
                     Define.Get<Wrapper<{{csharpType}}>>("/api/wrapped");
             }
             """;

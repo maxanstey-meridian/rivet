@@ -257,14 +257,14 @@ public sealed class ResponseSetFidelityTests
             [RivetContract]
             public static class DefaultsContract
             {
-                public static readonly Define Get = Define.Get("/get");
-                public static readonly Define Put = Define.Put("/put");
-                public static readonly Define Patch = Define.Patch("/patch");
-                public static readonly Define Head = Define.Head("/head");
-                public static readonly Define Options = Define.Options("/options");
-                public static readonly Define Post = Define.Post("/post");
-                public static readonly Define Delete = Define.Delete("/delete");
-                public static readonly Define TypedDelete = Define.Delete<string>("/typed-delete");
+                public static readonly RouteDefinition Get = Define.Get("/get");
+                public static readonly RouteDefinition Put = Define.Put("/put");
+                public static readonly RouteDefinition Patch = Define.Patch("/patch");
+                public static readonly RouteDefinition Head = Define.Head("/head");
+                public static readonly RouteDefinition Options = Define.Options("/options");
+                public static readonly RouteDefinition Post = Define.Post("/post");
+                public static readonly RouteDefinition Delete = Define.Delete("/delete");
+                public static readonly RouteDefinition<string> TypedDelete = Define.Delete<string>("/typed-delete");
             }
             """;
 

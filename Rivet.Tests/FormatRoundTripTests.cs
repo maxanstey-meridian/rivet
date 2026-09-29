@@ -29,7 +29,7 @@ public sealed class FormatRoundTripTests
                 [Rivet.RivetContract]
                 public static class FormatRoundTripContract
                 {
-                    public static readonly Rivet.Define Get =
+                    public static readonly Rivet.RouteDefinition<Test.{{typeName}}> Get =
                         Rivet.Define.Get<Test.{{typeName}}>("/api/format-roundtrip");
                 }
                 """;
@@ -874,7 +874,7 @@ public sealed class FormatRoundTripTests
             [RivetContract]
             public static class PricesContract
             {
-                public static readonly Define GetPrice =
+                public static readonly RouteDefinition<PriceDto> GetPrice =
                     Define.Get<PriceDto>("/api/prices/{id}");
             }
             """;
@@ -908,7 +908,7 @@ public sealed class FormatRoundTripTests
             [RivetContract]
             public static class SensorContract
             {
-                public static readonly Define Get =
+                public static readonly RouteDefinition<SensorDto> Get =
                     Define.Get<SensorDto>("/api/sensor");
             }
             """;

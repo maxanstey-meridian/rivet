@@ -22,7 +22,7 @@ public sealed class OpenApiDocumentInfoTests
         [RivetContract]
         public static class TasksContract
         {
-            public static readonly Define GetTask =
+            public static readonly RouteDefinition<TaskDto> GetTask =
                 Define.Get<TaskDto>("/api/tasks/{id}");
         }
         """;
