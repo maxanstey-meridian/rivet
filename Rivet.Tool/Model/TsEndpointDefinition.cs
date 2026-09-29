@@ -117,7 +117,8 @@ public sealed record EndpointSecurity(bool IsAnonymous, string? Scheme = null);
 /// A typed response for a given status code.
 /// </summary>
 public sealed record TsResponseType(
-    int StatusCode,
+    // 0 means "no numeric status" (default/range keys) and is absent on the wire.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int StatusCode,
     TsType? DataType,
     string? Description = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -129,6 +130,7 @@ public sealed record TsResponseType(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StatusKey = null
 )
 {
+    [JsonIgnore]
     public string EffectiveStatusKey => StatusKey ?? StatusCode.ToString();
 }
 
@@ -152,7 +154,7 @@ public sealed record TsMediaTypeContent(
 /// </summary>
 public sealed record TsResponseHeader(
     string Name,
-    TsType Type,
+    [property: JsonRequired] TsType Type,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? Description = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
@@ -181,7 +183,7 @@ public sealed record TsResponseHeader(
 /// </summary>
 public sealed record TsEndpointParam(
     string Name,
-    TsType Type,
+    [property: JsonRequired] TsType Type,
     ParamSource Source,
     bool IsOptional = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

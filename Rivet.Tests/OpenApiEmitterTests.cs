@@ -505,15 +505,7 @@ public sealed class OpenApiEmitterTests
             BodyPropertyName: "member_key"
         );
 
-        var options = new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        };
-        options.Converters.Add(new TsTypeJsonConverter());
-        options.Converters.Add(
-            new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.CamelCase)
-        );
-        var json = JsonSerializer.Serialize(parameter, options);
+        var json = JsonSerializer.Serialize(parameter, JsonContractReader.Options);
 
         Assert.Equal(
             "member_key",

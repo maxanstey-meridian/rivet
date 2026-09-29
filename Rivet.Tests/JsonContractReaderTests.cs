@@ -1021,19 +1021,19 @@ public sealed class JsonContractReaderTests
         """{ "name": "X-Page", "description": "no type" }""",
         "[]",
         "[]",
-        "response header 'X-Page' on endpoint 'getUser' has no type"
+        "TsResponseHeader' was missing required properties including: 'type'"
     )]
     [InlineData(
         "null",
         """[{ "name": "id", "source": "route" }]""",
         "[]",
-        "param 'id' on endpoint 'getUser' has no type"
+        "TsEndpointParam' was missing required properties including: 'type'"
     )]
     [InlineData(
         "null",
         "[]",
         """[{ "name": "User", "typeParameters": [], "properties": [{ "name": "id", "optional": false }] }]""",
-        "property 'User.id' has no type"
+        "TsPropertyDefinition' was missing required properties including: 'type'"
     )]
     public void Missing_Required_Type_Is_Refused(
         string header,

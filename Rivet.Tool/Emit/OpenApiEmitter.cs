@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
@@ -2105,11 +2104,7 @@ public sealed class OpenApiEmitter
 
     private static Dictionary<string, object> MapIntUnion(TsType.IntUnion union)
     {
-        // Member literals are decimal strings in the IR so legal enum constants
-        // beyond Int32 survive; parse them to wide numbers so OpenAPI emits exact
-        // digits, not quoted strings
-        // (acceptance:numeric-enums-cover-all-legal-underlying-values).
-        var enumValues = union.Members.Select(ParseEnumLiteral).ToList<object>();
+        var enumValues = union.Members.Select(IntEnumLiteral.ToJson).ToList<object>();
         var schema = new Dictionary<string, object>
         {
             ["type"] =
@@ -2129,38 +2124,6 @@ public sealed class OpenApiEmitter
         EnrichScalarSchema(schema, union.ScalarMetadata);
 
         return schema;
-    }
-
-    /// <summary>
-    /// Parses an exact signed or unsigned enum integer; invalid carriers are refused.
-    /// </summary>
-    private static object ParseEnumLiteral(string literal)
-    {
-        if (
-            long.TryParse(
-                literal,
-                NumberStyles.Integer,
-                CultureInfo.InvariantCulture,
-                out var signed
-            )
-        )
-        {
-            return signed;
-        }
-
-        if (
-            ulong.TryParse(
-                literal,
-                NumberStyles.Integer,
-                CultureInfo.InvariantCulture,
-                out var unsigned
-            )
-        )
-        {
-            return unsigned;
-        }
-
-        throw new JsonException($"Invalid integer enum literal '{literal}'.");
     }
 
     private static Dictionary<string, object> MapStringUnion(TsType.StringUnion union)
