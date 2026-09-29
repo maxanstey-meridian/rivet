@@ -18,16 +18,19 @@ DOCUMENT = {
 
 
 class LocalReferenceTests(unittest.TestCase):
-    def test_references_resolve_per_rfc_6901_with_percent_decoding_per_token(self):
+    def test_references_resolve_per_rfc_6901_percent_decoding_before_splitting(self):
         cases = {
             "#/components/schemas/a~1b": {"type": "string"},
-            "#/components/schemas/a%2Fb": {"type": "string"},
+            "#/components/schemas/a%2Fb": None,
+            "#/components%2Fschemas/c~0d": {"type": "integer"},
+            "#/components/schemas/a%7E1b": {"type": "string"},
             "#/components/schemas/c~0d": {"type": "integer"},
             "#/components/schemas/c%7Ed": {"type": "integer"},
             "#/paths/~1items/get/parameters/0": {"name": "id"},
             "#/paths/~1items/get/parameters/1": None,
             "#/components/schemas/missing": None,
             "components/schemas/a~1b": None,
+            "#": DOCUMENT,
         }
         for reference, expected in cases.items():
             with self.subTest(reference=reference):
@@ -41,8 +44,8 @@ class LocalReferenceTests(unittest.TestCase):
             roundtrip_diff.resolve_local_reference, roundtrip_inventory.resolve_local_reference
         )
         self.assertEqual(
-            {"type": "string"},
-            roundtrip_inventory.resolve_local_reference(DOCUMENT, "#/components/schemas/a%2Fb"),
+            {"type": "integer"},
+            roundtrip_inventory.resolve_local_reference(DOCUMENT, "#/components/schemas/c%7E0d"),
         )
 
 

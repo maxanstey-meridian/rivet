@@ -39,16 +39,19 @@ def pointer_token(value):
 
 
 def pointer_parts(reference):
-    """Split a local ``#/`` reference into unescaped tokens.
+    """The unescaped tokens of a local ``#`` / ``#/`` reference, or None.
 
-    Tokens are split first and then percent-decoded, so ``%2F`` stays inside its
-    token. This matches Rivet.Tool's ``JsonPointer`` (see the WP-02 RFC note).
+    The fragment is percent-decoded before it is split (RFC 6901 §6), so ``%2F`` is a
+    separator and a literal ``/`` in a name must be written ``~1``. This matches
+    Rivet.Tool's ``JsonPointer.FromUriFragment``.
     """
+    if reference == "#":
+        return []
     if not isinstance(reference, str) or not reference.startswith("#/"):
         return None
     return [
-        urllib.parse.unquote(part).replace("~1", "/").replace("~0", "~")
-        for part in reference[2:].split("/")
+        part.replace("~1", "/").replace("~0", "~")
+        for part in urllib.parse.unquote(reference[2:]).split("/")
     ]
 
 
