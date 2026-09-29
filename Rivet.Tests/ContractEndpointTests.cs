@@ -3140,7 +3140,11 @@ public sealed class ContractEndpointTests
         var stderr = CompilationHelper.CaptureStdErr(() =>
         {
             var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
-            walker = Rivet.Tool.Analysis.TypeWalker.Create(compilation, discovered.RivetTypes);
+            walker = Rivet.Tool.Analysis.TypeWalker.Create(
+                compilation,
+                new Rivet.Tool.Analysis.WellKnownTypes(compilation),
+                discovered.RivetTypes
+            );
         });
 
         // Loud diagnostic — never a silent merge
@@ -3199,7 +3203,11 @@ public sealed class ContractEndpointTests
         var stderr = CompilationHelper.CaptureStdErr(() =>
         {
             var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
-            walker = Rivet.Tool.Analysis.TypeWalker.Create(compilation, discovered.RivetTypes);
+            walker = Rivet.Tool.Analysis.TypeWalker.Create(
+                compilation,
+                new Rivet.Tool.Analysis.WellKnownTypes(compilation),
+                discovered.RivetTypes
+            );
         });
 
         Assert.Contains("collision", stderr);
@@ -3242,7 +3250,11 @@ public sealed class ContractEndpointTests
         var stderr = CompilationHelper.CaptureStdErr(() =>
         {
             var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
-            walker = Rivet.Tool.Analysis.TypeWalker.Create(compilation, discovered.RivetTypes);
+            walker = Rivet.Tool.Analysis.TypeWalker.Create(
+                compilation,
+                new Rivet.Tool.Analysis.WellKnownTypes(compilation),
+                discovered.RivetTypes
+            );
         });
 
         Assert.Contains("collision", stderr);

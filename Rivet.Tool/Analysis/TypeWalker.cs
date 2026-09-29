@@ -69,7 +69,7 @@ public sealed class TypeWalker
 
     private readonly WellKnownTypes _types;
 
-    public TypeWalker(Compilation compilation)
+    private TypeWalker(Compilation compilation, WellKnownTypes types)
     {
         // Build set of walkable assemblies: source + project references (not NuGet/framework)
         _walkableAssemblies = new HashSet<IAssemblySymbol>(SymbolEqualityComparer.Default)
@@ -144,7 +144,7 @@ public sealed class TypeWalker
             "System.Collections.Generic.IReadOnlyDictionary`2"
         );
 
-        _types = new WellKnownTypes(compilation);
+        _types = types;
         LoadGeneratedSchemas(compilation.Assembly);
     }
 
@@ -280,10 +280,11 @@ public sealed class TypeWalker
     /// </summary>
     public static TypeWalker Create(
         Compilation compilation,
+        WellKnownTypes types,
         IReadOnlyList<INamedTypeSymbol> attributedTypes
     )
     {
-        var walker = new TypeWalker(compilation);
+        var walker = new TypeWalker(compilation, types);
 
         foreach (var type in attributedTypes)
         {

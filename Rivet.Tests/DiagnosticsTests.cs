@@ -136,7 +136,11 @@ public sealed class DiagnosticsTests
         return CompilationHelper.CaptureStdErr(() =>
         {
             var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
-            _ = Rivet.Tool.Analysis.TypeWalker.Create(compilation, discovered.RivetTypes);
+            _ = Rivet.Tool.Analysis.TypeWalker.Create(
+                compilation,
+                new Rivet.Tool.Analysis.WellKnownTypes(compilation),
+                discovered.RivetTypes
+            );
         });
     }
 

@@ -102,7 +102,11 @@ public static class CompilationHelper
     )
     {
         var discovered = SymbolDiscovery.Discover(compilation);
-        var walker = TypeWalker.Create(compilation, discovered.RivetTypes);
+        var walker = TypeWalker.Create(
+            compilation,
+            new Rivet.Tool.Analysis.WellKnownTypes(compilation),
+            discovered.RivetTypes
+        );
         return (discovered, walker);
     }
 

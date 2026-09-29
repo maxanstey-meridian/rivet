@@ -49,9 +49,8 @@ static async Task<int> Run(string[] args)
     // Single-pass discovery: scan source assembly types once instead of 4× full namespace walks
     var discovered = SymbolDiscovery.Discover(compilation);
 
-    var walker = TypeWalker.Create(compilation, discovered.RivetTypes);
-
     var wkt = new WellKnownTypes(compilation);
+    var walker = TypeWalker.Create(compilation, wkt, discovered.RivetTypes);
     var endpoints = EndpointWalker.Walk(
         wkt,
         walker,
