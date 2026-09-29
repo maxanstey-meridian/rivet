@@ -166,9 +166,7 @@ public static class ContractWalker
         string? endpointDescription = null;
         EndpointSecurity? security = null;
         SecurityRequirements? securityRequirements = null;
-        var securityRequirementSchemes =
-            new SortedDictionary<int, Dictionary<string, List<string>>>();
-        var securityRequirementOrders = new HashSet<int>();
+        var securityRequirementsBuilder = new SecurityRequirementsBuilder();
         bool? requestBodyRequired = null;
         var requestBodyPresent = false;
         var acceptsFile = false;
@@ -309,23 +307,14 @@ public static class ContractWalker
                     securityRequirements = new SecurityRequirements([]);
                     break;
                 case "SecurityRequirement" when call.IntArg("requirementOrder") is int order:
-                    securityRequirementOrders.Add(order);
+                    securityRequirementsBuilder.AddRequirement(order);
                     if (call.StringArg("scheme") is { } requirementScheme)
                     {
-                        if (!securityRequirementSchemes.TryGetValue(order, out var schemes))
-                        {
-                            schemes = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-                            securityRequirementSchemes.Add(order, schemes);
-                        }
-                        if (!schemes.TryGetValue(requirementScheme, out var scopes))
-                        {
-                            scopes = [];
-                            schemes.Add(requirementScheme, scopes);
-                        }
-                        if (call.StringArg("scope") is { } scope)
-                        {
-                            scopes.Add(scope);
-                        }
+                        securityRequirementsBuilder.AddScheme(
+                            order,
+                            requirementScheme,
+                            call.StringArg("scope") is { } scope ? [scope] : []
+                        );
                     }
                     break;
                 case "RequestContent" when call.StringArg("mediaType") is { } mediaType:
@@ -492,32 +481,18 @@ public static class ContractWalker
             parameters.Add(declaredParameter);
         }
 
-        // Add success response to responses list
-        // Void endpoints with typed error responses also need a success entry
-        // so the client emitter generates a discriminated union (not RivetResult<void>)
-        if (returnType is not null)
+        // The success response. Void endpoints with typed error responses also need one
+        // so the client emitter generates a discriminated union (not RivetResult<void>).
+        var successCode =
+            successStatusOverride
+            ?? ResponseStatusValidation.DefaultSuccessCode(httpMethod, returnType is not null);
+        if (returnType is not null || !suppressImplicitResponse)
         {
-            var successCode =
-                successStatusOverride ?? DefaultSuccessCode(httpMethod, hasOutput: true);
             responses.Insert(
                 0,
                 new TsResponseType(
                     successCode,
                     returnType,
-                    successResponseDescription,
-                    StatusKey: successStatusKey
-                )
-            );
-        }
-        else if (!suppressImplicitResponse)
-        {
-            var successCode =
-                successStatusOverride ?? DefaultSuccessCode(httpMethod, hasOutput: false);
-            responses.Insert(
-                0,
-                new TsResponseType(
-                    successCode,
-                    null,
                     successResponseDescription,
                     StatusKey: successStatusKey
                 )
@@ -545,22 +520,10 @@ public static class ContractWalker
             Diagnostics.ContractExampleUndeclaredStatus,
             $"contract endpoint '{name}'"
         );
-        ApplyResponseHeaders(
-            responses,
-            responseHeaderCalls,
-            successStatusOverride
-                ?? DefaultSuccessCode(httpMethod, hasOutput: returnType is not null),
-            successStatusKey,
-            name
-        );
+        ApplyResponseHeaders(responses, responseHeaderCalls, successCode, successStatusKey, name);
         // Explicit additional representations must not erase the file factory's
         // success representation: runtime always includes the configured file format.
-        var fileSuccessKey =
-            successStatusKey
-            ?? (
-                successStatusOverride
-                ?? DefaultSuccessCode(httpMethod, hasOutput: returnType is not null)
-            ).ToString();
+        var fileSuccessKey = successStatusKey ?? successCode.ToString();
         if (
             fileContentType is not null
             && !suppressImplicitResponse
@@ -594,19 +557,7 @@ public static class ContractWalker
                     )
                     .ToList();
 
-        if (securityRequirementOrders.Count > 0)
-        {
-            securityRequirements = new SecurityRequirements(
-                securityRequirementOrders
-                    .Order()
-                    .Select(order => new SecurityRequirement(
-                        (securityRequirementSchemes.GetValueOrDefault(order) ?? [])
-                            .Select(pair => new SecurityRequirementScheme(pair.Key, pair.Value))
-                            .ToList()
-                    ))
-                    .ToList()
-            );
-        }
+        securityRequirements = securityRequirementsBuilder.Build() ?? securityRequirements;
 
         return new TsEndpointDefinition(
             name,
@@ -667,20 +618,6 @@ public static class ContractWalker
 
         responses.Sort((left, right) => left.StatusCode.CompareTo(right.StatusCode));
     }
-
-    /// <summary>
-    /// Default success status for an endpoint with no explicit .Status(...) call.
-    /// Must agree with the runtime defaults in Rivet.Define (Endpoint.cs):
-    /// POST → 201; DELETE without an output type → 204; DELETE with an output type → 200
-    /// (204-with-body is invalid HTTP); everything else → 200.
-    /// </summary>
-    private static int DefaultSuccessCode(string httpMethod, bool hasOutput) =>
-        httpMethod switch
-        {
-            "POST" => 201,
-            "DELETE" when !hasOutput => 204,
-            _ => 200,
-        };
 
     private static int ParseStatusCode(string statusKey) =>
         int.TryParse(statusKey, out var statusCode) ? statusCode : 0;
@@ -796,11 +733,11 @@ public static class ContractWalker
         IFieldSymbol field,
         DeclaredRequestBody? declaredRequestBody,
         TypeWalker typeWalker,
-        bool acceptsFile = false,
-        string? binaryContentType = null,
-        IReadOnlyList<TsEndpointParam>? declaredParameters = null,
-        bool hasDeclaredRequestBody = false,
-        bool hasOnlyBinaryRequestBody = false
+        bool acceptsFile,
+        string? binaryContentType,
+        IReadOnlyList<TsEndpointParam> declaredParameters,
+        bool hasDeclaredRequestBody,
+        bool hasOnlyBinaryRequestBody
     )
     {
         var routeParamNames = RouteParser.ParseRouteParamNames(route);
@@ -817,9 +754,7 @@ public static class ContractWalker
         var parameters = new List<TsEndpointParam>();
         var hasBody =
             hasDeclaredRequestBody
-            || (
-                httpMethod is "POST" or "PUT" or "PATCH" && declaredParameters is not { Count: > 0 }
-            );
+            || (httpMethod is "POST" or "PUT" or "PATCH" && declaredParameters.Count == 0);
         // .AcceptsBinary(): the request body is the raw bytes (host code reads the
         // stream), so TInput never lowers to a JSON body — its properties become
         // route/query params exactly like a GET/DELETE input.
@@ -897,7 +832,7 @@ public static class ContractWalker
                     }
                     else
                     {
-                        var declared = declaredParameters?.FirstOrDefault(parameter =>
+                        var declared = declaredParameters.FirstOrDefault(parameter =>
                             parameter.Source == ParamSource.Route && parameter.Name == paramName
                         );
                         if (declared is not null)

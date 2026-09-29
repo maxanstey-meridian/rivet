@@ -10,8 +10,7 @@ internal static class SecurityMetadataWalker
     {
         var schemeAttributes = new Dictionary<string, AttributeData>(StringComparer.Ordinal);
         var flows = new Dictionary<string, List<OAuth2Flow>>(StringComparer.Ordinal);
-        var requirements = new SortedDictionary<int, List<SecurityRequirementScheme>>();
-        var requirementOrders = new HashSet<int>();
+        var requirements = new SecurityRequirementsBuilder();
         var hasEmptyGlobalSecurity = false;
         var schemeType = compilation.GetTypeByMetadataName("Rivet.RivetSecuritySchemeAttribute");
         var flowType = compilation.GetTypeByMetadataName("Rivet.RivetOAuthFlowAttribute");
@@ -86,7 +85,7 @@ internal static class SecurityMetadataWalker
                 && orderArgument.Value is int order
             )
             {
-                requirementOrders.Add(order);
+                requirements.AddRequirement(order);
             }
             else if (
                 attribute.Is(globalSchemeType)
@@ -96,14 +95,7 @@ internal static class SecurityMetadataWalker
                 && requirementSchemeArgument.Value is string requirementScheme
             )
             {
-                if (!requirements.TryGetValue(schemeOrder, out var requirementSchemes))
-                {
-                    requirementSchemes = [];
-                    requirements.Add(schemeOrder, requirementSchemes);
-                }
-                requirementSchemes.Add(
-                    new SecurityRequirementScheme(requirementScheme, ReadStrings(scopesArgument))
-                );
+                requirements.AddScheme(schemeOrder, requirementScheme, ReadStrings(scopesArgument));
             }
             else if (attribute.Is(emptyGlobalType))
             {
@@ -117,17 +109,8 @@ internal static class SecurityMetadataWalker
             schemes.Add(name, ReadScheme(name, attribute, flows.GetValueOrDefault(name) ?? []));
         }
 
-        var hasGlobalSecurity = hasEmptyGlobalSecurity || requirementOrders.Count > 0;
-        var globalRequirements = hasGlobalSecurity
-            ? new SecurityRequirements(
-                requirementOrders
-                    .Order()
-                    .Select(order => new SecurityRequirement(
-                        requirements.GetValueOrDefault(order) ?? []
-                    ))
-                    .ToList()
-            )
-            : null;
+        var globalRequirements =
+            requirements.Build() ?? (hasEmptyGlobalSecurity ? new SecurityRequirements([]) : null);
 
         return schemes.Count == 0 && globalRequirements is null
             ? null

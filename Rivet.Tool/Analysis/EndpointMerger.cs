@@ -97,7 +97,7 @@ public static class EndpointMerger
 
         return RequestSurfaceEquivalent(left, right)
             && ParamsEquivalent(left.Params, right.Params)
-            && FileContentTypeEquivalent(left.FileContentType, right.FileContentType)
+            && DeclaredMediaTypeEquivalent(left.FileContentType, right.FileContentType)
             && ContentTypeOverrideEquivalent(
                 left.RequestContentTypeOverride,
                 right.RequestContentTypeOverride
@@ -129,21 +129,18 @@ public static class EndpointMerger
         // mapped type, requiredness). A duplicate key on one side cannot
         // double-match a single right entry, so duplicate-vs-distinct
         // contradictions fail instead of collapsing silently.
-        var rightCandidates = right.Select(param => (Param: param, Key: ParamKey(param))).ToList();
-        var consumed = new bool[rightCandidates.Count];
+        var consumed = new bool[right.Count];
         foreach (var param in left)
         {
-            var key = ParamKey(param);
             var matched = false;
-            for (var index = 0; index < rightCandidates.Count; index++)
+            for (var index = 0; index < right.Count; index++)
             {
-                var candidate = rightCandidates[index];
+                var candidate = right[index];
                 if (
                     consumed[index]
-                    || !string.Equals(candidate.Key.Name, key.Name, StringComparison.Ordinal)
-                    || candidate.Key.Source != key.Source
-                    || !TsTypeEquivalent(param.Type, candidate.Param.Type)
-                    || param.IsOptional != candidate.Param.IsOptional
+                    || (candidate.Name, candidate.Source, candidate.IsOptional)
+                        != (param.Name, param.Source, param.IsOptional)
+                    || !TsTypeEquivalent(param.Type, candidate.Type)
                 )
                 {
                     continue;
@@ -162,22 +159,6 @@ public static class EndpointMerger
 
         return true;
     }
-
-    private static (string Name, ParamSource Source) ParamKey(TsEndpointParam param) =>
-        (param.Name, param.Source);
-
-    /// <summary>
-    /// File-axis media-type equivalence. Only an observable declaration
-    /// difference is a conflict: when exactly one declaration is null (no
-    /// explicit declaration) the two are treated as equivalent when the
-    /// non-null value is one of the file/JSON defaults, keeping cross-frontend
-    /// pairs that carry their file media type on different representation axes
-    /// (one in FileContentType, the other in response contents, or the default
-    /// omitted on one side) collapsing, while any explicitly differing file
-    /// media type fails the merge.
-    /// </summary>
-    private static bool FileContentTypeEquivalent(string? left, string? right) =>
-        DeclaredMediaTypeEquivalent(left, right);
 
     /// <summary>
     /// Content-type-override equivalence on the request and response axes.
@@ -198,6 +179,16 @@ public static class EndpointMerger
         );
     }
 
+    /// <summary>
+    /// File-axis media-type equivalence. Only an observable declaration
+    /// difference is a conflict: when exactly one declaration is null (no
+    /// explicit declaration) the two are treated as equivalent when the
+    /// non-null value is one of the file/JSON defaults, keeping cross-frontend
+    /// pairs that carry their file media type on different representation axes
+    /// (one in FileContentType, the other in response contents, or the default
+    /// omitted on one side) collapsing, while any explicitly differing file
+    /// media type fails the merge.
+    /// </summary>
     private static bool DeclaredMediaTypeEquivalent(string? left, string? right)
     {
         if (string.Equals(left, right, StringComparison.OrdinalIgnoreCase))
@@ -243,70 +234,8 @@ public static class EndpointMerger
             return false;
         }
 
-        if (!ContentEquivalent(left.Contents, right.Contents))
-        {
-            return false;
-        }
-
-        return HeadersEquivalent(left.Headers, right.Headers);
-    }
-
-    private static bool HeadersEquivalent(
-        IReadOnlyList<TsResponseHeader>? left,
-        IReadOnlyList<TsResponseHeader>? right
-    )
-    {
-        if ((left is null) != (right is null))
-        {
-            return false;
-        }
-
-        if (left is null)
-        {
-            return true;
-        }
-
-        if (left.Count != right!.Count)
-        {
-            return false;
-        }
-
-        return left.OrderBy(header => header.Name, StringComparer.Ordinal)
-            .Zip(
-                right.OrderBy(header => header.Name, StringComparer.Ordinal),
-                (leftHeader, rightHeader) =>
-                    JsonSerializer.Serialize(leftHeader) == JsonSerializer.Serialize(rightHeader)
-            )
-            .All(equal => equal);
-    }
-
-    private static bool ContentEquivalent(
-        IReadOnlyList<TsMediaTypeContent>? left,
-        IReadOnlyList<TsMediaTypeContent>? right
-    )
-    {
-        if ((left is null) != (right is null))
-        {
-            return false;
-        }
-
-        if (left is null)
-        {
-            return true;
-        }
-
-        if (left.Count != right!.Count)
-        {
-            return false;
-        }
-
-        return left.OrderBy(content => content.MediaType, StringComparer.Ordinal)
-            .Zip(
-                right.OrderBy(content => content.MediaType, StringComparer.Ordinal),
-                (leftContent, rightContent) =>
-                    JsonSerializer.Serialize(leftContent) == JsonSerializer.Serialize(rightContent)
-            )
-            .All(equal => equal);
+        return ListEquivalentBy(left.Contents, right.Contents, content => content.MediaType)
+            && ListEquivalentBy(left.Headers, right.Headers, header => header.Name);
     }
 
     private static bool RequestSurfaceEquivalent(
@@ -329,37 +258,33 @@ public static class EndpointMerger
             return false;
         }
 
-        return RequestContentsEquivalent(left.RequestContents, right.RequestContents);
+        return ListEquivalentBy(
+            left.RequestContents,
+            right.RequestContents,
+            content => content.MediaType
+        );
     }
 
-    private static bool RequestContentsEquivalent(
-        IReadOnlyList<TsMediaTypeContent>? left,
-        IReadOnlyList<TsMediaTypeContent>? right
-    )
-    {
-        if ((left is null) != (right is null))
-        {
-            return false;
-        }
-
-        if (left is null)
-        {
-            return true;
-        }
-
-        if (left.Count != right!.Count)
-        {
-            return false;
-        }
-
-        return left.OrderBy(content => content.MediaType, StringComparer.Ordinal)
-            .Zip(
-                right.OrderBy(content => content.MediaType, StringComparer.Ordinal),
-                (leftContent, rightContent) =>
-                    JsonSerializer.Serialize(leftContent) == JsonSerializer.Serialize(rightContent)
-            )
-            .All(equal => equal);
-    }
+    /// <summary>
+    /// Two optional lists are equivalent when both are absent, or both hold the same
+    /// serialized entries once ordered by <paramref name="key"/>.
+    /// </summary>
+    private static bool ListEquivalentBy<T>(
+        IReadOnlyList<T>? left,
+        IReadOnlyList<T>? right,
+        Func<T, string> key
+    ) =>
+        left is null || right is null
+            ? left is null && right is null
+            : left.Count == right.Count
+                && left.OrderBy(key, StringComparer.Ordinal)
+                    .Zip(
+                        right.OrderBy(key, StringComparer.Ordinal),
+                        (leftItem, rightItem) =>
+                            JsonSerializer.Serialize(leftItem)
+                            == JsonSerializer.Serialize(rightItem)
+                    )
+                    .All(equal => equal);
 
     private static bool TsTypeEquivalent(TsType? left, TsType? right)
     {

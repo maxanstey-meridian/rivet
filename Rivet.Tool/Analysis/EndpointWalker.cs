@@ -858,7 +858,7 @@ public static class EndpointWalker
             }
         }
 
-        if (explicitSources.Count > 1 && explicitSources.Distinct().Count() > 1)
+        if (explicitSources.Distinct().Count() > 1)
         {
             ThrowContradictoryBinding(param, explicitSources);
         }

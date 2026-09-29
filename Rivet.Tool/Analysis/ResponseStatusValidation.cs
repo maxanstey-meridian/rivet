@@ -86,14 +86,25 @@ internal static class ResponseStatusValidation
             return normalized;
         }
 
-        var statusCode =
-            httpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase) ? 201
-            : httpMethod.Equals("DELETE", StringComparison.OrdinalIgnoreCase) && returnType is null
-                ? 204
-            : 200;
-        normalized.Add(new TsResponseType(statusCode, returnType));
+        normalized.Add(
+            new TsResponseType(DefaultSuccessCode(httpMethod, returnType is not null), returnType)
+        );
         return normalized;
     }
+
+    /// <summary>
+    /// Default success status for an endpoint with no explicit .Status(...) call.
+    /// Must agree with the runtime defaults in Rivet.Define (Endpoint.cs):
+    /// POST → 201; DELETE without an output type → 204; DELETE with an output type → 200
+    /// (204-with-body is invalid HTTP); everything else → 200.
+    /// </summary>
+    internal static int DefaultSuccessCode(string httpMethod, bool hasOutput) =>
+        httpMethod.ToUpperInvariant() switch
+        {
+            "POST" => 201,
+            "DELETE" when !hasOutput => 204,
+            _ => 200,
+        };
 
     /// <summary>
     /// HTTP forbids a message body on 1xx, 204, 205 and 304 — the same statuses
