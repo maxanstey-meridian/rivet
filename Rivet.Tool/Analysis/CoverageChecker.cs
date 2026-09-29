@@ -539,47 +539,25 @@ public static class CoverageChecker
             return EndpointContext.None;
         }
 
-        var (httpMethod, methodRoute) = EndpointWalker.ExtractHttpMethodAndRoute(wkt, methodSymbol);
+        var (httpMethod, route) = EndpointWalker.ResolveActionRoute(wkt, methodSymbol);
         if (httpMethod is null)
         {
             return EndpointContext.None;
         }
 
-        var controllerRoute = EndpointWalker.ExtractControllerRoute(
-            wkt,
-            methodSymbol.ContainingType
-        );
-        var fullRoute = EndpointWalker.CombineRoutes(controllerRoute, methodRoute);
-        if (fullRoute is null)
-        {
-            // An MVC action with no statically resolvable route ([HttpGet] with no
-            // template on a controller without [Route]) is unresolved, not verified:
-            // report it through the established RouteError channel so BuildWarnings
-            // emits a warning (the requested check exits nonzero) and the
-            // unresolved state stays distinguishable from a known-mismatched
-            // route, mirroring the minimal-API unresolved reporting.
-            return new EndpointContext(
+        // An MVC action with no statically resolvable route ([HttpGet] with no
+        // template on a controller without [Route]) is unresolved, not verified:
+        // report it through the RouteError channel so BuildWarnings emits a warning
+        // (the requested check exits nonzero), mirroring the minimal-API unresolved
+        // reporting. The route itself comes from the same resolver extraction uses.
+        return route is null
+            ? new EndpointContext(
                 true,
                 [httpMethod],
                 null,
                 RouteError: "unresolved route: the action declares no route template and the controller declares no [Route]"
-            );
-        }
-
-        // A6: substitute [controller]/[action] tokens exactly like extraction
-        // (EndpointWalker.BuildEndpoint) so extraction and coverage agree on the
-        // same declared transport route.
-        fullRoute = EndpointWalker.SubstituteRouteTokens(
-            fullRoute,
-            methodSymbol.ContainingType,
-            methodSymbol
-        );
-
-        return new EndpointContext(
-            true,
-            [httpMethod],
-            RouteParser.StripRouteConstraints(fullRoute)
-        );
+            )
+            : new EndpointContext(true, [httpMethod], route);
     }
 
     private static EndpointContext TryResolveMinimalApi(

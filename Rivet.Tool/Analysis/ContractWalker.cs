@@ -49,7 +49,13 @@ public static class ContractWalker
                         continue;
                     }
 
-                    var endpoint = BuildEndpointFromMethod(wkt, method, controllerName, typeWalker);
+                    var endpoint = EndpointWalker.BuildControllerEndpoint(
+                        method,
+                        controllerName,
+                        isContract: true,
+                        wkt,
+                        typeWalker
+                    );
                     if (endpoint is not null)
                     {
                         endpoints.Add(endpoint);
@@ -95,98 +101,6 @@ public static class ContractWalker
         }
 
         return endpoints;
-    }
-
-    /// <summary>
-    /// Builds an endpoint definition from an abstract method with HTTP attributes.
-    /// Uses EndpointWalker's extraction logic with contract-style controller name derivation.
-    /// </summary>
-    private static TsEndpointDefinition? BuildEndpointFromMethod(
-        WellKnownTypes wkt,
-        IMethodSymbol method,
-        string controllerName,
-        TypeWalker typeWalker
-    )
-    {
-        var (httpMethod, methodRoute) = EndpointWalker.ExtractHttpMethodAndRoute(wkt, method);
-        if (httpMethod is null)
-        {
-            return null;
-        }
-
-        var classRoute = EndpointWalker.ExtractControllerRoute(wkt, method.ContainingType);
-        var fullRoute = EndpointWalker.CombineRoutes(classRoute, methodRoute);
-
-        if (fullRoute is null)
-        {
-            return null;
-        }
-
-        // A6: substitute [controller]/[action] tokens before constraint stripping
-        fullRoute = EndpointWalker.SubstituteRouteTokens(fullRoute, method.ContainingType, method);
-
-        fullRoute = RouteParser.StripRouteConstraints(fullRoute);
-
-        var parameters = EndpointWalker.ExtractParams(wkt, method, typeWalker, fullRoute);
-        var responses = EndpointWalker
-            .ExtractAllResponseTypes(wkt, method, typeWalker, normalize: false)
-            .ToList();
-        var name = Naming.ToCamelCase(method.Name);
-        if (responses.Count == 0)
-        {
-            // Same explicit-response boundary as annotated controllers: an abstract
-            // contract method with no declared success response is an incomplete
-            // contract — refuse rather than fabricate 204/200. The concrete payload
-            // T convenience applies after Task/ValueTask unwrapping; result
-            // containers and void stay unresolved.
-            var unwrapped = EndpointWalker.UnwrapTask(wkt, method.ReturnType, out _);
-            if (
-                unwrapped is null
-                || EndpointWalker.IsStatusSelectingResultContainer(wkt, unwrapped)
-            )
-            {
-                throw new RivetUserException(
-                    $"error {Diagnostics.UnmappedTypedResult}: contract endpoint "
-                        + $"'{name}' declares no success response. "
-                        + "Rivet reads explicit contract declarations — add .Status(...).Returns(...) "
-                        + "(or a concrete payload output type) to declare the success response."
-                );
-            }
-
-            responses.Add(
-                new TsResponseType(200, EndpointWalker.ExtractReturnType(wkt, method, typeWalker))
-            );
-        }
-
-        ResponseStatusValidation.RejectContractDuplicates(responses, name);
-        responses.Sort((left, right) => left.StatusCode.CompareTo(right.StatusCode));
-        var successResponse = responses.FirstOrDefault(response =>
-            response.StatusCode is >= 200 and < 300
-        );
-        var returnType =
-            successResponse?.DataType
-            ?? (
-                responses.Count == 0
-                    ? EndpointWalker.ExtractReturnType(wkt, method, typeWalker)
-                    : null
-            );
-
-        var responseContentTypeOverride = EndpointWalker.ResolveResponseContentType(
-            wkt,
-            method,
-            successResponse?.DataType
-        );
-
-        return new TsEndpointDefinition(
-            name,
-            httpMethod,
-            fullRoute,
-            parameters,
-            returnType,
-            controllerName,
-            responses,
-            ResponseContentTypeOverride: responseContentTypeOverride
-        );
     }
 
     private static TsEndpointDefinition? BuildEndpointFromField(
@@ -961,7 +875,25 @@ public static class ContractWalker
 
         ResponseStatusValidation.RejectContractDuplicates(responses, name);
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
-        ApplyResponseExamples(responses, responseExampleCalls, fileContentType, name);
+        EndpointWalker.ApplyResponseExamples(
+            responses,
+            responseExampleCalls
+                .Select(call =>
+                    (
+                        call.StatusKey!,
+                        ToEndpointExample(
+                            call,
+                            DefaultResponseExampleMediaType(
+                                ParseStatusCode(call.StatusKey!),
+                                fileContentType
+                            )
+                        )
+                    )
+                )
+                .ToList(),
+            Diagnostics.ContractExampleUndeclaredStatus,
+            $"contract endpoint '{name}'"
+        );
         ApplyResponseHeaders(
             responses,
             responseHeaderCalls,
@@ -1006,7 +938,7 @@ public static class ContractWalker
                     .Select(call =>
                         ToEndpointExample(
                             call,
-                            DefaultRequestExampleMediaType(isFormEncoded, parameters)
+                            EndpointWalker.DefaultRequestExampleMediaType(parameters, isFormEncoded)
                         )
                     )
                     .ToList();
@@ -1115,23 +1047,6 @@ public static class ContractWalker
         return candidate[(wireName.Length + 1)..].All(char.IsDigit);
     }
 
-    private static string DefaultRequestExampleMediaType(
-        bool isFormEncoded,
-        IReadOnlyList<TsEndpointParam> parameters
-    )
-    {
-        if (
-            parameters.Any(parameter =>
-                parameter.Source is ParamSource.File or ParamSource.FormField
-            )
-        )
-        {
-            return "multipart/form-data";
-        }
-
-        return isFormEncoded ? "application/x-www-form-urlencoded" : "application/json";
-    }
-
     private static string DefaultResponseExampleMediaType(int statusCode, string? fileContentType)
     {
         if (fileContentType is not null && statusCode is >= 200 and < 300)
@@ -1155,56 +1070,6 @@ public static class ContractWalker
             call.ResolvedJson,
             call.ReferencedComponents
         );
-    }
-
-    private static void ApplyResponseExamples(
-        List<TsResponseType> responses,
-        IReadOnlyList<PendingEndpointExampleCall> responseExampleCalls,
-        string? fileContentType,
-        string endpointName
-    )
-    {
-        if (responseExampleCalls.Count == 0)
-        {
-            return;
-        }
-
-        foreach (
-            var group in responseExampleCalls.GroupBy(
-                call => call.StatusKey!,
-                StringComparer.OrdinalIgnoreCase
-            )
-        )
-        {
-            var mappedExamples = group
-                .Select(call =>
-                    ToEndpointExample(
-                        call,
-                        DefaultResponseExampleMediaType(ParseStatusCode(group.Key), fileContentType)
-                    )
-                )
-                .ToList();
-
-            var responseIndex = responses.FindIndex(response =>
-                response.EffectiveStatusKey.Equals(group.Key, StringComparison.OrdinalIgnoreCase)
-            );
-            if (responseIndex >= 0)
-            {
-                var response = responses[responseIndex];
-                var mergedExamples = response.Examples is null
-                    ? mappedExamples
-                    : response.Examples.Concat(mappedExamples).ToList();
-                responses[responseIndex] = response with { Examples = mergedExamples };
-                continue;
-            }
-
-            Diagnostics.Warn(
-                Diagnostics.ContractExampleUndeclaredStatus,
-                $"ignoring response example for undeclared status {group.Key} on contract endpoint '{endpointName}'"
-            );
-        }
-
-        responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
     }
 
     /// <summary>
