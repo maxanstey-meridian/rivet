@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
@@ -111,72 +112,40 @@ public static class ContractWalker
         TypeWalker typeWalker
     )
     {
-        // Get the syntax for the field initializer
-        if (field.DeclaringSyntaxReferences.Length == 0)
+        if (ReadBuilderChain(field, compilation, wkt) is not [var root, .. var builderCalls])
         {
             return null;
         }
 
-        var syntaxRef = field.DeclaringSyntaxReferences[0];
-        var syntaxNode = syntaxRef.GetSyntax();
-
-        if (syntaxNode is not VariableDeclaratorSyntax declarator || declarator.Initializer is null)
-        {
-            return null;
-        }
-
-        var initializerExpr = declarator.Initializer.Value;
-        var semanticModel = compilation.GetSemanticModel(syntaxNode.SyntaxTree);
-
-        // Walk the invocation chain via syntax + GetSymbolInfo (more reliable than operations API
-        // for field initializers with implicit conversions)
-        var chain = CollectInvocationChain(initializerExpr, semanticModel);
-        if (chain.Count == 0)
-        {
-            return null;
-        }
-
-        // The root call is the factory method: Define.Get<TInput, TOutput>("/route") or Define.File("/route")
-        var root = chain[0];
-        var isFileEndpoint = root.MethodName == "File";
-        var httpMethod = isFileEndpoint ? "GET" : root.MethodName.ToUpperInvariant();
-        var route = root.RouteArg;
-
+        var route = root.StringArg("route");
         if (route is null)
         {
             return null;
         }
 
+        var isFileEndpoint = root.TargetMethod.Name == "File";
+        var httpMethod = isFileEndpoint ? "GET" : root.TargetMethod.Name.ToUpperInvariant();
         route = RouteParser.StripRouteConstraints(route);
 
         var name = Naming.ToCamelCase(field.Name);
         var provenance = OpenApiProvenanceWalker.ReadOperation(compilation, field);
 
-        // Determine TInput / TOutput from type arguments on the root factory call
-        ITypeSymbol? tInput = null;
-        ITypeSymbol? tOutput = null;
-
-        if (root.TypeArgs.Count == 2)
+        // Define.Get<TInput, TOutput> carries both types; a single type argument is the
+        // output, except on Define.File<TInput>, where it is the input.
+        var rootTypeArgs = root.TargetMethod.TypeArguments;
+        ITypeSymbol? tInput = rootTypeArgs switch
         {
-            tInput = root.TypeArgs[0];
-            tOutput = root.TypeArgs[1];
-        }
-        else if (root.TypeArgs.Count == 1)
+            [var input, _] => input,
+            [var input] when isFileEndpoint => input,
+            _ => null,
+        };
+        ITypeSymbol? tOutput = rootTypeArgs switch
         {
-            // Define.File<TInput> has a single type arg that represents the input type,
-            // while Define.Get<TOutput> has a single type arg that represents the output type.
-            if (isFileEndpoint)
-            {
-                tInput = root.TypeArgs[0];
-            }
-            else
-            {
-                tOutput = root.TypeArgs[0];
-            }
-        }
+            [_, var output] => output,
+            [var output] when !isFileEndpoint => output,
+            _ => null,
+        };
 
-        // Process chained calls: .Accepts<T>(), .Returns<T>(statusCode[, description]),
-        // .Status(statusCode), .Description(desc), .Anonymous(), .Secure(scheme), .ProducesFile(contentType)
         var responses = new List<TsResponseType>();
         var requestExampleCalls = new List<PendingEndpointExampleCall>();
         var responseExampleCalls = new List<PendingEndpointExampleCall>();
@@ -206,552 +175,230 @@ public static class ContractWalker
         string? responseContentTypeOverride = null;
         QueryAuthMetadata? queryAuth = null;
 
-        for (var i = 1; i < chain.Count; i++)
+        TsMediaTypeContent SchemaContent(IInvocationOperation call, string mediaType, string label)
         {
-            var call = chain[i];
-            if (call.MethodName == "Accepts" && call.TypeArgs.Count == 1)
-            {
-                tInput = call.TypeArgs[0];
-            }
-            else if (call.MethodName == "AcceptsFile")
-            {
-                acceptsFile = true;
-                requestBodyPresent = true;
-            }
-            else if (call.MethodName == "FormEncoded")
-            {
-                isFormEncoded = true;
-                requestBodyPresent = true;
-            }
-            else if (call.MethodName == "AcceptsBinary")
-            {
-                binaryRequestContentType = call.StringArg ?? "application/octet-stream";
-                requestBodyPresent = true;
-                requestContentsAuthoritative = true;
-                requestContents.Add(
-                    new TsMediaTypeContent(binaryRequestContentType, null, IsBinary: true)
-                );
-            }
-            else if (call.MethodName == "AcceptsContentType" && call.StringArg is not null)
-            {
-                requestContentTypeOverride = call.StringArg;
-            }
-            else if (call.MethodName == "ProducesContentType" && call.StringArg is not null)
-            {
-                responseContentTypeOverride = call.StringArg;
-            }
-            else if (
-                call.MethodName == "RequestExampleJson"
-                && call.GetStringArg("json") is not null
-            )
-            {
-                requestExampleCalls.Add(
-                    new PendingEndpointExampleCall(
-                        StatusKey: null,
-                        Name: call.GetStringArg("name"),
-                        MediaType: call.GetStringArg("mediaType"),
-                        Json: call.GetStringArg("json"),
-                        ComponentExampleId: null,
-                        ResolvedJson: null,
-                        ReferencedComponents: ParseReferencedComponents(
-                            call.GetStringArg("referencedComponentsJson")
-                        )
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "RequestExampleRef"
-                && call.GetStringArg("componentExampleId") is not null
-                && call.GetStringArg("resolvedJson") is not null
-            )
-            {
-                requestExampleCalls.Add(
-                    new PendingEndpointExampleCall(
-                        StatusKey: null,
-                        Name: call.GetStringArg("name"),
-                        MediaType: call.GetStringArg("mediaType"),
-                        Json: null,
-                        ComponentExampleId: call.GetStringArg("componentExampleId"),
-                        ResolvedJson: call.GetStringArg("resolvedJson"),
-                        ReferencedComponents: ParseReferencedComponents(
-                            call.GetStringArg("referencedComponentsJson")
-                        )
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "Returns"
-                && call.TypeArgs.Count == 1
-                && call.StatusCodeArg is not null
-            )
-            {
-                var tsType = typeWalker.MapType(call.TypeArgs[0]);
-                responses.Add(
-                    new TsResponseType(
-                        call.StatusCodeArg.Value,
-                        tsType,
-                        call.GetStringArg("description")
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "Returns"
-                && call.TypeArgs.Count == 1
-                && call.GetStringArg("statusKey") is { } typedStatusKey
-            )
-            {
-                responses.Add(
-                    new TsResponseType(
-                        ParseStatusCode(typedStatusKey),
-                        typeWalker.MapType(call.TypeArgs[0]),
-                        call.GetStringArg("description"),
-                        StatusKey: typedStatusKey
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "Returns"
-                && call.TypeArgs.Count == 0
-                && call.StatusCodeArg is not null
-            )
-            {
-                responses.Add(
-                    new TsResponseType(
-                        call.StatusCodeArg.Value,
-                        null,
-                        call.GetStringArg("description")
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "Returns"
-                && call.TypeArgs.Count == 0
-                && call.GetStringArg("statusKey") is { } statusKey
-            )
-            {
-                responses.Add(
-                    new TsResponseType(
-                        ParseStatusCode(statusKey),
-                        null,
-                        call.GetStringArg("description"),
-                        StatusKey: statusKey
-                    )
-                );
-            }
-            else if (
-                call.MethodName is "WithResponseHeader" or "WithResponseHeaderKey"
-                && call.GetStringArg("name") is { } responseHeaderName
-            )
-            {
-                // The convenience overload has no statusCode arg — null targets the
-                // success response, resolved after the responses list is built.
-                responseHeaderCalls.Add(
-                    new PendingResponseHeaderCall(
-                        call.GetIntArg("statusCode")?.ToString() ?? call.GetStringArg("statusKey"),
-                        responseHeaderName,
-                        call.TypeArgs.Count == 1
-                            ? typeWalker
-                                .MapType(call.TypeArgs[0])
-                                .WithLeaf(
-                                    call.GetStringArg("schemaType"),
-                                    call.GetStringArg("format")
-                                )
-                            : new TsType.Primitive("string"),
-                        call.GetStringArg("description"),
-                        call.GetBoolArg("required") ?? false,
-                        ParseJsonArgument(call.GetStringArg("schemaExamplesJson")),
-                        ParseJsonArgument(call.GetStringArg("exampleJson")),
-                        ParseJsonArgument(call.GetStringArg("examplesJson")),
-                        call.GetBoolArg("deprecated") ?? false,
-                        call.GetStringArg("style"),
-                        call.GetBoolArg("explode"),
-                        call.GetBoolArg("allowReserved") ?? false,
-                        call.GetBoolArg("allowEmptyValue") ?? false,
-                        call.GetStringArg("contentType")
-                    )
-                );
-            }
-            else if (call.MethodName == "Status" && call.StatusCodeArg is not null)
-            {
-                if (successStatusOverride is not null)
-                {
-                    throw new RivetUserException(
-                        $"error {Diagnostics.DuplicateResponseStatus}: endpoint '{name}' calls .Status() more than once"
-                    );
-                }
-                else
-                {
-                    successStatusOverride = call.StatusCodeArg.Value;
-                }
-            }
-            else if (call.MethodName == "SuppressImplicitResponse")
-            {
-                suppressImplicitResponse = true;
-            }
-            else if (
-                call.MethodName == "StatusKey"
-                && call.GetStringArg("statusKey") is { } primaryStatusKey
-            )
-            {
-                successStatusKey = primaryStatusKey;
-                successResponseDescription = call.GetStringArg("description");
-            }
-            else if (call.MethodName == "Summary" && call.StringArg is not null)
-            {
-                endpointSummary = call.StringArg;
-            }
-            else if (call.MethodName == "Description" && call.StringArg is not null)
-            {
-                endpointDescription = call.StringArg;
-            }
-            else if (call.MethodName == "Anonymous")
-            {
-                security = new EndpointSecurity(true);
-            }
-            else if (call.MethodName == "Secure" && call.StringArg is not null)
-            {
-                security = new EndpointSecurity(false, call.StringArg);
-            }
-            else if (call.MethodName == "SecurityRequirements")
-            {
-                securityRequirements = new SecurityRequirements([]);
-            }
-            else if (
-                call.MethodName == "SecurityRequirement"
-                && call.GetIntArg("requirementOrder") is int requirementOrder
-            )
-            {
-                securityRequirementOrders.Add(requirementOrder);
-                if (call.GetStringArg("scheme") is not { } requirementScheme)
-                {
-                    continue;
-                }
+            var schemaType = call.StringArg("schemaType");
+            var format = call.StringArg("format");
+            return new TsMediaTypeContent(
+                mediaType,
+                typeWalker.ApplyGeneratedSchemaRef(
+                    typeWalker
+                        .MapType(call.TargetMethod.TypeArguments[0])
+                        .WithLeaf(schemaType, format),
+                    call.StringArg("schemaRef"),
+                    $"{label} '{mediaType}' on endpoint '{name}'"
+                ),
+                SchemaType: schemaType,
+                Format: format == "" ? null : format,
+                IsFormatSpecified: format is not null,
+                SchemaDescription: call.StringArg("schemaDescription")
+            );
+        }
 
-                if (!securityRequirementSchemes.TryGetValue(requirementOrder, out var schemes))
-                {
-                    schemes = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-                    securityRequirementSchemes.Add(requirementOrder, schemes);
-                }
-                if (!schemes.TryGetValue(requirementScheme, out var scopes))
-                {
-                    scopes = [];
-                    schemes.Add(requirementScheme, scopes);
-                }
-                if (call.GetStringArg("scope") is { } scope)
-                {
-                    scopes.Add(scope);
-                }
-            }
-            else if (
-                call.MethodName == "RequestContent"
-                && call.TypeArgs.Count == 1
-                && call.GetStringArg("mediaType") is { } requestMediaType
-            )
+        foreach (var call in builderCalls)
+        {
+            var typeArgs = call.TargetMethod.TypeArguments;
+            switch (call.TargetMethod.Name)
             {
-                var schemaType = call.GetStringArg("schemaType");
-                var format = call.GetStringArg("format");
-                requestContents.Add(
-                    new TsMediaTypeContent(
-                        requestMediaType,
-                        typeWalker.ApplyGeneratedSchemaRef(
-                            typeWalker.MapType(call.TypeArgs[0]).WithLeaf(schemaType, format),
-                            call.GetStringArg("schemaRef"),
-                            $"Request content '{requestMediaType}' on endpoint '{name}'"
-                        ),
-                        SchemaType: schemaType,
-                        Format: format == "" ? null : format,
-                        IsFormatSpecified: format is not null
-                    )
-                );
-                requestBodyPresent = true;
-                requestContentsAuthoritative = true;
-            }
-            else if (
-                call.MethodName == "RequestContent"
-                && call.TypeArgs.Count == 0
-                && call.GetStringArg("mediaType") is { } schemaLessRequestMediaType
-            )
-            {
-                requestContents.Add(new TsMediaTypeContent(schemaLessRequestMediaType, null));
-                requestBodyPresent = true;
-                requestContentsAuthoritative = true;
-            }
-            else if (
-                call.MethodName == "RequestBinaryContent"
-                && call.GetStringArg("mediaType") is { } binaryRequestMediaType
-            )
-            {
-                if (
-                    !requestContents.Any(content =>
-                        content.MediaType == binaryRequestMediaType && content.IsBinary
-                    )
-                )
-                {
+                case "Accepts" when typeArgs.Length == 1:
+                    tInput = typeArgs[0];
+                    break;
+                case "AcceptsFile":
+                    acceptsFile = true;
+                    requestBodyPresent = true;
+                    break;
+                case "FormEncoded":
+                    isFormEncoded = true;
+                    requestBodyPresent = true;
+                    break;
+                case "AcceptsBinary":
+                    binaryRequestContentType =
+                        call.StringArg("contentType") ?? "application/octet-stream";
+                    requestBodyPresent = true;
+                    requestContentsAuthoritative = true;
                     requestContents.Add(
-                        new TsMediaTypeContent(binaryRequestMediaType, null, IsBinary: true)
+                        new TsMediaTypeContent(binaryRequestContentType, null, IsBinary: true)
                     );
-                }
-                requestBodyPresent = true;
-                requestContentsAuthoritative = true;
-            }
-            else if (call.MethodName == "RequestBodyRequired")
-            {
-                requestBodyRequired = call.GetBoolArg("required");
-                requestBodyPresent = true;
-            }
-            else if (call.MethodName == "RequestBody")
-            {
-                requestBodyPresent = true;
-                requestContentsAuthoritative = true;
-            }
-            else if (
-                call.MethodName == "Parameter"
-                && call.TypeArgs.Count == 1
-                && call.GetStringArg("name") is { } parameterName
-                && call.GetStringArg("location") is { } parameterLocation
-                && call.GetBoolArg("required") is { } parameterRequired
-            )
-            {
-                var source = parameterLocation.ToLowerInvariant() switch
-                {
-                    "path" => ParamSource.Route,
-                    "query" => ParamSource.Query,
-                    "header" => ParamSource.Header,
-                    "cookie" => ParamSource.Cookie,
-                    _ => throw new RivetUserException(
-                        $"Endpoint '{name}' declares unsupported parameter location '{parameterLocation}'."
-                    ),
-                };
-                var metadata = ParseParameterMetadata(call.GetStringArg("metadataJson"));
-                var parameterType = typeWalker
-                    .MapType(call.TypeArgs[0])
-                    .WithLeaf(call.GetStringArg("schemaType"), call.GetStringArg("format"));
-                parameterType = typeWalker.ApplyGeneratedSchemaRef(
-                    parameterType,
-                    call.GetStringArg("schemaRef"),
-                    $"Parameter '{parameterName}' on endpoint '{name}'"
-                );
-                if (parameterType is TsType.Array array && metadata.ItemMetadata is not null)
-                {
-                    parameterType = array with { ElementMetadata = metadata.ItemMetadata };
-                }
-                declaredParameters.Add(
-                    new TsEndpointParam(
-                        parameterName,
-                        parameterType,
-                        source,
-                        IsOptional: !parameterRequired,
-                        Description: metadata.Description,
-                        IsDeprecated: metadata.IsDeprecated,
-                        DefaultValue: metadata.DefaultValue,
-                        Constraints: metadata.Constraints,
-                        SchemaExamples: metadata.SchemaExamples,
-                        Example: metadata.Example,
-                        Examples: metadata.Examples,
-                        Style: metadata.Style,
-                        Explode: metadata.Explode,
-                        SchemaType: call.GetStringArg("schemaType"),
-                        Format: call.GetStringArg("format") is ""
-                            ? null
-                            : call.GetStringArg("format"),
-                        IsFormatSpecified: call.GetStringArg("format") is not null,
-                        AllowEmptyValue: metadata.AllowEmptyValue
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "ResponseContent"
-                && call.TypeArgs.Count == 1
-                && call.GetIntArg("statusCode") is int contentStatusCode
-                && call.GetStringArg("mediaType") is { } responseMediaType
-            )
-            {
-                var schemaType = call.GetStringArg("schemaType");
-                var format = call.GetStringArg("format");
-                responseContents.Add(
-                    (
-                        contentStatusCode.ToString(),
-                        new TsMediaTypeContent(
-                            responseMediaType,
-                            typeWalker.ApplyGeneratedSchemaRef(
-                                typeWalker.MapType(call.TypeArgs[0]).WithLeaf(schemaType, format),
-                                call.GetStringArg("schemaRef"),
-                                $"Response content '{responseMediaType}' on endpoint '{name}'"
-                            ),
-                            SchemaType: schemaType,
-                            Format: format == "" ? null : format,
-                            IsFormatSpecified: format is not null,
-                            SchemaDescription: call.GetStringArg("schemaDescription")
+                    break;
+                case "AcceptsContentType" when call.StringArg("contentType") is { } contentType:
+                    requestContentTypeOverride = contentType;
+                    break;
+                case "ProducesContentType" when call.StringArg("contentType") is { } contentType:
+                    responseContentTypeOverride = contentType;
+                    break;
+                case "RequestExampleJson" or "RequestExampleRef" when IsCompleteExample(call):
+                    requestExampleCalls.Add(ToExampleCall(call, statusKey: null));
+                    break;
+                case "ResponseExampleJson"
+                or "ResponseExampleRef" when call.Status() is { } status && IsCompleteExample(call):
+                    responseExampleCalls.Add(ToExampleCall(call, status.Key));
+                    break;
+                case "Returns" when call.Status() is { } status:
+                    responses.Add(
+                        new TsResponseType(
+                            status.Code,
+                            typeArgs.Length == 1 ? typeWalker.MapType(typeArgs[0]) : null,
+                            call.StringArg("description"),
+                            StatusKey: status.DeclaredKey
+                        )
+                    );
+                    break;
+                case "WithResponseHeader"
+                or "WithResponseHeaderKey" when call.StringArg("name") is { } headerName:
+                    // The convenience overload has no status — null targets the success
+                    // response, resolved after the responses list is built.
+                    responseHeaderCalls.Add(
+                        new PendingResponseHeaderCall(
+                            call.Status()?.Key,
+                            headerName,
+                            typeArgs.Length == 1
+                                ? typeWalker
+                                    .MapType(typeArgs[0])
+                                    .WithLeaf(
+                                        call.StringArg("schemaType"),
+                                        call.StringArg("format")
+                                    )
+                                : new TsType.Primitive("string"),
+                            call.StringArg("description"),
+                            call.BoolArg("required") ?? false,
+                            ParseJsonArgument(call.StringArg("schemaExamplesJson")),
+                            ParseJsonArgument(call.StringArg("exampleJson")),
+                            ParseJsonArgument(call.StringArg("examplesJson")),
+                            call.BoolArg("deprecated") ?? false,
+                            call.StringArg("style"),
+                            call.BoolArg("explode"),
+                            call.BoolArg("allowReserved") ?? false,
+                            call.BoolArg("allowEmptyValue") ?? false,
+                            call.StringArg("contentType")
+                        )
+                    );
+                    break;
+                case "Status" when call.IntArg("statusCode") is int statusCode:
+                    if (successStatusOverride is not null)
+                    {
+                        throw new RivetUserException(
+                            $"error {Diagnostics.DuplicateResponseStatus}: endpoint '{name}' calls .Status() more than once"
+                        );
+                    }
+                    successStatusOverride = statusCode;
+                    break;
+                case "SuppressImplicitResponse":
+                    suppressImplicitResponse = true;
+                    break;
+                case "StatusKey" when call.StringArg("statusKey") is { } statusKey:
+                    successStatusKey = statusKey;
+                    successResponseDescription = call.StringArg("description");
+                    break;
+                case "Summary" when call.StringArg("summary") is { } summary:
+                    endpointSummary = summary;
+                    break;
+                case "Description" when call.StringArg("description") is { } description:
+                    endpointDescription = description;
+                    break;
+                case "Anonymous":
+                    security = new EndpointSecurity(true);
+                    break;
+                case "Secure" when call.StringArg("scheme") is { } scheme:
+                    security = new EndpointSecurity(false, scheme);
+                    break;
+                case "SecurityRequirements":
+                    securityRequirements = new SecurityRequirements([]);
+                    break;
+                case "SecurityRequirement" when call.IntArg("requirementOrder") is int order:
+                    securityRequirementOrders.Add(order);
+                    if (call.StringArg("scheme") is { } requirementScheme)
+                    {
+                        if (!securityRequirementSchemes.TryGetValue(order, out var schemes))
+                        {
+                            schemes = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+                            securityRequirementSchemes.Add(order, schemes);
+                        }
+                        if (!schemes.TryGetValue(requirementScheme, out var scopes))
+                        {
+                            scopes = [];
+                            schemes.Add(requirementScheme, scopes);
+                        }
+                        if (call.StringArg("scope") is { } scope)
+                        {
+                            scopes.Add(scope);
+                        }
+                    }
+                    break;
+                case "RequestContent" when call.StringArg("mediaType") is { } mediaType:
+                    requestContents.Add(
+                        typeArgs.Length == 1
+                            ? SchemaContent(call, mediaType, "Request content")
+                            : new TsMediaTypeContent(mediaType, null)
+                    );
+                    requestBodyPresent = true;
+                    requestContentsAuthoritative = true;
+                    break;
+                case "RequestBinaryContent" when call.StringArg("mediaType") is { } mediaType:
+                    if (
+                        !requestContents.Any(content =>
+                            content.MediaType == mediaType && content.IsBinary
                         )
                     )
-                );
-            }
-            else if (
-                call.MethodName == "ResponseContent"
-                && call.TypeArgs.Count == 0
-                && call.GetIntArg("statusCode") is int schemaLessContentStatusCode
-                && call.GetStringArg("mediaType") is { } schemaLessResponseMediaType
-            )
-            {
-                responseContents.Add(
-                    (
-                        schemaLessContentStatusCode.ToString(),
-                        new TsMediaTypeContent(schemaLessResponseMediaType, null)
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "ResponseBinaryContent"
-                && call.GetIntArg("statusCode") is int binaryContentStatusCode
-                && call.GetStringArg("mediaType") is { } binaryResponseMediaType
-            )
-            {
-                responseContents.Add(
-                    (
-                        binaryContentStatusCode.ToString(),
-                        new TsMediaTypeContent(binaryResponseMediaType, null, IsBinary: true)
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "ResponseContent"
-                && call.TypeArgs.Count == 1
-                && call.GetStringArg("statusKey") is { } typedContentStatusKey
-                && call.GetStringArg("mediaType") is { } typedResponseMediaType
-            )
-            {
-                var schemaType = call.GetStringArg("schemaType");
-                var format = call.GetStringArg("format");
-                responseContents.Add(
-                    (
-                        typedContentStatusKey,
-                        new TsMediaTypeContent(
-                            typedResponseMediaType,
-                            typeWalker.ApplyGeneratedSchemaRef(
-                                typeWalker.MapType(call.TypeArgs[0]).WithLeaf(schemaType, format),
-                                call.GetStringArg("schemaRef"),
-                                $"Response content '{typedResponseMediaType}' on endpoint '{name}'"
-                            ),
-                            SchemaType: schemaType,
-                            Format: format == "" ? null : format,
-                            IsFormatSpecified: format is not null,
-                            SchemaDescription: call.GetStringArg("schemaDescription")
+                    {
+                        requestContents.Add(
+                            new TsMediaTypeContent(mediaType, null, IsBinary: true)
+                        );
+                    }
+                    requestBodyPresent = true;
+                    requestContentsAuthoritative = true;
+                    break;
+                case "RequestBodyRequired":
+                    requestBodyRequired = call.BoolArg("required");
+                    requestBodyPresent = true;
+                    break;
+                case "RequestBody":
+                    requestBodyPresent = true;
+                    requestContentsAuthoritative = true;
+                    break;
+                case "Parameter"
+                    when typeArgs.Length == 1
+                        && call.StringArg("name") is { } parameterName
+                        && call.StringArg("location") is { } parameterLocation
+                        && call.BoolArg("required") is { } parameterRequired:
+                    declaredParameters.Add(
+                        ToDeclaredParameter(
+                            call,
+                            parameterName,
+                            parameterLocation,
+                            parameterRequired,
+                            name,
+                            typeWalker
                         )
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "ResponseContent"
-                && call.TypeArgs.Count == 0
-                && call.GetStringArg("statusKey") is { } contentStatusKey
-                && call.GetStringArg("mediaType") is { } schemaLessResponseMediaTypeByKey
-            )
-            {
-                responseContents.Add(
-                    (
-                        contentStatusKey,
-                        new TsMediaTypeContent(schemaLessResponseMediaTypeByKey, null)
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "ResponseBinaryContent"
-                && call.GetStringArg("statusKey") is { } binaryStatusKey
-                && call.GetStringArg("mediaType") is { } binaryResponseMediaTypeByKey
-            )
-            {
-                responseContents.Add(
-                    (
-                        binaryStatusKey,
-                        new TsMediaTypeContent(binaryResponseMediaTypeByKey, null, IsBinary: true)
-                    )
-                );
-            }
-            else if (call.MethodName == "ProducesFile")
-            {
-                fileContentType = call.StringArg ?? "application/octet-stream";
-            }
-            else if (call.MethodName == "ContentType")
-            {
-                fileContentType = call.StringArg ?? "application/octet-stream";
-            }
-            else if (call.MethodName == "QueryAuth")
-            {
-                queryAuth = new QueryAuthMetadata(call.GetStringArg("parameterName") ?? "token");
-            }
-            else if (
-                call.MethodName == "ResponseExampleJson"
-                && call.GetIntArg("statusCode") is int responseStatusCode
-                && call.GetStringArg("json") is not null
-            )
-            {
-                responseExampleCalls.Add(
-                    new PendingEndpointExampleCall(
-                        responseStatusCode.ToString(),
-                        call.GetStringArg("name"),
-                        call.GetStringArg("mediaType"),
-                        call.GetStringArg("json"),
-                        null,
-                        null,
-                        ParseReferencedComponents(call.GetStringArg("referencedComponentsJson"))
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "ResponseExampleRef"
-                && call.GetIntArg("statusCode") is int refStatusCode
-                && call.GetStringArg("componentExampleId") is not null
-                && call.GetStringArg("resolvedJson") is not null
-            )
-            {
-                responseExampleCalls.Add(
-                    new PendingEndpointExampleCall(
-                        refStatusCode.ToString(),
-                        call.GetStringArg("name"),
-                        call.GetStringArg("mediaType"),
-                        null,
-                        call.GetStringArg("componentExampleId"),
-                        call.GetStringArg("resolvedJson"),
-                        ParseReferencedComponents(call.GetStringArg("referencedComponentsJson"))
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "ResponseExampleJson"
-                && call.GetStringArg("statusKey") is { } exampleStatusKey
-                && call.GetStringArg("json") is not null
-            )
-            {
-                responseExampleCalls.Add(
-                    new PendingEndpointExampleCall(
-                        exampleStatusKey,
-                        call.GetStringArg("name"),
-                        call.GetStringArg("mediaType"),
-                        call.GetStringArg("json"),
-                        null,
-                        null,
-                        ParseReferencedComponents(call.GetStringArg("referencedComponentsJson"))
-                    )
-                );
-            }
-            else if (
-                call.MethodName == "ResponseExampleRef"
-                && call.GetStringArg("statusKey") is { } refStatusKey
-                && call.GetStringArg("componentExampleId") is not null
-                && call.GetStringArg("resolvedJson") is not null
-            )
-            {
-                responseExampleCalls.Add(
-                    new PendingEndpointExampleCall(
-                        refStatusKey,
-                        call.GetStringArg("name"),
-                        call.GetStringArg("mediaType"),
-                        null,
-                        call.GetStringArg("componentExampleId"),
-                        call.GetStringArg("resolvedJson"),
-                        ParseReferencedComponents(call.GetStringArg("referencedComponentsJson"))
-                    )
-                );
+                    );
+                    break;
+                case "ResponseContent"
+                    when call.Status() is { } status
+                        && call.StringArg("mediaType") is { } mediaType:
+                    responseContents.Add(
+                        (
+                            status.Key,
+                            typeArgs.Length == 1
+                                ? SchemaContent(call, mediaType, "Response content")
+                                : new TsMediaTypeContent(mediaType, null)
+                        )
+                    );
+                    break;
+                case "ResponseBinaryContent"
+                    when call.Status() is { } status
+                        && call.StringArg("mediaType") is { } mediaType:
+                    responseContents.Add(
+                        (status.Key, new TsMediaTypeContent(mediaType, null, IsBinary: true))
+                    );
+                    break;
+                case "ProducesFile":
+                    fileContentType = call.StringArg("contentType") ?? "application/octet-stream";
+                    break;
+                case "ContentType":
+                    fileContentType = call.StringArg("mediaType") ?? "application/octet-stream";
+                    break;
+                case "QueryAuth":
+                    queryAuth = new QueryAuthMetadata(call.StringArg("parameterName") ?? "token");
+                    break;
             }
         }
 
@@ -804,14 +451,14 @@ public static class ContractWalker
         // Build return type from TOutput
         TsType? returnType = tOutput is not null ? typeWalker.MapType(tOutput) : null;
 
-        // Build params based on HTTP method and TInput
+        var declaredRequestBody = ReadDeclaredRequestBody(field, wkt);
         var (builtParameters, inputTypeName) = BuildParams(
             wkt,
             httpMethod,
             route,
             tInput,
             field,
-            compilation,
+            declaredRequestBody,
             typeWalker,
             acceptsFile,
             binaryRequestContentType,
@@ -824,7 +471,7 @@ public static class ContractWalker
             parameter.Source is ParamSource.Body or ParamSource.File or ParamSource.FormField
         );
 
-        requestBodyRequired ??= GetRequestBodyRequired(field, compilation);
+        requestBodyRequired ??= declaredRequestBody?.Required;
 
         foreach (var declaredParameter in declaredParameters)
         {
@@ -1143,7 +790,7 @@ public static class ContractWalker
         string route,
         ITypeSymbol? tInput,
         IFieldSymbol field,
-        Compilation compilation,
+        DeclaredRequestBody? declaredRequestBody,
         TypeWalker typeWalker,
         bool acceptsFile = false,
         string? binaryContentType = null,
@@ -1208,7 +855,13 @@ public static class ContractWalker
 
         if (lowersBody)
         {
-            var requestBodyType = GetRequestBodyType(field, compilation, tInput, route, typeWalker);
+            var requestBodyType = GetRequestBodyType(
+                field,
+                declaredRequestBody,
+                tInput,
+                route,
+                typeWalker
+            );
 
             // Route params from template — try to match types from TInput properties
             var routeMatchedProps = new HashSet<string>(StringComparer.Ordinal);
@@ -1523,6 +1176,58 @@ public static class ContractWalker
         return (parameters, inputTypeName);
     }
 
+    private static TsEndpointParam ToDeclaredParameter(
+        IInvocationOperation call,
+        string parameterName,
+        string parameterLocation,
+        bool parameterRequired,
+        string endpointName,
+        TypeWalker typeWalker
+    )
+    {
+        var source = parameterLocation.ToLowerInvariant() switch
+        {
+            "path" => ParamSource.Route,
+            "query" => ParamSource.Query,
+            "header" => ParamSource.Header,
+            "cookie" => ParamSource.Cookie,
+            _ => throw new RivetUserException(
+                $"Endpoint '{endpointName}' declares unsupported parameter location '{parameterLocation}'."
+            ),
+        };
+        var metadata = ParseParameterMetadata(call.StringArg("metadataJson"));
+        var schemaType = call.StringArg("schemaType");
+        var format = call.StringArg("format");
+        var parameterType = typeWalker.ApplyGeneratedSchemaRef(
+            typeWalker.MapType(call.TargetMethod.TypeArguments[0]).WithLeaf(schemaType, format),
+            call.StringArg("schemaRef"),
+            $"Parameter '{parameterName}' on endpoint '{endpointName}'"
+        );
+        if (parameterType is TsType.Array array && metadata.ItemMetadata is not null)
+        {
+            parameterType = array with { ElementMetadata = metadata.ItemMetadata };
+        }
+        return new TsEndpointParam(
+            parameterName,
+            parameterType,
+            source,
+            IsOptional: !parameterRequired,
+            Description: metadata.Description,
+            IsDeprecated: metadata.IsDeprecated,
+            DefaultValue: metadata.DefaultValue,
+            Constraints: metadata.Constraints,
+            SchemaExamples: metadata.SchemaExamples,
+            Example: metadata.Example,
+            Examples: metadata.Examples,
+            Style: metadata.Style,
+            Explode: metadata.Explode,
+            SchemaType: schemaType,
+            Format: format == "" ? null : format,
+            IsFormatSpecified: format is not null,
+            AllowEmptyValue: metadata.AllowEmptyValue
+        );
+    }
+
     private static ParameterMetadata ParseParameterMetadata(string? json)
     {
         if (json is null)
@@ -1571,24 +1276,31 @@ public static class ContractWalker
         return document.RootElement.Clone();
     }
 
+    /// <summary>[RivetRequestBody(typeof(T), required)] on a contract field.</summary>
+    private sealed record DeclaredRequestBody(ITypeSymbol? BodyType, bool Required);
+
+    private static DeclaredRequestBody? ReadDeclaredRequestBody(
+        IFieldSymbol field,
+        WellKnownTypes wkt
+    ) =>
+        field.GetAttribute(wkt.RivetRequestBody) is { } attribute
+            ? new DeclaredRequestBody(
+                attribute.ConstructorArguments is [{ Value: ITypeSymbol bodyType }, ..]
+                    ? bodyType
+                    : null,
+                attribute.ConstructorArguments is not [_, { Value: false }, ..]
+            )
+            : null;
+
     private static TsType? GetRequestBodyType(
         IFieldSymbol field,
-        Compilation compilation,
+        DeclaredRequestBody? declaredRequestBody,
         ITypeSymbol? inputType,
         string route,
         TypeWalker typeWalker
     )
     {
-        var attributeType = compilation.GetTypeByMetadataName("Rivet.RivetRequestBodyAttribute");
-        if (attributeType is null)
-        {
-            return null;
-        }
-
-        var attribute = field
-            .GetAttributes()
-            .FirstOrDefault(candidate => candidate.Is(attributeType));
-        if (attribute?.ConstructorArguments is not [{ Value: ITypeSymbol bodyType }, ..])
+        if (declaredRequestBody?.BodyType is not { } bodyType)
         {
             return null;
         }
@@ -1605,32 +1317,9 @@ public static class ContractWalker
         }
 
         var mappedType = typeWalker.MapType(bodyType);
-        var isRequired =
-            attribute.ConstructorArguments.Length < 2
-            || attribute.ConstructorArguments[1].Value is not false;
-        return isRequired || mappedType is TsType.Nullable
+        return declaredRequestBody.Required || mappedType is TsType.Nullable
             ? mappedType
             : new TsType.Nullable(mappedType);
-    }
-
-    private static bool? GetRequestBodyRequired(IFieldSymbol field, Compilation compilation)
-    {
-        var attributeType = compilation.GetTypeByMetadataName("Rivet.RivetRequestBodyAttribute");
-        if (attributeType is null)
-        {
-            return null;
-        }
-
-        var attribute = field
-            .GetAttributes()
-            .FirstOrDefault(candidate => candidate.Is(attributeType));
-        if (attribute is null)
-        {
-            return null;
-        }
-
-        return attribute.ConstructorArguments.Length < 2
-            || attribute.ConstructorArguments[1].Value is not false;
     }
 
     private static bool IsCompatibleRequestBodyType(
@@ -1779,49 +1468,6 @@ public static class ContractWalker
         return Naming.ToCamelCase(name);
     }
 
-    /// <summary>
-    /// Represents a single method call in the builder chain.
-    /// </summary>
-    private sealed class ChainedCall
-    {
-        public ChainedCall(
-            string methodName,
-            IReadOnlyList<ITypeSymbol> typeArgs,
-            IReadOnlyDictionary<string, object> constantArgs
-        )
-        {
-            MethodName = methodName;
-            TypeArgs = typeArgs;
-            ConstantArgs = constantArgs;
-        }
-
-        public string MethodName { get; }
-        public IReadOnlyList<ITypeSymbol> TypeArgs { get; }
-        public IReadOnlyDictionary<string, object> ConstantArgs { get; }
-
-        public string? RouteArg => GetStringArg("route");
-        public int? StatusCodeArg => GetIntArg("statusCode");
-        public string? StringArg => GetFirstStringArg();
-
-        public string? GetStringArg(string parameterName) =>
-            ConstantArgs.TryGetValue(parameterName, out var value) && value is string text
-                ? text
-                : null;
-
-        public int? GetIntArg(string parameterName) =>
-            ConstantArgs.TryGetValue(parameterName, out var value) && value is int number
-                ? number
-                : null;
-
-        public bool? GetBoolArg(string parameterName) =>
-            ConstantArgs.TryGetValue(parameterName, out var value) && value is bool flag
-                ? flag
-                : null;
-
-        private string? GetFirstStringArg() =>
-            ConstantArgs.Values.OfType<string>().FirstOrDefault();
-    }
-
     private sealed record PendingEndpointExampleCall(
         string? StatusKey,
         string? Name,
@@ -1865,87 +1511,126 @@ public static class ContractWalker
     );
 
     /// <summary>
-    /// Walks the invocation chain from the initializer expression using syntax + GetSymbolInfo.
-    /// Returns calls in order: root factory call first, then chained builder calls.
+    /// Reads a contract field's initializer as a Rivet builder chain: the Define factory
+    /// call first, then each builder call in source order. Null when the initializer is
+    /// not a chain rooted at a Define member, so the field is not read. A call in the
+    /// chain that is not a Rivet builder method (a user extension, say) is refused: its
+    /// effect on the contract cannot be read statically.
     /// </summary>
-    private static List<ChainedCall> CollectInvocationChain(
-        ExpressionSyntax expression,
-        SemanticModel semanticModel
+    private static List<IInvocationOperation>? ReadBuilderChain(
+        IFieldSymbol field,
+        Compilation compilation,
+        WellKnownTypes wkt
     )
     {
-        var calls = new List<ChainedCall>();
-        CollectInvocationsRecursive(expression, semanticModel, calls);
-        calls.Reverse(); // Root call first
+        if (
+            field.DeclaringSyntaxReferences is not [var reference, ..]
+            || reference.GetSyntax()
+                is not VariableDeclaratorSyntax { Initializer.Value: var value }
+        )
+        {
+            return null;
+        }
+
+        var calls = new List<IInvocationOperation>();
+        var operation = compilation.GetSemanticModel(value.SyntaxTree).GetOperation(value);
+        while (WithoutConversions(operation) is IInvocationOperation invocation)
+        {
+            calls.Add(invocation);
+            operation =
+                invocation.Instance
+                ?? (
+                    invocation.TargetMethod.IsExtensionMethod
+                    && invocation.Arguments is [var receiver, ..]
+                        ? receiver.Value
+                        : null
+                );
+        }
+        calls.Reverse();
+
+        if (
+            calls is not [var root, ..]
+            || !SymbolEqualityComparer.Default.Equals(root.TargetMethod.ContainingType, wkt.Define)
+        )
+        {
+            return null;
+        }
+
+        foreach (var call in calls.Skip(1))
+        {
+            var owner = call.TargetMethod.ContainingType.OriginalDefinition;
+            INamedTypeSymbol?[] builderTypes =
+            [
+                wkt.RouteDefinitionBase,
+                wkt.RouteDefinition,
+                wkt.FileRouteDefinition,
+                wkt.FileRouteDefinitionOfT,
+            ];
+            if (!builderTypes.Any(type => SymbolEqualityComparer.Default.Equals(owner, type)))
+            {
+                throw new RivetUserException(
+                    $"Contract endpoint '{field.ContainingType.Name}.{field.Name}' calls "
+                        + $"'{call.TargetMethod.ToDisplayString()}', which is not a Rivet builder method. "
+                        + "Rivet reads the builder chain statically and cannot interpret it; "
+                        + "declare the endpoint with Rivet builder calls only."
+                );
+            }
+        }
+
         return calls;
     }
 
-    private static void CollectInvocationsRecursive(
-        ExpressionSyntax expression,
-        SemanticModel semanticModel,
-        List<ChainedCall> calls
-    )
+    private static IOperation? WithoutConversions(IOperation? operation) =>
+        operation is IConversionOperation conversion
+            ? WithoutConversions(conversion.Operand)
+            : operation;
+
+    private static object? ConstantArg(this IInvocationOperation call, string parameter) =>
+        call.Arguments.FirstOrDefault(argument => argument.Parameter?.Name == parameter)
+            is { } argument
+        && WithoutConversions(argument.Value)?.ConstantValue is { HasValue: true } constant
+            ? constant.Value
+            : null;
+
+    private static string? StringArg(this IInvocationOperation call, string parameter) =>
+        call.ConstantArg(parameter) as string;
+
+    private static int? IntArg(this IInvocationOperation call, string parameter) =>
+        call.ConstantArg(parameter) is int value ? value : null;
+
+    private static bool? BoolArg(this IInvocationOperation call, string parameter) =>
+        call.ConstantArg(parameter) is bool value ? value : null;
+
+    /// <summary>
+    /// The response status a builder call targets, from either its statusCode or its
+    /// statusKey parameter. DeclaredKey is set only for the statusKey form.
+    /// </summary>
+    private static ResponseStatus? Status(this IInvocationOperation call) =>
+        call.IntArg("statusCode") is int code ? new ResponseStatus(code, null)
+        : call.StringArg("statusKey") is { } key ? new ResponseStatus(ParseStatusCode(key), key)
+        : null;
+
+    private readonly record struct ResponseStatus(int Code, string? DeclaredKey)
     {
-        // Unwrap parentheses
-        while (expression is ParenthesizedExpressionSyntax parens)
-        {
-            expression = parens.Expression;
-        }
-
-        if (expression is not InvocationExpressionSyntax invocation)
-        {
-            return;
-        }
-
-        var symbolInfo = semanticModel.GetSymbolInfo(invocation);
-        if (symbolInfo.Symbol is not IMethodSymbol method)
-        {
-            return;
-        }
-
-        // Extract type arguments
-        var typeArgs = method.TypeArguments;
-
-        var constantArgs = new Dictionary<string, object>(StringComparer.Ordinal);
-
-        for (var i = 0; i < invocation.ArgumentList.Arguments.Count; i++)
-        {
-            var arg = invocation.ArgumentList.Arguments[i];
-            var parameter = ResolveParameter(method, arg, i);
-            if (parameter is null)
-            {
-                continue;
-            }
-
-            var constValue = semanticModel.GetConstantValue(arg.Expression);
-            if (!constValue.HasValue || constValue.Value is null)
-            {
-                continue;
-            }
-
-            constantArgs[parameter.Name] = constValue.Value;
-        }
-
-        calls.Add(new ChainedCall(method.Name, typeArgs, constantArgs));
-
-        // Recurse into the receiver (the expression the method is called on)
-        if (invocation.Expression is MemberAccessExpressionSyntax memberAccess)
-        {
-            CollectInvocationsRecursive(memberAccess.Expression, semanticModel, calls);
-        }
+        public string Key => DeclaredKey ?? Code.ToString();
     }
 
-    private static IParameterSymbol? ResolveParameter(
-        IMethodSymbol method,
-        ArgumentSyntax argument,
-        int ordinal
-    )
-    {
-        if (argument.NameColon is not null)
-        {
-            var name = argument.NameColon.Name.Identifier.ValueText;
-            return method.Parameters.FirstOrDefault(parameter => parameter.Name == name);
-        }
+    private static bool IsCompleteExample(IInvocationOperation call) =>
+        call.StringArg("json") is not null
+        || call.StringArg("componentExampleId") is not null
+            && call.StringArg("resolvedJson") is not null;
 
-        return ordinal < method.Parameters.Length ? method.Parameters[ordinal] : null;
-    }
+    private static PendingEndpointExampleCall ToExampleCall(
+        IInvocationOperation call,
+        string? statusKey
+    ) =>
+        new(
+            statusKey,
+            call.StringArg("name"),
+            call.StringArg("mediaType"),
+            call.StringArg("json"),
+            call.StringArg("componentExampleId"),
+            call.StringArg("resolvedJson"),
+            ParseReferencedComponents(call.StringArg("referencedComponentsJson"))
+        );
 }

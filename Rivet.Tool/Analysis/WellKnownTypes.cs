@@ -145,7 +145,9 @@ public sealed class WellKnownTypes(Compilation c)
     public INamedTypeSymbol? IFormFile { get; } =
         c.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IFormFile");
 
-    // Coverage analysis
+    // Contract builder chain and coverage analysis
+    public INamedTypeSymbol? Define { get; } = RivetType(c, "Define");
+    public INamedTypeSymbol? RouteDefinitionBase { get; } = RivetType(c, "RouteDefinitionBase`1");
     public INamedTypeSymbol? RouteDefinition { get; } = RivetType(c, "RouteDefinition");
     public INamedTypeSymbol? RouteDefinitionOfT { get; } = RivetType(c, "RouteDefinition`1");
     public INamedTypeSymbol? RouteDefinitionOfTInputTOutput { get; } =

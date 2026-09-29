@@ -38,6 +38,111 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void User_Extension_Method_In_Chain_Is_Refused()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetType]
+            public sealed record ErrorDto(string Message);
+
+            public static class RouteExtensions
+            {
+                public static RouteDefinition<TaskDto> Returns<TError>(
+                    this RouteDefinition<TaskDto> route,
+                    int statusCode,
+                    bool logged) => route;
+            }
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> GetTask =
+                    Define.Get<TaskDto>("/api/tasks").Returns<ErrorDto>(404, logged: true);
+            }
+            """;
+
+        var error = Assert.Throws<RivetUserException>(() => Generate(source));
+        Assert.Contains("GetTask", error.Message);
+        Assert.Contains("not a Rivet builder method", error.Message);
+    }
+
+    [Fact]
+    public void Chain_Not_Rooted_At_Define_Is_Not_Read()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            public static class Routes
+            {
+                public static RouteDefinition<TaskDto> Get<T>(string route) => Define.Get<TaskDto>("/api/real");
+            }
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> GetTask = Routes.Get<TaskDto>("/api/fake");
+            }
+            """;
+
+        Assert.Empty(Generate(source));
+    }
+
+    [Fact]
+    public void Chain_Reads_Named_And_Default_Arguments()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetType]
+            public sealed record ErrorDto(string Message);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> GetTask =
+                    Define.Get<TaskDto>(route: "/api/tasks")
+                        .Returns<ErrorDto>(description: "Missing", statusCode: 404)
+                        .WithResponseHeader<int>(required: true, name: "X-Rate")
+                        .QueryAuth();
+
+                public static readonly FileRouteDefinition Download =
+                    Define.File("/api/files").ProducesFile();
+            }
+            """;
+
+        var endpoints = Generate(source);
+        var getTask = endpoints.Single(e => e.Name == "getTask");
+        Assert.Equal("/api/tasks", getTask.RouteTemplate);
+        var notFound = getTask.Responses.Single(r => r.StatusCode == 404);
+        Assert.Equal("Missing", notFound.Description);
+        Assert.True(notFound.DataType is TsType.TypeRef { Name: "ErrorDto" });
+        var header = Assert.Single(getTask.Responses.Single(r => r.StatusCode == 200).Headers!);
+        Assert.Equal("X-Rate", header.Name);
+        Assert.True(header.Required);
+        Assert.Equal("token", getTask.QueryAuth?.ParameterName);
+        Assert.Equal(
+            "application/octet-stream",
+            endpoints.Single(e => e.Name == "download").FileContentType
+        );
+    }
+
+    [Fact]
     public void Required_Field_Is_Required_In_Schema()
     {
         var source = """
