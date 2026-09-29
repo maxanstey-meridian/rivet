@@ -30,7 +30,13 @@ public static class EndpointWalker
         {
             if (seen.Add(method))
             {
-                var endpoint = BuildEndpoint(method, wkt, typeWalker);
+                var endpoint = BuildControllerEndpoint(
+                    method,
+                    Naming.ToCamelCase(ControllerBaseName(method.ContainingType)),
+                    isContract: false,
+                    wkt,
+                    typeWalker
+                );
                 if (endpoint is not null)
                 {
                     endpoints.Add(endpoint);
@@ -51,7 +57,13 @@ public static class EndpointWalker
         {
             if (seen.Add(method))
             {
-                var endpoint = BuildEndpoint(method, wkt, typeWalker);
+                var endpoint = BuildControllerEndpoint(
+                    method,
+                    Naming.ToCamelCase(ControllerBaseName(method.ContainingType)),
+                    isContract: false,
+                    wkt,
+                    typeWalker
+                );
                 if (endpoint is not null)
                 {
                     endpoints.Add(endpoint);
@@ -62,96 +74,104 @@ public static class EndpointWalker
         return endpoints;
     }
 
-    private static TsEndpointDefinition? BuildEndpoint(
+    /// <summary>
+    /// Builds an endpoint from an MVC-attributed method: an annotated action
+    /// ([RivetEndpoint]/[RivetClient]) or an abstract [RivetContract] method. Contract
+    /// methods refuse duplicate statuses and do not read MVC request metadata
+    /// ([Consumes], [FromForm] encoding, Rivet examples).
+    /// </summary>
+    internal static TsEndpointDefinition? BuildControllerEndpoint(
         IMethodSymbol method,
+        string controllerName,
+        bool isContract,
         WellKnownTypes wkt,
         TypeWalker typeWalker
     )
     {
-        var (httpMethod, methodRoute) = ExtractHttpMethodAndRoute(wkt, method);
-        if (httpMethod is null)
+        var (httpMethod, route) = ResolveActionRoute(wkt, method);
+        if (httpMethod is null || route is null)
         {
             return null;
         }
 
-        // Combine controller [Route] prefix with method route
-        var controllerRoute = ExtractControllerRoute(wkt, method.ContainingType);
-        var fullRoute = CombineRoutes(controllerRoute, methodRoute);
-
-        if (fullRoute is null)
-        {
-            return null;
-        }
-
-        // A6: substitute [controller]/[action] tokens before constraint stripping
-        fullRoute = SubstituteRouteTokens(fullRoute, method.ContainingType, method);
-
-        // Strip route constraints: {id:guid} → {id}
-        fullRoute = RouteParser.StripRouteConstraints(fullRoute);
-
-        var parameters = ExtractParams(wkt, method, typeWalker, fullRoute);
-        var responses = ExtractAllResponseTypes(wkt, method, typeWalker).ToList();
+        var name = Naming.ToCamelCase(method.Name);
+        var parameters = ExtractParams(wkt, method, typeWalker, route);
+        var responses = ExtractAllResponseTypes(wkt, method, typeWalker, normalize: !isContract)
+            .ToList();
         if (responses.Count == 0)
         {
+            // Explicit-response boundary: a method with no declared success response is
+            // an incomplete contract — refuse rather than fabricate one. The concrete
+            // payload T convenience applies after Task/ValueTask unwrapping; result
+            // containers and void stay unresolved.
             var unwrapped = UnwrapTask(wkt, method.ReturnType, out _);
             if (unwrapped is null || IsStatusSelectingResultContainer(wkt, unwrapped))
             {
                 throw new RivetUserException(
-                    $"error {Diagnostics.UnmappedTypedResult}: endpoint "
-                        + $"'{MethodOwner(method)}.{method.Name}' declares no response. "
-                        + "Rivet reads explicit response declarations, not MVC runtime defaults — "
-                        + "add [ProducesResponseType(typeof(T), 200)] (or a concrete payload return / "
-                        + "a fixed-status typed result) to declare the success response."
+                    isContract
+                        ? $"error {Diagnostics.UnmappedTypedResult}: contract endpoint "
+                            + $"'{name}' declares no success response. "
+                            + "Rivet reads explicit contract declarations — add .Status(...).Returns(...) "
+                            + "(or a concrete payload output type) to declare the success response."
+                        : $"error {Diagnostics.UnmappedTypedResult}: endpoint "
+                            + $"'{MethodOwner(method)}.{method.Name}' declares no response. "
+                            + "Rivet reads explicit response declarations, not MVC runtime defaults — "
+                            + "add [ProducesResponseType(typeof(T), 200)] (or a concrete payload return / "
+                            + "a fixed-status typed result) to declare the success response."
                 );
             }
 
-            responses.Add(new TsResponseType(200, ExtractReturnType(wkt, method, typeWalker)));
+            responses.Add(new TsResponseType(200, typeWalker.MapType(unwrapped)));
+        }
+
+        if (isContract)
+        {
+            ResponseStatusValidation.RejectContractDuplicates(responses, name);
+            responses.Sort((left, right) => left.StatusCode.CompareTo(right.StatusCode));
         }
 
         var successResponse = responses.FirstOrDefault(response =>
             response.StatusCode is >= 200 and < 300
         );
-        var returnType =
-            successResponse?.DataType
-            ?? (responses.Count == 0 ? ExtractReturnType(wkt, method, typeWalker) : null);
-        var isFormEncoded = HasFromFormBody(method, wkt);
-        var requestExamples = ExtractRequestExamples(wkt, method, parameters, isFormEncoded);
-        ApplyResponseExamples(
-            responses,
-            ExtractResponseExamples(wkt, method),
-            Naming.ToCamelCase(method.Name)
-        );
-        var name = Naming.ToCamelCase(method.Name);
-        var controllerName = DeriveControllerFileName(method.ContainingType);
         var responseContentTypeOverride = ResolveResponseContentType(
             wkt,
             method,
             successResponse?.DataType
         );
+        if (isContract)
+        {
+            return new TsEndpointDefinition(
+                name,
+                httpMethod,
+                route,
+                parameters,
+                successResponse?.DataType,
+                controllerName,
+                responses,
+                ResponseContentTypeOverride: responseContentTypeOverride
+            );
+        }
 
-        var consumes = method
-            .GetAttributes()
-            .Where(a =>
-                a.AttributeClass?.ToDisplayString() == "Microsoft.AspNetCore.Mvc.ConsumesAttribute"
-            )
-            .ToArray();
+        var isFormEncoded = HasFromFormBody(method, wkt);
+        var requestExamples = ExtractRequestExamples(wkt, method, parameters, isFormEncoded);
+        ApplyResponseExamples(
+            responses,
+            ExtractResponseExamples(wkt, method),
+            Diagnostics.ControllerExampleUndeclaredStatus,
+            $"controller endpoint '{name}'"
+        );
+
+        var consumes = method.GetAttributes().Where(a => a.Is(wkt.Consumes)).ToArray();
         if (consumes.Length == 0)
         {
             consumes = method
                 .ContainingType.GetAttributes()
-                .Where(a =>
-                    a.AttributeClass?.ToDisplayString()
-                    == "Microsoft.AspNetCore.Mvc.ConsumesAttribute"
-                )
+                .Where(a => a.Is(wkt.Consumes))
                 .ToArray();
         }
         var requestMediaTypes = consumes
             .SelectMany(a => a.ConstructorArguments)
-            .SelectMany(a =>
-                a.Kind == TypedConstantKind.Array ? a.Values.AsEnumerable() : new[] { a }
-            )
-            .Select(a => a.Value)
-            .OfType<string>()
+            .SelectMany(a => a.Strings())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         if (requestMediaTypes.Length > 1)
@@ -164,9 +184,9 @@ public static class EndpointWalker
         return new TsEndpointDefinition(
             name,
             httpMethod,
-            fullRoute,
+            route,
             parameters,
-            returnType,
+            successResponse?.DataType,
             controllerName,
             responses,
             IsFormEncoded: isFormEncoded,
@@ -177,6 +197,30 @@ public static class EndpointWalker
     }
 
     /// <summary>
+    /// The HTTP method and full transport route of an MVC action: the [Http*] verb and
+    /// template combined with the class [Route], [controller]/[action] tokens
+    /// substituted, constraints stripped. HttpMethod is null when the method is not an
+    /// action; Route is null when neither the action nor the class declares a template.
+    /// </summary>
+    internal static (string? HttpMethod, string? Route) ResolveActionRoute(
+        WellKnownTypes wkt,
+        IMethodSymbol method
+    )
+    {
+        var (httpMethod, methodRoute) = ExtractHttpMethodAndRoute(wkt, method);
+        if (httpMethod is null)
+        {
+            return (null, null);
+        }
+
+        var route = CombineRoutes(ExtractControllerRoute(wkt, method.ContainingType), methodRoute);
+        return route is null
+            ? (httpMethod, null)
+            : (httpMethod, RouteParser.StripRouteConstraints(SubstituteRouteTokens(route, method)));
+    }
+
+    /// <summary>
+    /// True for result containers whose runtime value selects    /// <summary>
     /// True for result containers whose runtime value selects the response's status
     /// and/or shape: any type assignable to IActionResult/IResult whose status is not
     /// statically encoded. Detection is the declared interface boundary — not a list of
@@ -275,46 +319,18 @@ public static class EndpointWalker
     /// Reads the first content type declared via [Produces] on the action, falling
     /// back to the controller. Returns null when MVC metadata declares none.
     /// </summary>
-    private static string? ExtractProducesContentType(WellKnownTypes wkt, IMethodSymbol method)
-    {
-        if (wkt.Produces is null)
-        {
-            return null;
-        }
-
-        foreach (var attr in method.GetAttributes().Concat(method.ContainingType.GetAttributes()))
-        {
-            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.Produces))
-            {
-                continue;
-            }
-
-            // ProducesAttribute's constructor is (string contentType,
-            // params string[] additionalContentTypes), so even a single
-            // [Produces("x")] carries two arguments (string + empty array).
-            // Read the first declared content type across every argument:
-            // the string positionals first, then any additional array values.
-            foreach (var value in attr.ConstructorArguments)
-            {
-                if (value.Kind == TypedConstantKind.Array)
-                {
-                    foreach (var item in value.Values)
-                    {
-                        if (item.Value is string arrayContentType && arrayContentType.Length > 0)
-                        {
-                            return arrayContentType;
-                        }
-                    }
-                }
-                else if (value.Value is string contentType && contentType.Length > 0)
-                {
-                    return contentType;
-                }
-            }
-        }
-
-        return null;
-    }
+    /// <remarks>
+    /// ProducesAttribute's constructor is (string contentType, params string[]
+    /// additionalContentTypes), so the string positional is read before the array values.
+    /// </remarks>
+    private static string? ExtractProducesContentType(WellKnownTypes wkt, IMethodSymbol method) =>
+        method
+            .GetAttributes()
+            .Concat(method.ContainingType.GetAttributes())
+            .Where(attr => attr.Is(wkt.Produces))
+            .SelectMany(attr => attr.ConstructorArguments)
+            .SelectMany(argument => argument.Strings())
+            .FirstOrDefault(contentType => contentType.Length > 0);
 
     private static IReadOnlyList<TsEndpointExample>? ExtractRequestExamples(
         WellKnownTypes wkt,
@@ -330,9 +346,7 @@ public static class EndpointWalker
 
         var examples = method
             .GetAttributes()
-            .Where(attr =>
-                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.RivetRequestExample)
-            )
+            .Where(attr => attr.Is(wkt.RivetRequestExample))
             .Select(attr =>
                 ToRequestExample(attr, DefaultRequestExampleMediaType(parameters, isFormEncoded))
             )
@@ -343,28 +357,18 @@ public static class EndpointWalker
         return examples.Count == 0 ? null : examples;
     }
 
-    private static IReadOnlyList<PendingResponseExample> ExtractResponseExamples(
-        WellKnownTypes wkt,
-        IMethodSymbol method
-    )
-    {
-        if (wkt.RivetResponseExample is null)
-        {
-            return [];
-        }
-
-        return method
+    private static IReadOnlyList<(
+        string StatusKey,
+        TsEndpointExample Example
+    )> ExtractResponseExamples(WellKnownTypes wkt, IMethodSymbol method) =>
+        method
             .GetAttributes()
-            .Where(attr =>
-                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.RivetResponseExample)
-            )
-            .Select(ToPendingResponseExample)
-            .Where(example => example is not null)
-            .Cast<PendingResponseExample>()
+            .Where(attr => attr.Is(wkt.RivetResponseExample))
+            .Select(ToResponseExample)
+            .OfType<(string, TsEndpointExample)>()
             .ToList();
-    }
 
-    private static string DefaultRequestExampleMediaType(
+    internal static string DefaultRequestExampleMediaType(
         IReadOnlyList<TsEndpointParam> parameters,
         bool isFormEncoded
     )
@@ -388,7 +392,7 @@ public static class EndpointWalker
                 .GetAttributes()
                 .Any(attr =>
                     attr.AttributeClass is not null
-                    && SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.FromForm)
+                    && attr.Is(wkt.FromForm)
                     && !SymbolEqualityComparer.Default.Equals(param.Type, wkt.IFormFile)
                 )
         );
@@ -414,25 +418,21 @@ public static class EndpointWalker
         );
     }
 
-    private static PendingResponseExample? ToPendingResponseExample(AttributeData attr)
-    {
-        if (
-            attr.ConstructorArguments.Length < 2
-            || attr.ConstructorArguments[0].Value is not int statusCode
-            || attr.ConstructorArguments[1].Value is not string json
-        )
-        {
-            return null;
-        }
-
-        return new PendingResponseExample(
-            statusCode,
-            GetStringArg(attr, 3),
-            GetStringArg(attr, 4),
-            json,
-            GetStringArg(attr, 2)
-        );
-    }
+    private static (string StatusKey, TsEndpointExample Example)? ToResponseExample(
+        AttributeData attr
+    ) =>
+        attr.ConstructorArguments is [{ Value: int statusCode }, { Value: string json }, ..]
+            ? (
+                statusCode.ToString(),
+                ToEndpointExample(
+                    "application/json",
+                    GetStringArg(attr, 3),
+                    json,
+                    GetStringArg(attr, 2),
+                    GetStringArg(attr, 4)
+                )
+            )
+            : null;
 
     private static TsEndpointExample ToEndpointExample(
         string defaultMediaType,
@@ -452,46 +452,47 @@ public static class EndpointWalker
             );
     }
 
-    private static void ApplyResponseExamples(
+    /// <summary>
+    /// Attaches response examples to the responses declaring their status, then sorts
+    /// by status. An example for an undeclared status is ignored with a warning.
+    /// </summary>
+    internal static void ApplyResponseExamples(
         List<TsResponseType> responses,
-        IReadOnlyList<PendingResponseExample> responseExamples,
-        string endpointName
+        IReadOnlyList<(string StatusKey, TsEndpointExample Example)> examples,
+        string undeclaredStatusDiagnostic,
+        string endpointLabel
     )
     {
-        if (responseExamples.Count == 0)
+        if (examples.Count == 0)
         {
             return;
         }
 
-        foreach (var group in responseExamples.GroupBy(example => example.StatusCode))
+        foreach (
+            var group in examples.GroupBy(
+                example => example.StatusKey,
+                StringComparer.OrdinalIgnoreCase
+            )
+        )
         {
-            var mappedExamples = group
-                .Select(example =>
-                    ToEndpointExample(
-                        "application/json",
-                        example.Name,
-                        example.JsonOrResolvedJson,
-                        example.ComponentExampleId,
-                        example.MediaType
-                    )
-                )
-                .ToList();
-
-            var responseIndex = responses.FindIndex(response => response.StatusCode == group.Key);
+            var responseIndex = responses.FindIndex(response =>
+                response.EffectiveStatusKey.Equals(group.Key, StringComparison.OrdinalIgnoreCase)
+            );
             if (responseIndex < 0)
             {
                 Diagnostics.Warn(
-                    Diagnostics.ControllerExampleUndeclaredStatus,
-                    $"ignoring response example for undeclared status {group.Key} on controller endpoint '{endpointName}'"
+                    undeclaredStatusDiagnostic,
+                    $"ignoring response example for undeclared status {group.Key} on {endpointLabel}"
                 );
                 continue;
             }
 
             var response = responses[responseIndex];
-            var mergedExamples = response.Examples is null
-                ? mappedExamples
-                : response.Examples.Concat(mappedExamples).ToList();
-            responses[responseIndex] = response with { Examples = mergedExamples };
+            var mapped = group.Select(example => example.Example);
+            responses[responseIndex] = response with
+            {
+                Examples = (response.Examples ?? []).Concat(mapped).ToList(),
+            };
         }
 
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
@@ -504,38 +505,16 @@ public static class EndpointWalker
             : null;
     }
 
-    private sealed record PendingResponseExample(
-        int StatusCode,
-        string? Name,
-        string? MediaType,
-        string JsonOrResolvedJson,
-        string? ComponentExampleId
-    );
-
     /// <summary>
-    /// Derives a camelCase file name from the controller class.
-    /// CaseStatusesController → caseStatuses, PublicFormsController → publicForms,
-    /// Static class Endpoints → endpoints.
+    /// The controller class name without its "Controller" suffix
+    /// (CaseStatusesController → CaseStatuses).
     /// </summary>
-    private static string DeriveControllerFileName(INamedTypeSymbol? containingType)
-    {
-        if (containingType is null)
-        {
-            return "client";
-        }
+    private static string ControllerBaseName(INamedTypeSymbol type) =>
+        type.Name.EndsWith("Controller", StringComparison.Ordinal)
+            ? type.Name[..^"Controller".Length]
+            : type.Name;
 
-        var name = containingType.Name;
-
-        // Strip "Controller" suffix
-        if (name.EndsWith("Controller", StringComparison.Ordinal))
-        {
-            name = name[..^"Controller".Length];
-        }
-
-        return Naming.ToCamelCase(name);
-    }
-
-    internal static (string? HttpMethod, string? Route) ExtractHttpMethodAndRoute(
+    private static (string? HttpMethod, string? Route) ExtractHttpMethodAndRoute(
         WellKnownTypes wkt,
         IMethodSymbol method
     )
@@ -567,22 +546,14 @@ public static class EndpointWalker
     /// <summary>
     /// Reads [Route("...")] from the containing controller class.
     /// </summary>
-    internal static string? ExtractControllerRoute(
+    private static string? ExtractControllerRoute(
         WellKnownTypes wkt,
-        INamedTypeSymbol? containingType
+        INamedTypeSymbol containingType
     )
     {
-        if (containingType is null)
-        {
-            return null;
-        }
-
         foreach (var attr in containingType.GetAttributes())
         {
-            if (
-                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, wkt.Route)
-                && attr.ConstructorArguments.Length > 0
-            )
+            if (attr.Is(wkt.Route) && attr.ConstructorArguments.Length > 0)
             {
                 return attr.ConstructorArguments[0].Value as string;
             }
@@ -597,33 +568,20 @@ public static class EndpointWalker
     /// "Controller" suffix; <c>[action]</c> to the action method name.
     /// Token matching is case-insensitive, matching ASP.NET conventions.
     /// </summary>
-    internal static string SubstituteRouteTokens(
-        string route,
-        INamedTypeSymbol? containingType,
-        IMethodSymbol method
-    )
-    {
-        if (!route.Contains('['))
-        {
-            return route;
-        }
-
-        var controllerName = containingType?.Name ?? "";
-        if (controllerName.EndsWith("Controller", StringComparison.Ordinal))
-        {
-            controllerName = controllerName[..^"Controller".Length];
-        }
-
-        return route
-            .Replace("[controller]", controllerName, StringComparison.OrdinalIgnoreCase)
+    private static string SubstituteRouteTokens(string route, IMethodSymbol method) =>
+        route
+            .Replace(
+                "[controller]",
+                ControllerBaseName(method.ContainingType),
+                StringComparison.OrdinalIgnoreCase
+            )
             .Replace("[action]", method.Name, StringComparison.OrdinalIgnoreCase);
-    }
 
     /// <summary>
     /// Combines controller route prefix with method route segment.
     /// e.g. "api/case-statuses" + "{id:guid}" → "/api/case-statuses/{id:guid}"
     /// </summary>
-    internal static string? CombineRoutes(string? controllerRoute, string? methodRoute)
+    private static string? CombineRoutes(string? controllerRoute, string? methodRoute)
     {
         // If method route starts with / it's absolute — use as-is
         if (methodRoute is not null && methodRoute.StartsWith('/'))
@@ -675,12 +633,10 @@ public static class EndpointWalker
 
         foreach (var param in method.Parameters)
         {
-            var source = ClassifyParam(wkt, typeWalker, param, routeParamNames);
-            if (HasAttribute(param, wkt.FromServices) || IsCancellationToken(param.Type))
+            if (ClassifyParam(wkt, typeWalker, method, param, routeParamNames) is not { } source)
             {
                 continue;
             }
-            source ??= ThrowUnresolvedBinding(method, param);
 
             if (source == ParamSource.Route)
             {
@@ -729,7 +685,7 @@ public static class EndpointWalker
                 new TsEndpointParam(
                     wireName,
                     tsType,
-                    source.Value,
+                    source,
                     IsOptional: param.HasExplicitDefaultValue,
                     DefaultValue: GetDefaultValueLiteral(param)
                 )
@@ -800,12 +756,6 @@ public static class EndpointWalker
         return null;
     }
 
-    private static bool HasAttribute(IParameterSymbol param, INamedTypeSymbol? attributeType) =>
-        attributeType is not null
-        && param
-            .GetAttributes()
-            .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, attributeType));
-
     /// <summary>
     /// The literal source text of a parameter's C# default value (for example "20"
     /// for `int limit = 20`, "default" for a default literal), or null. E8: surfaced
@@ -859,9 +809,15 @@ public static class EndpointWalker
         Services,
     }
 
+    /// <summary>
+    /// The transport source of an action parameter, or null for host plumbing
+    /// ([FromServices], CancellationToken). Refuses a parameter whose source is
+    /// contradictory or cannot be established.
+    /// </summary>
     private static ParamSource? ClassifyParam(
         WellKnownTypes wkt,
         TypeWalker typeWalker,
+        IMethodSymbol method,
         IParameterSymbol param,
         HashSet<string> routeParamNames
     )
@@ -902,7 +858,7 @@ public static class EndpointWalker
             }
         }
 
-        if (explicitSources.Count > 1 && explicitSources.Distinct().Count() > 1)
+        if (explicitSources.Distinct().Count() > 1)
         {
             ThrowContradictoryBinding(param, explicitSources);
         }
@@ -963,7 +919,7 @@ public static class EndpointWalker
         }
 
         // No declaration, no convention: the transport source is unknown.
-        return null;
+        return ThrowUnresolvedBinding(method, param);
     }
 
     /// <summary>
@@ -1171,84 +1127,6 @@ public static class EndpointWalker
         }
 
         return results;
-    }
-
-    /// <summary>
-    /// Extracts return type. Tries ProducesResponseType(typeof(T), 200) first (controllers),
-    /// then falls back to method return type (minimal API).
-    /// </summary>
-    internal static TsType? ExtractReturnType(
-        WellKnownTypes wkt,
-        IMethodSymbol method,
-        TypeWalker typeWalker
-    )
-    {
-        // Try ProducesResponseType first (controller pattern)
-        var producesType = ExtractProducesResponseType(wkt, method);
-        if (producesType is not null)
-        {
-            return typeWalker.MapType(producesType);
-        }
-
-        // Fall back to method return type (minimal API pattern)
-        var unwrapped = UnwrapTask(wkt, method.ReturnType, out var isVoidTask);
-        if (isVoidTask || unwrapped is null)
-        {
-            return null;
-        }
-
-        // Check for typed results (Results<T1, T2, ...> or single e.g. Ok<T>)
-        if (unwrapped is INamedTypeSymbol namedUnwrapped)
-        {
-            var resultMappings = CollectTypedResultMappings(wkt, namedUnwrapped);
-            if (resultMappings.Count > 0)
-            {
-                // Prefer 2xx with body over 2xx without — order in Results<> shouldn't matter
-                var successWithBody = resultMappings.FirstOrDefault(m =>
-                    m.StatusCode is >= 200 and < 300 && m.BodyType is not null
-                );
-
-                return successWithBody.BodyType is not null
-                    ? typeWalker.MapType(successWithBody.BodyType)
-                    : null;
-            }
-        }
-
-        // IActionResult / ActionResult are runtime result containers: their success
-        // body/status is selected at runtime, not by the declared contract. They are
-        // never a 200 payload source (planner-constraint:concrete-return-convenience-
-        // narrowed); BuildEndpoint refuses them when no explicit response metadata
-        // exists.
-        if (
-            SymbolEqualityComparer.Default.Equals(unwrapped, wkt.IActionResult)
-            || SymbolEqualityComparer.Default.Equals(unwrapped, wkt.ActionResult)
-        )
-        {
-            return null;
-        }
-
-        return typeWalker.MapType(unwrapped);
-    }
-
-    /// <summary>
-    /// Finds [ProducesResponseType(typeof(T), 200)] on the method and returns T.
-    /// Only considers 2xx status codes as the success response type.
-    /// </summary>
-    private static ITypeSymbol? ExtractProducesResponseType(
-        WellKnownTypes wkt,
-        IMethodSymbol method
-    )
-    {
-        foreach (var attr in method.GetAttributes())
-        {
-            var parsed = ReadProducesResponseType(wkt, attr);
-            if (parsed is { Type: not null, StatusCode: >= 200 and < 300 })
-            {
-                return parsed.Value.Type;
-            }
-        }
-
-        return null;
     }
 
     /// <summary>

@@ -123,16 +123,22 @@ public static class CompilationHelper
     )
     {
         var wkt = new WellKnownTypes(compilation);
-        return ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
+        return ContractWalker
+            .Walk(compilation, wkt, walker, discovered.ContractTypes)
+            .Select(contract => contract.Endpoint)
+            .ToList();
     }
 
+    /// <summary>Discovers and walks the compilation's contracts, then checks coverage.</summary>
     public static IReadOnlyList<CoverageWarning> CheckCoverage(
         Compilation compilation,
-        IReadOnlyList<TsEndpointDefinition> contractEndpoints
+        string functionsRoutePrefix = "api"
     )
     {
+        var (discovered, walker) = DiscoverAndWalk(compilation);
         var wkt = new WellKnownTypes(compilation);
-        return CoverageChecker.Check(compilation, wkt, contractEndpoints, "api");
+        var contracts = ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
+        return CoverageChecker.Check(compilation, wkt, contracts, functionsRoutePrefix);
     }
 
     // --- Canonical walk/emit helpers (survive the Phase 3 pivot) ---

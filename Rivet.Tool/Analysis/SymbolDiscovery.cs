@@ -32,32 +32,17 @@ public static class SymbolDiscovery
         {
             var attributes = type.GetAttributes();
 
-            if (
-                rivetTypeAttr is not null
-                && attributes.Any(a =>
-                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, rivetTypeAttr)
-                )
-            )
+            if (rivetTypeAttr is not null && attributes.Any(a => a.Is(rivetTypeAttr)))
             {
                 rivetTypes.Add(type);
             }
 
-            if (
-                contractAttr is not null
-                && attributes.Any(a =>
-                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, contractAttr)
-                )
-            )
+            if (contractAttr is not null && attributes.Any(a => a.Is(contractAttr)))
             {
                 contractTypes.Add(type);
             }
 
-            if (
-                clientAttr is not null
-                && attributes.Any(a =>
-                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, clientAttr)
-                )
-            )
+            if (clientAttr is not null && attributes.Any(a => a.Is(clientAttr)))
             {
                 clientTypes.Add(type);
             }
@@ -66,16 +51,7 @@ public static class SymbolDiscovery
             {
                 foreach (var member in type.GetMembers().OfType<IMethodSymbol>())
                 {
-                    if (
-                        member
-                            .GetAttributes()
-                            .Any(a =>
-                                SymbolEqualityComparer.Default.Equals(
-                                    a.AttributeClass,
-                                    endpointAttr
-                                )
-                            )
-                    )
+                    if (member.GetAttributes().Any(a => a.Is(endpointAttr)))
                     {
                         endpointMethods.Add(member);
                     }

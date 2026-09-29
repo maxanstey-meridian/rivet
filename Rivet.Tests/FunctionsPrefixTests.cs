@@ -42,17 +42,8 @@ public sealed class FunctionsPrefixTests
     public void Configured_prefix_is_used_for_route_coverage(string prefix, string expected)
     {
         var compilation = CompilationHelper.CreateCompilation(Source.Replace("EXPECTED", expected));
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var contracts = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        Assert.Empty(
-            CoverageChecker.Check(compilation, new WellKnownTypes(compilation), contracts, prefix)
-        );
-        var mismatch = CoverageChecker.Check(
-            compilation,
-            new WellKnownTypes(compilation),
-            contracts,
-            "wrong"
-        );
+        Assert.Empty(CompilationHelper.CheckCoverage(compilation, prefix));
+        var mismatch = CompilationHelper.CheckCoverage(compilation, "wrong");
         Assert.Contains(mismatch, warning => warning.Kind == CoverageWarningKind.RouteMismatch);
     }
 
@@ -67,14 +58,7 @@ public sealed class FunctionsPrefixTests
         var compilation = CompilationHelper.CreateCompilation(
             Source.Replace("EXPECTED", expected).Replace("Route = \"hello\"", "Route = \"/hello\"")
         );
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var contracts = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var warnings = CoverageChecker.Check(
-            compilation,
-            new WellKnownTypes(compilation),
-            contracts,
-            prefix
-        );
+        var warnings = CompilationHelper.CheckCoverage(compilation, prefix);
         var warning = Assert.Single(warnings);
         Assert.Equal(CoverageWarningKind.RouteMismatch, warning.Kind);
         Assert.Contains("leading slash", warning.Actual);
