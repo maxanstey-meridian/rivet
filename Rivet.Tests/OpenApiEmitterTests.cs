@@ -4608,6 +4608,7 @@ public sealed class OpenApiEmitterTests
         // 1. Loud, named diagnostic — never a silent drop.
         Assert.Contains("generic template 'Collection'", stderr);
         Assert.Contains("Collection_ProductDto", stderr);
+        Assert.Contains("is not present in the contract's type definitions", stderr);
 
         using var doc = JsonDocument.Parse(spec);
 
