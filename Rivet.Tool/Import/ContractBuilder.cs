@@ -567,8 +567,6 @@ internal static class ContractBuilder
             {
                 continue;
             }
-            var statusCode = ResponseStatus.Code(statusStr);
-
             foreach (var (name, header) in response.Headers)
             {
                 if (string.IsNullOrEmpty(name))
@@ -586,8 +584,11 @@ internal static class ContractBuilder
 
                 if (
                     headers.Any(existing =>
-                        existing.StatusCode == statusCode
-                        && string.Equals(existing.Name, name, StringComparison.OrdinalIgnoreCase)
+                        string.Equals(
+                            existing.StatusKey,
+                            statusStr,
+                            StringComparison.OrdinalIgnoreCase
+                        ) && string.Equals(existing.Name, name, StringComparison.OrdinalIgnoreCase)
                     )
                 )
                 {

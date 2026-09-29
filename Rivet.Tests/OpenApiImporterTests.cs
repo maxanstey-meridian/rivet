@@ -7060,4 +7060,41 @@ public sealed class OpenApiImporterTests
 
         CompilationHelper.CompileImportResult(result);
     }
+
+    [Fact]
+    public void Same_Response_Header_On_4XX_And_Default_Imports_For_Both()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Problem": { "type": "object", "properties": { "title": { "type": "string" } }, "required": ["title"] }
+            """,
+            paths: """
+            "/api/x": {
+                "get": {
+                    "operationId": "GetX",
+                    "responses": {
+                        "200": { "description": "OK" },
+                        "4XX": {
+                            "description": "Client error",
+                            "headers": { "X-Trace": { "schema": { "type": "string" } } },
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+                        },
+                        "default": {
+                            "description": "Other error",
+                            "headers": { "X-Trace": { "schema": { "type": "string" } } },
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        var contract = result.Files.Single(file => file.FileName.EndsWith("Contract.cs")).Content;
+
+        Assert.Contains(".WithResponseHeaderKey<string>(\"4XX\", \"X-Trace\"", contract);
+        Assert.Contains(".WithResponseHeaderKey<string>(\"default\", \"X-Trace\"", contract);
+        CompilationHelper.CompileImportResult(result);
+    }
 }
