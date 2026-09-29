@@ -525,6 +525,79 @@ public abstract partial class RouteDefinitionBase<TSelf>
 }
 
 /// <summary>
+/// The terminals an unbound definition shares: Error and File. Success differs by payload
+/// shape, so each definition declares its own.
+/// </summary>
+public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<TSelf>
+    where TSelf : TerminalRouteDefinitionBase<TSelf>
+{
+    private protected TerminalRouteDefinitionBase(string method, string route, int defaultStatus)
+        : base(method, route, defaultStatus) { }
+
+    private protected virtual Type? SuccessPayloadType => null;
+
+    public RivetResult Error(int statusCode) =>
+        RivetTerminal.Error(Publish(SuccessPayloadType), statusCode);
+
+    public RivetResult Error<TError>(int statusCode, TError payload) =>
+        RivetTerminal.Error(Publish(SuccessPayloadType), statusCode, payload);
+
+    public RivetResult File(
+        byte[] content,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null,
+        string? contentType = null
+    ) =>
+        RivetTerminal.File(
+            Publish(SuccessPayloadType),
+            content,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag,
+            contentType
+        );
+
+    public RivetResult File(
+        Stream content,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null,
+        string? contentType = null
+    ) =>
+        RivetTerminal.File(
+            Publish(SuccessPayloadType),
+            content,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag,
+            contentType
+        );
+
+    public RivetResult File(
+        string physicalPath,
+        string? downloadName = null,
+        bool enableRangeProcessing = false,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null,
+        string? contentType = null
+    ) =>
+        RivetTerminal.PhysicalFile(
+            Publish(SuccessPayloadType),
+            physicalPath,
+            downloadName,
+            enableRangeProcessing,
+            lastModified,
+            entityTag,
+            contentType
+        );
+}
+
+/// <summary>
 /// Route definition for endpoints with both input and output types.
 /// Roslyn reads the chain at generation time. Bind publishes the contract for terminal use.
 /// </summary>
@@ -544,73 +617,15 @@ public sealed class RouteDefinition<TInput, TOutput>
 /// <summary>
 /// Route definition for endpoints with output only (no input type).
 /// </summary>
-public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefinition<TOutput>>
+public sealed class RouteDefinition<TOutput> : TerminalRouteDefinitionBase<RouteDefinition<TOutput>>
 {
     internal RouteDefinition(string method, string route, int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
 
+    private protected override Type? SuccessPayloadType => typeof(TOutput);
+
     public RivetResult Success(TOutput payload) =>
         RivetTerminal.Success(Publish(typeof(TOutput)), payload);
-
-    public RivetResult Error(int statusCode) =>
-        RivetTerminal.Error(Publish(typeof(TOutput)), statusCode);
-
-    public RivetResult Error<TError>(int statusCode, TError payload) =>
-        RivetTerminal.Error(Publish(typeof(TOutput)), statusCode, payload);
-
-    public RivetResult File(
-        byte[] content,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.File(
-            Publish(typeof(TOutput)),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
-
-    public RivetResult File(
-        Stream content,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.File(
-            Publish(typeof(TOutput)),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
-
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.PhysicalFile(
-            Publish(typeof(TOutput)),
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
 }
 
 /// <summary>
@@ -632,71 +647,12 @@ public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRout
 /// <summary>
 /// Route definition for endpoints with no typed input or output.
 /// </summary>
-public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
+public sealed class RouteDefinition : TerminalRouteDefinitionBase<RouteDefinition>
 {
     internal RouteDefinition(string method, string route, int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
 
     public RivetResult Success() => RivetTerminal.Success(Publish(null));
-
-    public RivetResult Error(int statusCode) => RivetTerminal.Error(Publish(null), statusCode);
-
-    public RivetResult Error<TError>(int statusCode, TError payload) =>
-        RivetTerminal.Error(Publish(null), statusCode, payload);
-
-    public RivetResult File(
-        byte[] content,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.File(
-            Publish(null),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
-
-    public RivetResult File(
-        Stream content,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.File(
-            Publish(null),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
-
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.PhysicalFile(
-            Publish(null),
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
 
     /// <summary>
     /// Convert to an input-only endpoint (accepts a body, returns void).
@@ -708,72 +664,13 @@ public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
 /// Route definition for file/stream endpoints that return binary content rather than JSON.
 /// Defaults to GET and sets a content type (application/octet-stream unless overridden).
 /// </summary>
-public sealed class FileRouteDefinition : RouteDefinitionBase<FileRouteDefinition>
+public sealed class FileRouteDefinition : TerminalRouteDefinitionBase<FileRouteDefinition>
 {
     internal FileRouteDefinition(string route, int defaultStatus = 200)
         : base("GET", route, defaultStatus)
     {
         ProducesFile();
     }
-
-    public RivetResult Error(int statusCode) => RivetTerminal.Error(Publish(null), statusCode);
-
-    public RivetResult Error<TError>(int statusCode, TError payload) =>
-        RivetTerminal.Error(Publish(null), statusCode, payload);
-
-    public RivetResult File(
-        byte[] content,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.File(
-            Publish(null),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
-
-    public RivetResult File(
-        Stream content,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.File(
-            Publish(null),
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
-
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.PhysicalFile(
-            Publish(null),
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
 
     /// <summary>
     /// Sets the response content type for this file endpoint.

@@ -236,6 +236,29 @@ public sealed class CoverageCheckerTests
     }
 
     [Fact]
+    public void Bound_error_is_coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                [HttpPost]
+                public IActionResult Create([FromBody] TaskInput input) =>
+                    TasksContract.CreateTask.Bind(input).Error(400).ToActionResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        AssertNoMissingWarning(warnings, "CreateTask");
+    }
+
+    [Fact]
     public void Direct_file_is_coverage()
     {
         var implementation = """

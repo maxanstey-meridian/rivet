@@ -123,10 +123,16 @@ public static class CoverageChecker
         return BuildWarnings(fieldMap, implementations, bindings, consumedBindings);
     }
 
+    // Matched on the receiver's type, not the method's declaring type: Error and File are
+    // declared once on shared base classes, and the route types are sealed.
     private static bool IsTerminal(WellKnownTypes wkt, IInvocationOperation invocation) =>
-        invocation is { TargetMethod.Name: "Success" or "Error" or "File", Instance: not null }
+        invocation
+            is {
+                TargetMethod.Name: "Success" or "Error" or "File",
+                Instance.Type: INamedTypeSymbol receiver,
+            }
         && IsOneOf(
-            invocation.TargetMethod.ContainingType.OriginalDefinition,
+            receiver.OriginalDefinition,
             wkt.RouteDefinition,
             wkt.RouteDefinitionOfT,
             wkt.FileRouteDefinition,

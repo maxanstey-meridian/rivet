@@ -75,18 +75,17 @@ internal sealed record RouteResponseContent(
     bool IsBinary
 );
 
-public sealed class BoundRouteDefinition<TOutput>
+/// <summary>The terminals every bound definition shares: Error and File.</summary>
+public abstract class BoundRouteDefinitionBase
 {
-    private readonly EndpointContract _contract;
+    private protected BoundRouteDefinitionBase(EndpointContract contract) => Contract = contract;
 
-    internal BoundRouteDefinition(EndpointContract contract) => _contract = contract;
+    private protected EndpointContract Contract { get; }
 
-    public RivetResult Success(TOutput payload) => RivetTerminal.Success(_contract, payload);
-
-    public RivetResult Error(int statusCode) => RivetTerminal.Error(_contract, statusCode);
+    public RivetResult Error(int statusCode) => RivetTerminal.Error(Contract, statusCode);
 
     public RivetResult Error<TError>(int statusCode, TError payload) =>
-        RivetTerminal.Error(_contract, statusCode, payload);
+        RivetTerminal.Error(Contract, statusCode, payload);
 
     public RivetResult File(
         byte[] content,
@@ -97,7 +96,7 @@ public sealed class BoundRouteDefinition<TOutput>
         string? contentType = null
     ) =>
         RivetTerminal.File(
-            _contract,
+            Contract,
             content,
             downloadName,
             enableRangeProcessing,
@@ -115,7 +114,7 @@ public sealed class BoundRouteDefinition<TOutput>
         string? contentType = null
     ) =>
         RivetTerminal.File(
-            _contract,
+            Contract,
             content,
             downloadName,
             enableRangeProcessing,
@@ -133,7 +132,7 @@ public sealed class BoundRouteDefinition<TOutput>
         string? contentType = null
     ) =>
         RivetTerminal.PhysicalFile(
-            _contract,
+            Contract,
             physicalPath,
             downloadName,
             enableRangeProcessing,
@@ -143,138 +142,26 @@ public sealed class BoundRouteDefinition<TOutput>
         );
 }
 
-public sealed class BoundRouteDefinition
+public sealed class BoundRouteDefinition<TOutput> : BoundRouteDefinitionBase
 {
-    private readonly EndpointContract _contract;
+    internal BoundRouteDefinition(EndpointContract contract)
+        : base(contract) { }
 
-    internal BoundRouteDefinition(EndpointContract contract) => _contract = contract;
-
-    public RivetResult Success() => RivetTerminal.Success(_contract);
-
-    public RivetResult Error(int statusCode) => RivetTerminal.Error(_contract, statusCode);
-
-    public RivetResult Error<TError>(int statusCode, TError payload) =>
-        RivetTerminal.Error(_contract, statusCode, payload);
-
-    public RivetResult File(
-        byte[] content,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
-
-    public RivetResult File(
-        Stream content,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
-
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.PhysicalFile(
-            _contract,
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
+    public RivetResult Success(TOutput payload) => RivetTerminal.Success(Contract, payload);
 }
 
-public sealed class BoundFileRouteDefinition
+public sealed class BoundRouteDefinition : BoundRouteDefinitionBase
 {
-    private readonly EndpointContract _contract;
+    internal BoundRouteDefinition(EndpointContract contract)
+        : base(contract) { }
 
-    internal BoundFileRouteDefinition(EndpointContract contract) => _contract = contract;
+    public RivetResult Success() => RivetTerminal.Success(Contract);
+}
 
-    public RivetResult Error(int statusCode) => RivetTerminal.Error(_contract, statusCode);
-
-    public RivetResult Error<TError>(int statusCode, TError payload) =>
-        RivetTerminal.Error(_contract, statusCode, payload);
-
-    public RivetResult File(
-        byte[] content,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
-
-    public RivetResult File(
-        Stream content,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
-
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName = null,
-        bool enableRangeProcessing = false,
-        DateTimeOffset? lastModified = null,
-        string? entityTag = null,
-        string? contentType = null
-    ) =>
-        RivetTerminal.PhysicalFile(
-            _contract,
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag,
-            contentType
-        );
+public sealed class BoundFileRouteDefinition : BoundRouteDefinitionBase
+{
+    internal BoundFileRouteDefinition(EndpointContract contract)
+        : base(contract) { }
 }
 
 internal static class RivetTerminal
