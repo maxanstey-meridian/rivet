@@ -17,50 +17,18 @@ public sealed record RouteErrorResponse(
 }
 
 /// <summary>
-/// Describes a response header declared via .WithResponseHeader(). A null StatusCode
-/// targets the endpoint's success status. Spec-only: Rivet never sets or validates
-/// response headers at runtime — emitting them is handler code.
-/// </summary>
-public sealed record RouteResponseHeader(
-    int? StatusCode,
-    string Name,
-    string? Description,
-    bool Required,
-    string? StatusKey = null,
-    Type? HeaderType = null,
-    string? SchemaType = null,
-    string? Format = null,
-    string? SchemaExamplesJson = null,
-    string? ExampleJson = null,
-    string? ExamplesJson = null,
-    bool Deprecated = false,
-    string? Style = null,
-    bool? Explode = null,
-    bool AllowReserved = false,
-    bool AllowEmptyValue = false,
-    string? ContentType = null
-);
-
-/// <summary>
 /// Everything a route definition's builder methods record. Immutable, so a converted
 /// definition (<c>.Accepts&lt;T&gt;()</c>) takes the whole state in one assignment.
 /// </summary>
 internal sealed record RouteState(int SuccessStatus)
 {
     public bool StatusSet { get; init; }
-    public string? Summary { get; init; }
-    public string? Description { get; init; }
-    public bool Anonymous { get; init; }
-    public string? SecurityScheme { get; init; }
     public string? FileContentType { get; init; }
     public bool AcceptsFile { get; init; }
     public bool FormEncoded { get; init; }
     public string? BinaryRequestContentType { get; init; }
-    public string? RequestContentType { get; init; }
     public string? ResponseContentType { get; init; }
-    public string? QueryAuthParameterName { get; init; }
     public ImmutableList<RouteErrorResponse> ErrorResponses { get; init; } = [];
-    public ImmutableList<RouteResponseHeader> ResponseHeaders { get; init; } = [];
     public ImmutableList<RouteResponseContent> ResponseContents { get; init; } = [];
     public string? SuccessStatusKey { get; init; }
     public bool SuppressImplicitResponse { get; init; }
@@ -70,7 +38,7 @@ internal sealed record RouteState(int SuccessStatus)
 /// Shared builder state and fluent methods for all RouteDefinition variants.
 /// Uses CRTP so each builder method returns the concrete type for chaining.
 /// </summary>
-public abstract class RouteDefinitionBase<TSelf>
+public abstract partial class RouteDefinitionBase<TSelf>
     where TSelf : RouteDefinitionBase<TSelf>
 {
     // Definitions live in shared static readonly fields, so once a terminal has published
@@ -85,28 +53,6 @@ public abstract class RouteDefinitionBase<TSelf>
 
     /// <summary>The route template from the contract definition.</summary>
     public string Route { get; }
-
-    public string? EndpointSummary => _state.Summary;
-    public string? EndpointDescription => _state.Description;
-    public bool IsAnonymous => _state.Anonymous;
-    public string? SecurityScheme => _state.SecurityScheme;
-    public string? FileContentType => _state.FileContentType;
-    public bool IsFormEncoded => _state.FormEncoded;
-    public string? BinaryRequestContentType => _state.BinaryRequestContentType;
-    public string? RequestContentType => _state.RequestContentType;
-    public string? ResponseContentType => _state.ResponseContentType;
-    public bool IsQueryAuth => _state.QueryAuthParameterName is not null;
-    public string? QueryAuthParameterName => _state.QueryAuthParameterName;
-    public IReadOnlyList<RouteErrorResponse>? RouteErrorResponses =>
-        _state.ErrorResponses.IsEmpty ? null : _state.ErrorResponses;
-    public IReadOnlyList<RouteResponseHeader>? ResponseHeaders =>
-        _state.ResponseHeaders.IsEmpty ? null : _state.ResponseHeaders;
-
-    /// <summary>The resolved success status code for this endpoint.</summary>
-    public int SuccessStatusCode => _state.SuccessStatus;
-
-    /// <summary>The resolved success status code used during publication.</summary>
-    protected int SuccessStatus => _state.SuccessStatus;
 
     protected RouteDefinitionBase(string method, string route, int defaultStatus)
         : this(method, route, new RouteState(defaultStatus)) { }
@@ -333,11 +279,6 @@ public abstract class RouteDefinitionBase<TSelf>
         );
     }
 
-    public TSelf Summary(string summary) => Mutate(state => state with { Summary = summary });
-
-    public TSelf Description(string description) =>
-        Mutate(state => state with { Description = description });
-
     public TSelf Status(int statusCode) =>
         Mutate(state =>
         {
@@ -370,16 +311,6 @@ public abstract class RouteDefinitionBase<TSelf>
         });
 
     /// <summary>
-    /// Carries the source OpenAPI response key and primary response description through
-    /// generated C#. Concrete runtime status behavior remains controlled by <see cref="Status"/>.
-    /// </summary>
-    public TSelf StatusKey(string statusKey, string? description = null)
-    {
-        _ = description;
-        return Mutate(state => state with { SuccessStatusKey = statusKey });
-    }
-
-    /// <summary>
     /// Suppresses Rivet's authored method-default response. Intended for imported
     /// operations whose source response set contains no concrete success response.
     /// </summary>
@@ -400,29 +331,6 @@ public abstract class RouteDefinitionBase<TSelf>
             return state with
             {
                 FormEncoded = true,
-            };
-        });
-
-    /// <summary>
-    /// Declares the request body's media type when it is not application/json
-    /// (e.g. "text/plain" for a string body). The body SCHEMA is unchanged —
-    /// this overrides only the content-type key the spec declares. For raw
-    /// binary bodies use .AcceptsBinary(); for forms use .FormEncoded().
-    /// </summary>
-    public TSelf AcceptsContentType(string contentType) =>
-        Mutate(state =>
-        {
-            if (state.FormEncoded || state.BinaryRequestContentType is not null)
-            {
-                throw new InvalidOperationException(
-                    $"{Method} {Route}: .AcceptsContentType() cannot be combined with "
-                        + ".FormEncoded() or .AcceptsBinary() — those already declare the body media type."
-                );
-            }
-
-            return state with
-            {
-                RequestContentType = contentType,
             };
         });
 
@@ -536,398 +444,6 @@ public abstract class RouteDefinitionBase<TSelf>
     private static bool IsRangeStatusKey(string statusKey) =>
         statusKey is [>= '1' and <= '5', 'X' or 'x', 'X' or 'x'];
 
-    /// <summary>
-    /// Declares a response header on the given status code (contract concept).
-    /// Spec-only: Rivet never sets or validates response headers at runtime —
-    /// emitting Location/ETag/... is handler code. <paramref name="required"/> is an
-    /// explicit opt-in promise that the header is always present.
-    /// </summary>
-    public TSelf WithResponseHeader(
-        int statusCode,
-        string name,
-        string? description = null,
-        bool required = false
-    ) =>
-        AddResponseHeader(
-            new RouteResponseHeader(
-                statusCode,
-                name,
-                description,
-                required,
-                HeaderType: typeof(string)
-            )
-        );
-
-    public TSelf WithResponseHeader<THeader>(
-        int statusCode,
-        string name,
-        string? description = null,
-        bool required = false,
-        string? schemaType = null,
-        string? format = null,
-        string? schemaExamplesJson = null,
-        string? exampleJson = null,
-        string? examplesJson = null,
-        bool deprecated = false,
-        string? style = null,
-        bool? explode = null,
-        bool allowReserved = false,
-        bool allowEmptyValue = false,
-        string? contentType = null
-    ) =>
-        AddResponseHeader(
-            new RouteResponseHeader(
-                statusCode,
-                name,
-                description,
-                required,
-                HeaderType: typeof(THeader),
-                SchemaType: schemaType,
-                Format: format,
-                SchemaExamplesJson: schemaExamplesJson,
-                ExampleJson: exampleJson,
-                ExamplesJson: examplesJson,
-                Deprecated: deprecated,
-                Style: style,
-                Explode: explode,
-                AllowReserved: allowReserved,
-                AllowEmptyValue: allowEmptyValue,
-                ContentType: contentType
-            )
-        );
-
-    public TSelf WithResponseHeaderKey(
-        string statusKey,
-        string name,
-        string? description = null,
-        bool required = false
-    )
-    {
-        return AddResponseHeader(
-            new RouteResponseHeader(null, name, description, required, statusKey, typeof(string))
-        );
-    }
-
-    public TSelf WithResponseHeaderKey<THeader>(
-        string statusKey,
-        string name,
-        string? description = null,
-        bool required = false,
-        string? schemaType = null,
-        string? format = null,
-        string? schemaExamplesJson = null,
-        string? exampleJson = null,
-        string? examplesJson = null,
-        bool deprecated = false,
-        string? style = null,
-        bool? explode = null,
-        bool allowReserved = false,
-        bool allowEmptyValue = false,
-        string? contentType = null
-    ) =>
-        AddResponseHeader(
-            new RouteResponseHeader(
-                null,
-                name,
-                description,
-                required,
-                statusKey,
-                typeof(THeader),
-                schemaType,
-                format,
-                schemaExamplesJson,
-                exampleJson,
-                examplesJson,
-                deprecated,
-                style,
-                explode,
-                allowReserved,
-                allowEmptyValue,
-                contentType
-            )
-        );
-
-    /// <summary>
-    /// Declares a response header on the endpoint's success status (contract concept).
-    /// See <see cref="WithResponseHeader(int, string, string?, bool)"/>.
-    /// </summary>
-    public TSelf WithResponseHeader(
-        string name,
-        string? description = null,
-        bool required = false
-    ) =>
-        AddResponseHeader(
-            new RouteResponseHeader(null, name, description, required, HeaderType: typeof(string))
-        );
-
-    public TSelf WithResponseHeader<THeader>(
-        string name,
-        string? description = null,
-        bool required = false,
-        string? schemaType = null,
-        string? format = null,
-        string? schemaExamplesJson = null,
-        string? exampleJson = null,
-        string? examplesJson = null,
-        bool deprecated = false,
-        string? style = null,
-        bool? explode = null,
-        bool allowReserved = false,
-        bool allowEmptyValue = false,
-        string? contentType = null
-    ) =>
-        AddResponseHeader(
-            new RouteResponseHeader(
-                null,
-                name,
-                description,
-                required,
-                HeaderType: typeof(THeader),
-                SchemaType: schemaType,
-                Format: format,
-                SchemaExamplesJson: schemaExamplesJson,
-                ExampleJson: exampleJson,
-                ExamplesJson: examplesJson,
-                Deprecated: deprecated,
-                Style: style,
-                Explode: explode,
-                AllowReserved: allowReserved,
-                AllowEmptyValue: allowEmptyValue,
-                ContentType: contentType
-            )
-        );
-
-    private TSelf AddResponseHeader(RouteResponseHeader header) =>
-        Mutate(state =>
-        {
-            if (
-                state.ResponseHeaders.Any(existing =>
-                    existing.StatusCode == header.StatusCode
-                    && string.Equals(
-                        existing.StatusKey,
-                        header.StatusKey,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                    && string.Equals(existing.Name, header.Name, StringComparison.OrdinalIgnoreCase)
-                )
-            )
-            {
-                throw new InvalidOperationException(
-                    $"Response header '{header.Name}' is already declared for this status via .WithResponseHeader() — declare each header only once per status."
-                );
-            }
-
-            return state with
-            {
-                ResponseHeaders = state.ResponseHeaders.Add(header),
-            };
-        });
-
-    public TSelf RequestExampleJson(
-        string json,
-        string? name = null,
-        string? mediaType = null,
-        string? referencedComponentsJson = null
-    )
-    {
-        // Example metadata is consumed by the Roslyn analyzer, not at runtime.
-        _ = json;
-        _ = name;
-        _ = mediaType;
-        _ = referencedComponentsJson;
-        return Mutate(static state => state);
-    }
-
-    public TSelf RequestExampleRef(
-        string componentExampleId,
-        string resolvedJson,
-        string? name = null,
-        string? mediaType = null,
-        string? referencedComponentsJson = null
-    )
-    {
-        _ = componentExampleId;
-        _ = resolvedJson;
-        _ = name;
-        _ = mediaType;
-        _ = referencedComponentsJson;
-        return Mutate(static state => state);
-    }
-
-    public TSelf ResponseExampleJson(
-        int statusCode,
-        string json,
-        string? name = null,
-        string? mediaType = null,
-        string? referencedComponentsJson = null
-    )
-    {
-        _ = statusCode;
-        _ = json;
-        _ = name;
-        _ = mediaType;
-        _ = referencedComponentsJson;
-        return Mutate(static state => state);
-    }
-
-    public TSelf ResponseExampleJson(
-        string statusKey,
-        string json,
-        string? name = null,
-        string? mediaType = null,
-        string? referencedComponentsJson = null
-    )
-    {
-        _ = statusKey;
-        _ = json;
-        _ = name;
-        _ = mediaType;
-        _ = referencedComponentsJson;
-        return Mutate(static state => state);
-    }
-
-    public TSelf ResponseExampleRef(
-        int statusCode,
-        string componentExampleId,
-        string resolvedJson,
-        string? name = null,
-        string? mediaType = null,
-        string? referencedComponentsJson = null
-    )
-    {
-        _ = statusCode;
-        _ = componentExampleId;
-        _ = resolvedJson;
-        _ = name;
-        _ = mediaType;
-        _ = referencedComponentsJson;
-        return Mutate(static state => state);
-    }
-
-    public TSelf ResponseExampleRef(
-        string statusKey,
-        string componentExampleId,
-        string resolvedJson,
-        string? name = null,
-        string? mediaType = null,
-        string? referencedComponentsJson = null
-    )
-    {
-        _ = statusKey;
-        _ = componentExampleId;
-        _ = resolvedJson;
-        _ = name;
-        _ = mediaType;
-        _ = referencedComponentsJson;
-        return Mutate(static state => state);
-    }
-
-    public TSelf Anonymous() => Mutate(static state => state with { Anonymous = true });
-
-    public TSelf Secure(string scheme) => Mutate(state => state with { SecurityScheme = scheme });
-
-    public TSelf SecurityRequirements() => Mutate(static state => state);
-
-    public TSelf SecurityRequirement(int requirementOrder)
-    {
-        _ = requirementOrder;
-        return Mutate(static state => state);
-    }
-
-    public TSelf SecurityRequirement(int requirementOrder, string scheme, string? scope = null)
-    {
-        _ = requirementOrder;
-        _ = scheme;
-        _ = scope;
-        return Mutate(static state => state);
-    }
-
-    public TSelf RequestContent<T>(
-        string mediaType,
-        string? schemaRef = null,
-        string? schemaType = null,
-        string? format = null
-    )
-    {
-        _ = mediaType;
-        _ = schemaRef;
-        _ = schemaType;
-        _ = format;
-        return Mutate(static state => state);
-    }
-
-    public TSelf RequestContent(string mediaType)
-    {
-        _ = mediaType;
-        return Mutate(static state => state);
-    }
-
-    public TSelf RequestBinaryContent(string mediaType)
-    {
-        _ = mediaType;
-        return Mutate(static state => state);
-    }
-
-    public TSelf RequestBodyRequired(bool required)
-    {
-        _ = required;
-        return Mutate(static state => state);
-    }
-
-    public TSelf RequestBody() => Mutate(static state => state);
-
-    public TSelf Parameter<T>(
-        string name,
-        string location,
-        bool required,
-        string? schemaType = null,
-        string? format = null,
-        string? metadataJson = null,
-        string? schemaRef = null
-    )
-    {
-        _ = name;
-        _ = location;
-        _ = required;
-        _ = schemaType;
-        _ = format;
-        _ = metadataJson;
-        _ = schemaRef;
-        return Mutate(static state => state);
-    }
-
-    public TSelf ResponseContent<T>(
-        int statusCode,
-        string mediaType,
-        string? schemaRef = null,
-        string? schemaType = null,
-        string? format = null,
-        string? schemaDescription = null
-    )
-    {
-        _ = schemaRef;
-        _ = schemaType;
-        _ = format;
-        _ = schemaDescription;
-        return AddResponseContent(statusCode.ToString(), mediaType, typeof(T), isBinary: false);
-    }
-
-    public TSelf ResponseContent<T>(
-        string statusKey,
-        string mediaType,
-        string? schemaRef = null,
-        string? schemaType = null,
-        string? format = null,
-        string? schemaDescription = null
-    )
-    {
-        _ = schemaRef;
-        _ = schemaType;
-        _ = format;
-        _ = schemaDescription;
-        return AddResponseContent(statusKey, mediaType, typeof(T), isBinary: false);
-    }
-
     public TSelf ResponseContent(int statusCode, string mediaType) =>
         AddResponseContent(statusCode.ToString(), mediaType, null, isBinary: false);
 
@@ -954,14 +470,6 @@ public abstract class RouteDefinitionBase<TSelf>
                 ),
             }
         );
-
-    /// <summary>
-    /// Opts this endpoint into query-based authentication, where the auth token is passed
-    /// as a query parameter instead of a header. Primarily intended for media players
-    /// (ExoPlayer, HLS.js) that cannot inject custom headers on segment requests.
-    /// </summary>
-    public TSelf QueryAuth(string parameterName = "token") =>
-        Mutate(state => state with { QueryAuthParameterName = parameterName });
 
     /// <summary>
     /// Marks this endpoint as returning a file download instead of JSON.

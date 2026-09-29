@@ -59,12 +59,20 @@ public sealed class ContractTerminalResultTests
             .Delete("/api/items/{id}")
             .Returns(StatusCodes.Status404NotFound, "Not found");
 
-        Assert.Equal(StatusCodes.Status204NoContent, route.SuccessStatusCode);
-
         var result = await ExecuteAsync(route.Success());
 
         Assert.Equal(StatusCodes.Status204NoContent, result.StatusCode);
         Assert.Empty(result.Body);
+    }
+
+    [Fact]
+    public async Task Success_DeleteWithOutput_WithoutExplicitStatus_DefaultsTo200()
+    {
+        var route = Define.Delete<ItemDto>("/api/items/{id}");
+
+        var result = await ExecuteAsync(route.Success(new ItemDto("item_1", "Widget")));
+
+        Assert.Equal(StatusCodes.Status200OK, result.StatusCode);
     }
 
     [Fact]
@@ -155,18 +163,20 @@ public sealed class ContractTerminalResultTests
     }
 
     [Fact]
-    public void Returns_DefaultSuccessStatus_Can_Precede_Status_Override()
+    public async Task Returns_DefaultSuccessStatus_Can_Precede_Status_Override()
     {
         var route = Define
             .Post<ItemDto>("/api/items")
             .Returns<ErrorDto>(StatusCodes.Status201Created)
             .Status(StatusCodes.Status202Accepted);
 
-        Assert.Equal(StatusCodes.Status202Accepted, route.SuccessStatusCode);
-        Assert.Equal(
-            StatusCodes.Status201Created,
-            Assert.Single(route.RouteErrorResponses!).StatusCode
+        var success = await ExecuteAsync(route.Success(new ItemDto("item_1", "Widget")));
+        var error = await ExecuteAsync(
+            route.Error(StatusCodes.Status201Created, new ErrorDto("created elsewhere"))
         );
+
+        Assert.Equal(StatusCodes.Status202Accepted, success.StatusCode);
+        Assert.Equal(StatusCodes.Status201Created, error.StatusCode);
     }
 
     [Fact]

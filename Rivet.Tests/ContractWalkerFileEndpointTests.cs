@@ -127,6 +127,43 @@ public sealed class ContractWalkerFileEndpointTests
     }
 
     [Fact]
+    public void QueryAuth_OnInputAndConvertedDefinitions_SetsQueryAuth()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record DataInput(string Id);
+
+            [RivetContract]
+            public static class DataContract
+            {
+                public static readonly Define GetData =
+                    Define.Get<DataInput, string>("/api/data/{id}")
+                        .QueryAuth();
+
+                public static readonly Define PutData =
+                    Define.Put("/api/data/{id}")
+                        .QueryAuth("tk")
+                        .Accepts<DataInput>();
+            }
+            """;
+
+        var endpoints = Walk(source);
+
+        Assert.Equal(
+            "token",
+            Assert.Single(endpoints, e => e.HttpMethod == "GET").QueryAuth?.ParameterName
+        );
+        Assert.Equal(
+            "tk",
+            Assert.Single(endpoints, e => e.HttpMethod == "PUT").QueryAuth?.ParameterName
+        );
+    }
+
+    [Fact]
     public void File_WithoutQueryAuth_DefaultsCorrectly()
     {
         var source = """

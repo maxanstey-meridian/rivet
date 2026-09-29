@@ -2439,7 +2439,7 @@ public sealed class ContractEndpointTests
     public void Delete_Default_Status_Runtime_And_Walker_Agree()
     {
         // --- Void DELETE: both sides default to 204 ---
-        Assert.Equal(204, Define.Delete("/api/items/{id}").SuccessStatusCode);
+        // The runtime side is pinned by ContractTerminalResultTests.Success_Delete*.
 
         var voidSource = """
             using Rivet;
@@ -2461,8 +2461,6 @@ public sealed class ContractEndpointTests
         Assert.Equal(204, voidSuccess.StatusCode);
 
         // --- DELETE with an output type: both sides default to 200 ---
-        Assert.Equal(200, Define.Delete<TsEndpointDefinition>("/api/items/{id}").SuccessStatusCode);
-
         var outputSource = """
             using Rivet;
 

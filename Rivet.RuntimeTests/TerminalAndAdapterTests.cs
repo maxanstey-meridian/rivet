@@ -210,7 +210,6 @@ public sealed class TerminalAndAdapterTests
     {
         var route = Define.Get<Response>("/metadata").Returns<ExactProblem>("202");
 
-        Assert.Equal("202", Assert.Single(route.RouteErrorResponses!).StatusKey);
         Assert.NotNull(route.Error(202, new ExactProblem("accepted")));
     }
 

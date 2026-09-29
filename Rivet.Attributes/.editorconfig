@@ -1,0 +1,5 @@
+# Spec-only builder methods: the Tool reads their arguments from syntax, so the
+# parameters are intentionally unused at runtime.
+[RouteDefinitionBase.SpecOnly.cs]
+dotnet_diagnostic.IDE0060.severity = none
+dotnet_diagnostic.CA1801.severity = none

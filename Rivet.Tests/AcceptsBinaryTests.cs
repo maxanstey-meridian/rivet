@@ -17,22 +17,6 @@ public sealed class AcceptsBinaryTests
     // ----- Builder -----
 
     [Fact]
-    public void AcceptsBinary_Defaults_To_OctetStream()
-    {
-        var route = Define.Put("/api/things/{id}/chunks/{n}").AcceptsBinary();
-
-        Assert.Equal("application/octet-stream", route.BinaryRequestContentType);
-    }
-
-    [Fact]
-    public void AcceptsBinary_Sets_Custom_ContentType()
-    {
-        var route = Define.Put("/api/recordings/{id}/audio").AcceptsBinary("audio/mpeg");
-
-        Assert.Equal("audio/mpeg", route.BinaryRequestContentType);
-    }
-
-    [Fact]
     public void AcceptsBinary_IsFluent()
     {
         var route = Define.Put("/api/things/{id}");
@@ -49,7 +33,7 @@ public sealed class AcceptsBinaryTests
             .AcceptsBinary("video/mp4")
             .Accepts<ChunkInput>();
 
-        Assert.Equal("video/mp4", route.BinaryRequestContentType);
+        Assert.Throws<InvalidOperationException>(() => route.AcceptsFile());
     }
 
     [Fact]
