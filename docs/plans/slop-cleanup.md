@@ -117,7 +117,7 @@ After a WP, re-run it into `/tmp/rivet-golden/after` and `diff -r before after`.
   - **Lane D — Runtime:** owns `Rivet.Attributes/**`, `Rivet.RuntimeTests/**`. Order: D3 → D1 → D2 → D4.
   - **Lane E — Test infra and tools:** owns `tools/**`, `Taskfile.yml`, plus the test-infrastructure files listed in E1/E2. Order: E1 → E2 → E4 → E3.
 - Lanes may add *new* tests to the behaviour test file for their area (e.g. Lane C → `OpenApiImporterTests.cs`). Lane E must not restructure those files in Wave 1.
-- **Wave 2 (serial, after all lanes merge):** W2-1 (G5), W2-2 (test-file folding), W2-3 (CLI, G6), W2-5 (cross-lane API removals, G3/G9), W2-4 (final sweep, last).
+- **Wave 2 (serial, on `slop/integration` after all lanes merged):** W2-1 (G5), W2-2 (test-file folding), W2-3 (CLI, G6), W2-5 (cross-lane API removals, G3/G9), W2-6 (Wave 1 follow-ups), W2-4 (final sweep, last).
 
 Each WP lists: **Tag · Est. LOC saved · Depends · Owns**, then Problem, Change, Acceptance.
 
@@ -706,8 +706,24 @@ NEW · ~120 LOC
 
 **Acceptance.** `grep -rn "implicit operator Define" Rivet.Attributes` returns nothing. Build, tests, samples and golden diff are clean.
 
+#### W2-6 — Follow-ups deferred by Wave 1 (cross-lane)
+NEW · ~200 LOC
+
+1. **Terminal base types (from D1).** `CoverageChecker.IsRivetTerminalInvocation` matches a terminal's declaring type against the six concrete classes, so inherited terminals would silently drop out of coverage.
+   - First make it accept terminals declared on a Rivet base type (compare `ContainingType.OriginalDefinition` walking `BaseType`).
+   - Then move `Error`/`File`/`Success` into one abstract bound-terminal base plus one `TerminalRouteDefinitionBase<TSelf>`.
+   - Acceptance: coverage tests pass, and a public-API snapshot shows only the base-type move.
+2. **Remove the `ContentType` alias (from D4).** Switch `Import/CSharpWriter.cs` (~1093) to emit `.ProducesFile(...)`. Delete `FileRouteDefinition.ContentType` and its reading in `ContractWalker` (~773). Update the samples, `docs/guides/file-uploads*`, the ~7 test files and the Meridian reference if it's quoted anywhere in the repo docs.
+3. **Duplicate response headers (from D4).** `.WithResponseHeader("ETag").WithResponseHeader("etag")` is no longer rejected anywhere, and the emitter's header map is case-sensitive, so both are emitted. Add a generation-time diagnostic in `ContractWalker` (new RIV id, registered in `Diagnostics.cs` and `docs/reference/diagnostics.md`) for a case-insensitively duplicate header name on the same status. Red-first.
+4. **`.SecurityRequirements()` with no arguments (from Wave 0)** duplicates `.Anonymous()`. Delete the no-argument form from the runtime builder and the walker, and update any callers.
+5. **Emit synthetic naming (from Lane C).** `InlineTypeExtractor` still produces `Foo2`, while import now uses `Foo_2`. Make emit use the same `Name_2` scheme through one shared naming helper, and record the golden-diff renames.
+6. **Header dedupe in import (from Lane C).** `ContractBuilder` de-duplicates response headers on numeric status, so a `4XX` header and a `default` header with the same name collide. Key on the status string; red-first. Record the import golden changes.
+7. **Shared `WellKnownTypes` (from Lane B).** `Program.cs` and `TypeWalker` each build one; build it once and pass it.
+
 #### W2-4 — Final sweep
 Run the §3 gate, the full golden diff, Plumb and `detect_changes` across the whole change. Update the ledger with final LOC deltas (`git diff --stat main`).
+
+Also: delete the remaining tracker-tag comments (E6, E11, W4, GAP-1, FABLE_GAPS, P2 wave N, planner-constraint, …) and the stale TypeScript-era doc comments across `Rivet.Tool/Emit/**`, `Rivet.Tool/Model/**` and `Rivet.Tool/Analysis/**` (Lane A/B only removed them from code they rewrote).
 
 Also pick up the remaining small items if still present:
 - The `Naming.ToCamelCase` empty guard is redundant; `JsonNamingPolicy.CamelCase` already returns empty input unchanged.
