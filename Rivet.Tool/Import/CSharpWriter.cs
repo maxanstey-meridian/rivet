@@ -308,7 +308,7 @@ internal static class CSharpWriter
         {
             sb.AppendLine("using System.Text.Json.Serialization;");
         }
-        // I6: substring match — IFormFile can appear nested (List<IFormFile>,
+        // Substring match — IFormFile can appear nested (List<IFormFile>,
         // Dictionary<string, IFormFile>), not only as the bare property type.
         if (
             record.Properties.Any(p => p.CSharpType.Contains("IFormFile", StringComparison.Ordinal))
@@ -468,8 +468,8 @@ internal static class CSharpWriter
         );
 
     /// <summary>
-    /// Required-and-nullable is only expressible with the `required` keyword
-    /// (FABLE_ROUNDTRIP #6/#11b): a positional `T? X` parameter reads as
+    /// Required-and-nullable is only expressible with the `required` keyword:
+    /// a positional `T? X` parameter reads as
     /// optional to the walker, so records with such properties take the
     /// non-positional required/init form where the keyword carries the axis.
     /// </summary>
@@ -703,7 +703,7 @@ internal static class CSharpWriter
         var sb = new StringBuilder();
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
-        // I6: substring match — IFormFile can appear nested (List<IFormFile>), not only bare.
+        // Substring match — IFormFile can appear nested (List<IFormFile>), not only bare.
         if (
             contract.Fields.Any(f =>
                 f.InputType?.Contains("IFormFile", StringComparison.Ordinal) == true
@@ -1025,7 +1025,7 @@ internal static class CSharpWriter
             }
         }
 
-        // FABLE_ROUNDTRIP #10: text/* media types survive as content-type
+        // A text/* media type survives as content-type
         // overrides — the schema is unchanged, only the declared media type.
         if (field.RequestContentType is not null)
         {

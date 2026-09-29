@@ -17,10 +17,10 @@ internal sealed class SchemaMapper
     private readonly ResolutionContext _ctx;
     private readonly RecordSynthesizer _synth;
 
-    // I1: component alias resolution ("Alias": {"$ref": "#/components/schemas/Real"}).
-    // Alias keys map to their FINAL (non-reference) target key; cyclic/missing chains are
-    // recorded separately so consumers fall back loudly instead of overflowing the stack
-    // chasing the library's reference proxies.
+    // Component alias resolution ("Alias": {"$ref": "#/components/schemas/Real"}).
+    // Alias keys map to their FINAL (non-reference) target key; chains to a missing target
+    // are recorded separately so consumers fall back loudly instead of chasing the
+    // library's reference proxies.
     private readonly Dictionary<string, string> _aliasTargets = new(StringComparer.Ordinal);
     private readonly HashSet<string> _unresolvableAliases = new(StringComparer.Ordinal);
     private readonly HashSet<string> _skippedComponentTypes = new(StringComparer.Ordinal);
@@ -28,7 +28,7 @@ internal sealed class SchemaMapper
     private readonly HashSet<string> _unsupportedNamedScalarsWarned = new(StringComparer.Ordinal);
     private readonly HashSet<string> _requiredComponentSchemas = new(StringComparer.Ordinal);
 
-    // P2 wave 4: oneOf + discriminator + usable mapping reverses to an abstract
+    // A oneOf + discriminator + usable mapping reverses to an abstract
     // [JsonPolymorphic] base record with [JsonDerivedType] registrations. Bases are
     // keyed by schema key; each conforming variant key maps back to its base key;
     // bases whose mapping could NOT be reversed record the reason for the loud
@@ -65,16 +65,14 @@ internal sealed class SchemaMapper
     public IReadOnlyList<GeneratedEnum> ExtraEnums => _ctx.ExtraEnums;
 
     /// <summary>
-    /// Register a synthetic record (e.g. parameter input records built by ContractBuilder).
-    /// </summary>
-    /// <summary>
-    /// Dedup-with-shape-check (I3 guard): identical shape reuses the existing record;
-    /// a name collision with a different shape gets a suffixed name. Returns the name to reference.
+    /// Registers a synthetic record (e.g. a parameter input record built by ContractBuilder).
+    /// An identical shape reuses the existing record; a name collision with a different shape
+    /// gets a suffixed name. Returns the name to reference.
     /// </summary>
     public string AddExtraRecord(GeneratedRecord record) => _ctx.AddOrReuseExtraRecord(record);
 
     /// <summary>
-    /// P2 wave 5: the header-augmented replacement for a component record, or null when
+    /// The header-augmented replacement for a component record, or null when
     /// the record was not augmented. Consulted by OpenApiImporter when writing Types/.
     /// </summary>
     public GeneratedRecord? GetComponentRecordOverride(string name) =>
@@ -102,7 +100,7 @@ internal sealed class SchemaMapper
                 !byName.TryGetValue(prop.Name, out var existing)
                 || existing.CSharpType != prop.CSharpType
                 || existing.IsRequired != prop.IsRequired
-                // P2 wave 5: a header-bound property is a different shape from a plain
+                // A header-bound property is a different shape from a plain
                 // one of the same name/type — headers never enter the JSON schema.
                 || existing.HeaderName != prop.HeaderName
             )
@@ -115,7 +113,7 @@ internal sealed class SchemaMapper
     }
 
     /// <summary>
-    /// P2 wave 5: header-aware component reuse for synthesized inputs. [RivetHeader]
+    /// Header-aware component reuse for synthesized inputs. [RivetHeader]
     /// properties never enter a JSON schema, so the component a previous emit∘import loop
     /// produced for a header-bearing input carries only the NON-header subset. When that
     /// subset matches (base name first, then numbered variants), the component record is
@@ -184,7 +182,7 @@ internal sealed class SchemaMapper
     /// <c>{baseName}3</c>, …) whose shape matches exactly, lowest suffix first.
     /// A prior emit∘import loop may already have disambiguated a synthesized input to a
     /// numbered name — reusing it (instead of minting a fresh suffix every loop) keeps
-    /// emit∘import a fixed point (GAP-2, I3 residual). Null when nothing matches.
+    /// emit∘import a fixed point. Null when nothing matches.
     /// </summary>
     public string? FindNumberedSchemaWithShape(
         string baseName,
@@ -222,7 +220,7 @@ internal sealed class SchemaMapper
         // (cloudflare: ...CustomHostname vs ...Customhostname left a dangling type).
         var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // I1: resolve alias chains first, using raw reference ids only (never proxied
+        // Resolve alias chains first, using raw reference ids only (never proxied
         // members — a cyclic alias would overflow the stack inside the library's proxy)
         _componentSchemas = schemas;
         if (requiredComponentSchemas is not null)
@@ -237,7 +235,7 @@ internal sealed class SchemaMapper
 
         foreach (var (key, schema) in schemas)
         {
-            // I1: alias entries are resolved via _aliasTargets; touching their proxied
+            // Alias entries are resolved via _aliasTargets; touching their proxied
             // members here would recurse on cyclic chains
             if (schema is OpenApiSchemaReference)
             {
@@ -268,10 +266,10 @@ internal sealed class SchemaMapper
 
         // Pre-pass: claim every component schema's C# name BEFORE any type resolution runs,
         // so synthetic records/enums created during resolution can never reuse a component
-        // name with a different shape (I3 — two types in one Types/{Name}.cs file).
+        // name with a different shape (two types in one Types/{Name}.cs file).
         foreach (var (key, schema) in schemas)
         {
-            // I1: aliases produce no file of their own and must NOT claim a name — they
+            // Aliases produce no file of their own and must NOT claim a name — they
             // map to their target's name in the follow-up loop below
             if (schema is OpenApiSchemaReference)
             {
@@ -286,7 +284,7 @@ internal sealed class SchemaMapper
             _ctx.ReservedTypeNames.Add(name);
         }
 
-        // I1: alias keys map to the FINAL target's mapped name so every consumer of the
+        // Alias keys map to the FINAL target's mapped name so every consumer of the
         // alias resolves to a type that actually exists. Unresolvable aliases (cycles,
         // missing targets) get no mapping — their consumers fall back loudly.
         foreach (var (key, schema) in schemas)
@@ -313,7 +311,7 @@ internal sealed class SchemaMapper
             }
         }
 
-        // P2 wave 4: detect reversible polymorphic unions BEFORE mapping so variant
+        // Detect reversible polymorphic unions BEFORE mapping so variant
         // schemas can be generated as derived records regardless of iteration order.
         DetectPolymorphicUnions(schemas);
 
@@ -336,7 +334,7 @@ internal sealed class SchemaMapper
 
         foreach (var (key, schema) in schemas)
         {
-            // Skip $ref aliases — resolved via the alias-target map (I1); unresolvable
+            // Skip $ref aliases — resolved via the alias-target map; unresolvable
             // aliases have no SchemaNameMap entry at all
             if (schema is OpenApiSchemaReference)
             {
@@ -389,7 +387,7 @@ internal sealed class SchemaMapper
                 ? null
                 : schema.Description;
 
-            // P2 wave 4: a schema claimed as a polymorphic union variant becomes a
+            // A schema claimed as a polymorphic union variant becomes a
             // derived record: the discriminator property is STRIPPED (System.Text.Json
             // re-adds it on the wire — keeping it would double-emit) and the record
             // inherits from the abstract base.
@@ -448,7 +446,7 @@ internal sealed class SchemaMapper
                     continue;
                 }
 
-                // P2 wave 4: oneOf + discriminator + usable mapping reverses to an
+                // A oneOf + discriminator + usable mapping reverses to an
                 // abstract [JsonPolymorphic] base record with one [JsonDerivedType]
                 // registration per mapping entry.
                 if (_polymorphicBases.TryGetValue(key, out var poly))
@@ -530,7 +528,7 @@ internal sealed class SchemaMapper
                     continue;
                 }
 
-                // Named diagnostic (I.A-17): a discriminator on a plain object schema (no oneOf
+                // Named diagnostic: a discriminator on a plain object schema (no oneOf
                 // union to dispatch over) has no C# contract representation — the record is
                 // generated but the polymorphic dispatch semantics are dropped.
                 if (schema.Discriminator?.PropertyName is { } discriminatorProperty)
@@ -576,7 +574,7 @@ internal sealed class SchemaMapper
             );
         }
 
-        // Register component records for shape-checked reuse (I3 residual)
+        // Register component records for shape-checked reuse
         var componentIdsByName = _ctx
             .SchemaNameMap.Where(pair => schemas[pair.Key] is not OpenApiSchemaReference)
             .GroupBy(pair => pair.Value, StringComparer.Ordinal)
@@ -1145,7 +1143,7 @@ internal sealed class SchemaMapper
     }
 
     /// <summary>
-    /// P2 wave 4: detects oneOf schemas whose <c>discriminator.propertyName</c> +
+    /// Detects oneOf schemas whose <c>discriminator.propertyName</c> +
     /// <c>mapping</c> can be reversed into a [JsonPolymorphic] base with
     /// [JsonDerivedType] registrations. A union qualifies only when every mapped
     /// variant resolves to a plain object component carrying a conforming tag
@@ -1349,7 +1347,7 @@ internal sealed class SchemaMapper
 
         var refId = DecodeComponentId(schemaRef.Reference.Id);
 
-        // I1: refs to unresolvable aliases (cycle/missing target) — loud fallback,
+        // Refs to unresolvable aliases (missing target) — loud fallback,
         // and never touch the proxy (a cyclic chain overflows the stack)
         if (refId is not null && _unresolvableAliases.Contains(refId))
         {
@@ -1363,7 +1361,7 @@ internal sealed class SchemaMapper
             return true;
         }
 
-        // I1: refs to alias entries resolve against the FINAL target schema and name
+        // Refs to alias entries resolve against the FINAL target schema and name
         var effective = (IOpenApiSchema)schemaRef;
         var effectiveId = refId;
         if (
@@ -1437,7 +1435,7 @@ internal sealed class SchemaMapper
                     ? mapped
                     : _ctx.TypeName(effectiveId ?? DecodeComponentId(schemaRef.Reference.Id)!);
 
-            // FABLE_ROUNDTRIP #6: a component that is itself nullable (3.0
+            // A component that is itself nullable (3.0
             // `nullable: true` / 3.1 null in the type array — both parse to the
             // Null flag) makes every bare $ref use-site nullable. Dropping this
             // typed 139 github-corpus properties non-nullable that the API can
@@ -1845,7 +1843,7 @@ internal sealed class SchemaMapper
     }
 
     /// <summary>
-    /// Named diagnostic (I.A-15): an enum constraint that cannot be represented as a C# enum
+    /// Named diagnostic: an enum constraint that cannot be represented as a C# enum
     /// (single value, mixed/float values, out-of-int32-range values) degrades to a primitive.
     /// Never silent — the values are dropped from the generated contract.
     /// </summary>

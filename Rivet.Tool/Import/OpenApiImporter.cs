@@ -68,7 +68,6 @@ public static class OpenApiImporter
         var files = new List<GeneratedFile>();
         var mapper = new SchemaMapper(warnings);
 
-        // Parse schemas
         var schemas = doc.Components?.Schemas;
 
         var schemaResult = schemas is { Count: > 0 }
@@ -97,7 +96,6 @@ public static class OpenApiImporter
 
         var globalSecurityScheme = options.SecurityScheme;
 
-        // Parse paths → contracts
         var contracts = doc.Paths is { Count: > 0 }
             ? ContractBuilder.BuildContracts(
                 doc.Paths,
@@ -125,19 +123,18 @@ public static class OpenApiImporter
                 provenance.Document.ComponentRequestBodies ?? []
             ),
         };
-        // Emit type files (records → Types/, enums → Types/, brands → Domain/)
+        // Records and enums go to Types/, brands to Domain/.
         var ns = options.Namespace;
 
         foreach (var record in schemaResult.Records)
         {
-            // P2 wave 5: contract building may have augmented a component record with
+            // Contract building may have augmented a component record with
             // [RivetHeader] properties (header-aware input reuse) — write the replacement.
             var effective = mapper.GetComponentRecordOverride(record.Name) ?? record;
             var content = CSharpWriter.WriteRecord(effective, ns);
             files.Add(new GeneratedFile($"Types/{effective.Name}.cs", content));
         }
 
-        // Emit synthetic records from inline objects
         foreach (var record in mapper.ExtraRecords)
         {
             var content = CSharpWriter.WriteRecord(record, ns);
@@ -150,7 +147,6 @@ public static class OpenApiImporter
             files.Add(new GeneratedFile($"Types/{enumDef.Name}.cs", content));
         }
 
-        // Emit synthetic enums from inline enum properties
         foreach (var enumDef in mapper.ExtraEnums)
         {
             var content = CSharpWriter.WriteEnum(enumDef, ns);
@@ -163,7 +159,6 @@ public static class OpenApiImporter
             files.Add(new GeneratedFile($"Domain/{brand.Name}.cs", content));
         }
 
-        // Emit contract files
         foreach (var contract in contracts)
         {
             var content = CSharpWriter.WriteContract(contract, ns);

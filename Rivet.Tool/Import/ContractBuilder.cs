@@ -63,7 +63,7 @@ internal static class ContractBuilder
                 var httpMethod = method.Method.ToLowerInvariant();
                 var tag = ExtractTag(operation) ?? "Default";
 
-                // WP-1.1: prefer the explicit x-rivet-contract extension — the tag
+                // Prefer the explicit x-rivet-contract extension — the tag
                 // convention is lossy for unusual casing (underscores, acronyms) and
                 // breaks under hand-edits. Convention stays as the fallback.
                 var contractKey = SchemaClassifier.GetExtensionString(
@@ -125,7 +125,7 @@ internal static class ContractBuilder
     {
         var operationId = operation.OperationId;
 
-        // WP-1.1: prefer the explicit x-rivet-endpoint extension over the
+        // Prefer the explicit x-rivet-endpoint extension over the
         // operationId/tag-prefix convention (lossy for unusual casing).
         var fieldName = SchemaClassifier.GetExtensionString(
             operation.Extensions,
@@ -150,7 +150,7 @@ internal static class ContractBuilder
         var requestContents = ResolveRequestContents(operation.RequestBody, mapper, fieldName);
         var inputTypeFromBody = inputType is not null;
 
-        // I14: parameters must be resolved regardless of body presence — they used to be
+        // Parameters must be resolved regardless of body presence — they used to be
         // silently discarded whenever the operation had a request body (262 Stripe GETs
         // lost every path+query param). Path/query params merge with the body-derived
         // input record; when a true merge is structurally impossible (opaque body type)
@@ -184,7 +184,7 @@ internal static class ContractBuilder
         }
         string? requestBodyType = null;
 
-        // FABLE_ROUNDTRIP #7: an optional request body (required:false — the
+        // An optional request body (required:false — the
         // OpenAPI default) is modeled by a nullable TInput; the emitter's E11
         // rule re-emits it as required:false. Only for pure-body inputs on
         // body-carrying methods: a record that merged required path/query
@@ -237,7 +237,7 @@ internal static class ContractBuilder
             fieldName,
             componentExamples
         );
-        // P2 wave 5: response headers re-emit as .WithResponseHeader(...) chain calls —
+        // Response headers re-emit as .WithResponseHeader(...) chain calls —
         // resolved AFTER the declared-status set is final (success + error responses).
         var responseHeaders = ResolveResponseHeaders(
             operation,
@@ -535,7 +535,7 @@ internal static class ContractBuilder
     private sealed record ScalarLeafProvenance(string SchemaType, string? Format);
 
     /// <summary>
-    /// P2 wave 5: response headers (previously out-of-scope) become .WithResponseHeader()
+    /// Response headers (previously out-of-scope) become .WithResponseHeader()
     /// calls. Headers on a status the contract cannot declare are dropped loudly.
     /// </summary>
     private static IReadOnlyList<GeneratedResponseHeader> ResolveResponseHeaders(
@@ -668,7 +668,7 @@ internal static class ContractBuilder
         }
 
         // A $ref request body that the library could not resolve has no content —
-        // never drop it silently (I11 class): leave a loud marker on the endpoint.
+        // never drop it silently: leave a loud marker on the endpoint.
         if (requestBody is OpenApiRequestBodyReference { Target: null } unresolvedRef)
         {
             var refId = unresolvedRef.Reference?.Id ?? "unknown";
@@ -739,7 +739,7 @@ internal static class ContractBuilder
             && TryGetSchemaForContentType(content, fallbackType, out schema)
         )
         {
-            // FABLE_ROUNDTRIP #10: a text/* body keeps its media type via
+            // A text/* body keeps its media type via
             // .AcceptsContentType(...) — re-emitting it as application/json
             // was a silent wire change (the octet-stream bug's sibling).
             var requestContentType = fallbackType.StartsWith(
@@ -929,7 +929,7 @@ internal static class ContractBuilder
                 );
             }
 
-            // FABLE_ROUNDTRIP #1, the query half: pin the wire name whenever the
+            // The query half of wire-name pinning: pin the wire name whenever the
             // emitted name (camelCase of the property) differs from the original
             // — `per_page` no longer drifts to `perPage` (263 github query
             // params). Headers carry their original name via [RivetHeader]
@@ -1033,13 +1033,13 @@ internal static class ContractBuilder
         var deduped = SchemaClassifier.DeduplicateProperties(properties);
 
         // Reuse a components/schemas record only when its SHAPE matches the synthesized input —
-        // name-only reuse silently hands the endpoint someone else's type (I3 residual).
+        // name-only reuse silently hands the endpoint someone else's type.
         if (mapper.HasMappedSchemaWithShape(recordName, deduped))
         {
             return recordName;
         }
 
-        // GAP-2 (emit∘import idempotency): a previous import loop may already have
+        // Emit∘import idempotency: a previous import loop may already have
         // disambiguated this synthesized input to a numbered variant (e.g. StreamInput_2).
         // Reuse the identically-shaped numbered component instead of minting a fresh
         // suffix (StreamInput_3, StreamInput_4, …) on every loop.
@@ -1049,18 +1049,18 @@ internal static class ContractBuilder
             return numberedVariant;
         }
 
-        // P2 wave 5: [RivetHeader] properties are never part of a JSON schema, so a
+        // [RivetHeader] properties are never part of a JSON schema, so a
         // component emitted on a previous loop carries only the NON-header subset.
         // Re-attaching the header properties to that component (instead of minting a
         // numbered variant per loop) keeps emit∘import a fixed point for header-bearing
-        // inputs — same GAP-2/I3-residual reasoning as the numbered-variant reuse above.
+        // inputs — same reasoning as the numbered-variant reuse above.
         var augmented = mapper.AugmentComponentWithHeaderShape(recordName, deduped);
         if (augmented is not null)
         {
             return augmented;
         }
 
-        // Dedup-with-shape-check (I3): a same-named synthetic input with a different shape
+        // Dedup-with-shape-check: a same-named synthetic input with a different shape
         // (e.g. two tags both synthesizing GetByIdInput, or a name-only collision with a
         // component schema) gets a disambiguated name.
         return mapper.AddExtraRecord(new GeneratedRecord(recordName, deduped));
@@ -1249,7 +1249,7 @@ internal static class ContractBuilder
 
             successCode = code;
 
-            // I7: a lower 2xx supersedes everything a higher one resolved — including a
+            // A lower 2xx supersedes everything a higher one resolved — including a
             // binary branch's fileContentType, which previously leaked through and produced
             // a typed JSON output AND ProducesFile on the same endpoint.
             outputType = null;
@@ -1295,7 +1295,7 @@ internal static class ContractBuilder
                             && TryGetSchemaForContentType(response.Content, textType, out schema)
                         )
                         {
-                            // FABLE_ROUNDTRIP #10: keep the text/* media type via
+                            // Keep the text/* media type via
                             // .ProducesContentType(...) — re-emitting it as
                             // application/json was a silent wire change.
                             outputType = mapper.ResolveCSharpType(schema!, $"{fieldName}Response");
@@ -1316,7 +1316,7 @@ internal static class ContractBuilder
             }
         }
 
-        // FABLE_ROUNDTRIP #8 + cross-corpus #3: operations that declare no 2xx at
+        // Operations that declare no 2xx at
         // all. The lowest concrete non-error status — 1xx informational (websocket
         // upgrades declare only 101) or 3xx redirect — becomes the declared
         // (bodyless) success status; without one the walker defaults a 200 the API

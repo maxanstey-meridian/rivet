@@ -96,8 +96,7 @@ internal static class SchemaClassifier
     /// <summary>
     /// True for any whole JSON number inside the signed/unsigned 64-bit ranges —
     /// the widest exact carrier the generated C# enum emitter guarantees, so legal
-    /// enum constants beyond Int32 survive import instead of being dropped
-    /// (planner-constraint:generated-enum-underlying-type).
+    /// enum constants beyond Int32 survive import instead of being dropped.
     /// </summary>
     internal static bool IsWholeInt64(JsonNode node)
     {
@@ -199,7 +198,7 @@ internal static class SchemaClassifier
 
         if (schema.AllOf is { Count: > 0 })
         {
-            // Must agree with MapSchemas (I2): an allOf whose merged record would have zero
+            // Must agree with MapSchemas: an allOf whose merged record would have zero
             // properties is SKIPPED there, so refs to it must not resolve to the (never
             // emitted) record name. Mirrors ResolveAllOfRecord + MergeWithSiblingProperties.
             return AllOfYieldsProperties(schema);
@@ -262,7 +261,7 @@ internal static class SchemaClassifier
         }
 
         // ResolveAllOfRecord recurses into a REF element's allOf when present AND merges the
-        // target's own sibling properties (I4 fix); all other elements contribute their own
+        // target's own sibling properties; all other elements contribute their own
         // properties only.
         if (element is OpenApiSchemaReference && element.AllOf is { Count: > 0 })
         {
@@ -548,8 +547,7 @@ internal static class SchemaClassifier
                 // policy-cased member name when a policy is declared, otherwise
                 // the emitter's camelCase (TypeWalker). 'Ready' (Pascal ==
                 // original, old check skipped the pin) still emits as 'ready' —
-                // a silent case-mangle both directions
-                // (FABLE_ROUNDTRIP #3, 63 properties on the github corpus).
+                // a silent case-mangle both directions.
                 var derived = policy is null
                     ? Naming.ToCamelCase(sanitized)
                     : Naming.ToPolicyCase(sanitized, policy.Value);
@@ -588,8 +586,7 @@ internal static class SchemaClassifier
             // Naming magnitude only — the member value below keeps raw digits.
             // GetValue<long> throws above long.MaxValue even though IsWholeInt64
             // admits those digits, and Math.Abs overflows at long.MinValue, so
-            // derive the name from a defensive magnitude read instead
-            // (acceptance:numeric-enums-cover-all-legal-underlying-values).
+            // derive the name from a defensive magnitude read instead.
             string namingMagnitude;
             if (memberNode.AsValue().TryGetValue<long>(out var signedValue))
             {

@@ -70,7 +70,7 @@ internal sealed record RecordProperty(
     string? Example = null,
     bool IsReadOnly = false,
     bool IsWriteOnly = false,
-    // P2 wave 5: non-null for request-header properties — the wire header name with its
+    // Non-null for request-header properties — the wire header name with its
     // original casing. Written as [property: RivetHeader("...")], never part of JSON.
     string? HeaderName = null,
     // Non-null when camelCase(Name) is not the spec's property key (snake_case keys,
@@ -89,8 +89,7 @@ internal sealed record GeneratedEnumMember(
     string CSharpName,
     string? OriginalName,
     // Decimal literal of the enum constant ("1", "5000000000"): a string carrier
-    // so constants beyond Int32 round-trip byte-for-byte through generated C#
-    // (planner-constraint:generated-enum-underlying-type).
+    // so constants beyond Int32 round-trip byte-for-byte through generated C#.
     string? IntValue = null
 );
 
@@ -226,7 +225,7 @@ internal sealed record GeneratedEndpointParameter(
     string? SchemaRef = null
 );
 
-/// <summary>P2 wave 5: a response header re-emitted as a .WithResponseHeader(...) chain call.</summary>
+/// <summary>A response header re-emitted as a .WithResponseHeader(...) chain call.</summary>
 internal sealed record GeneratedResponseHeader(
     string StatusKey,
     string Name,

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.OpenApi;
 using Rivet.Tool.Model;
 
@@ -42,7 +43,7 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
                 }
 
                 // If the ref target itself has allOf, recurse — and merge the target's own
-                // sibling properties too (I4: middle inheritance layers contribute their
+                // sibling properties too (middle inheritance layers contribute their
                 // declared properties, not just their composed bases).
                 if (element.AllOf is { Count: > 0 })
                 {
@@ -102,7 +103,7 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
             }
             else if (variant.Properties is { Count: > 0 })
             {
-                // Inline object → synthesize sub-record (dedup-with-shape-check, I3 guard)
+                // Inline object → synthesize sub-record (dedup-with-shape-check)
                 var subName = $"{name}Option{optionIndex}";
                 var record = MapRecord(subName, variant);
                 var finalSubName = ctx.AddOrReuseExtraRecord(record);
@@ -133,7 +134,7 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
     )
     {
         var properties = new List<RecordProperty>();
-        // I8: a composing schema's top-level `required` applies to the whole composed
+        // A composing schema's top-level `required` applies to the whole composed
         // instance — union it with the element's own `required` so requiredness is
         // decided before the "?" suffix is appended.
         var requiredSet =
@@ -393,12 +394,7 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
         return c.HasAny ? c : null;
 
         static double? Number(string? value) =>
-            double.TryParse(
-                value,
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out var number
-            )
+            double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
                 ? number
                 : null;
     }

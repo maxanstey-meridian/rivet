@@ -25,7 +25,7 @@ internal sealed class ResolutionContext(List<string> warnings)
     public HashSet<string> ReservedTypeNames { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Registers a synthetic record, deduplicating by name + shape (I3 guard).
+    /// Registers a synthetic record, deduplicating by name + shape.
     /// Same name + identical shape → reuse the existing record. Same name + different shape
     /// (or a name reserved by a component schema) → the record gets a numeric-suffixed name so
     /// one consumer can never silently receive another consumer's type.
@@ -124,13 +124,13 @@ internal sealed class ResolutionContext(List<string> warnings)
 
     /// <summary>
     /// Records generated from #/components/schemas, keyed by final (deduped) C# name.
-    /// Used for shape-checked reuse of synthesized parameter-input records (I3 residual).
+    /// Used for shape-checked reuse of synthesized parameter-input records.
     /// </summary>
     public Dictionary<string, GeneratedRecord> MappedComponentRecords { get; } =
         new(StringComparer.Ordinal);
 
     /// <summary>
-    /// P2 wave 5: component records that gained [RivetHeader] properties during contract
+    /// Component records that gained [RivetHeader] properties during contract
     /// building (header-aware input reuse). MapSchemas has already materialized its result
     /// by then, so OpenApiImporter consults these replacements when writing Types/ files.
     /// </summary>
