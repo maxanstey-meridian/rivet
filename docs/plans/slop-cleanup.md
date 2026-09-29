@@ -1,6 +1,6 @@
 # Rivet slop cleanup spec
 
-Status: ready. Decisions made 2026-09-29 (§4).
+Status: complete — released as v0.45.0 (2026-09-29).
 Baseline: `main` @ `3fd003a` (2026-09-29). Line numbers below are from that commit; re-locate by symbol name if they have moved.
 Source: independent slop hunt (2026-09-29), cross-checked against `reviews/2026-09-09-adversarial/REVIEW.md`, `reviews/2026-09-14-fix-investigation/FIX-PLAN.md` and `docs/plans/post-v0.42.0-remediation.md`. Each item carries a `NEW` / `ALREADY-COVERED` tag relative to those documents.
 

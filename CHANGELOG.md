@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — breaking
+## 0.45.0 — 2026-09-29 (breaking)
 
 - `Rivet.Attributes`: removed the unused `RouteDefinitionBase.IsFileUpload` getter.
 - Import: an operation with `security: []` now scaffolds `.Anonymous()` instead of `.SecurityRequirements()`. Both re-emit `security: []`.

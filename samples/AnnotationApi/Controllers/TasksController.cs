@@ -45,7 +45,11 @@ public sealed record AddCommentRequest(string Body);
 public sealed record AttachmentResultDto(Guid Id, string FileName, long Size);
 
 [RivetType]
-public sealed record SearchTasksRequest(string Term, int MinPriority, string? Tag);
+public sealed record SearchTasksRequest(
+    string Term,
+    int MinPriority,
+    [property: RivetOptional] string? Tag
+);
 
 [RivetType]
 public sealed record NotFoundDto(string Message);

@@ -213,8 +213,8 @@ public sealed class MvcBindingHostTests : IDisposable
             .ToHashSet(StringComparer.Ordinal);
         Assert.Contains("term", requiredFields);
         Assert.Contains("minPriority", requiredFields);
-        // The nullable tag is required-and-nullable: clients send null, not nothing.
-        Assert.Contains("tag", requiredFields);
+        // Nullability alone no longer makes a member optional; [RivetOptional] does.
+        Assert.DoesNotContain("tag", requiredFields);
 
         // FromRoute(Name="taskId"): the emitted path parameter carries the wire name
         // that matches the live route placeholder the host test exercises.

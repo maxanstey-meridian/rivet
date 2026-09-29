@@ -122,9 +122,9 @@ honest degradation, not full support.
   nullable resolves nullable at every use-site. A property that is required
   AND nullable scaffolds in the non-positional form with the C# `required`
   keyword (`public required T? X { get; init; }`) — must be present, may be
-  null — and re-emits with both axes intact. Optional non-nullable properties
-  still WIDEN to nullable on import (`T?` is the only optionality spelling on
-  positional records) — an under-claim, the one residual conflation. A null
+  null — and re-emits with both axes intact. Optionality is spelled
+  `[RivetOptional]`, independent of nullability, so all four
+  required/optional × nullable/non-nullable combinations round-trip. A null
   branch inside a 3+-variant `oneOf` union is also still dropped (the `As*`
   wrapper has no nullability slot; the `{"type": "null"}` degradation marker
   covers the 2-variant case).
