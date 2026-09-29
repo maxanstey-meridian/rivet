@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Rivet.Tool;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
@@ -770,7 +769,9 @@ public sealed class MetadataAttributeTests
             }
             """;
 
-        var exception = Assert.Throws<RivetUserException>(() => CompilationHelper.EmitOpenApi(source));
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApi(source)
+        );
         Assert.Contains(
             "default of property 'mode' must be a JSON literal, got 'not-valid-json'",
             exception.Message

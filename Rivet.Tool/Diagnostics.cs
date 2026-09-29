@@ -89,6 +89,7 @@ public static class Diagnostics
     public const string ImportAdditionalPropertiesDropped = "RIV3004";
     public const string ImportDiscriminatorDropped = "RIV3005";
     public const string ImportAliasTargetMissing = "RIV3006";
+
     // RIV3007 (ImportAliasRefCycle) retired: alias cycles are broken before mapping and
     // reported as RIV3001. The number is never reused.
     public const string ImportUnresolvableAliasReference = "RIV3008";
