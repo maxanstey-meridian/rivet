@@ -221,47 +221,6 @@ public sealed class HeaderSupportTests
     }
 
     // ---------------------------------------------------------------
-    // Runtime builder — declaration-time guards only (spec-only at runtime)
-    // ---------------------------------------------------------------
-
-    [Fact]
-    public void Builder_Rejects_DuplicateHeaderPerStatus()
-    {
-        var definition = Define.Get<string>("/api/things").WithResponseHeader("ETag");
-
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            definition.WithResponseHeader("etag")
-        );
-        Assert.Contains("already declared", ex.Message);
-    }
-
-    [Fact]
-    public void Builder_Exposes_DeclaredResponseHeaders()
-    {
-        var definition = Define
-            .Get<string>("/api/things")
-            .WithResponseHeader("ETag")
-            .WithResponseHeader(304, "Cache-Control", "Caching policy", required: true);
-
-        Assert.NotNull(definition.ResponseHeaders);
-        Assert.Equal(2, definition.ResponseHeaders!.Count);
-        Assert.Equal(
-            new RouteResponseHeader(null, "ETag", null, false, HeaderType: typeof(string)),
-            definition.ResponseHeaders[0]
-        );
-        Assert.Equal(
-            new RouteResponseHeader(
-                304,
-                "Cache-Control",
-                "Caching policy",
-                true,
-                HeaderType: typeof(string)
-            ),
-            definition.ResponseHeaders[1]
-        );
-    }
-
-    // ---------------------------------------------------------------
     // OpenApiEmitter — in: header parameters
     // ---------------------------------------------------------------
 

@@ -28,7 +28,7 @@ public sealed class EnforcementHonestyTests
         var route = Define.Get<ItemBase>("/api/items/{id}");
 
         var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            Task.FromResult(route.Success(new ItemWithSecrets("1", "Widget", "hunter2", true)))
+            ExecuteAsync(route.Success(new ItemWithSecrets("1", "Widget", "hunter2", true)))
         );
 
         Assert.Contains("ItemWithSecrets", exception.Message);
@@ -43,7 +43,7 @@ public sealed class EnforcementHonestyTests
         var route = Define.Get<ItemBase>("/api/items/{id}");
 
         var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            Task.FromResult(
+            ExecuteAsync(
                 route.Success((ItemBase)new ItemWithSecrets("1", "Widget", "hunter2", true))
             )
         );
@@ -107,7 +107,7 @@ public sealed class EnforcementHonestyTests
             .Returns<Animal>(StatusCodes.Status404NotFound);
 
         var exception = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            Task.FromResult(
+            ExecuteAsync(
                 route.Error(StatusCodes.Status404NotFound, (Animal)new LoudAnimal("Rex", "WOOF"))
             )
         );
@@ -289,7 +289,7 @@ public sealed class EnforcementHonestyTests
         var route = Define.Get<ItemBase>("/api/items/{id}");
 
         await Assert.ThrowsAsync<RivetContractViolationException>(() =>
-            Task.FromResult(route.Success((ItemBase)new ItemWithSecrets("1", "W", "s", false)))
+            ExecuteAsync(route.Success((ItemBase)new ItemWithSecrets("1", "W", "s", false)))
         );
 
         Assert.True(

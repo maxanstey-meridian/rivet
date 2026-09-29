@@ -29,12 +29,21 @@ public sealed class RivetUnionAttribute : JsonConverterAttribute
 /// in declaration order. Wrappers are positional records whose parameters
 /// mirror their properties (the shape the importer generates).
 /// </summary>
-public sealed class RivetUnionJsonConverter<T> : JsonConverter<T>
+internal sealed class RivetUnionJsonConverter<T> : JsonConverter<T>
 {
     private static readonly PropertyInfo[] _variantProperties = typeof(T)
         .GetProperties(BindingFlags.Public | BindingFlags.Instance)
         .Where(property => property.CanRead)
         .ToArray();
+
+    // The importer generates positional records: one constructor whose parameters
+    // correspond 1:1 (by name, case-insensitively) with the variant properties.
+    private static readonly ConstructorInfo _constructor = typeof(T)
+        .GetConstructors()
+        .OrderByDescending(candidate => candidate.GetParameters().Length)
+        .First();
+
+    private static readonly ParameterInfo[] _parameters = _constructor.GetParameters();
 
     public override T? Read(
         ref Utf8JsonReader reader,
@@ -108,25 +117,19 @@ public sealed class RivetUnionJsonConverter<T> : JsonConverter<T>
         return element.ValueKind is JsonValueKind.Object or JsonValueKind.Array;
     }
 
-    private static T Construct(PropertyInfo matched, object? value)
-    {
-        // The importer generates positional records: one constructor whose
-        // parameters correspond 1:1 (by name, case-insensitively) with the
-        // variant properties.
-        var constructor = typeof(T)
-            .GetConstructors()
-            .OrderByDescending(candidate => candidate.GetParameters().Length)
-            .First();
-
-        var arguments = constructor
-            .GetParameters()
-            .Select(parameter =>
-                string.Equals(parameter.Name, matched.Name, StringComparison.OrdinalIgnoreCase)
-                    ? value
-                    : null
-            )
-            .ToArray();
-
-        return (T)constructor.Invoke(arguments);
-    }
+    private static T Construct(PropertyInfo matched, object? value) =>
+        (T)
+            _constructor.Invoke(
+                _parameters
+                    .Select(parameter =>
+                        string.Equals(
+                            parameter.Name,
+                            matched.Name,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                            ? value
+                            : null
+                    )
+                    .ToArray()
+            );
 }

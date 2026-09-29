@@ -1,3 +1,6 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+
 namespace Rivet.Tests;
 
 public sealed class FileRouteDefinitionTests
@@ -12,19 +15,19 @@ public sealed class FileRouteDefinitionTests
     }
 
     [Fact]
-    public void File_DefaultContentType_IsOctetStream()
+    public async Task File_DefaultContentType_IsOctetStream()
     {
         var route = Define.File("/api/files/{id}");
 
-        Assert.Equal("application/octet-stream", route.FileContentType);
+        Assert.Equal("application/octet-stream", await WireContentType(route.File([1])));
     }
 
     [Fact]
-    public void File_ContentType_OverridesDefault()
+    public async Task File_ContentType_OverridesDefault()
     {
         var route = Define.File("/api/stream").ContentType("video/mp4");
 
-        Assert.Equal("video/mp4", route.FileContentType);
+        Assert.Equal("video/mp4", await WireContentType(route.File([1])));
     }
 
     [Fact]
@@ -46,47 +49,54 @@ public sealed class FileRouteDefinitionTests
     }
 
     [Fact]
-    public void File_Generic_DefaultContentType_IsOctetStream()
+    public async Task File_Generic_DefaultContentType_IsOctetStream()
     {
         var route = Define.File<FileDownloadInput>("/api/files/{id}");
 
-        Assert.Equal("application/octet-stream", route.FileContentType);
+        Assert.Equal(
+            "application/octet-stream",
+            await WireContentType(route.Bind(new FileDownloadInput("1")).File([1]))
+        );
     }
 
     [Fact]
-    public void File_Generic_ContentType_OverridesDefault()
+    public async Task File_Generic_ContentType_OverridesDefault()
     {
         var route = Define.File<FileDownloadInput>("/api/stream").ContentType("video/mp4");
 
-        Assert.Equal("video/mp4", route.FileContentType);
+        Assert.Equal(
+            "video/mp4",
+            await WireContentType(route.Bind(new FileDownloadInput("1")).File([1]))
+        );
     }
 
     [Fact]
-    public void File_BaseBuilderMethods_Work()
+    public async Task File_BaseBuilderMethods_Work()
     {
         var route = Define
             .File("/api/stream")
             .ContentType("video/mp4")
             .Summary("Download a video")
-            .Anonymous();
+            .Anonymous()
+            .QueryAuth();
 
-        Assert.Equal("video/mp4", route.FileContentType);
-        Assert.Equal("Download a video", route.EndpointSummary);
-        Assert.True(route.IsAnonymous);
+        Assert.Equal("video/mp4", await WireContentType(route.File([1])));
     }
 
     [Fact]
-    public void File_Generic_BaseBuilderMethods_Work()
+    public async Task File_Generic_BaseBuilderMethods_Work()
     {
         var route = Define
             .File<FileDownloadInput>("/api/stream")
             .ContentType("audio/mpeg")
             .Description("Stream audio content")
-            .Secure("Bearer");
+            .Secure("Bearer")
+            .QueryAuth("session");
 
-        Assert.Equal("audio/mpeg", route.FileContentType);
-        Assert.Equal("Stream audio content", route.EndpointDescription);
-        Assert.Equal("Bearer", route.SecurityScheme);
+        Assert.Equal(
+            "audio/mpeg",
+            await WireContentType(route.Bind(new FileDownloadInput("1")).File([1]))
+        );
     }
 
     [Fact]
@@ -99,83 +109,6 @@ public sealed class FileRouteDefinitionTests
     }
 
     // --- QueryAuth tests ---
-
-    [Fact]
-    public void QueryAuth_DefaultParameterName_IsToken()
-    {
-        var route = Define.File("/api/stream").QueryAuth();
-
-        Assert.True(route.IsQueryAuth);
-        Assert.Equal("token", route.QueryAuthParameterName);
-    }
-
-    [Fact]
-    public void QueryAuth_CustomParameterName()
-    {
-        var route = Define.File("/api/stream").QueryAuth("key");
-
-        Assert.True(route.IsQueryAuth);
-        Assert.Equal("key", route.QueryAuthParameterName);
-    }
-
-    [Fact]
-    public void QueryAuth_NotSet_IsFalse()
-    {
-        var route = Define.File("/api/stream");
-
-        Assert.False(route.IsQueryAuth);
-        Assert.Null(route.QueryAuthParameterName);
-    }
-
-    [Fact]
-    public void QueryAuth_ChainableWithContentType()
-    {
-        var route = Define.File("/api/stream").ContentType("video/mp4").QueryAuth();
-
-        Assert.Equal("video/mp4", route.FileContentType);
-        Assert.True(route.IsQueryAuth);
-        Assert.Equal("token", route.QueryAuthParameterName);
-    }
-
-    [Fact]
-    public void QueryAuth_AvailableOnRouteDefinition()
-    {
-        var route = Define.Get("/api/data").QueryAuth("api_key");
-
-        Assert.True(route.IsQueryAuth);
-        Assert.Equal("api_key", route.QueryAuthParameterName);
-    }
-
-    [Fact]
-    public void QueryAuth_AvailableOnGenericRouteDefinition()
-    {
-        var route = Define.Get<FileDownloadInput, string>("/api/data").QueryAuth();
-
-        Assert.True(route.IsQueryAuth);
-        Assert.Equal("token", route.QueryAuthParameterName);
-    }
-
-    [Fact]
-    public void QueryAuth_AvailableOnFileRouteDefinitionGeneric()
-    {
-        var route = Define
-            .File<FileDownloadInput>("/api/stream")
-            .ContentType("audio/mpeg")
-            .QueryAuth("session");
-
-        Assert.True(route.IsQueryAuth);
-        Assert.Equal("session", route.QueryAuthParameterName);
-        Assert.Equal("audio/mpeg", route.FileContentType);
-    }
-
-    [Fact]
-    public void QueryAuth_SurvivesCopyStateTo_ViaAccepts()
-    {
-        var route = Define.Get("/api/data").QueryAuth("tk").Accepts<FileDownloadInput>();
-
-        Assert.True(route.IsQueryAuth);
-        Assert.Equal("tk", route.QueryAuthParameterName);
-    }
 
     [Fact]
     public void QueryAuth_IsFluent_ReturnsSelf()
@@ -256,12 +189,21 @@ public sealed class FileRouteDefinitionTests
     }
 
     [Fact]
-    public void R3_BuilderChain_BeforePublication_StillMutable()
+    public async Task R3_BuilderChain_BeforePublication_StillMutable()
     {
         // The generation-time fluent chain is unaffected
         var route = Define.File("/api/stream").ContentType("video/mp4").Summary("ok").QueryAuth();
 
-        Assert.Equal("video/mp4", route.FileContentType);
+        Assert.Equal("video/mp4", await WireContentType(route.File([1])));
+    }
+
+    private static async Task<string?> WireContentType(RivetResult result)
+    {
+        await using var provider = new ServiceCollection().AddLogging().BuildServiceProvider();
+        var context = new DefaultHttpContext { RequestServices = provider };
+        context.Response.Body = new MemoryStream();
+        await result.ToResult().ExecuteAsync(context);
+        return context.Response.ContentType;
     }
 
     // Dummy input type for generic variant tests

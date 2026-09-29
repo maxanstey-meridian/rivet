@@ -1,19 +1,58 @@
 namespace Rivet;
 
-using System.Reflection;
-using System.Text.Json.Serialization;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
 
-internal sealed record ResponseRepresentation(string MediaType, bool IsBinary);
+/// <summary>A declared response media type, parsed once when the contract is published.</summary>
+internal sealed record ResponseRepresentation(
+    string MediaType,
+    bool IsBinary,
+    bool IsWellFormed,
+    bool IsJson,
+    bool IsUtf8OrUnspecified
+)
+{
+    public static readonly ResponseRepresentation Json = Create("application/json", false);
 
+    /// <summary>Representations are matched on the media type without parameters.</summary>
+    public string Key { get; } = KeyOf(MediaType);
+
+    public static string KeyOf(string mediaType) =>
+        MediaTypeHeaderValue.TryParse(mediaType, out var parsed)
+            ? parsed.MediaType.Value ?? mediaType
+            : mediaType;
+
+    public static ResponseRepresentation Create(string mediaType, bool isBinary)
+    {
+        if (!MediaTypeHeaderValue.TryParse(mediaType, out var parsed))
+        {
+            return new(mediaType, isBinary, false, false, false);
+        }
+
+        var isJson =
+            parsed.Suffix.Equals("json", StringComparison.OrdinalIgnoreCase)
+            || parsed.Type.Equals("application", StringComparison.OrdinalIgnoreCase)
+                && parsed.SubTypeWithoutSuffix.Equals("json", StringComparison.OrdinalIgnoreCase);
+        var isUtf8OrUnspecified =
+            !parsed.Charset.HasValue
+            || parsed.Charset.Equals("utf-8", StringComparison.OrdinalIgnoreCase);
+        return new(mediaType, isBinary, true, isJson, isUtf8OrUnspecified);
+    }
+}
+
+/// <summary>
+/// One declared response. <see cref="Body"/> is the representation Success/Error write
+/// with (null when ambiguous); <see cref="Binary"/> holds the File(...) representations.
+/// </summary>
 internal sealed record ResponseContract(
     string StatusKey,
     int? StatusCode,
     Type? PayloadType,
-    string? PreferredContentType,
-    IReadOnlyDictionary<string, ResponseRepresentation> Content
+    int RepresentationCount,
+    ResponseRepresentation? Body,
+    IReadOnlyList<ResponseRepresentation> Binary
 );
 
 internal sealed record ResponseSet(
@@ -49,23 +88,6 @@ public sealed class BoundRouteDefinition<TOutput>
     public RivetResult Error<TError>(int statusCode, TError payload) =>
         RivetTerminal.Error(_contract, statusCode, payload);
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        byte[] content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         byte[] content,
         string? downloadName = null,
@@ -84,23 +106,6 @@ public sealed class BoundRouteDefinition<TOutput>
             contentType
         );
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        Stream content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         Stream content,
         string? downloadName = null,
@@ -117,23 +122,6 @@ public sealed class BoundRouteDefinition<TOutput>
             lastModified,
             entityTag,
             contentType
-        );
-
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.PhysicalFile(
-            _contract,
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
         );
 
     public RivetResult File(
@@ -168,23 +156,6 @@ public sealed class BoundRouteDefinition
     public RivetResult Error<TError>(int statusCode, TError payload) =>
         RivetTerminal.Error(_contract, statusCode, payload);
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        byte[] content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         byte[] content,
         string? downloadName = null,
@@ -203,23 +174,6 @@ public sealed class BoundRouteDefinition
             contentType
         );
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        Stream content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         Stream content,
         string? downloadName = null,
@@ -236,23 +190,6 @@ public sealed class BoundRouteDefinition
             lastModified,
             entityTag,
             contentType
-        );
-
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.PhysicalFile(
-            _contract,
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
         );
 
     public RivetResult File(
@@ -285,23 +222,6 @@ public sealed class BoundFileRouteDefinition
     public RivetResult Error<TError>(int statusCode, TError payload) =>
         RivetTerminal.Error(_contract, statusCode, payload);
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        byte[] content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         byte[] content,
         string? downloadName = null,
@@ -320,23 +240,6 @@ public sealed class BoundFileRouteDefinition
             contentType
         );
 
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        Stream content,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.File(
-            _contract,
-            content,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
-        );
-
     public RivetResult File(
         Stream content,
         string? downloadName = null,
@@ -353,23 +256,6 @@ public sealed class BoundFileRouteDefinition
             lastModified,
             entityTag,
             contentType
-        );
-
-    // Retained for callers compiled against the original five-parameter signature.
-    public RivetResult File(
-        string physicalPath,
-        string? downloadName,
-        bool enableRangeProcessing,
-        DateTimeOffset? lastModified,
-        string? entityTag
-    ) =>
-        RivetTerminal.PhysicalFile(
-            _contract,
-            physicalPath,
-            downloadName,
-            enableRangeProcessing,
-            lastModified,
-            entityTag
         );
 
     public RivetResult File(
@@ -405,14 +291,13 @@ internal static class RivetTerminal
         }
 
         EnsureBodyless(contract, response);
-        EnsureNotFile(contract, response);
-        return new RivetBodyResult(response.StatusCode!.Value, null, null, null, false);
+        return new RivetBodyResult(contract, response.StatusCode!.Value, null, null, null, false);
     }
 
     internal static RivetResult Success<T>(EndpointContract contract, T payload)
     {
         var response = RequireSuccess(contract);
-        ValidatePayload(contract, response, typeof(T), payload);
+        ValidatePayload(contract, response, payload);
         return Body(contract, response, payload);
     }
 
@@ -429,14 +314,14 @@ internal static class RivetTerminal
         }
 
         EnsureBodyless(contract, response);
-        return new RivetBodyResult(statusCode, null, null, null, false);
+        return new RivetBodyResult(contract, statusCode, null, null, null, false);
     }
 
     internal static RivetResult Error<T>(EndpointContract contract, int statusCode, T payload)
     {
         var response = ResolveError(contract, statusCode);
         EnsureErrorIsNotBinary(contract, response);
-        ValidatePayload(contract, response, typeof(T), payload);
+        ValidatePayload(contract, response, payload);
         return Body(contract, response with { StatusCode = statusCode }, payload);
     }
 
@@ -447,7 +332,7 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType = null
+        string? contentType
     )
     {
         if (content is null)
@@ -473,7 +358,7 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType = null
+        string? contentType
     )
     {
         if (content is null)
@@ -509,7 +394,7 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType = null
+        string? contentType
     )
     {
         if (string.IsNullOrWhiteSpace(physicalPath))
@@ -540,7 +425,7 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType = null
+        string? contentType
     )
     {
         var response = RequireSuccess(contract);
@@ -552,73 +437,56 @@ internal static class RivetTerminal
             );
         }
 
-        var binaryRepresentations = response
-            .Content.Values.Where(representation => representation.IsBinary)
-            .ToArray();
-        if (binaryRepresentations.Length == 0)
+        if (response.Binary.Count == 0)
         {
             throw Violation(contract, "does not declare a binary/file success response");
         }
 
-        if (contentType is null && binaryRepresentations.Length > 1)
+        if (contentType is null && response.Binary.Count > 1)
         {
             throw Violation(
                 contract,
                 "declares multiple binary/file success representations; File(...) is ambiguous between "
-                    + string.Join(", ", binaryRepresentations.Select(item => $"'{item.MediaType}'"))
+                    + string.Join(", ", response.Binary.Select(item => $"'{item.MediaType}'"))
             );
         }
 
-        if (
-            contentType is not null
-            && !binaryRepresentations.Any(representation =>
-                string.Equals(
-                    representation.MediaType,
-                    contentType,
+        var representation = contentType is null
+            ? response.Binary[0]
+            : response.Binary.FirstOrDefault(item =>
+                item.Key.Equals(
+                    ResponseRepresentation.KeyOf(contentType),
                     StringComparison.OrdinalIgnoreCase
                 )
             )
-        )
+                ?? throw Violation(
+                    contract,
+                    $"does not declare binary/file success content type '{contentType}'"
+                );
+        if (!representation.IsWellFormed)
         {
             throw Violation(
                 contract,
-                $"does not declare binary/file success content type '{contentType}'"
-            );
-        }
-
-        contentType ??= binaryRepresentations[0].MediaType;
-        if (
-            string.IsNullOrWhiteSpace(contentType)
-            || !MediaTypeHeaderValue.TryParse(contentType, out _)
-        )
-        {
-            throw Violation(
-                contract,
-                $"declares malformed binary/file success content type '{contentType}'"
+                $"declares malformed binary/file success content type '{representation.MediaType}'"
             );
         }
 
         EntityTagHeaderValue? parsedEntityTag = null;
-        if (entityTag is not null)
+        if (
+            entityTag is not null
+            && (
+                !EntityTagHeaderValue.TryParse(entityTag, out parsedEntityTag)
+                || parsedEntityTag.Equals(EntityTagHeaderValue.Any)
+            )
+        )
         {
-            try
-            {
-                parsedEntityTag = EntityTagHeaderValue.Parse(entityTag);
-                if (parsedEntityTag == EntityTagHeaderValue.Any)
-                {
-                    throw new FormatException();
-                }
-            }
-            catch (FormatException)
-            {
-                throw Violation(contract, $"received malformed entity tag '{entityTag}'");
-            }
+            throw Violation(contract, $"received malformed entity tag '{entityTag}'");
         }
 
         return new RivetFileResult(
             response.StatusCode!.Value,
             source,
-            contentType,
+            contentType ?? representation.MediaType,
             downloadName,
             enableRangeProcessing,
             lastModified,
@@ -641,9 +509,29 @@ internal static class RivetTerminal
         }
 
         EnsureNotFile(contract, response);
-        var representation = SelectRepresentation(contract, response);
-        EnsureSupportedJsonCharset(contract, response, representation);
-        if (!IsJson(representation.MediaType) && payload is not string)
+        var representation =
+            response.Body
+            ?? throw Violation(
+                contract,
+                $"declares multiple non-JSON representations for status '{response.StatusKey}' without an explicit primary runtime content type"
+            );
+        if (!representation.IsWellFormed)
+        {
+            throw Violation(
+                contract,
+                $"declares malformed content type '{representation.MediaType}' for status '{response.StatusKey}'"
+            );
+        }
+
+        if (representation.IsJson && !representation.IsUtf8OrUnspecified)
+        {
+            throw Violation(
+                contract,
+                $"declares unsupported JSON content type '{representation.MediaType}' for status '{response.StatusKey}'; JSON responses are UTF-8"
+            );
+        }
+
+        if (!representation.IsJson && payload is not string)
         {
             throw Violation(
                 contract,
@@ -652,46 +540,12 @@ internal static class RivetTerminal
         }
 
         return new RivetBodyResult(
+            contract,
             response.StatusCode!.Value,
             payload,
             response.PayloadType,
             representation.MediaType,
-            true
-        );
-    }
-
-    private static ResponseRepresentation SelectRepresentation(
-        EndpointContract contract,
-        ResponseContract response
-    )
-    {
-        if (
-            response.PreferredContentType is { } preferred
-            && response.Content.TryGetValue(preferred, out var preferredRepresentation)
-        )
-        {
-            return preferredRepresentation;
-        }
-
-        if (response.Content.Count == 0)
-        {
-            return new ResponseRepresentation("application/json", false);
-        }
-
-        var json = response.Content.Values.FirstOrDefault(item => IsJson(item.MediaType));
-        if (json is not null)
-        {
-            return json;
-        }
-
-        if (response.Content.Count == 1)
-        {
-            return response.Content.Values.Single();
-        }
-
-        throw Violation(
-            contract,
-            $"declares multiple non-JSON representations for status '{response.StatusKey}' without an explicit primary runtime content type"
+            representation.IsJson
         );
     }
 
@@ -707,7 +561,7 @@ internal static class RivetTerminal
 
     private static void EnsureNotFile(EndpointContract contract, ResponseContract response)
     {
-        if (response.Content.Values.Any(representation => representation.IsBinary))
+        if (response.Binary.Count > 0)
         {
             throw Violation(
                 contract,
@@ -718,7 +572,7 @@ internal static class RivetTerminal
 
     private static void EnsureBodyless(EndpointContract contract, ResponseContract response)
     {
-        if (response.Content.Count > 0)
+        if (response.RepresentationCount > 0)
         {
             throw Violation(
                 contract,
@@ -729,7 +583,7 @@ internal static class RivetTerminal
 
     private static void EnsureErrorIsNotBinary(EndpointContract contract, ResponseContract response)
     {
-        if (response.Content.Values.Any(representation => representation.IsBinary))
+        if (response.Binary.Count > 0)
         {
             throw Violation(
                 contract,
@@ -774,7 +628,6 @@ internal static class RivetTerminal
     private static void ValidatePayload<T>(
         EndpointContract contract,
         ResponseContract response,
-        Type suppliedType,
         T payload
     )
     {
@@ -795,11 +648,11 @@ internal static class RivetTerminal
             );
         }
 
-        if (!expectedType.IsAssignableFrom(suppliedType))
+        if (!expectedType.IsAssignableFrom(typeof(T)))
         {
             throw Violation(
                 contract,
-                $"declares payload type '{expectedType.FullName}' for status {response.StatusCode}, but '{suppliedType.FullName}' was supplied"
+                $"declares payload type '{expectedType.FullName}' for status {response.StatusCode}, but '{typeof(T).FullName}' was supplied"
             );
         }
 
@@ -811,26 +664,38 @@ internal static class RivetTerminal
                 $"cannot carry native ASP.NET result type '{valueType.FullName}'; use a contract-owned terminal payload"
             );
         }
+    }
 
-        var polymorphic = expectedType.GetCustomAttribute<JsonPolymorphicAttribute>();
-        var registeredDerivedType = expectedType
-            .GetCustomAttributes<JsonDerivedTypeAttribute>()
-            .Any(attribute => attribute.DerivedType == valueType);
+    /// <summary>
+    /// A subtype instance where a type is declared would serialize undeclared members, unless
+    /// the serializer treats the declared type polymorphically (attributes or a resolver),
+    /// so this runs where the adapter has the host's serializer options.
+    /// </summary>
+    internal static void EnsureDeclaredRuntimeType(
+        RivetBodyResult result,
+        JsonSerializerOptions options
+    )
+    {
+        var expectedType = result.PayloadType!;
+        var valueType = result.Value!.GetType();
         if (
             valueType == expectedType
-            || polymorphic is null && (expectedType.IsInterface || expectedType.IsAbstract)
             || expectedType == typeof(object)
             || Nullable.GetUnderlyingType(expectedType) == valueType
-            || polymorphic is not null && registeredDerivedType
+            || !expectedType.IsAssignableFrom(valueType)
         )
         {
             return;
         }
 
-        if (expectedType.IsAssignableFrom(valueType))
+        var polymorphism = options.GetTypeInfo(expectedType).PolymorphismOptions;
+        var declared = polymorphism is null
+            ? expectedType.IsInterface || expectedType.IsAbstract
+            : polymorphism.DerivedTypes.Any(derived => derived.DerivedType == valueType);
+        if (!declared)
         {
             throw Violation(
-                contract,
+                result.Contract,
                 $"received runtime payload type '{valueType.FullName}' where '{expectedType.FullName}' is declared; undeclared members could reach the wire"
             );
         }
@@ -844,37 +709,6 @@ internal static class RivetTerminal
     private static bool AllowsBody(int statusCode) =>
         statusCode is >= 200 and not 204 and not 205 and not 304;
 
-    private static bool IsJson(string mediaType)
-    {
-        var value = mediaType.Split(';', 2)[0].Trim();
-        return value.Equals("application/json", StringComparison.OrdinalIgnoreCase)
-            || value.EndsWith("+json", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static bool IsNativeFrameworkResult(Type type) =>
         typeof(IResult).IsAssignableFrom(type) || typeof(IActionResult).IsAssignableFrom(type);
-
-    private static void EnsureSupportedJsonCharset(
-        EndpointContract contract,
-        ResponseContract response,
-        ResponseRepresentation representation
-    )
-    {
-        if (!IsJson(representation.MediaType))
-        {
-            return;
-        }
-
-        if (
-            !MediaTypeHeaderValue.TryParse(representation.MediaType, out var mediaType)
-            || mediaType.Charset.HasValue
-                && !mediaType.Charset.Value.Equals("utf-8", StringComparison.OrdinalIgnoreCase)
-        )
-        {
-            throw Violation(
-                contract,
-                $"declares unsupported JSON content type '{representation.MediaType}' for status '{response.StatusKey}'; JSON responses are UTF-8"
-            );
-        }
-    }
 }
