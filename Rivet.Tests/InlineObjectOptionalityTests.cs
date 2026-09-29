@@ -59,31 +59,6 @@ public sealed class InlineObjectOptionalityTests
     }
 
     [Fact]
-    public void Json_Without_Optionality_Uses_Legacy_Nullable_Convention()
-    {
-        const string json = """
-            {
-              "kind": "inlineObject",
-              "properties": [
-                {
-                  "name": "legacy",
-                  "type": {
-                    "kind": "nullable",
-                    "inner": { "kind": "primitive", "type": "string" }
-                  }
-                }
-              ]
-            }
-            """;
-
-        var type = Assert.IsType<TsType.InlineObject>(
-            JsonSerializer.Deserialize<TsType>(json, _options)
-        );
-
-        Assert.True(type.Fields[0].Optional);
-    }
-
-    [Fact]
     public void Tuple_Syntax_Does_Not_Infer_Optionality_From_Nullability()
     {
         TsType.InlineObjectField field = (

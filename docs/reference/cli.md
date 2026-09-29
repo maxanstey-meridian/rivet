@@ -65,10 +65,8 @@ public output:
 dotnet rivet --from contract.json --output ./generated
 ```
 
-Inline-object properties written by current runtimes always include an explicit
-`optional` flag, independently of whether their value type is nullable. For
-compatibility with older contract IR, the reader still treats a missing
-`optional` flag as optional when the property's type is nullable.
+An inline-object property without an `optional` flag is required, whether or not its
+value type is nullable.
 
 ## Checks And Listing
 

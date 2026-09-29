@@ -125,12 +125,19 @@ public abstract record TsType
             IReadOnlyList<InlineObjectField> Fields
     ) : TsType;
 
-    [JsonConverter(typeof(InlineObjectFieldJsonConverter))]
+    /// <summary>
+    /// One inline-object property. An absent <c>optional</c> reads as required: a nullable
+    /// type does not make the property optional.
+    /// </summary>
     public sealed record InlineObjectField(
-        string Name,
-        TsType Type,
+        [property: JsonRequired] string Name,
+        [property: JsonRequired] TsType Type,
         bool Optional = false,
-        InlineObjectFieldSurface Surface = InlineObjectFieldSurface.Both
+        [property:
+            JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault),
+            JsonConverter(typeof(JsonStringEnumConverter<InlineObjectFieldSurface>))
+        ]
+            InlineObjectFieldSurface Surface = InlineObjectFieldSurface.Both
     )
     {
         // Keep concise tuple syntax without conflating a nullable value with an absent field.
@@ -152,51 +159,6 @@ public abstract record TsType
         [property: JsonRequired] TsType Type,
         TsTypeMetadata? Metadata = null
     );
-
-    /// <summary>
-    /// An absent <c>optional</c> means the field is optional exactly when its type is nullable.
-    /// </summary>
-    private sealed class InlineObjectFieldJsonConverter : JsonConverter<InlineObjectField>
-    {
-        private sealed record Wire(
-            [property: JsonRequired] string Name,
-            [property: JsonRequired] TsType Type,
-            bool? Optional,
-            [property:
-                JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault),
-                JsonConverter(typeof(JsonStringEnumConverter<InlineObjectFieldSurface>))
-            ]
-                InlineObjectFieldSurface Surface = InlineObjectFieldSurface.Both
-        );
-
-        public override InlineObjectField Read(
-            ref Utf8JsonReader reader,
-            Type typeToConvert,
-            JsonSerializerOptions options
-        )
-        {
-            var wire =
-                JsonSerializer.Deserialize<Wire>(ref reader, options)
-                ?? throw new JsonException("An inline object property must be a JSON object.");
-            return new InlineObjectField(
-                wire.Name,
-                wire.Type,
-                wire.Optional ?? wire.Type is Nullable,
-                wire.Surface
-            );
-        }
-
-        public override void Write(
-            Utf8JsonWriter writer,
-            InlineObjectField value,
-            JsonSerializerOptions options
-        ) =>
-            JsonSerializer.Serialize(
-                writer,
-                new Wire(value.Name, value.Type, value.Optional, value.Surface),
-                options
-            );
-    }
 
     /// <summary>
     /// Produces a stable, human-readable name suffix for a TsType.

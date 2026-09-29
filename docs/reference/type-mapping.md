@@ -1,8 +1,11 @@
 # Type Mapping
 
 How C# types lower into OpenAPI 3.1 schemas. Property names camelCase by default
-(`[JsonPropertyName]` overrides); non-nullable, non-`[RivetOptional]` members are
-`required`.
+(`[JsonPropertyName]` overrides). Every object property is `required` unless it is
+marked `[RivetOptional]` or `[JsonIgnore(Condition = WhenWritingNull | WhenWritingDefault)]`.
+Nullability does not make a property optional: System.Text.Json writes `null`, so a
+`string?` property is required with type `["string", "null"]`. Query, header and form
+parameters follow the model binder instead: a nullable parameter is optional.
 
 ## Primitives
 
@@ -38,7 +41,8 @@ How C# types lower into OpenAPI 3.1 schemas. Property names camelCase by default
   `[JsonStringEnumMemberName]` overrides the converter's casing. When the casing
   produces the same wire value for two members (`RIV1106`), generation fails — loudly, never with a wrong string union.
 - **Nullable members** (`string?`, `int?`) → 3.1 type arrays
-  (`"type": ["string", "null"]`); nullable `$ref`s use a null branch.
+  (`"type": ["string", "null"]`); nullable `$ref`s use a null branch. They stay in
+  `required`; add `[RivetOptional]` for a property clients may omit.
 - **Collections** (`List<T>`, `IReadOnlyList<T>`, arrays) → `array` with `items`.
 - **Dictionaries** → `object` with `additionalProperties`. Non-string keys add a
   `propertyNames` schema: enum keys `$ref` the enum schema (which is emitted —

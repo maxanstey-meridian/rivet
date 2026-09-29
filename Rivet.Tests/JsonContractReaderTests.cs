@@ -180,6 +180,44 @@ public sealed class JsonContractReaderTests
     }
 
     [Fact]
+    public void InlineObject_Field_Without_Optional_Flag_Is_Required_Even_When_Nullable()
+    {
+        var json = """
+            {
+                "types": [],
+                "enums": [],
+                "endpoints": [
+                    {
+                        "name": "createBuyer",
+                        "httpMethod": "POST",
+                        "routeTemplate": "/buyers",
+                        "controllerName": "buyer",
+                        "params": [],
+                        "returnType": null,
+                        "responses": [],
+                        "requestType": {
+                            "kind": "inlineObject",
+                            "properties": [
+                                { "name": "note", "type": { "kind": "nullable", "inner": { "kind": "primitive", "type": "string" } } },
+                                { "name": "hint", "type": { "kind": "nullable", "inner": { "kind": "primitive", "type": "string" } }, "optional": true }
+                            ]
+                        }
+                    }
+                ]
+            }
+            """;
+
+        var fields = Assert
+            .IsType<TsType.InlineObject>(
+                Assert.Single(JsonContractReader.Read(json).Endpoints).RequestType
+            )
+            .Fields;
+
+        Assert.False(fields.Single(field => field.Name == "note").Optional);
+        Assert.True(fields.Single(field => field.Name == "hint").Optional);
+    }
+
+    [Fact]
     public void RequestType_Absent_IsNull()
     {
         var json = """

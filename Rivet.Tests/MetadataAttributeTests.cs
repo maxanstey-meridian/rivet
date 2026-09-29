@@ -65,7 +65,7 @@ public sealed class MetadataAttributeTests
             namespace Other
             {
                 [System.AttributeUsage(System.AttributeTargets.All)]
-                public sealed class RequiredAttribute : System.Attribute;
+                public sealed class RivetOptionalAttribute : System.Attribute;
 
                 [System.AttributeUsage(System.AttributeTargets.All)]
                 public sealed class RivetDescriptionAttribute(string text) : System.Attribute
@@ -78,8 +78,8 @@ public sealed class MetadataAttributeTests
             {
                 [RivetType]
                 public sealed record ItemDto(
-                    [property: Other.Required] string? Nickname,
-                    [property: System.ComponentModel.DataAnnotations.Required] string? Alias,
+                    [property: Other.RivetOptional] string? Nickname,
+                    [property: Rivet.RivetOptional] string? Alias,
                     [property: Other.RivetDescription("not a Rivet description")] string Name);
 
                 [RivetContract]
@@ -101,8 +101,8 @@ public sealed class MetadataAttributeTests
             .Select(e => e.GetString())
             .ToList();
 
-        Assert.DoesNotContain("nickname", required);
-        Assert.Contains("alias", required);
+        Assert.Contains("nickname", required);
+        Assert.DoesNotContain("alias", required);
         Assert.False(
             schema
                 .GetProperty("properties")

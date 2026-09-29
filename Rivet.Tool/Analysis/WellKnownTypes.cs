@@ -115,7 +115,6 @@ public sealed class WellKnownTypes(Compilation c)
         Stj(c, "JsonStringEnumMemberNameAttribute");
 
     // DataAnnotations
-    public INamedTypeSymbol? Required { get; } = DataAnnotation(c, "RequiredAttribute");
     public INamedTypeSymbol? MinLength { get; } = DataAnnotation(c, "MinLengthAttribute");
     public INamedTypeSymbol? MaxLength { get; } = DataAnnotation(c, "MaxLengthAttribute");
     public INamedTypeSymbol? Length { get; } = DataAnnotation(c, "LengthAttribute");

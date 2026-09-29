@@ -2708,7 +2708,7 @@ public sealed class OpenApiRoundTripTests
     /// The property must be present but its value can be null.
     /// </summary>
     [Fact]
-    public void NullableProperties_AreOptionalAndNullable()
+    public void NullableProperties_AreRequiredAndNullable()
     {
         var source = """
             using System;
@@ -2761,11 +2761,11 @@ public sealed class OpenApiRoundTripTests
         Assert.Contains("id", required);
         Assert.Contains("createdAt", required);
 
-        // Nullable params without [Required] are NOT required
-        Assert.DoesNotContain("bio", required);
-        Assert.DoesNotContain("score", required);
-        Assert.DoesNotContain("optionalRef", required);
-        Assert.DoesNotContain("deletedAt", required);
+        // Nullable params are required too: the serializer writes null
+        Assert.Contains("bio", required);
+        Assert.Contains("score", required);
+        Assert.Contains("optionalRef", required);
+        Assert.Contains("deletedAt", required);
 
         // Nullable fields carry the 3.1 type array with a "null" member
         static string[] Types(JsonElement prop) =>

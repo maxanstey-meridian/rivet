@@ -73,7 +73,7 @@ public sealed class AnnotationRoundTripTests
         """;
 
     [Fact]
-    public void Required_Attribute_Overrides_Nullability()
+    public void Nullable_Properties_Are_Required_With_Or_Without_Required_Attribute()
     {
         using var doc = CompilationHelper.EmitOpenApi(NullabilityFixture);
         var schema = doc
@@ -90,8 +90,8 @@ public sealed class AnnotationRoundTripTests
         // string? with [Required] → required
         Assert.Contains("nullableRequired", requiredNames);
 
-        // string? without [Required] → NOT required
-        Assert.DoesNotContain("nullableOptional", requiredNames);
+        // string? without [Required] → still required: null is written to the wire
+        Assert.Contains("nullableOptional", requiredNames);
 
         // string without [Required] → required (existing behaviour)
         Assert.Contains("nonNullableNoAttr", requiredNames);
@@ -345,6 +345,51 @@ public sealed class AnnotationRoundTripTests
                 );
             }
         }
+    }
+
+    [Fact]
+    public void Import_Compile_Emit_Preserves_Required_Exactly()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Item": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "note": { "type": ["string", "null"] },
+                    "tag": { "type": "string" },
+                    "hint": { "type": ["string", "null"] }
+                },
+                "required": ["name", "note"]
+            }
+            """,
+            paths: """
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } } } } } }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec);
+        var reemitted = OpenApiEmitter.Emit(
+            [],
+            CompilationHelper
+                .DiscoverAndWalk(CompilationHelper.CompileImportResult(imported))
+                .Walker.Definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            null
+        );
+        var required = JsonDocument
+            .Parse(reemitted)
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Item")
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(name => name.GetString())
+            .Order()
+            .ToList();
+
+        Assert.Equal(["name", "note"], required);
     }
 
     [Fact]

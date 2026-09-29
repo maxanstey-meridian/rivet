@@ -171,14 +171,14 @@ public sealed class GenericTypeTests
 
         var (_, walker) = CompilationHelper.WalkContract(source);
 
-        // JsonNode? → (unknown | null), optional; CSharpType preserved for round-tripping
+        // JsonNode? → (unknown | null), required; CSharpType preserved for round-tripping
         var dto = walker.Definitions["DynamicDto"];
         var dataProp = Assert.Single(dto.Properties, p => p.Name == "data");
         var nullable = Assert.IsType<TsType.Nullable>(dataProp.Type);
         var inner = Assert.IsType<TsType.Primitive>(nullable.Inner);
         Assert.Equal("unknown", inner.Name);
         Assert.Equal("JsonNode", inner.CSharpType);
-        Assert.True(dataProp.IsOptional);
+        Assert.False(dataProp.IsOptional);
     }
 
     [Fact]

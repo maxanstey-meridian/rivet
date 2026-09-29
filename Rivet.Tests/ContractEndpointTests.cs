@@ -143,7 +143,7 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
-    public void Required_Field_Is_Required_In_Schema()
+    public void Included_Fields_Are_Required_Whether_Or_Not_Nullable()
     {
         var source = """
             using System.Text.Json.Serialization;
@@ -171,7 +171,7 @@ public sealed class ContractEndpointTests
         var (_, walker) = CompilationHelper.WalkContract(source);
         var properties = walker.Definitions["NoteDto"].Properties;
         Assert.False(properties.Single(p => p.Name == "text").IsOptional);
-        Assert.True(properties.Single(p => p.Name == "tag").IsOptional);
+        Assert.False(properties.Single(p => p.Name == "tag").IsOptional);
     }
 
     [Fact]

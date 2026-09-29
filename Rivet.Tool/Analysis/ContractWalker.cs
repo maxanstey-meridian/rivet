@@ -1317,8 +1317,11 @@ public static class ContractWalker
             var inputProperty = matches[0];
             if (
                 routeNames.Contains(RouteParser.NormalizeForMatching(inputProperty.Name))
-                || !SymbolEqualityComparer.Default.Equals(bodyProperty.Type, inputProperty.Type)
-                || typeWalker.IsOptional(bodyProperty) != typeWalker.IsOptional(inputProperty)
+                || !SymbolEqualityComparer.IncludeNullability.Equals(
+                    bodyProperty.Type,
+                    inputProperty.Type
+                )
+                || typeWalker.CanOmitOnWire(bodyProperty) != typeWalker.CanOmitOnWire(inputProperty)
             )
             {
                 return false;

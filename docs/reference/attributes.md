@@ -21,7 +21,7 @@ validating hosts at runtime.
 | `[RivetDescription("text")]` | property, class | `description` |
 | `[RivetExample("json")]` | property | `examples: [value]` (3.1 keyword; value parsed as a JSON literal) |
 | `[RivetDefault("json")]` | property | `default` (JSON literal) |
-| `[RivetOptional]` | property | Removes the property from `required` |
+| `[RivetOptional]` | property | Removes the property from `required`. Nullability alone never does; on a query, header or form parameter a nullable type is already optional. |
 | `[RivetReadOnly]` / `[RivetWriteOnly]` | property | `readOnly: true` / `writeOnly: true` |
 | `[RivetFormat("fmt")]` | property | `format` — for custom formats (`uri-template`, `currency`, ...) with no dedicated C# type; takes precedence over formats inferred from DataAnnotations |
 | `[RivetConstraints(...)]` | property | `multipleOf`, `uniqueItems` — the two constraints DataAnnotations cannot express. Also a `ValidationAttribute`: enforced at runtime under validating hosts (`[ApiController]` model validation, `Validator.TryValidateObject`); null values pass — pair with `[Required]`. See [Runtime validation](../guides/runtime-validation.md#enforcing-constraints-at-runtime) |

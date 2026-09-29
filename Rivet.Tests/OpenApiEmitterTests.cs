@@ -4788,7 +4788,7 @@ public sealed class OpenApiEmitterTests
             .ToList();
         Assert.Contains("id", required);
         Assert.Contains("name", required);
-        Assert.DoesNotContain("note", required); // nullable → optional
+        Assert.Contains("note", required); // nullable is still on the wire
     }
 
     // ========== Optional parameters and bodies ==========
@@ -4939,17 +4939,36 @@ public sealed class OpenApiEmitterTests
         Assert.Contains("value", requiredNames);
     }
 
-    [Fact]
-    public void OpenApi_Nullable_Field_Is_Not_Required()
+    // System.Text.Json writes null members by default, so a nullable member is always on
+    // the wire: nullability alone never makes a property optional.
+    [Theory]
+    [InlineData("string? Description", true)]
+    [InlineData("TagDto? Tag", true)]
+    [InlineData("[property: RivetOptional] string? Description", false)]
+    [InlineData(
+        "[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Description",
+        false
+    )]
+    [InlineData(
+        "[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] string? Description",
+        false
+    )]
+    public void Nullable_Property_Is_Required_Unless_Declared_Omittable(
+        string parameter,
+        bool expectRequired
+    )
     {
-        // Nullable properties without [Required] should NOT be in the required array
-        var source = """
+        var source = $$"""
+            using System.Text.Json.Serialization;
             using Rivet;
 
             namespace Test;
 
             [RivetType]
-            public sealed record ItemDto(string Name, string? Description);
+            public sealed record TagDto(string Label);
+
+            [RivetType]
+            public sealed record ItemDto(string Name, {{parameter}});
 
             [RivetContract]
             public static class ItemsContract
@@ -4959,16 +4978,97 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var doc = CompilationHelper.EmitOpenApi(source);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var schema = doc
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
             .GetProperty("ItemDto");
-        var required = schema.GetProperty("required");
-        var requiredNames = required.EnumerateArray().Select(e => e.GetString()).ToList();
+        var requiredNames = schema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
+        var member = schema.GetProperty("properties").EnumerateObject().Last();
 
         Assert.Contains("name", requiredNames);
-        Assert.DoesNotContain("description", requiredNames);
+        Assert.Equal(expectRequired, requiredNames.Contains(member.Name));
+        Assert.Contains("null", member.Value.GetRawText());
+    }
+
+    [Fact]
+    public void Multipart_Input_Record_Follows_The_Object_Schema_Rule()
+    {
+        // A contract's multipart input is a record component, so it follows the
+        // object-schema rule: a nullable part needs [RivetOptional] to be omittable.
+        var source = """
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record UploadInput(IFormFile? Cover, [property: RivetOptional] IFormFile? Avatar);
+
+            [RivetType]
+            public sealed record ItemDto(string Name);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly RouteDefinition<UploadInput, ItemDto> Upload =
+                    Define.Post<UploadInput, ItemDto>("/api/items");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var required = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("UploadInput")
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
+
+        Assert.Equal(["cover"], required);
+    }
+
+    [Fact]
+    public void Nullable_Query_Parameter_Stays_Optional()
+    {
+        // Parameters follow binder semantics: a nullable query value may be absent.
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record SearchInput(string Term, int? Page);
+
+            [RivetType]
+            public sealed record ItemDto(string Name);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly RouteDefinition<SearchInput, ItemDto> Search =
+                    Define.Get<SearchInput, ItemDto>("/api/items");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var parameters = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/items")
+            .GetProperty("get")
+            .GetProperty("parameters")
+            .EnumerateArray()
+            .ToDictionary(p => p.GetProperty("name").GetString()!, p => p);
+
+        Assert.True(parameters["term"].GetProperty("required").GetBoolean());
+        Assert.False(
+            parameters["page"].TryGetProperty("required", out var required) && required.GetBoolean()
+        );
     }
 
     [Fact]

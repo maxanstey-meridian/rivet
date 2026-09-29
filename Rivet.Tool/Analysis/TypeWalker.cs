@@ -517,18 +517,18 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// Whether the serializer may leave the member off the wire: [JsonIgnore]
-    /// WhenWritingNull/WhenWritingDefault omission, or an optional member. Such a
-    /// member cannot be required on the emitted schema (acceptance:json-property-surface).
+    /// Whether an object-schema property may be absent: only when declared so with
+    /// [RivetOptional], or when [JsonIgnore(WhenWritingNull|WhenWritingDefault)] lets the
+    /// serializer omit it. System.Text.Json writes null members by default, so
+    /// nullability alone keeps a property required (typed <c>T | null</c>).
     /// </summary>
-    private bool CanOmitOnWire(ISymbol member) =>
-        (
-            member is IPropertySymbol prop
+    public bool CanOmitOnWire(ISymbol member) =>
+        member.HasAttribute(_types.RivetOptional)
+        || member is IPropertySymbol prop
             && prop.GetAttribute(_types.JsonIgnore) is { } ignore
             && ReadJsonIgnoreCondition(ignore)
                 is JsonIgnoreCondition.WhenWritingNull
-                    or JsonIgnoreCondition.WhenWritingDefault
-        ) || IsOptional(member);
+                    or JsonIgnoreCondition.WhenWritingDefault;
 
     /// <summary>
     /// Flattens the wire-member surface of a type across its BaseType chain
@@ -2131,32 +2131,14 @@ public sealed class TypeWalker
             : null;
 
     /// <summary>
-    /// Requiredness of a wire member (property or field): [RivetOptional] wins, then
-    /// [Required], then the C# `required` keyword, then nullability.
+    /// Whether a property bound as a query, header or form parameter is optional. This
+    /// follows binder semantics, not the JSON wire: [RivetOptional], or a nullable type
+    /// (an absent value binds as null). Object-schema properties use
+    /// <see cref="CanOmitOnWire"/>.
     /// </summary>
-    public bool IsOptional(ISymbol member)
-    {
-        if (member.HasAttribute(_types.RivetOptional))
-        {
-            return true;
-        }
-
-        if (member.HasAttribute(_types.Required))
-        {
-            return false;
-        }
-
-        // The C# `required` keyword: must be set at construction, may still be
-        // null — the one form that expresses required-AND-nullable (a real axis:
-        // 139 github-corpus properties). DataAnnotations [Required] cannot say
-        // this (it rejects null at MVC binding); the keyword can.
-        if (member is IPropertySymbol { IsRequired: true } or IFieldSymbol { IsRequired: true })
-        {
-            return false;
-        }
-
-        return GetMemberType(member).NullableAnnotation == NullableAnnotation.Annotated;
-    }
+    public bool IsOptional(ISymbol member) =>
+        member.HasAttribute(_types.RivetOptional)
+        || GetMemberType(member).NullableAnnotation == NullableAnnotation.Annotated;
 
     /// <summary>The declared type of a wire member (property or field).</summary>
     public static ITypeSymbol GetMemberType(ISymbol member) =>

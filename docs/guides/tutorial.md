@@ -66,7 +66,8 @@ The spec is OpenAPI 3.1. The interesting parts:
 ```
 
 Note the defaults: property names are camelCased, `Guid` becomes
-`format: uuid`, and non-nullable members are `required`. Enums are integers by
+`format: uuid`, and every member is `required` unless marked `[RivetOptional]`
+(a nullable member is required and nullable). Enums are integers by
 default (ordinary System.Text.Json serialization); add a type-level
 `[JsonConverter(typeof(JsonStringEnumConverter<TaskStatus>))]` to make them
 strings.
