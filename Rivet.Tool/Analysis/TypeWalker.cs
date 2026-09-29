@@ -43,7 +43,6 @@ public sealed class TypeWalker
     private readonly Dictionary<string, TsTypeDefinition> _definitions = new();
     private readonly Dictionary<string, TsType.Brand> _brands = new();
     private readonly Dictionary<string, TsType> _enums = new();
-    private readonly Dictionary<string, string?> _typeNamespaces = new();
     private readonly HashSet<string> _visiting = new();
 
     // A5: emitted-name registry keyed by fully-qualified name (namespace + arity).
@@ -213,7 +212,7 @@ public sealed class TypeWalker
                 || attribute.ConstructorArguments[5].Value is not string metadataJson
             )
             {
-                throw new InvalidOperationException(
+                throw new RivetUserException(
                     "Invalid generated schema metadata in RivetGeneratedSchemaAttribute."
                 );
             }
@@ -241,7 +240,7 @@ public sealed class TypeWalker
                     : null;
             if (!_generatedSchemaNames.Add(name))
             {
-                throw new InvalidOperationException(
+                throw new RivetUserException(
                     $"Generated schema name '{name}' collides with another generated type."
                 );
             }
@@ -254,7 +253,7 @@ public sealed class TypeWalker
 
             TsType leaf = isArray
                 ? itemSchemaRef is null
-                    ? throw new InvalidOperationException(
+                    ? throw new RivetUserException(
                         $"Generated array schema '{name}' has no item schema reference."
                     )
                     : new TsType.Array(new TsType.TypeRef(itemSchemaRef))
@@ -270,7 +269,7 @@ public sealed class TypeWalker
 
             if (_definitions.ContainsKey(name))
             {
-                throw new InvalidOperationException(
+                throw new RivetUserException(
                     $"Generated schema name '{name}' collides with another generated type."
                 );
             }
@@ -322,8 +321,6 @@ public sealed class TypeWalker
     public IReadOnlyDictionary<string, TsTypeDefinition> Definitions => _definitions;
     public IReadOnlyDictionary<string, TsType.Brand> Brands => _brands;
     public IReadOnlyDictionary<string, TsType> Enums => _enums;
-    public IReadOnlyDictionary<string, string?> TypeNamespaces => _typeNamespaces;
-    public bool HasErrors { get; private set; }
 
     /// <summary>
     /// Creates a walker and walks the provided [RivetType]-attributed types.
@@ -360,7 +357,7 @@ public sealed class TypeWalker
 
         if (!_definitions.ContainsKey(schemaRef) && !_enums.ContainsKey(schemaRef))
         {
-            throw new InvalidOperationException(
+            throw new RivetUserException(
                 $"{context} references unknown generated schema '{schemaRef}'."
             );
         }
@@ -861,7 +858,6 @@ public sealed class TypeWalker
                 GetTypeDescription(definition),
                 GetTypeMetadata(definition)
             );
-            _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
             return;
         }
 
@@ -878,7 +874,6 @@ public sealed class TypeWalker
                 GetTypeDescription(definition),
                 GetTypeMetadata(definition)
             );
-            _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
             return;
         }
 
@@ -1145,7 +1140,6 @@ public sealed class TypeWalker
             GetTypeMetadata(definition),
             ReadGeneratedSchemaMetadata(definition).GetValueOrDefault("")
         );
-        _typeNamespaces.TryAdd(name, GetNamespaceGroup(definition));
     }
 
     private static string? GetTypeDescription(INamedTypeSymbol definition)
@@ -1199,7 +1193,7 @@ public sealed class TypeWalker
                 || attribute.ConstructorArguments[0].Value is not string pointer
             )
             {
-                throw new InvalidOperationException(
+                throw new RivetUserException(
                     "Invalid generated schema metadata in RivetGeneratedSchemaMetadataAttribute."
                 );
             }
@@ -1710,7 +1704,7 @@ public sealed class TypeWalker
                                 != fields.Count
                         )
                         {
-                            throw new ContractAnalysisException(
+                            throw new RivetUserException(
                                 $"error {Diagnostics.UnsupportedEnumConverter}: string enum '{namedType.Name}' contains flags or aliased values. Use distinct values without Flags, or a numeric enum."
                             );
                         }
@@ -1733,7 +1727,7 @@ public sealed class TypeWalker
                                     .Where(f => EnumWireValue(f, enumNamingPolicy) == colliding)
                                     .Select(f => f.Name)
                             );
-                            throw new ContractAnalysisException(
+                            throw new RivetUserException(
                                 $"error {Diagnostics.EnumWireValueCollision}: enum '{namedType.Name}' members "
                                     + $"({collidingMembers}) produce the same wire value '{colliding}'. "
                                     + "Use distinct member names or explicit wire names."
@@ -1779,7 +1773,6 @@ public sealed class TypeWalker
                             _generatedEnumMetadata.GetValueOrDefault(enumName)
                         );
                     }
-                    _typeNamespaces.TryAdd(enumName, GetNamespaceGroup(namedType));
                 }
 
                 return new TsType.TypeRef(enumName);
@@ -1808,7 +1801,6 @@ public sealed class TypeWalker
                         GetTypeDescription(namedType)
                     );
                     _brands.TryAdd(brandName, brand);
-                    _typeNamespaces.TryAdd(brandName, GetNamespaceGroup(namedType));
                     return brand;
                 }
 
@@ -1918,7 +1910,7 @@ public sealed class TypeWalker
             || converters[0].ConstructorArguments is not [{ Value: INamedTypeSymbol converterType }]
         )
         {
-            throw new ContractAnalysisException(
+            throw new RivetUserException(
                 $"error {Diagnostics.UnsupportedEnumConverter}: enum '{type.Name}' must use one explicit [JsonConverter(typeof(...))] declaration; custom converter attributes are unsupported."
             );
         }
@@ -1931,7 +1923,7 @@ public sealed class TypeWalker
             )
         )
         {
-            throw new ContractAnalysisException(
+            throw new RivetUserException(
                 $"error {Diagnostics.UnsupportedEnumConverter}: converter for enum '{type.Name}' must target that enum."
             );
         }
@@ -1943,7 +1935,7 @@ public sealed class TypeWalker
             ("Rivet", "RivetCamelCaseEnumConverter") => (true, RivetNamingPolicy.CamelCase),
             ("Rivet", "RivetSnakeCaseEnumConverter") => (true, RivetNamingPolicy.SnakeCase),
             ("Rivet", "RivetKebabCaseEnumConverter") => (true, RivetNamingPolicy.KebabCase),
-            _ => throw new ContractAnalysisException(
+            _ => throw new RivetUserException(
                 $"error {Diagnostics.UnsupportedEnumConverter}: enum '{type.Name}' uses unsupported converter '{converterType.ToDisplayString()}'. Use a built-in enum converter or a Rivet enum policy converter."
             ),
         };
@@ -2205,7 +2197,7 @@ public sealed class TypeWalker
             )
         )
         {
-            throw new ContractAnalysisException(
+            throw new RivetUserException(
                 $"error {Diagnostics.InvalidRivetScalarShape}: [RivetScalar] type "
                     + $"'{symbol.ToDisplayString()}' must be a non-generic class/struct/record "
                     + "with exactly one public readable non-indexer property "
@@ -2582,20 +2574,5 @@ public sealed class TypeWalker
         }
 
         return field.Type.NullableAnnotation == NullableAnnotation.Annotated;
-    }
-
-    /// <summary>
-    /// Gets the last segment of the containing namespace for grouping.
-    /// Returns null for types in the global namespace.
-    /// </summary>
-    private static string? GetNamespaceGroup(INamedTypeSymbol symbol)
-    {
-        var ns = symbol.ContainingNamespace;
-        if (ns is null || ns.IsGlobalNamespace)
-        {
-            return null;
-        }
-
-        return ns.Name;
     }
 }

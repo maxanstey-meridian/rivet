@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Rivet.Tool;
 using Rivet.Tool.Analysis;
 
 namespace Rivet.Tests;
@@ -328,8 +329,11 @@ public sealed class ReusableComponentIdentityRoundTripTests
             """
         );
 
-        var exception = Assert.Throws<ContractAnalysisException>(() =>
-            OpenApiProvenanceWalker.Walk(compilation)
+        var exception = Assert.Throws<RivetUserException>(() =>
+            OpenApiProvenanceWalker.Walk(
+                compilation,
+                CompilationHelper.DiscoverAndWalk(compilation).Walker
+            )
         );
         Assert.Contains("component parameter JSON", exception.Message);
         Assert.Contains("not an object", exception.Message);

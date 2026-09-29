@@ -228,7 +228,6 @@ public static class OpenApiImporter
         OpenApiDocumentProvenance provenance
     )
     {
-        const string prefix = "#/components/schemas/";
         var result = new HashSet<string>(StringComparer.Ordinal);
         foreach (
             var json in (provenance.ComponentParameters ?? [])
@@ -251,17 +250,11 @@ public static class OpenApiImporter
                         property.NameEquals("$ref")
                         && property.Value.ValueKind == JsonValueKind.String
                         && property.Value.GetString() is { } reference
-                        && reference.StartsWith(prefix, StringComparison.Ordinal)
                     )
                     {
-                        var token = reference[prefix.Length..];
-                        if (!token.Contains('/', StringComparison.Ordinal))
+                        if (JsonPointer.TryGetComponentName(reference, "schemas", out var name))
                         {
-                            result.Add(
-                                Uri.UnescapeDataString(token)
-                                    .Replace("~1", "/", StringComparison.Ordinal)
-                                    .Replace("~0", "~", StringComparison.Ordinal)
-                            );
+                            result.Add(name);
                         }
                     }
                     else
@@ -801,8 +794,7 @@ public static class OpenApiImporter
         JsonObject? referenced = null;
         if (GetLocalReference(pathItem) is { } reference)
         {
-            var pointer = DecodePointer(reference);
-            if (!referenceChain.Add(pointer))
+            if (!referenceChain.Add(reference))
             {
                 throw new InvalidOperationException(
                     $"Cyclic local path-item reference detected at '{reference}'."
@@ -815,7 +807,7 @@ public static class OpenApiImporter
                     $"Local path-item reference '{reference}' does not target an object."
                 );
             referenced = ResolvePathItem(referenced, root, referenceChain);
-            referenceChain.Remove(pointer);
+            referenceChain.Remove(reference);
         }
 
         var local = (JsonObject)pathItem.DeepClone();
@@ -1002,8 +994,7 @@ public static class OpenApiImporter
         }
 
         referenceChain ??= new HashSet<string>();
-        var pointer = DecodePointer(reference);
-        if (!referenceChain.Add(pointer))
+        if (!referenceChain.Add(reference))
         {
             throw new InvalidOperationException(
                 $"Cyclic local {kind} reference detected at '{reference}'."
@@ -1016,7 +1007,7 @@ public static class OpenApiImporter
                 $"Local {kind} reference '{reference}' does not target an object."
             );
         var resolved = ResolveReferenceObject(target, root, kind, referenceChain);
-        referenceChain.Remove(pointer);
+        referenceChain.Remove(reference);
 
         foreach (var sibling in new[] { "summary", "description" })
         {
@@ -1088,61 +1079,12 @@ public static class OpenApiImporter
             : null;
     }
 
-    private static JsonNode ResolvePointer(JsonObject root, string reference)
-    {
-        var pointer = DecodePointer(reference);
-        JsonNode current = root;
-        if (pointer.Length == 0)
-        {
-            return current;
-        }
-
-        foreach (var encodedToken in pointer[1..].Split('/'))
-        {
-            var token = encodedToken.Replace("~1", "/").Replace("~0", "~");
-            current = current switch
-            {
-                JsonObject obj
-                    when obj.TryGetPropertyValue(token, out var child) && child is not null =>
-                    child,
-                JsonArray array
-                    when int.TryParse(token, out var index)
-                        && index >= 0
-                        && index < array.Count
-                        && array[index] is { } child => child,
-                _ => throw new InvalidOperationException(
-                    $"Local JSON reference '{reference}' targets a missing value."
-                ),
-            };
-        }
-
-        return current;
-    }
-
-    private static string DecodePointer(string reference)
-    {
-        string pointer;
-        try
-        {
-            pointer = Uri.UnescapeDataString(reference[1..]);
-        }
-        catch (UriFormatException exception)
-        {
-            throw new InvalidOperationException(
-                $"Local JSON reference '{reference}' has invalid percent encoding.",
-                exception
+    private static JsonNode ResolvePointer(JsonObject root, string reference) =>
+        JsonPointer.TryResolve(root, reference, out var target)
+            ? target
+            : throw new InvalidOperationException(
+                $"Local JSON reference '{reference}' targets a missing value."
             );
-        }
-
-        if (pointer.Length > 0 && pointer[0] != '/')
-        {
-            throw new InvalidOperationException(
-                $"Local JSON reference '{reference}' is not a JSON Pointer."
-            );
-        }
-
-        return pointer;
-    }
 
     /// <summary>
     /// I1: detects components/schemas entries that are pure $ref aliases forming a cycle

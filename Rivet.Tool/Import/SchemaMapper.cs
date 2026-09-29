@@ -78,11 +78,6 @@ internal sealed class SchemaMapper
     public string AddExtraRecord(GeneratedRecord record) => _ctx.AddOrReuseExtraRecord(record);
 
     /// <summary>
-    /// Check if a type name was already mapped from components/schemas.
-    /// </summary>
-    public bool HasMappedSchema(string name) => _ctx.SchemaNameMap.ContainsValue(name);
-
-    /// <summary>
     /// P2 wave 5: the header-augmented replacement for a component record, or null when
     /// the record was not augmented. Consulted by OpenApiImporter when writing Types/.
     /// </summary>
@@ -169,35 +164,6 @@ internal sealed class SchemaMapper
         return null;
     }
 
-    /// <summary>
-    /// P2 wave 5 (body-merge case): replaces a component record's properties with a merged
-    /// list that differs ONLY by [RivetHeader] properties — the JSON shape (non-header
-    /// subset) must be unchanged, or the call refuses and returns false. Idempotent: an
-    /// identical property list returns true without touching anything.
-    /// </summary>
-    public bool TryAugmentComponentRecord(string name, IReadOnlyList<RecordProperty> merged)
-    {
-        if (!_ctx.MappedComponentRecords.TryGetValue(name, out var record))
-        {
-            return false;
-        }
-
-        if (record.Properties.SequenceEqual(merged))
-        {
-            return true;
-        }
-
-        var existingPlain = record.Properties.Where(p => p.HeaderName is null).ToList();
-        var mergedPlain = merged.Where(p => p.HeaderName is null).ToList();
-        if (!existingPlain.SequenceEqual(mergedPlain))
-        {
-            return false;
-        }
-
-        _ctx.ReplaceComponentRecord(name, record with { Properties = merged.ToList() });
-        return true;
-    }
-
     /// <summary>Base name first, then numbered variants ordered by suffix.</summary>
     private IEnumerable<string> ComponentCandidates(string baseName)
     {
@@ -248,21 +214,6 @@ internal sealed class SchemaMapper
         }
 
         return int.TryParse(name.AsSpan(baseName.Length), out var suffix) ? suffix : null;
-    }
-
-    /// <summary>
-    /// Finds an already-mapped record (component or synthesized extra) by its C# name.
-    /// Used by ContractBuilder to merge path/query parameters into a body-derived input
-    /// record (I14) — null when the name does not resolve to a plain record.
-    /// </summary>
-    public GeneratedRecord? FindRecordByName(string name)
-    {
-        if (_ctx.MappedComponentRecords.TryGetValue(name, out var record))
-        {
-            return record;
-        }
-
-        return _ctx.ExtraRecords.FirstOrDefault(r => r.Name == name);
     }
 
     /// <summary>
@@ -1605,9 +1556,7 @@ internal sealed class SchemaMapper
     }
 
     private static string? DecodeComponentId(string? value) =>
-        value
-            ?.Replace("~1", "/", StringComparison.Ordinal)
-            .Replace("~0", "~", StringComparison.Ordinal);
+        value is null ? null : JsonPointer.Unescape(Uri.UnescapeDataString(value));
 
     private bool TryResolveNullableType(IOpenApiSchema schema, string? context, out string result)
     {
@@ -1932,15 +1881,7 @@ internal sealed class SchemaMapper
                 return SynthesizeInlineEnum(schema, context);
             }
 
-            var stringType = QualifyFrameworkScalarIfShadowed(
-                SchemaClassifier.ResolveStringType(schema)
-            );
-            if (schema.Enum is { Count: > 0 })
-            {
-                WarnEnumConstraintDropped(schema, context, stringType);
-            }
-
-            return stringType;
+            return QualifyFrameworkScalarIfShadowed(SchemaClassifier.ResolveStringType(schema));
         }
 
         if (type.HasFlag(JsonSchemaType.Integer))

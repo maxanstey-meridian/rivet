@@ -512,10 +512,30 @@ public sealed class OpenApiImporterTests
             title: "API"
         );
 
-        Assert.Contains(
-            ".SecurityRequirements()",
-            CompilationHelper.FindFile(CompilationHelper.Import(spec), "HealthContract.cs")
+        var imported = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(imported, "HealthContract.cs");
+        Assert.Contains(".Anonymous()", contract);
+        Assert.DoesNotContain(".SecurityRequirements()", contract);
+
+        var compilation = CompilationHelper.CompileImportResult(imported);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        using var emitted = JsonDocument.Parse(
+            OpenApiEmitter.Emit(
+                endpoints,
+                walker.Definitions,
+                walker.Brands,
+                walker.Enums,
+                security: null
+            )
         );
+        var security = emitted
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/health")
+            .GetProperty("get")
+            .GetProperty("security");
+        Assert.Equal(JsonValueKind.Array, security.ValueKind);
+        Assert.Equal(0, security.GetArrayLength());
     }
 
     [Fact]
@@ -1664,10 +1684,7 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(LoadFixture(), "TaskBoard.Contracts");
 
         // Health endpoint has an explicit empty requirement list.
-        Assert.Contains(
-            ".SecurityRequirements()",
-            CompilationHelper.FindFile(result, "HealthContract.cs")
-        );
+        Assert.Contains(".Anonymous()", CompilationHelper.FindFile(result, "HealthContract.cs"));
 
         // Members invite has security: [{"admin": []}].
         Assert.Contains(

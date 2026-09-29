@@ -355,4 +355,56 @@ public sealed class CliExitCodeTests
             DeleteWork(work);
         }
     }
+
+    [Fact]
+    public async Task Form_Endpoint_With_Non_Form_Content_Type_Exits_1_Without_Stack_Trace()
+    {
+        const string source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed class ItemsController : ControllerBase
+            {
+                [Consumes("text/plain"), RivetEndpoint, HttpPost("/items")]
+                public string Post([FromForm] string title) => "ok";
+            }
+            """;
+        var (work, sourcePath) = await WriteSourceAsync("Api.cs", source);
+        try
+        {
+            var result = CliRunner.RunCli(work, [sourcePath]);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("RIV1100", result.StdErr);
+            Assert.DoesNotContain("Unhandled exception", result.StdErr);
+            Assert.DoesNotContain("   at ", result.StdErr);
+        }
+        finally
+        {
+            DeleteWork(work);
+        }
+    }
+
+    [Fact]
+    public async Task Malformed_Contract_Json_Exits_1_Without_Stack_Trace()
+    {
+        var (work, contractPath) = await WriteSourceAsync("contract.json", "{");
+        try
+        {
+            var result = CliRunner.RunCli(
+                work,
+                ["--from", contractPath, "--output", Path.Combine(work, "out")]
+            );
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("contract.json", result.StdErr);
+            Assert.DoesNotContain("   at ", result.StdErr);
+        }
+        finally
+        {
+            DeleteWork(work);
+        }
+    }
 }

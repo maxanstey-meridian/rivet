@@ -347,6 +347,6 @@ public sealed class CliParserTests
         var options = CliParser.ParseArgs(["--from-openapi", "spec.json", "--security", "admin"]);
 
         Assert.NotNull(options);
-        Assert.Equal("admin", options!.DefaultSecurity);
+        Assert.Equal(["admin"], options!.SecuritySchemes!);
     }
 }

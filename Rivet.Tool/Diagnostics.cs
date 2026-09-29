@@ -196,8 +196,7 @@ public static class Diagnostics
             "Header parameter named Accept, Content-Type or Authorization — OpenAPI forbids these as header parameters; the parameter is omitted from the spec.",
         [DuplicateResponseStatusInIr] =
             "External contract IR declares the same response status more than once; the duplicate is dropped and the first declaration is kept.",
-        [DuplicateSecuritySchemeDefinition] =
-            "A security scheme name is configured as both the primary and an additional definition.",
+        [DuplicateSecuritySchemeDefinition] = "Two --security values define the same scheme name.",
         [ConflictingOperations] =
             "Two incompatible endpoints declare the same normalized HTTP method + route — generation fails instead of writing a lossy spec.",
         [ImportAliasCycleBroken] =

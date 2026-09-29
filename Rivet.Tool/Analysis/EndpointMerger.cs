@@ -15,14 +15,6 @@ namespace Rivet.Tool.Analysis;
 /// </summary>
 public static class EndpointMerger
 {
-    /// <summary>
-    /// Thrown when two non-equivalent endpoint declarations share one transport
-    /// identity. Program.cs routes this through the established stderr + exit 1
-    /// pattern so --routes cannot print and return success.
-    /// </summary>
-    public sealed class TransportConflictException(string message)
-        : InvalidOperationException(message);
-
     public static IReadOnlyList<TsEndpointDefinition> Merge(
         IReadOnlyList<TsEndpointDefinition> contractEndpoints,
         IReadOnlyList<TsEndpointDefinition> annotationEndpoints
@@ -50,7 +42,7 @@ public static class EndpointMerger
                     continue;
                 }
 
-                throw new TransportConflictException(
+                throw new RivetUserException(
                     $"error {Diagnostics.ConflictingOperations}: transport identity {key.Method} {key.Route} is declared by two incompatible endpoints: "
                         + $"'{existing.ControllerName}.{existing.Name}' and '{endpoint.ControllerName}.{endpoint.Name}'. "
                         + "Resolve the contradiction at the source — first-wins/last-wins cannot resolve conflicting declarations."

@@ -163,7 +163,7 @@ public sealed class OpenApiRoundTripTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var security = SecurityMetadataWalker.Walk(compilation);
-        var emittedJson = OpenApiEmitter.EmitWithSecurityMetadata(
+        var emittedJson = OpenApiEmitter.Emit(
             endpoints,
             walker.Definitions,
             walker.Brands,
@@ -248,7 +248,7 @@ public sealed class OpenApiRoundTripTests
         var securityConfig =
             security is null ? null
             : security.Contains('=') ? SecurityParser.ParseMany(["bearer", security])
-            : SecurityParser.Parse(security);
+            : SecurityParser.ParseMany([security]);
         var openApiJson = OpenApiEmitter.Emit(
             endpoints,
             walker.Definitions,
@@ -1250,7 +1250,8 @@ public sealed class OpenApiRoundTripTests
 
         // Anonymous endpoint
         var health = endpoints.First(e => e.RouteTemplate == "/api/health");
-        Assert.Empty(Assert.IsType<SecurityRequirements>(health.SecurityRequirements).Alternatives);
+        Assert.True(health.Security?.IsAnonymous);
+        Assert.Null(health.SecurityRequirements);
 
         // Override endpoint
         var admin = endpoints.First(e => e.RouteTemplate == "/api/admin");
@@ -2051,10 +2052,7 @@ public sealed class OpenApiRoundTripTests
         var json0 = OpenApiEmitter.Emit(eps0, wlk0.Definitions, wlk0.Brands, wlk0.Enums, secCfg);
 
         // Step 1 (round 1): OpenAPI → import → compile → walk → OpenAPI
-        var import1 = OpenApiImporter.Import(
-            json0,
-            new ImportOptions("RoundTrip", secCfg!.SchemeName)
-        );
+        var import1 = OpenApiImporter.Import(json0, new ImportOptions("RoundTrip", "bearer"));
 
         var comp1 = CompilationHelper.CreateCompilationFromMultiple(
             import1.Files.Select(f => f.Content).ToArray()
@@ -2064,10 +2062,7 @@ public sealed class OpenApiRoundTripTests
         var json1 = OpenApiEmitter.Emit(eps1, wlk1.Definitions, wlk1.Brands, wlk1.Enums, secCfg);
 
         // Step 2 (round 2): OpenAPI → import → compile → walk → OpenAPI
-        var import2 = OpenApiImporter.Import(
-            json1,
-            new ImportOptions("RoundTrip", secCfg!.SchemeName)
-        );
+        var import2 = OpenApiImporter.Import(json1, new ImportOptions("RoundTrip", "bearer"));
         var comp2 = CompilationHelper.CreateCompilationFromMultiple(
             import2.Files.Select(f => f.Content).ToArray()
         );
@@ -2383,9 +2378,8 @@ public sealed class OpenApiRoundTripTests
         // ───── Assertion group 8: Security survived ─────
 
         // Anonymous
-        Assert.Empty(
-            Assert.IsType<SecurityRequirements>(healthCheck.SecurityRequirements).Alternatives
-        );
+        Assert.True(healthCheck.Security?.IsAnonymous);
+        Assert.Null(healthCheck.SecurityRequirements);
 
         // Custom scheme
         var adminPurge = eps2.First(e => e.RouteTemplate == "/api/admin/cache");

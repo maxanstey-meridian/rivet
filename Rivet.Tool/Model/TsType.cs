@@ -211,68 +211,6 @@ public abstract record TsType
         };
     }
 
-    /// <summary>
-    /// Recursively collects all named type references from a TsType tree.
-    /// </summary>
-    public static void CollectTypeRefs(TsType type, HashSet<string> names)
-    {
-        switch (type)
-        {
-            case TypeRef r:
-                names.Add(r.Name);
-                break;
-            case Nullable n:
-                CollectTypeRefs(n.Inner, names);
-                break;
-            case Array a:
-                CollectTypeRefs(a.Element, names);
-                break;
-            case Dictionary d:
-                CollectTypeRefs(d.Value, names);
-                if (d.Key is not null)
-                {
-                    CollectTypeRefs(d.Key, names);
-                }
-                break;
-            case Generic g:
-                names.Add(g.Name);
-                foreach (var arg in g.TypeArguments)
-                {
-                    CollectTypeRefs(arg, names);
-                }
-                break;
-            case Brand b:
-                names.Add(b.Name);
-                CollectTypeRefs(b.Inner, names);
-                break;
-            case StringUnion:
-            case IntUnion:
-            case Literal:
-            case Primitive:
-            case TypeParam:
-                // No type refs to collect
-                break;
-            case InlineObject obj:
-                foreach (var field in obj.Fields)
-                {
-                    CollectTypeRefs(field.Type, names);
-                }
-                break;
-            case TaggedUnion tu:
-                foreach (var variant in tu.Variants)
-                {
-                    CollectTypeRefs(variant.Type, names);
-                }
-                break;
-            case Union u:
-                foreach (var variant in u.Variants)
-                {
-                    CollectTypeRefs(variant, names);
-                }
-                break;
-        }
-    }
-
     private static string LiteralNameSuffix(JsonElement value) =>
         value.ValueKind switch
         {

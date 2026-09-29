@@ -1129,10 +1129,6 @@ internal static class CSharpWriter
 
         if (field.SecurityRequirements is { } securityRequirements)
         {
-            if (securityRequirements.Alternatives.Count == 0)
-            {
-                calls.Add(".SecurityRequirements()");
-            }
             for (var order = 0; order < securityRequirements.Alternatives.Count; order++)
             {
                 calls.Add($".SecurityRequirement({order})");

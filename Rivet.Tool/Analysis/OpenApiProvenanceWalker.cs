@@ -6,10 +6,7 @@ namespace Rivet.Tool.Analysis;
 
 internal static class OpenApiProvenanceWalker
 {
-    public static OpenApiDocumentProvenance? Walk(
-        Compilation compilation,
-        TypeWalker? typeWalker = null
-    )
+    public static OpenApiDocumentProvenance? Walk(Compilation compilation, TypeWalker typeWalker)
     {
         var attributes = compilation.Assembly.GetAttributes();
         var infoAttributes = attributes
@@ -21,13 +18,13 @@ internal static class OpenApiProvenanceWalker
         }
         if (infoAttributes.Count != 1)
         {
-            throw new ContractAnalysisException("Multiple Rivet document info declarations found.");
+            throw new RivetUserException("Multiple Rivet document info declarations found.");
         }
 
         var infoArguments = infoAttributes[0].ConstructorArguments;
         if (infoArguments.Length != 11)
         {
-            throw new ContractAnalysisException("Invalid Rivet document info metadata.");
+            throw new RivetUserException("Invalid Rivet document info metadata.");
         }
 
         var contact = RequiredBool(infoArguments[7], "document contact presence")
@@ -78,7 +75,7 @@ internal static class OpenApiProvenanceWalker
             .ToList();
         if (externalDocsAttributes.Count > 1)
         {
-            throw new ContractAnalysisException(
+            throw new RivetUserException(
                 "Multiple Rivet document external-docs declarations found."
             );
         }
@@ -104,7 +101,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 6)
                 {
-                    throw new ContractAnalysisException(
+                    throw new RivetUserException(
                         "Invalid Rivet document component-example metadata."
                     );
                 }
@@ -114,7 +111,7 @@ internal static class OpenApiProvenanceWalker
                 var externalValue = StringValue(args[5]);
                 if ((jsonValue is null) == (externalValue is null))
                 {
-                    throw new ContractAnalysisException(
+                    throw new RivetUserException(
                         $"Rivet document component example '{name}' requires exactly one of JSON value or externalValue."
                     );
                 }
@@ -140,7 +137,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 10)
                 {
-                    throw new ContractAnalysisException(
+                    throw new RivetUserException(
                         "Invalid Rivet document request-body content metadata."
                     );
                 }
@@ -149,12 +146,6 @@ internal static class OpenApiProvenanceWalker
                 TsType? schema = null;
                 if (schemaType is not null)
                 {
-                    if (typeWalker is null)
-                    {
-                        throw new ContractAnalysisException(
-                            "Rivet document request-body content requires a type walker."
-                        );
-                    }
                     var openApiSchemaType = StringValue(args[6]);
                     var format = StringValue(args[7]);
                     schema = ApplySchemaLeafMetadata(
@@ -193,7 +184,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 8)
                 {
-                    throw new ContractAnalysisException(
+                    throw new RivetUserException(
                         "Invalid Rivet document request-body example metadata."
                     );
                 }
@@ -223,9 +214,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 4)
                 {
-                    throw new ContractAnalysisException(
-                        "Invalid Rivet document request-body metadata."
-                    );
+                    throw new RivetUserException("Invalid Rivet document request-body metadata.");
                 }
                 var order = RequiredInt(args[0], "request-body order");
                 return (
@@ -275,7 +264,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 2)
                 {
-                    throw new ContractAnalysisException(
+                    throw new RivetUserException(
                         "Invalid Rivet imported-source fingerprint metadata."
                     );
                 }
@@ -293,7 +282,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 3)
                 {
-                    throw new ContractAnalysisException("Invalid Rivet vendor-extension metadata.");
+                    throw new RivetUserException("Invalid Rivet vendor-extension metadata.");
                 }
 
                 var extension = new OpenApiVendorExtensionProvenance(
@@ -303,7 +292,7 @@ internal static class OpenApiProvenanceWalker
                 );
                 if (!extension.Name.StartsWith("x-", StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new ContractAnalysisException(
+                    throw new RivetUserException(
                         $"Invalid Rivet vendor-extension name '{extension.Name}'."
                     );
                 }
@@ -313,7 +302,7 @@ internal static class OpenApiProvenanceWalker
                 }
                 catch (JsonException exception)
                 {
-                    throw new ContractAnalysisException(
+                    throw new RivetUserException(
                         $"Invalid Rivet vendor-extension JSON for '{extension.Name}': {exception.Message}"
                     );
                 }
@@ -371,7 +360,7 @@ internal static class OpenApiProvenanceWalker
         }
     }
 
-    private static ContractAnalysisException ImportedSourceConflict(string path, string reason) =>
+    private static RivetUserException ImportedSourceConflict(string path, string reason) =>
         new(
             $"error {Diagnostics.ImportedSchemaProvenanceConflict}: imported schema provenance conflicts with the current C# source because '{path}' {reason}; re-import the OpenAPI document or remove/update its raw schema provenance"
         );
@@ -388,7 +377,7 @@ internal static class OpenApiProvenanceWalker
         }
         if (provenanceAttributes.Count != 1)
         {
-            throw new ContractAnalysisException(
+            throw new RivetUserException(
                 $"Multiple Rivet operation provenance declarations found on '{field.Name}'."
             );
         }
@@ -482,7 +471,7 @@ internal static class OpenApiProvenanceWalker
                 }
                 catch (JsonException exception)
                 {
-                    throw new ContractAnalysisException(
+                    throw new RivetUserException(
                         $"Invalid Rivet document component {kind} JSON for '{name}': {exception.Message}"
                     );
                 }
@@ -567,24 +556,23 @@ internal static class OpenApiProvenanceWalker
     private static string? StringValue(TypedConstant value) => value.Value as string;
 
     private static string RequiredString(TypedConstant value, string context) =>
-        StringValue(value)
-        ?? throw new ContractAnalysisException($"Invalid Rivet {context} metadata.");
+        StringValue(value) ?? throw new RivetUserException($"Invalid Rivet {context} metadata.");
 
     private static int RequiredInt(TypedConstant value, string context) =>
         value.Value is int result
             ? result
-            : throw new ContractAnalysisException($"Invalid Rivet {context} metadata.");
+            : throw new RivetUserException($"Invalid Rivet {context} metadata.");
 
     private static bool RequiredBool(TypedConstant value, string context) =>
         value.Value is bool result
             ? result
-            : throw new ContractAnalysisException($"Invalid Rivet {context} metadata.");
+            : throw new RivetUserException($"Invalid Rivet {context} metadata.");
 
     private static IReadOnlyList<string> StringArray(TypedConstant value, string context)
     {
         if (value.Kind != TypedConstantKind.Array || value.IsNull)
         {
-            throw new ContractAnalysisException($"Invalid Rivet {context} metadata.");
+            throw new RivetUserException($"Invalid Rivet {context} metadata.");
         }
 
         return value.Values.Select(item => RequiredString(item, context)).ToList();

@@ -1,3 +1,4 @@
+using Rivet.Tool;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
@@ -1003,7 +1004,7 @@ public sealed class ContractEndpointTests
         // could never reach the wire, so generation fails instead of emitting it.
         // The parse-side guard fires on the shared normalization path every
         // frontend passes through, which is emission — not the walk alone.
-        var exception = Assert.Throws<ContractAnalysisException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.EmitOpenApi(source)
         );
 

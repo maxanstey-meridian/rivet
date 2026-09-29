@@ -139,7 +139,7 @@ public sealed class RealWorldImportTests
         // Emit OpenAPI from walked model
         var security = SecurityMetadataWalker.Walk(comp1);
         var provenance = OpenApiProvenanceWalker.Walk(comp1, wlk1);
-        var emittedJson = OpenApiEmitter.EmitWithSecurityMetadata(
+        var emittedJson = OpenApiEmitter.Emit(
             eps1,
             wlk1.Definitions,
             wlk1.Brands,
@@ -189,7 +189,7 @@ public sealed class RealWorldImportTests
         var eps1 = CompilationHelper.WalkContracts(comp1, disc1, wlk1);
         var security = SecurityMetadataWalker.Walk(comp1);
         var provenance = OpenApiProvenanceWalker.Walk(comp1, wlk1);
-        var emittedJson = OpenApiEmitter.EmitWithSecurityMetadata(
+        var emittedJson = OpenApiEmitter.Emit(
             eps1,
             wlk1.Definitions,
             wlk1.Brands,
@@ -382,14 +382,14 @@ public sealed class RealWorldImportTests
         {
             foreach (var p in ep.Params)
             {
-                TsType.CollectTypeRefs(p.Type, referencedNames);
+                TsTypeRefs.Collect(p.Type, referencedNames);
             }
 
             foreach (var resp in ep.Responses)
             {
                 if (resp.DataType is not null)
                 {
-                    TsType.CollectTypeRefs(resp.DataType, referencedNames);
+                    TsTypeRefs.Collect(resp.DataType, referencedNames);
                 }
             }
         }

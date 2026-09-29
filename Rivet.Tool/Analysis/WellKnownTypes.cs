@@ -47,7 +47,6 @@ public sealed class WellKnownTypes
     public readonly INamedTypeSymbol? IResult;
 
     // Infrastructure
-    public readonly INamedTypeSymbol? CancellationToken;
     public readonly INamedTypeSymbol? IFormFile;
 
     // Typed HTTP results — generic variants
@@ -76,12 +75,6 @@ public sealed class WellKnownTypes
     public readonly INamedTypeSymbol? ForbidHttpResult;
     public readonly INamedTypeSymbol? InternalServerError;
     public readonly INamedTypeSymbol? InternalServerErrorOfT;
-
-    // Variable-status typed results — deliberately absent from the fixed-status
-    // table; recognized only as unresolved result containers.
-    public readonly INamedTypeSymbol? ProblemHttpResult;
-    public readonly INamedTypeSymbol? JsonHttpResultOfT;
-    public readonly INamedTypeSymbol? StatusCodeHttpResult;
 
     // Coverage analysis
     public readonly INamedTypeSymbol? RouteDefinition;
@@ -179,7 +172,6 @@ public sealed class WellKnownTypes
         IResult = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IResult");
 
         // Infrastructure
-        CancellationToken = compilation.GetTypeByMetadataName("System.Threading.CancellationToken");
         IFormFile = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IFormFile");
 
         // Typed HTTP results — generic
@@ -242,18 +234,6 @@ public sealed class WellKnownTypes
         );
         InternalServerErrorOfT = compilation.GetTypeByMetadataName(
             "Microsoft.AspNetCore.Http.HttpResults.InternalServerError`1"
-        );
-
-        // Variable-status typed results — mapped nowhere; a Results<...> branch or a
-        // direct return using them is an unresolved contract.
-        ProblemHttpResult = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult"
-        );
-        JsonHttpResultOfT = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.JsonHttpResult`1"
-        );
-        StatusCodeHttpResult = compilation.GetTypeByMetadataName(
-            "Microsoft.AspNetCore.Http.HttpResults.StatusCodeHttpResult"
         );
 
         // Coverage analysis

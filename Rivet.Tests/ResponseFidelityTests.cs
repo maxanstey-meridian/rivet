@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Rivet.Tool.Analysis;
+using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -39,7 +39,7 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -72,7 +72,7 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -102,7 +102,7 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -140,7 +140,7 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -179,7 +179,7 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -219,7 +219,7 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -305,7 +305,7 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -349,7 +349,7 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -388,7 +388,7 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -551,7 +551,7 @@ public sealed class ResponseFidelityTests
             }
             """;
 
-        var exception = Assert.Throws<ContractAnalysisException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.EmitOpenApi(source)
         );
 
@@ -593,7 +593,7 @@ public sealed class ResponseFidelityTests
 
         // The parse-side guard lives on the shared normalization path every
         // frontend passes through — contract-JSON inputs included.
-        var exception = Assert.Throws<ContractAnalysisException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.EmitOpenApiFromJson(contractJson)
         );
 
@@ -606,8 +606,8 @@ public sealed class ResponseFidelityTests
     public void Emission_Pipeline_Guard_Rejects_Forbidden_Content_Before_Output()
     {
         // Direct IR feed through the public Emit path: the parse-side guard inside
-        // EmitWithSecurityMetadata's NormalizeIrAndEnsureResponse runs on every
-        // frontend, so the reachable abort is ContractAnalysisException — the
+        // Emit's NormalizeIrAndEnsureResponse runs on every
+        // frontend, so the reachable abort is RivetUserException — the
         // BuildResponses re-check stays as disclosed defense in depth (it cannot be
         // reached through any public emission path without first passing the parse
         // guard, which sees the same authored content).
@@ -637,7 +637,7 @@ public sealed class ResponseFidelityTests
             ),
         };
 
-        var exception = Assert.Throws<ContractAnalysisException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             OpenApiEmitter.Emit(
                 endpoints,
                 new Dictionary<string, TsTypeDefinition>(),

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -280,7 +281,7 @@ public sealed class VendorExtensionProvenanceTests
             ]
         );
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             OpenApiEmitter.Emit(
                 [],
                 new Dictionary<string, TsTypeDefinition>(),

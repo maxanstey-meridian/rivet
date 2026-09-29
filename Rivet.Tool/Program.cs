@@ -5,7 +5,15 @@ using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
 using Rivet.Tool.Model;
 
-return await Run(args);
+try
+{
+    return await Run(args);
+}
+catch (RivetUserException exception)
+{
+    Console.Error.WriteLine(exception.Message);
+    return 1;
+}
 
 static async Task<int> Run(string[] args)
 {
@@ -52,66 +60,22 @@ static async Task<int> Run(string[] args)
     // Single-pass discovery: scan source assembly types once instead of 4× full namespace walks
     var discovered = SymbolDiscovery.Discover(compilation);
 
-    TypeWalker walker;
-    try
-    {
-        walker = TypeWalker.Create(compilation, discovered.RivetTypes);
-    }
-    catch (ContractAnalysisException exception)
-    {
-        Console.Error.WriteLine(exception.Message);
-        return 1;
-    }
-    if (walker.HasErrors)
-    {
-        Console.Error.WriteLine("Aborting — type name collisions detected.");
-        return 1;
-    }
+    var walker = TypeWalker.Create(compilation, discovered.RivetTypes);
 
     var wkt = new WellKnownTypes(compilation);
-    // Controller-path refusals (unresolved binding, incomplete response) follow the
-    // same established stderr + exit-1 pattern as the contract path: the walker
-    // throws ContractAnalysisException and Program prints it verbatim.
-    IReadOnlyList<TsEndpointDefinition> endpoints;
-    try
-    {
-        endpoints = EndpointWalker.Walk(
-            wkt,
-            walker,
-            discovered.EndpointMethods,
-            discovered.ClientTypes
-        );
-    }
-    catch (ContractAnalysisException exception)
-    {
-        Console.Error.WriteLine(exception.Message);
-        return 1;
-    }
-    IReadOnlyList<TsEndpointDefinition> contractEndpoints;
-    try
-    {
-        contractEndpoints = ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
-    }
-    catch (ContractAnalysisException exception)
-    {
-        Console.Error.WriteLine(exception.Message);
-        return 1;
-    }
+    var endpoints = EndpointWalker.Walk(
+        wkt,
+        walker,
+        discovered.EndpointMethods,
+        discovered.ClientTypes
+    );
+    var contractEndpoints = ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
 
     if (options.Check)
     {
-        string functionsRoutePrefix;
-        try
-        {
-            functionsRoutePrefix = wkt.HttpTrigger is null
-                ? "api"
-                : FunctionsHostConfiguration.LoadRoutePrefix(projectPath);
-        }
-        catch (ContractAnalysisException exception)
-        {
-            Console.Error.WriteLine(exception.Message);
-            return 1;
-        }
+        var functionsRoutePrefix = wkt.HttpTrigger is null
+            ? "api"
+            : FunctionsHostConfiguration.LoadRoutePrefix(projectPath);
         var coverageWarnings = CoverageChecker.Check(
             compilation,
             wkt,
@@ -166,21 +130,7 @@ static async Task<int> Run(string[] args)
         }
     }
 
-    // Merge on transport identity (HTTP method + normalized route). Same-named
-    // overloads at distinct routes survive; contradictory declarations of the same
-    // transport identity are a hard conflict — routed through the established
-    // stderr + exit-1 pattern so --routes cannot print and return success.
-    IReadOnlyList<TsEndpointDefinition> merged;
-    try
-    {
-        merged = EndpointMerger.Merge(contractEndpoints, endpoints);
-    }
-    catch (EndpointMerger.TransportConflictException exception)
-    {
-        Console.Error.WriteLine(exception.Message);
-        return 1;
-    }
-    endpoints = merged;
+    var merged = EndpointMerger.Merge(contractEndpoints, endpoints);
 
     if (options.Routes)
     {
@@ -188,27 +138,12 @@ static async Task<int> Run(string[] args)
         return 0;
     }
 
-    var definitions = walker.Definitions.Values.ToList();
-    var brands = walker.Brands.Values.ToList();
-    ContractSecurityMetadata? securityMetadata;
-    OpenApiDocumentProvenance? documentProvenance;
-    try
-    {
-        securityMetadata = SecurityMetadataWalker.Walk(compilation);
-        documentProvenance = OpenApiProvenanceWalker.Walk(compilation, walker);
-    }
-    catch (ContractAnalysisException exception)
-    {
-        Console.Error.WriteLine(exception.Message);
-        return 1;
-    }
+    var securityMetadata = SecurityMetadataWalker.Walk(compilation);
+    var documentProvenance = OpenApiProvenanceWalker.Walk(compilation, walker);
 
     var emitInput = new EmitPipeline.EmitInput(
-        definitions,
-        brands,
         walker.Enums,
-        endpoints,
-        walker.TypeNamespaces,
+        merged,
         walker.Definitions,
         walker.Brands,
         securityMetadata,
@@ -228,14 +163,24 @@ static async Task<int> RunFromContract(RivetOptions options)
     }
 
     var json = await File.ReadAllTextAsync(contractPath);
-    var (types, enums, endpoints, brands) = JsonContractReader.Read(json);
+    IReadOnlyList<TsTypeDefinition> types;
+    Dictionary<string, TsType> enums;
+    IReadOnlyList<TsEndpointDefinition> endpoints;
+    Dictionary<string, TsType.Brand> brands;
+    try
+    {
+        (types, enums, endpoints, brands) = JsonContractReader.Read(json);
+    }
+    catch (System.Text.Json.JsonException exception)
+    {
+        throw new RivetUserException(
+            $"error: invalid contract JSON in {contractPath}: {exception.Message}"
+        );
+    }
 
     var emitInput = new EmitPipeline.EmitInput(
-        types.ToList(),
-        brands.Values.ToList(),
         enums,
         endpoints,
-        new Dictionary<string, string?>(),
         types.ToDictionary(t => t.Name),
         brands
     );
@@ -254,7 +199,7 @@ static int RunImport(RivetOptions options)
     var json = File.ReadAllText(options.FromOpenApiPath!);
     var importOptions = new ImportOptions(
         options.ImportNamespace ?? "Generated",
-        options.DefaultSecurity
+        options.SecuritySchemes?.FirstOrDefault()
     );
     var result = OpenApiImporter.Import(json, importOptions);
 

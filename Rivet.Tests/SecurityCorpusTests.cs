@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Rivet.Tool;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
@@ -258,8 +259,8 @@ public sealed class SecurityCorpusTests
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var security = SecurityMetadataWalker.Walk(compilation);
 
-        var exception = Assert.Throws<OpenApiEmissionException>(() =>
-            OpenApiEmitter.EmitWithSecurityMetadata(
+        var exception = Assert.Throws<RivetUserException>(() =>
+            OpenApiEmitter.Emit(
                 endpoints,
                 walker.Definitions,
                 walker.Brands,
@@ -338,7 +339,7 @@ public sealed class SecurityCorpusTests
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var security = SecurityMetadataWalker.Walk(compilation);
-        var emitted = OpenApiEmitter.EmitWithSecurityMetadata(
+        var emitted = OpenApiEmitter.Emit(
             endpoints,
             walker.Definitions,
             walker.Brands,

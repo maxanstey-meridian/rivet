@@ -84,7 +84,6 @@ public abstract class RouteDefinitionBase<TSelf>
     public bool IsAnonymous => _anonymous;
     public string? SecurityScheme => _securityScheme;
     public string? FileContentType => _fileContentType;
-    public bool IsFileUpload => _acceptsFile;
     public bool IsFormEncoded => _formEncoded;
     public string? BinaryRequestContentType => _binaryRequestContentType;
     public string? RequestContentType => _requestContentType;
@@ -263,11 +262,10 @@ public abstract class RouteDefinitionBase<TSelf>
         }
         else if (payloadType is not null && representations.Count == 0)
         {
-            var mediaType =
-                isSuccess && _responseContentType is not null
-                    ? _responseContentType
-                    : "application/json";
-            representations[mediaType] = new ResponseRepresentation(mediaType, false);
+            representations["application/json"] = new ResponseRepresentation(
+                "application/json",
+                false
+            );
         }
 
         var contentPayloadTypes = matchingContents

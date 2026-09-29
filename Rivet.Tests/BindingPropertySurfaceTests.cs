@@ -1,3 +1,4 @@
+using Rivet.Tool;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -133,7 +134,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         Assert.Contains("RIV1100", exception.Message);
         Assert.Contains("'pricing'", exception.Message);
@@ -163,7 +164,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         Assert.Contains("RIV1100", exception.Message);
         Assert.Contains("'http'", exception.Message);
@@ -197,7 +198,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         // No partial operation is emitted for the unresolved inputs.
         Assert.Contains("RIV1100", exception.Message);
@@ -226,7 +227,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         Assert.Contains("RIV1100", exception.Message);
         Assert.Contains("'payload'", exception.Message);
@@ -254,7 +255,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         Assert.Contains("RIV1100", exception.Message);
         Assert.Contains("'dryRun'", exception.Message);
@@ -362,7 +363,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         Assert.Contains("RIV1100", exception.Message);
         Assert.Contains("'altText'", exception.Message);
@@ -393,7 +394,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         Assert.Contains("RIV1100", exception.Message);
         Assert.Contains("'id'", exception.Message);
@@ -424,7 +425,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         Assert.Contains("RIV1100", exception.Message);
         Assert.Contains("'traceId'", exception.Message);
@@ -455,7 +456,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         Assert.Contains("RIV1100", exception.Message);
         Assert.Contains("'file'", exception.Message);
@@ -524,7 +525,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         Assert.Contains("RIV1100", exception.Message);
         Assert.Contains("banana", exception.Message);
@@ -557,7 +558,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         Assert.Contains("RIV1100", exception.Message);
         Assert.Contains("'banana'", exception.Message);
@@ -596,7 +597,7 @@ public sealed class BindingPropertySurfaceTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() => WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
         Assert.Contains("RIV1104", exception.Message);
         Assert.Contains("'metadata'", exception.Message);

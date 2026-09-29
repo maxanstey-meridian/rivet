@@ -257,7 +257,7 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkContract(source)
         );
 
@@ -283,7 +283,7 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkContract(source)
         );
 
@@ -311,7 +311,7 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkContract(source)
         );
 
@@ -343,7 +343,7 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkContract(source)
         );
 
@@ -371,7 +371,7 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkContract(source)
         );
 
@@ -399,7 +399,7 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkContract(source)
         );
 
@@ -430,7 +430,7 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkContract(source)
         );
 
@@ -457,7 +457,7 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkContract(source)
         );
 

@@ -20,7 +20,7 @@ internal static class ResponseStatusValidation
             return;
         }
 
-        throw new ContractAnalysisException(
+        throw new RivetUserException(
             $"error {Diagnostics.DuplicateResponseStatus}: endpoint '{endpointName}' declares response status "
                 + $"{duplicate.Key} more than once; authored contracts must declare exactly one response shape per status"
         );
@@ -140,7 +140,7 @@ internal static class ResponseStatusValidation
 
             if (IsBodyForbiddenStatusKey(response.EffectiveStatusKey))
             {
-                throw new ContractAnalysisException(
+                throw new RivetUserException(
                     $"error {Diagnostics.BodyForbiddenStatusExample}: endpoint '{endpointName}' "
                         + $"authors response content on body-forbidden status {response.EffectiveStatusKey} — "
                         + "HTTP forbids a message body on 1xx/204/205/304, so the authored example/content "

@@ -38,12 +38,6 @@ public static class CoverageChecker
     public static IReadOnlyList<CoverageWarning> Check(
         Compilation compilation,
         WellKnownTypes wkt,
-        IReadOnlyList<TsEndpointDefinition> contractEndpoints
-    ) => Check(compilation, wkt, contractEndpoints, "api");
-
-    public static IReadOnlyList<CoverageWarning> Check(
-        Compilation compilation,
-        WellKnownTypes wkt,
         IReadOnlyList<TsEndpointDefinition> contractEndpoints,
         string functionsRoutePrefix
     )

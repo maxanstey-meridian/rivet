@@ -2023,16 +2023,12 @@ internal static class ContractBuilder
     {
         if (operation.Security is null)
         {
-            // No operation-level security — use global default
-            return globalSecurityScheme is not null
-                ? (false, globalSecurityScheme, null)
-                : (false, null, null);
+            return (false, globalSecurityScheme, null);
         }
 
-        // Empty list → anonymous
         if (operation.Security.Count == 0)
         {
-            return (false, null, new SecurityRequirements([]));
+            return (true, null, null);
         }
 
         var requirements = new List<SecurityRequirement>();

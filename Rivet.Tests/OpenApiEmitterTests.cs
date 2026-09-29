@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Microsoft.OpenApi;
-using Rivet.Tool.Analysis;
+using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -8,7 +8,10 @@ namespace Rivet.Tests;
 
 public sealed class OpenApiEmitterTests
 {
-    private static JsonDocument EmitOpenApi(string source, SecurityConfig? security = null)
+    private static JsonDocument EmitOpenApi(
+        string source,
+        ContractSecurityMetadata? security = null
+    )
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
@@ -25,7 +28,7 @@ public sealed class OpenApiEmitterTests
 
     private static JsonDocument EmitOpenApiFromController(
         string source,
-        SecurityConfig? security = null
+        ContractSecurityMetadata? security = null
     )
     {
         var compilation = CompilationHelper.CreateCompilation(source);
@@ -46,7 +49,7 @@ public sealed class OpenApiEmitterTests
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
         IReadOnlyDictionary<string, TsType> enums,
-        SecurityConfig? security = null,
+        ContractSecurityMetadata? security = null,
         OpenApiDocumentInfo? documentInfo = null
     )
     {
@@ -774,31 +777,6 @@ public sealed class OpenApiEmitterTests
         );
         Assert.Contains("warning RIV2010:", stderr);
         Assert.DoesNotContain("discarded", json);
-    }
-
-    [Fact]
-    public void Direct_Emission_Rejects_Duplicate_Primary_Security_Definition()
-    {
-        var security = new SecurityConfig(
-            "bearer",
-            new HttpSecurityScheme("bearer"),
-            new Dictionary<string, SecuritySchemeDefinition>
-            {
-                ["bearer"] = new ApiKeySecurityScheme("X-Key", SecurityApiKeyLocation.Header),
-            }
-        );
-
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
-            OpenApiEmitter.Emit(
-                [],
-                new Dictionary<string, TsTypeDefinition>(),
-                new Dictionary<string, TsType.Brand>(),
-                new Dictionary<string, TsType>(),
-                security
-            )
-        );
-
-        Assert.Contains("error RIV2011:", exception.Message);
     }
 
     [Fact]
@@ -1761,10 +1739,10 @@ public sealed class OpenApiEmitterTests
             """;
 
         // RIV1102 guard: an authored example on 204 cannot create emitted content —
-        // the shared parse-side guard inside EmitWithSecurityMetadata aborts before
+        // the shared parse-side guard inside Emit aborts before
         // any output is written (the BuildResponses re-check stays as defense in
         // depth dominated by this guard on every public path).
-        var exception = Assert.Throws<ContractAnalysisException>(() => EmitOpenApi(source));
+        var exception = Assert.Throws<RivetUserException>(() => EmitOpenApi(source));
 
         Assert.Contains("RIV1102", exception.Message);
         // The parse guard receives bare endpoint.Name ('deleteSession'); the
@@ -2264,7 +2242,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var security = new SecurityConfig("bearer", new HttpSecurityScheme("bearer"));
+        var security = SecurityParser.ParseMany(["bearer"]);
 
         using var doc = EmitOpenApi(source, security);
         var root = doc.RootElement;
@@ -2301,7 +2279,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var security = new SecurityConfig("bearer", new HttpSecurityScheme("bearer"));
+        var security = SecurityParser.ParseMany(["bearer"]);
 
         using var doc = EmitOpenApi(source, security);
         var get = doc
@@ -2335,7 +2313,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var security = new SecurityConfig("admin", new HttpSecurityScheme("bearer"));
+        var security = SecurityParser.ParseMany(["admin=bearer"]);
 
         using var doc = EmitOpenApi(source, security);
         var delete = doc
@@ -2369,11 +2347,9 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var security = new SecurityConfig("bearer", new HttpSecurityScheme("bearer"));
+        var security = SecurityParser.ParseMany(["bearer"]);
 
-        var exception = Assert.Throws<OpenApiEmissionException>(() =>
-            EmitOpenApi(source, security)
-        );
+        var exception = Assert.Throws<RivetUserException>(() => EmitOpenApi(source, security));
 
         Assert.Contains("RIV2002", exception.Message);
         Assert.Contains("security scheme 'admin'", exception.Message);
@@ -2399,7 +2375,7 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var security = new SecurityConfig("bearer", new HttpSecurityScheme("bearer"));
+        var security = SecurityParser.ParseMany(["bearer"]);
 
         JsonDocument? doc = null;
         var stderr = CompilationHelper.CaptureStdErr(() => doc = EmitOpenApi(source, security));
@@ -2497,109 +2473,85 @@ public sealed class OpenApiEmitterTests
     [InlineData("session=cookie:sid", "session", "apiKey", "cookie")]
     [InlineData("internal=apikey:header:X-API-Key", "internal", "apiKey", "header")]
     [InlineData("Internal=APIKEY:HEADER:X-API-Key", "Internal", "apiKey", "header")]
-    public void SecurityParser_Parse_Formats(
+    [InlineData("admin.scheme=bearer", "admin.scheme", "http", "bearer")]
+    [InlineData("admin_scheme=bearer", "admin_scheme", "http", "bearer")]
+    [InlineData("admin-scheme=bearer", "admin-scheme", "http", "bearer")]
+    public void SecurityParser_Parses_Formats(
         string spec,
         string expectedName,
         string expectedType,
         string expectedSchemeOrIn
     )
     {
-        var result = SecurityParser.Parse(spec);
-        Assert.NotNull(result);
-        Assert.Equal(expectedName, result.SchemeName);
+        var (name, scheme) = Assert.Single(SecurityParser.ParseMany([spec])!.Schemes);
+        Assert.Equal(expectedName, name);
         if (expectedType == "http")
         {
-            var definition = Assert.IsType<HttpSecurityScheme>(result.SchemeDefinition);
-            Assert.Equal(expectedSchemeOrIn, definition.Scheme);
+            Assert.Equal(expectedSchemeOrIn, Assert.IsType<HttpSecurityScheme>(scheme).Scheme);
         }
         else
         {
-            var definition = Assert.IsType<ApiKeySecurityScheme>(result.SchemeDefinition);
-            Assert.Equal(expectedSchemeOrIn, definition.Location.ToString().ToLowerInvariant());
+            Assert.Equal(
+                expectedSchemeOrIn,
+                Assert.IsType<ApiKeySecurityScheme>(scheme).Location.ToString().ToLowerInvariant()
+            );
         }
     }
 
     [Fact]
-    public void SecurityParser_BearerJwt_HasFormat()
+    public void SecurityParser_Carries_Format_And_Names()
     {
-        var result = SecurityParser.Parse("bearer:jwt");
-        Assert.NotNull(result);
+        var security = SecurityParser.ParseMany([
+            "bearer:jwt",
+            "session=cookie:sid",
+            "apikey:header:X-API-Key",
+        ])!;
+
         Assert.Equal(
             "JWT",
-            Assert.IsType<HttpSecurityScheme>(result.SchemeDefinition).BearerFormat
+            Assert.IsType<HttpSecurityScheme>(security.Schemes["bearer"]).BearerFormat
         );
-    }
-
-    [Fact]
-    public void SecurityParser_Cookie_HasName()
-    {
-        var result = SecurityParser.Parse("cookie:sid");
-        Assert.NotNull(result);
-        Assert.Equal("sid", Assert.IsType<ApiKeySecurityScheme>(result.SchemeDefinition).Name);
-    }
-
-    [Fact]
-    public void SecurityParser_ApiKey_HasName()
-    {
-        var result = SecurityParser.Parse("apikey:header:X-API-Key");
-        Assert.NotNull(result);
+        Assert.Equal("sid", Assert.IsType<ApiKeySecurityScheme>(security.Schemes["session"]).Name);
         Assert.Equal(
             "X-API-Key",
-            Assert.IsType<ApiKeySecurityScheme>(result.SchemeDefinition).Name
+            Assert.IsType<ApiKeySecurityScheme>(security.Schemes["apiKeyAuth"]).Name
         );
+        var primary = Assert.Single(
+            Assert.Single(security.GlobalRequirements!.Alternatives).Schemes
+        );
+        Assert.Equal("bearer", primary.Name);
     }
 
     [Fact]
-    public void SecurityParser_Null_Returns_Null()
+    public void SecurityParser_No_Values_Returns_Null()
     {
-        Assert.Null(SecurityParser.Parse(null));
-        Assert.Null(SecurityParser.Parse(""));
-        Assert.Null(SecurityParser.Parse("   "));
-    }
-
-    [Fact]
-    public void SecurityParser_Unknown_Returns_Null()
-    {
-        Assert.Null(SecurityParser.Parse("oauth2"));
+        Assert.Null(SecurityParser.ParseMany([]));
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("oauth2")]
     [InlineData("admin scheme=bearer")]
     [InlineData("admin/auth=bearer")]
     [InlineData("admin:auth=bearer")]
-    public void SecurityParser_Invalid_Explicit_Component_Name_Returns_Null(string spec)
-    {
-        Assert.Null(SecurityParser.Parse(spec));
-    }
-
-    [Theory]
-    [InlineData("admin.scheme=bearer", "admin.scheme")]
-    [InlineData("admin_scheme=bearer", "admin_scheme")]
-    [InlineData("admin-scheme=bearer", "admin-scheme")]
-    public void SecurityParser_Valid_Explicit_Component_Name_Is_Preserved(
-        string spec,
-        string expectedName
-    )
-    {
-        Assert.Equal(expectedName, SecurityParser.Parse(spec)?.SchemeName);
-    }
-
-    [Theory]
     [InlineData("apikey:path:X-API-Key")]
     [InlineData("apikey::X-API-Key")]
     [InlineData("apikey:header:")]
     [InlineData("cookie:")]
     [InlineData("bearer:")]
     [InlineData("admin=other=bearer")]
-    public void SecurityParser_Malformed_Returns_Null(string spec)
+    public void SecurityParser_Rejects_Malformed_Value(string spec)
     {
-        Assert.Null(SecurityParser.Parse(spec));
+        var exception = Assert.Throws<RivetUserException>(() => SecurityParser.ParseMany([spec]));
+
+        Assert.Contains("invalid --security value", exception.Message);
     }
 
     [Fact]
     public void SecurityParser_ParseMany_Rejects_Malformed_Explicit_Value()
     {
-        var exception = Assert.Throws<SecurityConfigurationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             SecurityParser.ParseMany(["bearer", "oauth2"])
         );
 
@@ -2609,7 +2561,7 @@ public sealed class OpenApiEmitterTests
     [Fact]
     public void SecurityParser_ParseMany_Rejects_Duplicate_Scheme_Name()
     {
-        var exception = Assert.Throws<SecurityConfigurationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             SecurityParser.ParseMany(["admin=bearer", "admin=cookie:sid"])
         );
 

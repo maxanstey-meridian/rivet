@@ -365,7 +365,7 @@ public sealed class OpenApiConformanceTests : IDisposable
         var result = CompilationHelper.Import(
             openApiJson,
             ns: "ConformanceLoop",
-            securityConfig?.SchemeName
+            securityConfig?.Schemes.Keys.First()
         );
         var compilation = CompilationHelper.CompileImportResult(result);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);

@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.CodeAnalysis.CSharp;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -180,4 +181,69 @@ internal sealed class TemporaryJson(string path) : IDisposable
     }
 
     public void Dispose() => File.Delete(Path);
+}
+
+internal static class TsTypeRefs
+{
+    /// <summary>
+    /// Recursively collects all named type references from a TsType tree.
+    /// </summary>
+    public static void Collect(TsType type, HashSet<string> names)
+    {
+        switch (type)
+        {
+            case TsType.TypeRef r:
+                names.Add(r.Name);
+                break;
+            case TsType.Nullable n:
+                Collect(n.Inner, names);
+                break;
+            case TsType.Array a:
+                Collect(a.Element, names);
+                break;
+            case TsType.Dictionary d:
+                Collect(d.Value, names);
+                if (d.Key is not null)
+                {
+                    Collect(d.Key, names);
+                }
+                break;
+            case TsType.Generic g:
+                names.Add(g.Name);
+                foreach (var arg in g.TypeArguments)
+                {
+                    Collect(arg, names);
+                }
+                break;
+            case TsType.Brand b:
+                names.Add(b.Name);
+                Collect(b.Inner, names);
+                break;
+            case TsType.StringUnion:
+            case TsType.IntUnion:
+            case TsType.Literal:
+            case TsType.Primitive:
+            case TsType.TypeParam:
+                // No type refs to collect
+                break;
+            case TsType.InlineObject obj:
+                foreach (var field in obj.Fields)
+                {
+                    Collect(field.Type, names);
+                }
+                break;
+            case TsType.TaggedUnion tu:
+                foreach (var variant in tu.Variants)
+                {
+                    Collect(variant.Type, names);
+                }
+                break;
+            case TsType.Union u:
+                foreach (var variant in u.Variants)
+                {
+                    Collect(variant, names);
+                }
+                break;
+        }
+    }
 }

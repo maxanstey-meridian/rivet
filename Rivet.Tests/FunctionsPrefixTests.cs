@@ -1,3 +1,4 @@
+using Rivet.Tool;
 using Rivet.Tool.Analysis;
 
 namespace Rivet.Tests;
@@ -115,7 +116,7 @@ public sealed class FunctionsPrefixTests
         try
         {
             File.WriteAllText(Path.Combine(directory.FullName, "host.json"), json);
-            Assert.Throws<ContractAnalysisException>(() =>
+            Assert.Throws<RivetUserException>(() =>
                 FunctionsHostConfiguration.LoadRoutePrefix(
                     Path.Combine(directory.FullName, "Api.csproj")
                 )

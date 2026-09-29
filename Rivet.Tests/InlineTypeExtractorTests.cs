@@ -517,7 +517,13 @@ public sealed class InlineTypeExtractorTests
             (inline, "Buyers.find.return"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Buyers",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("BuyerFindDto", result);
     }
@@ -531,7 +537,13 @@ public sealed class InlineTypeExtractorTests
             (inline, "Order.list.return"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Order", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Order",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("OrderListDto", result);
     }
@@ -545,7 +557,13 @@ public sealed class InlineTypeExtractorTests
             (inner, "Buyers.find.return.field.lines"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Buyers",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("LineDto", result);
     }
@@ -615,9 +633,6 @@ public sealed class InlineTypeExtractorTests
         Assert.Equal("BuyerFindDto", ((TsType.TypeRef)result.Endpoints[0].ReturnType!).Name);
         Assert.IsType<TsType.TypeRef>(result.Endpoints[1].ReturnType);
         Assert.Equal("BuyerFindDto", ((TsType.TypeRef)result.Endpoints[1].ReturnType!).Name);
-
-        // Namespace is null (common group)
-        Assert.Null(result.TypeNamespaces["BuyerFindDto"]);
     }
 
     [Fact]
@@ -1165,7 +1180,6 @@ public sealed class InlineTypeExtractorTests
 
         Assert.Empty(result.ExtractedTypes);
         Assert.Empty(result.Endpoints);
-        Assert.Empty(result.TypeNamespaces);
     }
 
     [Fact]
@@ -1251,7 +1265,13 @@ public sealed class InlineTypeExtractorTests
             (inline, "Buyers.find.return.field.mix_types"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Buyers",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("MixTypeDto", result);
     }
@@ -1279,7 +1299,13 @@ public sealed class InlineTypeExtractorTests
             (inline, "Orders.list.response.200"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Orders", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Orders",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("OrderListDto", result);
     }
@@ -1296,7 +1322,9 @@ public sealed class InlineTypeExtractorTests
         var result = InlineTypeExtractor.GenerateName(
             "Products",
             occurrences,
-            new HashSet<string>()
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
         );
 
         Assert.Equal("ProductCreateDto", result);
@@ -1312,7 +1340,13 @@ public sealed class InlineTypeExtractorTests
             (inline, "Auth.session.return"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Auth", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Auth",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("AuthLoginDto", result);
     }
@@ -1326,7 +1360,13 @@ public sealed class InlineTypeExtractorTests
             (inline, "Auth.login.return"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Auth", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Auth",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("AuthLoginDto", result);
     }
@@ -1340,7 +1380,13 @@ public sealed class InlineTypeExtractorTests
             (inline, "Buyers.find.return.field.data"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Buyers",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("BuyerFindDto", result);
     }
@@ -1357,7 +1403,9 @@ public sealed class InlineTypeExtractorTests
         var result = InlineTypeExtractor.GenerateName(
             "order_items",
             occurrences,
-            new HashSet<string>()
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
         );
 
         Assert.Equal("OrderItemFindDto", result);
@@ -1372,7 +1420,13 @@ public sealed class InlineTypeExtractorTests
             (inline, "Orders.find_all.return"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Orders", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Orders",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("OrderFindAllDto", result);
     }
@@ -1386,7 +1440,13 @@ public sealed class InlineTypeExtractorTests
             (inline, "Buyers.find.return.field.data.field.items"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Buyers",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("ItemDto", result);
     }
@@ -1400,7 +1460,13 @@ public sealed class InlineTypeExtractorTests
             (inline, "Buyers.find.return.field.location"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Buyers",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("LocationDto", result);
     }
@@ -1475,17 +1541,6 @@ public sealed class InlineTypeExtractorTests
         var result = InlineTypeExtractor.DeriveStructuralName(inline);
 
         Assert.Equal("NameEmail", result); // "id" skipped, capped at 2 distinctive fields
-    }
-
-    [Fact]
-    public void GenerateName_WithExplicitBaseName()
-    {
-        var usedNames = new HashSet<string>();
-
-        var result = InlineTypeExtractor.GenerateName("Message", usedNames);
-
-        Assert.Equal("MessageDto", result);
-        Assert.Contains("MessageDto", usedNames);
     }
 
     [Fact]
@@ -2141,7 +2196,13 @@ public sealed class InlineTypeExtractorTests
             (type, "Auth.login.return"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Auth", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Auth",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("AuthLoginResponse", result);
     }
@@ -2158,7 +2219,13 @@ public sealed class InlineTypeExtractorTests
             (type, "Buyers.find.return"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Buyers",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("BuyerFindDto", result);
     }
@@ -2175,7 +2242,13 @@ public sealed class InlineTypeExtractorTests
             (type, "Buyers.find.return.field.location"),
         };
 
-        var result = InlineTypeExtractor.GenerateName("Buyers", occurrences, new HashSet<string>());
+        var result = InlineTypeExtractor.GenerateName(
+            "Buyers",
+            occurrences,
+            new HashSet<string>(),
+            [],
+            occurrences[0].Type
+        );
 
         Assert.Equal("LocationDto", result);
     }

@@ -5,8 +5,6 @@ using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Emit;
 
-internal sealed class OpenApiEmissionException(string message) : InvalidOperationException(message);
-
 /// <summary>
 /// Emits an OpenAPI 3.1 JSON spec from the Rivet model.
 /// </summary>
@@ -55,23 +53,6 @@ public static class OpenApiEmitter
     private static EmitContext? _ctx;
 
     public static string Emit(
-        IReadOnlyList<TsEndpointDefinition> endpoints,
-        IReadOnlyDictionary<string, TsTypeDefinition> definitions,
-        IReadOnlyDictionary<string, TsType.Brand> brands,
-        IReadOnlyDictionary<string, TsType> enums,
-        SecurityConfig? security,
-        OpenApiDocumentInfo? documentInfo = null
-    ) =>
-        EmitWithSecurityMetadata(
-            endpoints,
-            definitions,
-            brands,
-            enums,
-            ToSecurityMetadata(security),
-            documentInfo
-        );
-
-    public static string EmitWithSecurityMetadata(
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
         IReadOnlyDictionary<string, TsType.Brand> brands,
@@ -274,12 +255,7 @@ public static class OpenApiEmitter
         {
             foreach (var (name, definition) in security.Schemes)
             {
-                if (!securitySchemes.TryAdd(name, BuildSecurityScheme(definition)))
-                {
-                    throw new OpenApiEmissionException(
-                        $"error {Diagnostics.DuplicateSecuritySchemeDefinition}: duplicate security scheme definition '{name}'"
-                    );
-                }
+                securitySchemes[name] = BuildSecurityScheme(definition);
             }
 
             if (security.GlobalRequirements is { } globalRequirements)
@@ -304,7 +280,7 @@ public static class OpenApiEmitter
                 continue;
             }
 
-            throw new OpenApiEmissionException(
+            throw new RivetUserException(
                 $"error {Diagnostics.UndefinedSecurityScheme}: security scheme '{scheme}' is referenced by "
                     + $"an endpoint's .Secure(\"{scheme}\") but has no definition; define the same scheme with --security"
             );
@@ -418,22 +394,10 @@ public static class OpenApiEmitter
 
     private static void AddSchemaReference(string reference, HashSet<string> referenced)
     {
-        const string prefix = "#/components/schemas/";
-        if (!reference.StartsWith(prefix, StringComparison.Ordinal))
+        if (JsonPointer.TryGetComponentName(reference, "schemas", out var name))
         {
-            return;
+            referenced.Add(name);
         }
-
-        var token = reference[prefix.Length..];
-        if (token.Contains('/', StringComparison.Ordinal))
-        {
-            return;
-        }
-        referenced.Add(
-            Uri.UnescapeDataString(token)
-                .Replace("~1", "/", StringComparison.Ordinal)
-                .Replace("~0", "~", StringComparison.Ordinal)
-        );
     }
 
     private static void RetainVendorExtensionPathItemOwners(
@@ -441,22 +405,12 @@ public static class OpenApiEmitter
         IReadOnlyList<OpenApiVendorExtensionProvenance> extensions
     )
     {
-        const string prefix = "#/paths/";
         foreach (var extension in extensions)
         {
-            if (
-                !extension.OwnerPointer.StartsWith(prefix, StringComparison.Ordinal)
-                || extension.OwnerPointer[prefix.Length..].Contains('/', StringComparison.Ordinal)
-            )
+            if (JsonPointer.FromUriFragment(extension.OwnerPointer) is ["paths", var path])
             {
-                continue;
+                paths.TryAdd(path, new Dictionary<string, object>());
             }
-
-            var encodedPath = extension.OwnerPointer[prefix.Length..];
-            var path = Uri.UnescapeDataString(encodedPath)
-                .Replace("~1", "/", StringComparison.Ordinal)
-                .Replace("~0", "~", StringComparison.Ordinal);
-            paths.TryAdd(path, new Dictionary<string, object>());
         }
     }
 
@@ -470,13 +424,13 @@ public static class OpenApiEmitter
             var owner = ResolveObjectPointer(document, extension.OwnerPointer);
             if (owner is null)
             {
-                throw new OpenApiEmissionException(
+                throw new RivetUserException(
                     $"Cannot attach preserved vendor extension '{extension.Name}': emitted owner '{extension.OwnerPointer}' does not exist or is not an object."
                 );
             }
             if (owner.ContainsKey(extension.Name))
             {
-                throw new OpenApiEmissionException(
+                throw new RivetUserException(
                     $"Cannot attach preserved vendor extension '{extension.Name}' at '{extension.OwnerPointer}': the emitted owner already contains that property."
                 );
             }
@@ -489,7 +443,7 @@ public static class OpenApiEmitter
             }
             catch (JsonException exception)
             {
-                throw new OpenApiEmissionException(
+                throw new RivetUserException(
                     $"Cannot attach preserved vendor extension '{extension.Name}' at '{extension.OwnerPointer}': invalid JSON value ({exception.Message})."
                 );
             }
@@ -501,28 +455,20 @@ public static class OpenApiEmitter
         string pointer
     )
     {
-        if (pointer == "#")
-        {
-            return document;
-        }
-        if (!pointer.StartsWith("#/", StringComparison.Ordinal))
+        if (JsonPointer.FromUriFragment(pointer) is not { } tokens)
         {
             return null;
         }
 
-        object current = document;
-        foreach (var encodedToken in pointer[2..].Split('/'))
+        object? current = document;
+        foreach (var token in tokens)
         {
-            var token = Uri.UnescapeDataString(encodedToken)
-                .Replace("~1", "/", StringComparison.Ordinal)
-                .Replace("~0", "~", StringComparison.Ordinal);
             current = current switch
             {
                 Dictionary<string, object> obj when obj.TryGetValue(token, out var child) => child,
-                List<object> array
-                    when int.TryParse(token, out var index) && index >= 0 && index < array.Count =>
+                List<object> array when JsonPointer.TryIndex(token, array.Count, out var index) =>
                     array[index],
-                _ => null!,
+                _ => null,
             };
             if (current is null)
             {
@@ -531,36 +477,6 @@ public static class OpenApiEmitter
         }
 
         return current as Dictionary<string, object>;
-    }
-
-    private static ContractSecurityMetadata? ToSecurityMetadata(SecurityConfig? security)
-    {
-        if (security is null)
-        {
-            return null;
-        }
-
-        var schemes = new Dictionary<string, SecuritySchemeDefinition>(StringComparer.Ordinal)
-        {
-            [security.SchemeName] = security.SchemeDefinition,
-        };
-        if (security.AdditionalSchemeDefinitions is not null)
-        {
-            foreach (var (name, definition) in security.AdditionalSchemeDefinitions)
-            {
-                if (!schemes.TryAdd(name, definition))
-                {
-                    throw new OpenApiEmissionException(
-                        $"error {Diagnostics.DuplicateSecuritySchemeDefinition}: duplicate security scheme definition '{name}'"
-                    );
-                }
-            }
-        }
-
-        var globalRequirements = new SecurityRequirements([
-            new SecurityRequirement([new SecurityRequirementScheme(security.SchemeName, [])]),
-        ]);
-        return new ContractSecurityMetadata(schemes, globalRequirements);
     }
 
     private static Dictionary<string, object> BuildSecurityScheme(
@@ -604,7 +520,7 @@ public static class OpenApiEmitter
                 result["type"] = "mutualTLS";
                 break;
             default:
-                throw new OpenApiEmissionException(
+                throw new RivetUserException(
                     $"Unsupported security scheme model '{definition.GetType().Name}'."
                 );
         }
@@ -666,7 +582,7 @@ public static class OpenApiEmitter
         {
             if (!schemes.ContainsKey(name))
             {
-                throw new OpenApiEmissionException(
+                throw new RivetUserException(
                     $"error {Diagnostics.UndefinedSecurityScheme}: security scheme '{name}' is referenced by {context} security requirements but has no definition"
                 );
             }
@@ -730,7 +646,7 @@ public static class OpenApiEmitter
                     && !EndpointMerger.EndpointSurfaceEquivalent(existingEndpoint, ep)
                 )
                 {
-                    throw new OpenApiEmissionException(
+                    throw new RivetUserException(
                         $"error {Diagnostics.ConflictingOperations}: transport identity {ep.HttpMethod.ToUpperInvariant()} {TransportIdentity.NormalizeRoute(pathKey)} is declared by two incompatible operations: "
                             + $"'{existingEndpoint.ControllerName}.{existingEndpoint.Name}' and '{ep.ControllerName}.{ep.Name}'. "
                             + "Resolve the contradiction at the source — first-wins/last-wins cannot resolve conflicting declarations."
@@ -1013,7 +929,7 @@ public static class OpenApiEmitter
             );
             if (!parsed || (!multipart && !urlEncoded) || (fileParams.Count > 0 && !multipart))
             {
-                throw new ContractAnalysisException(
+                throw new RivetUserException(
                     $"error {Diagnostics.UnresolvedBindingSource}: form endpoint '{ep.ControllerName}.{ep.Name}' "
                         + $"cannot use request content type '{declaredContentType}'. Use a supported form content type."
                 );
@@ -1267,7 +1183,7 @@ public static class OpenApiEmitter
             var requestBodyReference = new Dictionary<string, object>
             {
                 ["$ref"] =
-                    $"#/components/requestBodies/{EscapeJsonPointerToken(requestBodyComponentId)}",
+                    $"#/components/requestBodies/{JsonPointer.Escape(requestBodyComponentId)}",
             };
             AddOptionalString(
                 requestBodyReference,
@@ -1316,7 +1232,7 @@ public static class OpenApiEmitter
                 && (resp.Examples is { Count: > 0 } || resp.Contents is { Count: > 0 })
             )
             {
-                throw new OpenApiEmissionException(
+                throw new RivetUserException(
                     $"error {Diagnostics.BodyForbiddenStatusExample}: endpoint '{ep.ControllerName}.{ep.Name}' "
                         + $"authors response content on body-forbidden status {resp.EffectiveStatusKey} — "
                         + "HTTP forbids a message body on 1xx/204/205/304, so the authored example/content "
@@ -1614,7 +1530,7 @@ public static class OpenApiEmitter
 
     private static Dictionary<string, object> ParseSchemaObject(string json, string context) =>
         JsonSerializer.Deserialize<Dictionary<string, object>>(json)
-        ?? throw new OpenApiEmissionException($"{context} is not a JSON object.");
+        ?? throw new RivetUserException($"{context} is not a JSON object.");
 
     private static Dictionary<string, object> BuildServer(OpenApiServerProvenance server)
     {
@@ -1858,7 +1774,7 @@ public static class OpenApiEmitter
         var identity = FilteredBodyIdentity(ep, bodyProperties);
         if (_ctx is null || !_ctx.FilteredBodyNames.TryGetValue(identity, out var assignedName))
         {
-            throw new OpenApiEmissionException(
+            throw new RivetUserException(
                 $"route-filtered request body name was not allocated for endpoint '{ep.ControllerName}.{ep.Name}'"
             );
         }
@@ -2071,7 +1987,7 @@ public static class OpenApiEmitter
             result.Add(
                 name,
                 JsonSerializer.Deserialize<Dictionary<string, object>>(json)
-                    ?? throw new OpenApiEmissionException(
+                    ?? throw new RivetUserException(
                         $"Preserved component {kind} '{name}' is not a JSON object."
                     )
             );
@@ -2220,10 +2136,7 @@ public static class OpenApiEmitter
     {
         if (example.ComponentExampleId is not null && example.ResolvedJson is not null)
         {
-            return new Dictionary<string, object>
-            {
-                ["$ref"] = $"#/components/examples/{example.ComponentExampleId}",
-            };
+            return ComponentReference("examples", example.ComponentExampleId);
         }
 
         var json = example.Json ?? example.ResolvedJson;
@@ -2305,7 +2218,7 @@ public static class OpenApiEmitter
             {
                 if (_ctx is null || !_ctx.InliningSyntheticTypes.Add(reference.Name))
                 {
-                    throw new OpenApiEmissionException(
+                    throw new RivetUserException(
                         $"synthetic type '{reference.Name}' is recursive and cannot be inlined without recursive schema algebra"
                     );
                 }
@@ -2362,15 +2275,10 @@ public static class OpenApiEmitter
         };
 
     private static Dictionary<string, object> ComponentReference(string componentId) =>
-        new() { ["$ref"] = $"#/components/schemas/{EscapeJsonPointerToken(componentId)}" };
+        new() { ["$ref"] = $"#/components/schemas/{JsonPointer.Escape(componentId)}" };
 
     private static Dictionary<string, object> ComponentReference(string kind, string componentId) =>
-        new() { ["$ref"] = $"#/components/{kind}/{EscapeJsonPointerToken(componentId)}" };
-
-    private static string EscapeJsonPointerToken(string value) =>
-        value
-            .Replace("~", "~0", StringComparison.Ordinal)
-            .Replace("/", "~1", StringComparison.Ordinal);
+        new() { ["$ref"] = $"#/components/{kind}/{JsonPointer.Escape(componentId)}" };
 
     private static Dictionary<string, object> MapIntUnion(TsType.IntUnion union)
     {
@@ -2547,7 +2455,7 @@ public static class OpenApiEmitter
                 var componentName =
                     variant.Metadata?.ComponentId ?? $"{baseName}_{UpperFirst(variant.Tag)}";
                 _ctx?.ExtraComponents.TryAdd(componentName, variantSchema);
-                refPath = $"#/components/schemas/{EscapeJsonPointerToken(componentName)}";
+                refPath = $"#/components/schemas/{JsonPointer.Escape(componentName)}";
             }
 
             oneOf.Add(new Dictionary<string, object> { ["$ref"] = refPath });

@@ -34,11 +34,8 @@ public sealed class EmitPipelineTests : IDisposable
     {
         var defs = definitions ?? [];
         return new EmitPipeline.EmitInput(
-            defs,
-            [],
             new Dictionary<string, TsType>(),
             endpoints,
-            new Dictionary<string, string?>(),
             defs.ToDictionary(d => d.Name),
             new Dictionary<string, TsType.Brand>()
         );
@@ -270,26 +267,20 @@ public sealed class EmitPipelineTests : IDisposable
     [InlineData(new[] { "bad name=bearer" }, "invalid --security value")]
     [InlineData(new[] { "a/b=bearer" }, "invalid --security value")]
     [InlineData(new[] { "admin=bearer", "admin=cookie:sid" }, "duplicate --security scheme name")]
-    public void Invalid_Security_Returns_Controlled_Error(
+    public async Task Invalid_Security_Refuses_As_User_Error(
         string[] securitySchemes,
         string expectedError
     )
     {
         var input = BuildEmitInput(DuplicateInlineEndpoints());
-        var result = -1;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-            result = EmitPipeline
-                .RunAsync(
-                    input,
-                    new RivetOptions(".", _outputDir, [], SecuritySchemes: securitySchemes)
-                )
-                .GetAwaiter()
-                .GetResult()
+        var exception = await Assert.ThrowsAsync<RivetUserException>(() =>
+            EmitPipeline.RunAsync(
+                input,
+                new RivetOptions(".", _outputDir, [], SecuritySchemes: securitySchemes)
+            )
         );
 
-        Assert.Equal(1, result);
-        Assert.Contains(expectedError, stderr);
-        Assert.DoesNotContain("Exception", stderr);
+        Assert.Contains(expectedError, exception.Message);
     }
 
     [Fact]

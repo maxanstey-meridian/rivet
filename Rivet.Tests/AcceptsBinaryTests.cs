@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
 using Rivet.Tool.Model;
@@ -208,9 +209,7 @@ public sealed class AcceptsBinaryTests
             }
             """;
 
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            CompilationHelper.WalkContract(source)
-        );
+        var ex = Assert.Throws<RivetUserException>(() => CompilationHelper.WalkContract(source));
         Assert.Contains(".AcceptsBinary()", ex.Message);
         Assert.Contains(".AcceptsFile()", ex.Message);
     }
@@ -233,9 +232,7 @@ public sealed class AcceptsBinaryTests
             }
             """;
 
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            CompilationHelper.WalkContract(source)
-        );
+        var ex = Assert.Throws<RivetUserException>(() => CompilationHelper.WalkContract(source));
         Assert.Contains(".AcceptsBinary()", ex.Message);
         Assert.Contains(".FormEncoded()", ex.Message);
     }

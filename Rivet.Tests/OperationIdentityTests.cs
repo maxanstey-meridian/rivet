@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rivet.Tool;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
@@ -325,7 +326,7 @@ public sealed class OperationIdentityTests
             }
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -518,7 +519,7 @@ public sealed class OperationIdentityTests
                 }
                 """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -562,7 +563,7 @@ public sealed class OperationIdentityTests
                 }
                 """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -605,7 +606,7 @@ public sealed class OperationIdentityTests
                 }
                 """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(source)
         );
 
@@ -704,7 +705,7 @@ public sealed class OperationIdentityTests
 
         // Duplicate-vs-distinct keys are a contradiction: the left duplicate
         // cannot consume the same right entry twice.
-        Assert.ThrowsAny<InvalidOperationException>(() => EndpointMerger.Merge([left], [right]));
+        Assert.Throws<RivetUserException>(() => EndpointMerger.Merge([left], [right]));
 
         // Distinct-vs-distinct with identical keys still collapses.
         var distinctLeft = Endpoint(

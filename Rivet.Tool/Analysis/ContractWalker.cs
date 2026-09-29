@@ -145,7 +145,7 @@ public static class ContractWalker
                 || EndpointWalker.IsStatusSelectingResultContainer(wkt, unwrapped)
             )
             {
-                throw new ContractAnalysisException(
+                throw new RivetUserException(
                     $"error {Diagnostics.UnmappedTypedResult}: contract endpoint "
                         + $"'{name}' declares no success response. "
                         + "Rivet reads explicit contract declarations — add .Status(...).Returns(...) "
@@ -460,7 +460,7 @@ public static class ContractWalker
             {
                 if (successStatusOverride is not null)
                 {
-                    throw new ContractAnalysisException(
+                    throw new RivetUserException(
                         $"error {Diagnostics.DuplicateResponseStatus}: endpoint '{name}' calls .Status() more than once"
                     );
                 }
@@ -607,7 +607,7 @@ public static class ContractWalker
                     "query" => ParamSource.Query,
                     "header" => ParamSource.Header,
                     "cookie" => ParamSource.Cookie,
-                    _ => throw new ContractAnalysisException(
+                    _ => throw new RivetUserException(
                         $"Endpoint '{name}' declares unsupported parameter location '{parameterLocation}'."
                     ),
                 };
@@ -860,7 +860,7 @@ public static class ContractWalker
         if (binaryRequestContentType is not null && (acceptsFile || isFormEncoded))
         {
             var conflictingCall = acceptsFile ? ".AcceptsFile()" : ".FormEncoded()";
-            throw new InvalidOperationException(
+            throw new RivetUserException(
                 $"{httpMethod} {route} ({controllerName}.{name}): .AcceptsBinary() cannot be combined "
                     + $"with {conflictingCall} — a request body is either raw binary or {(acceptsFile ? "multipart/form-data" : "form-encoded")}, not both."
             );
@@ -874,11 +874,7 @@ public static class ContractWalker
         }
 
         // [ProducesFile] attribute on the field → file endpoint
-        if (
-            field
-                .GetAttributes()
-                .Any(a => a.AttributeClass?.Name is "ProducesFileAttribute" or "ProducesFile")
-        )
+        if (field.GetAttributes().Any(a => a.AttributeClass?.Name == "ProducesFileAttribute"))
         {
             fileContentType ??= "application/octet-stream";
         }
@@ -1822,7 +1818,7 @@ public static class ContractWalker
             || !IsCompatibleRequestBodyType(bodyType, inputType, route, typeWalker)
         )
         {
-            throw new ContractAnalysisException(
+            throw new RivetUserException(
                 $"error {Diagnostics.InvalidRequestBodyProvenance}: endpoint '{field.ContainingType.Name}.{field.Name}' "
                     + $"declares request body type '{bodyType.Name}', which is not represented independently by its input type '{inputType?.Name}'"
             );

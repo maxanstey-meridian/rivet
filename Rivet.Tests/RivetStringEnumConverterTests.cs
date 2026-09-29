@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using Rivet.Tool.Analysis;
+using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -226,7 +226,7 @@ public sealed class RivetStringEnumConverterTests
             """;
 
         var stderr = Assert
-            .Throws<ContractAnalysisException>(() => CompilationHelper.WalkContract(source))
+            .Throws<RivetUserException>(() => CompilationHelper.WalkContract(source))
             .Message;
         Assert.Contains("error RIV1106:", stderr);
         Assert.Contains("Clash", stderr);
@@ -261,7 +261,7 @@ public sealed class RivetStringEnumConverterTests
             """;
 
         var stderr = Assert
-            .Throws<ContractAnalysisException>(() => CompilationHelper.WalkContract(source))
+            .Throws<RivetUserException>(() => CompilationHelper.WalkContract(source))
             .Message;
         Assert.Contains("error RIV1106:", stderr);
         Assert.Contains("(First, Second)", stderr);

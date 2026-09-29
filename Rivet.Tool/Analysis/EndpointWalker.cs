@@ -96,7 +96,7 @@ public static class EndpointWalker
             var unwrapped = UnwrapTask(wkt, method.ReturnType, out _);
             if (unwrapped is null || IsStatusSelectingResultContainer(wkt, unwrapped))
             {
-                throw new ContractAnalysisException(
+                throw new RivetUserException(
                     $"error {Diagnostics.UnmappedTypedResult}: endpoint "
                         + $"'{MethodOwner(method)}.{method.Name}' declares no response. "
                         + "Rivet reads explicit response declarations, not MVC runtime defaults — "
@@ -156,7 +156,7 @@ public static class EndpointWalker
             .ToArray();
         if (requestMediaTypes.Length > 1)
         {
-            throw new ContractAnalysisException(
+            throw new RivetUserException(
                 $"error {Diagnostics.UnresolvedBindingSource}: endpoint '{MethodOwner(method)}.{method.Name}' declares multiple request media types. Declare one supported [Consumes] media type."
             );
         }
@@ -691,7 +691,7 @@ public static class EndpointWalker
                     : $"[FromRoute(Name = \"{explicitRouteName}\")]";
                 if (!routeParamNames.Contains(effectiveRouteName))
                 {
-                    throw new ContractAnalysisException(
+                    throw new RivetUserException(
                         $"error {Diagnostics.UnresolvedBindingSource}: parameter '{param.Name}' on endpoint "
                             + $"'{MethodOwner(method)}.{method.Name}' is {declaration} but route '{routeTemplate}' "
                             + $"contains no '{{{effectiveRouteName}}}' placeholder — the route binds by its "
@@ -717,7 +717,7 @@ public static class EndpointWalker
             // itself would reject at startup.
             if (bodySeen && source == ParamSource.Body)
             {
-                throw new ContractAnalysisException(
+                throw new RivetUserException(
                     $"error {Diagnostics.UnresolvedBindingSource}: endpoint "
                         + $"'{MethodOwner(method)}.{method.Name}' declares a second request body — "
                         + $"parameter '{param.Name}' of type '{param.Type.ToDisplayString()}' cannot share the "
@@ -747,7 +747,7 @@ public static class EndpointWalker
 
         if (formSeen && bodySeen)
         {
-            throw new ContractAnalysisException(
+            throw new RivetUserException(
                 $"error {Diagnostics.MixedFormFileParameters}: endpoint '{MethodOwner(method)}.{method.Name}' "
                     + $"mixes body parameter '{parameters.First(p => p.Source == ParamSource.Body).Name}' with separate form fields or files. Declare one form DTO, "
                     + "or separate scalar [FromForm] fields and files; put a JSON body on a separate endpoint."
@@ -837,8 +837,7 @@ public static class EndpointWalker
 
     /// <summary>
     /// True for System.Threading.CancellationToken regardless of which referenced
-    /// assembly supplied the symbol. WellKnownTypes.CancellationToken goes through
-    /// GetTypeByMetadataName, which returns null when two referenced assemblies
+    /// assembly supplied the symbol. GetTypeByMetadataName returns null when two referenced assemblies
     /// declare the same full name (System.Runtime.dll and System.Private.CoreLib.dll
     /// both do) — so the ct guards must not rely on symbol equality.
     /// </summary>
@@ -912,7 +911,7 @@ public static class EndpointWalker
         {
             if (explicitSources.Any(source => source != BindingSource.Services))
             {
-                throw new ContractAnalysisException(
+                throw new RivetUserException(
                     $"error {Diagnostics.UnresolvedBindingSource}: CancellationToken parameter '{param.Name}' "
                         + "is host plumbing and cannot declare a transport binding."
                 );
@@ -989,7 +988,7 @@ public static class EndpointWalker
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private static ParamSource ThrowUnresolvedBinding(IMethodSymbol method, IParameterSymbol param)
     {
-        throw new ContractAnalysisException(
+        throw new RivetUserException(
             $"error {Diagnostics.UnresolvedBindingSource}: parameter '{param.Name}' of type "
                 + $"'{param.Type.ToDisplayString()}' on endpoint '{MethodOwner(method)}.{method.Name}' has no "
                 + "binding source. Rivet reads explicit transport declarations, not MVC inference — add "
@@ -1010,7 +1009,7 @@ public static class EndpointWalker
         List<BindingSource> sources
     )
     {
-        throw new ContractAnalysisException(
+        throw new RivetUserException(
             $"error {Diagnostics.UnresolvedBindingSource}: parameter '{param.Name}' of type "
                 + $"'{param.Type.ToDisplayString()}' carries contradictory binding attributes "
                 + $"({string.Join(", ", sources.Select(source => $"[From{source}]"))}) — one parameter "
@@ -1028,7 +1027,7 @@ public static class EndpointWalker
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private static void ThrowIncompatibleFileSource(IParameterSymbol param, ParamSource declared)
     {
-        throw new ContractAnalysisException(
+        throw new RivetUserException(
             $"error {Diagnostics.UnresolvedBindingSource}: parameter '{param.Name}' of type "
                 + $"'{param.Type.ToDisplayString()}' is IFormFile but is explicitly declared "
                 + $"{ToWireLabel(declared)} — an incompatible source for file transport. Remove the "
@@ -1150,7 +1149,7 @@ public static class EndpointWalker
                         // An unmapped Results<> branch must never vanish from a
                         // successful contract: refuse instead of warn-and-omit
                         // (planner-constraint:unresolved-facts-refuse-emission).
-                        throw new ContractAnalysisException(
+                        throw new RivetUserException(
                             $"error {Diagnostics.UnmappedTypedResult}: typed result "
                                 + $"'{resultArg.ToDisplayString()}' in Results<...> on endpoint "
                                 + $"'{(warnContext ?? "<unknown>")}' does not "
@@ -1372,7 +1371,7 @@ public static class EndpointWalker
                         );
                     if (!declarationsAgree)
                     {
-                        throw new ContractAnalysisException(
+                        throw new RivetUserException(
                             $"error {Diagnostics.ConflictingResponseDeclaration}: endpoint "
                                 + $"'{method.ContainingType.Name}.{method.Name}' declares response status "
                                 + $"{mapping.StatusCode} twice with different bodies — the earlier declaration "

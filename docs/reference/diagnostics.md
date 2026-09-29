@@ -108,7 +108,7 @@ Retired IDs are never reused; they keep a tombstone here instead of a table row.
 | `RIV2008` | Warning | Brand declared with conflicting underlying types — the first declaration wins. | Align every declaration of the brand on one underlying type. |
 | `RIV2009` | Warning | Header parameter named `Accept`, `Content-Type` or `Authorization` — OpenAPI forbids these as header parameters; the parameter is omitted from the spec. | Describe content negotiation via media types and auth via security schemes; use a custom header name for anything else. |
 | `RIV2010` | Warning | External contract IR declares the same response status more than once — the duplicate is dropped and the first declaration, including its metadata, is kept. | Fix the producer to emit one response per status; use a union schema when one status genuinely has multiple payload shapes. |
-| `RIV2011` | Error | A programmatic security configuration defines the primary scheme name again in its additional definitions. | Keep each scheme name unique; the CLI already rejects duplicate `--security` names. |
+| `RIV2011` | Error | Two `--security` values define the same scheme name. | Give each `--security` scheme a unique name (`name=<value>`). |
 | `RIV2012` | Error | Two incompatible endpoints declare the same normalized HTTP method + route (e.g. contradictory response shapes from different extraction frontends) — generation fails naming both sources instead of writing a lossy spec. | Resolve the contradiction at the source; equivalent duplicate declarations collapse silently. |
 
 ## RIV3xxx — import

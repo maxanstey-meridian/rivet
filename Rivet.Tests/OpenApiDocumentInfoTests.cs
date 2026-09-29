@@ -97,11 +97,8 @@ public sealed class OpenApiDocumentInfoTests
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
 
         var input = new EmitPipeline.EmitInput(
-            walker.Definitions.Values.ToList(),
-            walker.Brands.Values.ToList(),
             walker.Enums,
             endpoints,
-            walker.TypeNamespaces,
             walker.Definitions,
             walker.Brands
         );

@@ -1,6 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
-using Rivet.Tool.Analysis;
+using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -19,7 +19,7 @@ public sealed class ExplicitContractTests
     [InlineData("[FromQuery] System.Threading.CancellationToken token")]
     public void Contradictory_Or_Plumbing_Bindings_Refuse(string parameters)
     {
-        var error = Assert.Throws<ContractAnalysisException>(() =>
+        var error = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(Endpoint(parameters))
         );
         Assert.Contains("RIV1100", error.Message);
@@ -34,7 +34,7 @@ public sealed class ExplicitContractTests
     [InlineData("IFormFile file, [FromForm] Dto dto")]
     public void Mixed_Body_And_Form_Inputs_Refuse(string parameters)
     {
-        var error = Assert.Throws<ContractAnalysisException>(() =>
+        var error = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkMerged(Endpoint(parameters))
         );
         Assert.Contains("RIV1104", error.Message);
@@ -72,9 +72,7 @@ public sealed class ExplicitContractTests
                 public {{result}} Get() => throw new System.NotImplementedException();
             }
             """;
-        var error = Assert.Throws<ContractAnalysisException>(() =>
-            CompilationHelper.WalkMerged(source)
-        );
+        var error = Assert.Throws<RivetUserException>(() => CompilationHelper.WalkMerged(source));
         Assert.Contains("RIV1107", error.Message);
     }
 
@@ -189,7 +187,7 @@ public sealed class ExplicitContractTests
         Assert.Contains(
             "RIV1103",
             Assert
-                .Throws<ContractAnalysisException>(() =>
+                .Throws<RivetUserException>(() =>
                     CompilationHelper.DiscoverAndWalk(CompilationHelper.CreateCompilation(source))
                 )
                 .Message
@@ -234,7 +232,25 @@ public sealed class ExplicitContractTests
         Assert.Contains(
             "RIV1108",
             Assert
-                .Throws<ContractAnalysisException>(() =>
+                .Throws<RivetUserException>(() =>
+                    CompilationHelper.DiscoverAndWalk(CompilationHelper.CreateCompilation(source))
+                )
+                .Message
+        );
+    }
+
+    [Fact]
+    public void Colliding_Generated_Schema_Names_Refuse_As_User_Error()
+    {
+        const string source = """
+            using Rivet;
+            [assembly: RivetGeneratedSchema("Code", "Code", "string", null, false, "{}")]
+            [assembly: RivetGeneratedSchema("Code", "Code", "string", null, false, "{}")]
+            """;
+        Assert.Contains(
+            "collides",
+            Assert
+                .Throws<RivetUserException>(() =>
                     CompilationHelper.DiscoverAndWalk(CompilationHelper.CreateCompilation(source))
                 )
                 .Message
@@ -265,7 +281,7 @@ public sealed class ExplicitContractTests
             Assert.Contains(
                 "RIV1100",
                 Assert
-                    .Throws<ContractAnalysisException>(() => CompilationHelper.EmitOpenApi(source))
+                    .Throws<RivetUserException>(() => CompilationHelper.EmitOpenApi(source))
                     .Message
             );
             return;
@@ -289,9 +305,7 @@ public sealed class ExplicitContractTests
             .Replace("/items", "/items/{item-id}");
         Assert.Contains(
             "RIV1100",
-            Assert
-                .Throws<ContractAnalysisException>(() => CompilationHelper.WalkMerged(source))
-                .Message
+            Assert.Throws<RivetUserException>(() => CompilationHelper.WalkMerged(source)).Message
         );
     }
 
@@ -314,7 +328,7 @@ public sealed class ExplicitContractTests
         Assert.Contains(
             "RIV1108",
             Assert
-                .Throws<ContractAnalysisException>(() =>
+                .Throws<RivetUserException>(() =>
                     CompilationHelper.DiscoverAndWalk(CompilationHelper.CreateCompilation(source))
                 )
                 .Message
@@ -344,7 +358,7 @@ public sealed class ExplicitContractTests
         Assert.Contains(
             "RIV1103",
             Assert
-                .Throws<ContractAnalysisException>(() =>
+                .Throws<RivetUserException>(() =>
                     CompilationHelper.DiscoverAndWalk(CompilationHelper.CreateCompilation(source))
                 )
                 .Message
@@ -367,7 +381,7 @@ public sealed class ExplicitContractTests
         Assert.Contains(
             "RIV1108",
             Assert
-                .Throws<ContractAnalysisException>(() =>
+                .Throws<RivetUserException>(() =>
                     CompilationHelper.DiscoverAndWalk(CompilationHelper.CreateCompilation(source))
                 )
                 .Message
@@ -392,9 +406,7 @@ public sealed class ExplicitContractTests
             );
         Assert.Contains(
             "RIV1107",
-            Assert
-                .Throws<ContractAnalysisException>(() => CompilationHelper.WalkMerged(source))
-                .Message
+            Assert.Throws<RivetUserException>(() => CompilationHelper.WalkMerged(source)).Message
         );
     }
 

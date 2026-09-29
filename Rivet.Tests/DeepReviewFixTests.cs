@@ -449,18 +449,6 @@ public sealed class DeepReviewFixTests
 
     // ========== Deep Review Fix #3 (2026-03-21) — findings from two deep reviews ==========
 
-    // --- Fix 1: CollectTypeRefs recurses into Brand.Inner ---
-
-    [Fact]
-    public void CollectTypeRefs_Brand_Wrapping_TypeRef_CollectsBoth()
-    {
-        var names = new HashSet<string>();
-        TsType.CollectTypeRefs(new TsType.Brand("UserId", new TsType.TypeRef("IdBase")), names);
-
-        Assert.Contains("UserId", names);
-        Assert.Contains("IdBase", names);
-    }
-
     // --- Fix 5: Multipart route param deduplication ---
 
     [Fact]

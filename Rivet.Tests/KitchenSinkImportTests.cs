@@ -320,10 +320,7 @@ public sealed class KitchenSinkImportTests
         var result = _fixtureImport;
 
         // Health endpoint has an explicit empty requirement list.
-        Assert.Contains(
-            ".SecurityRequirements()",
-            CompilationHelper.FindFile(result, "HealthContract.cs")
-        );
+        Assert.Contains(".Anonymous()", CompilationHelper.FindFile(result, "HealthContract.cs"));
 
         // Admin purge has security: [{"admin": []}].
         Assert.Contains(
@@ -874,13 +871,13 @@ public sealed class KitchenSinkImportTests
         {
             foreach (var p in ep.Params)
             {
-                TsType.CollectTypeRefs(p.Type, referencedNames);
+                TsTypeRefs.Collect(p.Type, referencedNames);
             }
             foreach (var r in ep.Responses)
             {
                 if (r.DataType is not null)
                 {
-                    TsType.CollectTypeRefs(r.DataType, referencedNames);
+                    TsTypeRefs.Collect(r.DataType, referencedNames);
                 }
             }
         }

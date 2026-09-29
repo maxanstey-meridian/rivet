@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rivet.Tool;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -223,7 +224,7 @@ public sealed class ValueObjectTests
             public sealed record ProductDto(string Name, Money Price);
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkContract(source)
         );
 
@@ -246,7 +247,7 @@ public sealed class ValueObjectTests
             public sealed record ThingDto(Wrapper Data);
             """;
 
-        var exception = Assert.ThrowsAny<InvalidOperationException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             CompilationHelper.WalkContract(source)
         );
 

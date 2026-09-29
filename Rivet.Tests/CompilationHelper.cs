@@ -132,7 +132,7 @@ public static class CompilationHelper
     )
     {
         var wkt = new WellKnownTypes(compilation);
-        return CoverageChecker.Check(compilation, wkt, contractEndpoints);
+        return CoverageChecker.Check(compilation, wkt, contractEndpoints, "api");
     }
 
     // --- Canonical walk/emit helpers (survive the Phase 3 pivot) ---

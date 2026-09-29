@@ -57,7 +57,7 @@ internal static class FunctionsHostConfiguration
                         or UnauthorizedAccessException
             )
         {
-            throw new ContractAnalysisException(
+            throw new RivetUserException(
                 $"Cannot read Functions route prefix from {path}: {exception.Message}"
             );
         }

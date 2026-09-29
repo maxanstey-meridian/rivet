@@ -5,8 +5,7 @@ using Rivet.Tool.Model;
 
 public sealed record ExtractionResult(
     IReadOnlyList<TsEndpointDefinition> Endpoints,
-    IReadOnlyList<TsTypeDefinition> ExtractedTypes,
-    IReadOnlyDictionary<string, string?> TypeNamespaces
+    IReadOnlyList<TsTypeDefinition> ExtractedTypes
 );
 
 public static class InlineTypeExtractor
@@ -129,17 +128,6 @@ public static class InlineTypeExtractor
     public static string GenerateName(
         string controllerName,
         IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences,
-        HashSet<string> usedNames
-    )
-    {
-        var baseName = DeriveBaseName(controllerName, occurrences);
-        var suffix = IsResponseWrapper(occurrences, occurrences[0].Type) ? "Response" : "Dto";
-        return GenerateName(baseName, suffix, usedNames);
-    }
-
-    public static string GenerateName(
-        string controllerName,
-        IReadOnlyList<(TsType.InlineObject Type, string Context)> occurrences,
         HashSet<string> usedNames,
         Dictionary<string, TsType.InlineObject> nameTypes,
         TsType.InlineObject type,
@@ -149,19 +137,6 @@ public static class InlineTypeExtractor
         var baseName = DeriveBaseName(controllerName, occurrences);
         var suffix = IsResponseWrapper(occurrences, type) ? "Response" : "Dto";
         return GenerateName(baseName, suffix, usedNames, nameTypes, type, arrayElementHashes);
-    }
-
-    public static string GenerateName(string baseName, HashSet<string> usedNames)
-    {
-        return GenerateName(baseName, "Dto", usedNames);
-    }
-
-    public static string GenerateName(string baseName, string suffix, HashSet<string> usedNames)
-    {
-        var name = baseName + suffix;
-        name = ResolveCollision(name, usedNames);
-        usedNames.Add(name);
-        return name;
     }
 
     public static string GenerateName(
@@ -458,7 +433,6 @@ public static class InlineTypeExtractor
         var arrayElementHashes = CollectArrayElementHashes(endpoints);
         var replacements = new Dictionary<string, TsType.TypeRef>();
         var extractedTypes = new List<TsTypeDefinition>();
-        var typeNamespaces = new Dictionary<string, string?>();
 
         foreach (var group in groups)
         {
@@ -499,7 +473,6 @@ public static class InlineTypeExtractor
             }
 
             replacements[group.Key] = new TsType.TypeRef(name);
-            typeNamespaces[name] = null;
         }
 
         // Build type definitions with replaced field types
@@ -522,7 +495,7 @@ public static class InlineTypeExtractor
         // Replace InlineObjects in all endpoints
         var updatedEndpoints = endpoints.Select(e => ReplaceInEndpoint(e, replacements)).ToList();
 
-        return new ExtractionResult(updatedEndpoints, extractedTypes, typeNamespaces);
+        return new ExtractionResult(updatedEndpoints, extractedTypes);
     }
 
     private static TsEndpointDefinition ReplaceInEndpoint(

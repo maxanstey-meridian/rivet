@@ -76,7 +76,7 @@ internal static class OpenApiProvenanceReader
             .ToList();
         var opaqueSchemaPointers = schemaComponents
             .Where(component => NeedsSchemaProvenance(component.Value))
-            .Select(component => $"#/components/schemas/{EscapePointerToken(component.Name)}")
+            .Select(component => $"#/components/schemas/{JsonPointer.Escape(component.Name)}")
             .ToHashSet(StringComparer.Ordinal);
         var vendorExtensions = ReadVendorExtensions(root, swagger2, opaqueSchemaPointers);
         var document = new OpenApiDocumentProvenance(
@@ -518,19 +518,10 @@ internal static class OpenApiProvenanceReader
     )
     {
         componentId = null;
-        if (
-            !value.TryGetProperty("$ref", out var referenceValue)
-            || referenceValue.ValueKind != JsonValueKind.String
-            || referenceValue.GetString() is not { } reference
-            || !reference.StartsWith($"#/components/{kind}/", StringComparison.Ordinal)
-        )
-        {
-            return false;
-        }
-        componentId = Uri.UnescapeDataString(reference[$"#/components/{kind}/".Length..])
-            .Replace("~1", "/", StringComparison.Ordinal)
-            .Replace("~0", "~", StringComparison.Ordinal);
-        return true;
+        return value.TryGetProperty("$ref", out var referenceValue)
+            && referenceValue.ValueKind == JsonValueKind.String
+            && referenceValue.GetString() is { } reference
+            && JsonPointer.TryGetComponentName(reference, kind, out componentId);
     }
 
     private static IReadOnlyList<OpenApiVendorExtensionProvenance> ReadVendorExtensions(
@@ -607,7 +598,7 @@ internal static class OpenApiProvenanceReader
                 {
                     ReadVendorExtensions(
                         example.Value,
-                        $"{pointer}/examples/{EscapePointerToken(example.Name)}",
+                        $"{pointer}/examples/{JsonPointer.Escape(example.Name)}",
                         swagger2,
                         opaqueSchemaPointers,
                         exampleObject: true,
@@ -621,7 +612,7 @@ internal static class OpenApiProvenanceReader
             {
                 ReadVendorExtensions(
                     property.Value,
-                    $"{pointer}/{EscapePointerToken(property.Name)}",
+                    $"{pointer}/{JsonPointer.Escape(property.Name)}",
                     swagger2,
                     opaqueSchemaPointers,
                     exampleObject: false,
@@ -708,11 +699,6 @@ internal static class OpenApiProvenanceReader
         };
     }
 
-    private static string EscapePointerToken(string value) =>
-        value
-            .Replace("~", "~0", StringComparison.Ordinal)
-            .Replace("/", "~1", StringComparison.Ordinal);
-
     private static IReadOnlyList<OpenApiComponentExampleProvenance> ReadComponentExamples(
         JsonElement root
     )
@@ -789,20 +775,14 @@ internal static class OpenApiProvenanceReader
 
     private static string? ReadRequestBodyComponentId(JsonElement operation)
     {
-        if (
-            !operation.TryGetProperty("requestBody", out var requestBody)
-            || !requestBody.TryGetProperty("$ref", out var referenceValue)
-            || referenceValue.ValueKind != JsonValueKind.String
-            || referenceValue.GetString() is not { } reference
-            || !reference.StartsWith("#/components/requestBodies/", StringComparison.Ordinal)
-        )
-        {
-            return null;
-        }
-
-        return Uri.UnescapeDataString(reference["#/components/requestBodies/".Length..])
-            .Replace("~1", "/", StringComparison.Ordinal)
-            .Replace("~0", "~", StringComparison.Ordinal);
+        return
+            operation.TryGetProperty("requestBody", out var requestBody)
+            && requestBody.TryGetProperty("$ref", out var referenceValue)
+            && referenceValue.ValueKind == JsonValueKind.String
+            && referenceValue.GetString() is { } reference
+            && JsonPointer.TryGetComponentName(reference, "requestBodies", out var componentId)
+            ? componentId
+            : null;
     }
 
     private static OpenApiTagProvenance ReadTag(JsonElement tag)
@@ -965,7 +945,7 @@ internal static class OpenApiProvenanceReader
             );
         }
 
-        if (!TryResolveLocalReference(root, reference, out var target))
+        if (!JsonPointer.TryResolve(root, reference, out var target))
         {
             return null;
         }
@@ -976,7 +956,7 @@ internal static class OpenApiProvenanceReader
 
     private static JsonElement ResolveLocalReference(JsonElement root, string reference)
     {
-        if (TryResolveLocalReference(root, reference, out var target))
+        if (JsonPointer.TryResolve(root, reference, out var target))
         {
             return target;
         }
@@ -984,28 +964,6 @@ internal static class OpenApiProvenanceReader
         throw new InvalidOperationException(
             $"Local request body reference '{reference}' targets a missing value."
         );
-    }
-
-    private static bool TryResolveLocalReference(
-        JsonElement root,
-        string reference,
-        out JsonElement target
-    )
-    {
-        var current = root;
-        foreach (var encodedSegment in reference[2..].Split('/'))
-        {
-            var segment = Uri.UnescapeDataString(encodedSegment)
-                .Replace("~1", "/", StringComparison.Ordinal)
-                .Replace("~0", "~", StringComparison.Ordinal);
-            if (!current.TryGetProperty(segment, out current))
-            {
-                target = default;
-                return false;
-            }
-        }
-        target = current;
-        return true;
     }
 
     private static bool TryFindSwaggerBodyDescription(

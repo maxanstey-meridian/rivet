@@ -9,11 +9,8 @@ namespace Rivet.Tool.Emit;
 internal static class EmitPipeline
 {
     internal sealed record EmitInput(
-        IReadOnlyList<TsTypeDefinition> Definitions,
-        IReadOnlyList<TsType.Brand> Brands,
         IReadOnlyDictionary<string, TsType> Enums,
         IReadOnlyList<TsEndpointDefinition> Endpoints,
-        IReadOnlyDictionary<string, string?> TypeNamespaces,
         IReadOnlyDictionary<string, TsTypeDefinition> DefinitionsByName,
         IReadOnlyDictionary<string, TsType.Brand> BrandsByName,
         ContractSecurityMetadata? Security = null,
@@ -25,7 +22,10 @@ internal static class EmitPipeline
         // Extraction pass: find duplicate/large InlineObjects, replace with named TypeRefs.
         // OpenApiEmitter resolves those TypeRefs through DefinitionsByName, so the extracted
         // definitions must be merged in before emission.
-        var extraction = InlineTypeExtractor.Extract(input.Endpoints, input.Definitions.ToList());
+        var extraction = InlineTypeExtractor.Extract(
+            input.Endpoints,
+            input.DefinitionsByName.Values.ToList()
+        );
 
         var definitionsByName = new Dictionary<string, TsTypeDefinition>(input.DefinitionsByName);
         foreach (var def in extraction.ExtractedTypes)
@@ -41,46 +41,14 @@ internal static class EmitPipeline
             options.Version,
             options.Servers
         );
-        string openApiJson;
-        try
-        {
-            var securityConfig = options.SecuritySchemes is { Count: > 0 }
-                ? SecurityParser.ParseMany(options.SecuritySchemes)
-                : SecurityParser.Parse(options.DefaultSecurity);
-            openApiJson =
-                securityConfig is not null
-                    ? OpenApiEmitter.Emit(
-                        endpoints,
-                        definitionsByName,
-                        input.BrandsByName,
-                        input.Enums,
-                        securityConfig,
-                        documentInfo
-                    )
-                : input.Security is not null
-                    ? OpenApiEmitter.EmitWithSecurityMetadata(
-                        endpoints,
-                        definitionsByName,
-                        input.BrandsByName,
-                        input.Enums,
-                        input.Security,
-                        documentInfo
-                    )
-                : OpenApiEmitter.Emit(
-                    endpoints,
-                    definitionsByName,
-                    input.BrandsByName,
-                    input.Enums,
-                    null,
-                    documentInfo
-                );
-        }
-        catch (Exception exception)
-            when (exception is OpenApiEmissionException or SecurityConfigurationException)
-        {
-            Console.Error.WriteLine(exception.Message);
-            return 1;
-        }
+        var openApiJson = OpenApiEmitter.Emit(
+            endpoints,
+            definitionsByName,
+            input.BrandsByName,
+            input.Enums,
+            SecurityParser.ParseMany(options.SecuritySchemes ?? []) ?? input.Security,
+            documentInfo
+        );
 
         // Resolve the spec path: --openapi overrides (resolved against --output when relative);
         // otherwise --output <dir> writes <dir>/openapi.json.
