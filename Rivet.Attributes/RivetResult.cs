@@ -9,18 +9,21 @@ public abstract class RivetResult
 }
 
 internal sealed class RivetBodyResult(
+    EndpointContract contract,
     int statusCode,
     object? value,
     Type? payloadType,
     string? contentType,
-    bool hasBody
+    bool isJson
 ) : RivetResult
 {
+    internal EndpointContract Contract { get; } = contract;
     internal int StatusCode { get; } = statusCode;
     internal object? Value { get; } = value;
     internal Type? PayloadType { get; } = payloadType;
     internal string? ContentType { get; } = contentType;
-    internal bool HasBody { get; } = hasBody;
+    internal bool IsJson { get; } = isJson;
+    internal bool HasBody => ContentType is not null;
 }
 
 internal abstract record RivetFileSource;

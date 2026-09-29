@@ -3,18 +3,32 @@ namespace Rivet;
 using System.Collections.Immutable;
 using Microsoft.Net.Http.Headers;
 
-/// <summary>
-/// Describes an additional (non-success) response declared via .Returns&lt;T&gt;().
-/// </summary>
-public sealed record RouteErrorResponse(
-    int StatusCode,
-    Type? ResponseType,
-    string? Description,
-    string? StatusKey = null
-)
+/// <summary>An OpenAPI response key: an exact status, an nXX range (<see cref="RangeClass"/>), or default.</summary>
+internal readonly record struct ResponseStatusKey(string Key, int? Exact, int? RangeClass)
 {
-    public string EffectiveStatusKey => StatusKey ?? StatusCode.ToString();
+    public static ResponseStatusKey FromStatus(int statusCode) =>
+        new(statusCode.ToString(), statusCode, null);
+
+    public static ResponseStatusKey? Parse(string key) =>
+        key switch
+        {
+            [>= '1' and <= '5', >= '0' and <= '9', >= '0' and <= '9'] => new(
+                key,
+                int.Parse(key),
+                null
+            ),
+            [>= '1' and <= '5', 'X' or 'x', 'X' or 'x'] => new(key, null, key[0] - '0'),
+            _ when key.Equals("default", StringComparison.OrdinalIgnoreCase) => new(
+                key,
+                null,
+                null
+            ),
+            _ => null,
+        };
 }
+
+/// <summary>A non-success response declared via .Returns().</summary>
+internal sealed record RouteErrorResponse(ResponseStatusKey Status, Type? ResponseType);
 
 /// <summary>
 /// Everything a route definition's builder methods record. Immutable, so a converted
@@ -112,14 +126,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
 
     private EndpointContract BuildContract(RouteState state, Type? successPayloadType)
     {
-        if (state.SuccessStatus is < 100 or > 599)
-        {
-            throw new InvalidOperationException(
-                $"{Method} {Route}: success status {state.SuccessStatus} is not a valid HTTP status code."
-            );
-        }
-
-        if (state.ErrorResponses.Any(response => GetExactStatus(response) == state.SuccessStatus))
+        if (state.ErrorResponses.Any(response => response.Status.Exact == state.SuccessStatus))
         {
             throw new InvalidOperationException(
                 $"Status {state.SuccessStatus} is declared as both the success status and via .Returns() — "
@@ -140,53 +147,27 @@ public abstract partial class RouteDefinitionBase<TSelf>
         var ranges = new Dictionary<int, ResponseContract>();
         ResponseContract? fallback = null;
 
-        foreach (var response in state.ErrorResponses)
+        foreach (var (status, responseType) in state.ErrorResponses)
         {
-            var statusKey = response.EffectiveStatusKey;
-            var exactStatus = GetExactStatus(response);
-            if (exactStatus is not null)
-            {
-                exact.Add(
-                    exactStatus.Value,
-                    BuildResponse(
-                        state,
-                        statusKey,
-                        exactStatus.Value,
-                        response.ResponseType,
-                        isSuccess: false
-                    )
-                );
-                continue;
-            }
-
-            if (statusKey.Equals("default", StringComparison.OrdinalIgnoreCase))
-            {
-                fallback = BuildResponse(
-                    state,
-                    statusKey,
-                    null,
-                    response.ResponseType,
-                    isSuccess: false
-                );
-                continue;
-            }
-
-            if (
-                statusKey.Length == 3
-                && statusKey[0] is >= '1' and <= '5'
-                && statusKey[1..].Equals("XX", StringComparison.OrdinalIgnoreCase)
-            )
-            {
-                ranges.Add(
-                    statusKey[0] - '0',
-                    BuildResponse(state, statusKey, null, response.ResponseType, isSuccess: false)
-                );
-                continue;
-            }
-
-            throw new InvalidOperationException(
-                $"{Method} {Route}: response status key '{statusKey}' is not an exact status, nXX range, or default."
+            var response = BuildResponse(
+                state,
+                status.Key,
+                status.Exact,
+                responseType,
+                isSuccess: false
             );
+            if (status.Exact is { } exactStatus)
+            {
+                exact.Add(exactStatus, response);
+            }
+            else if (status.RangeClass is { } rangeClass)
+            {
+                ranges.Add(rangeClass, response);
+            }
+            else
+            {
+                fallback = response;
+            }
         }
 
         return new EndpointContract(
@@ -210,34 +191,25 @@ public abstract partial class RouteDefinitionBase<TSelf>
                 content.StatusKey.Equals(statusKey, StringComparison.OrdinalIgnoreCase)
             )
             .ToArray();
-        var representations = matchingContents
-            .GroupBy(content => content.MediaType, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(
-                group => group.Key,
-                group => new ResponseRepresentation(group.Key, group.Last().IsBinary),
-                StringComparer.OrdinalIgnoreCase
-            );
+        var representations = new Dictionary<string, ResponseRepresentation>(
+            StringComparer.OrdinalIgnoreCase
+        );
+        foreach (var content in matchingContents)
+        {
+            Add(ResponseRepresentation.Create(content.MediaType, content.IsBinary));
+        }
 
         if (state.FileContentType is not null && isSuccess)
         {
-            representations[state.FileContentType] = new ResponseRepresentation(
-                state.FileContentType,
-                true
-            );
+            Add(ResponseRepresentation.Create(state.FileContentType, isBinary: true));
         }
         else if (state.ResponseContentType is not null && isSuccess)
         {
-            representations[state.ResponseContentType] = new ResponseRepresentation(
-                state.ResponseContentType,
-                false
-            );
+            Add(ResponseRepresentation.Create(state.ResponseContentType, isBinary: false));
         }
         else if (payloadType is not null && representations.Count == 0)
         {
-            representations["application/json"] = new ResponseRepresentation(
-                "application/json",
-                false
-            );
+            Add(ResponseRepresentation.Json);
         }
 
         var contentPayloadTypes = matchingContents
@@ -274,9 +246,38 @@ public abstract partial class RouteDefinitionBase<TSelf>
             statusKey,
             statusCode,
             payloadType,
-            isSuccess ? state.ResponseContentType : null,
-            representations
+            representations.Count,
+            SelectBodyRepresentation(),
+            representations.Values.Where(representation => representation.IsBinary).ToArray()
         );
+
+        void Add(ResponseRepresentation representation) =>
+            representations[representation.Key] = representation;
+
+        // The representation Success/Error write a body with: the explicit primary content
+        // type, else JSON, else the only one declared. Null when that is ambiguous.
+        ResponseRepresentation? SelectBodyRepresentation()
+        {
+            if (
+                isSuccess
+                && state.ResponseContentType is { } preferred
+                && representations.TryGetValue(
+                    ResponseRepresentation.KeyOf(preferred),
+                    out var preferredRepresentation
+                )
+            )
+            {
+                return preferredRepresentation;
+            }
+
+            if (representations.Count == 0)
+            {
+                return ResponseRepresentation.Json;
+            }
+
+            return representations.Values.FirstOrDefault(representation => representation.IsJson)
+                ?? (representations.Count == 1 ? representations.Values.Single() : null);
+        }
     }
 
     public TSelf Status(int statusCode) =>
@@ -296,7 +297,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
                 );
             }
 
-            if (state.ErrorResponses.Any(response => GetExactStatus(response) == statusCode))
+            if (state.ErrorResponses.Any(response => response.Status.Exact == statusCode))
             {
                 throw new InvalidOperationException(
                     $"Status {statusCode} is already declared via .Returns() — success and error responses cannot share a status."
@@ -357,92 +358,67 @@ public abstract partial class RouteDefinitionBase<TSelf>
             };
         });
 
-    public TSelf Returns<TResponse>(int statusCode) => Returns<TResponse>(statusCode, null);
-
-    public TSelf Returns<TResponse>(int statusCode, string? description) =>
-        AddErrorResponse(new RouteErrorResponse(statusCode, typeof(TResponse), description));
-
-    public TSelf Returns<TResponse>(string statusKey, string? description = null) =>
-        AddErrorResponse(new RouteErrorResponse(0, typeof(TResponse), description, statusKey));
-
-    public TSelf Returns(int statusCode) => Returns(statusCode, null);
-
-    public TSelf Returns(int statusCode, string? description) =>
-        AddErrorResponse(new RouteErrorResponse(statusCode, null, description));
-
-    public TSelf Returns(string statusKey, string? description = null) =>
-        AddErrorResponse(new RouteErrorResponse(0, null, description, statusKey));
-
-    private TSelf AddErrorResponse(RouteErrorResponse response) =>
+    private TSelf AddErrorResponse(int statusCode, Type? responseType) =>
         Mutate(state =>
         {
-            var exactStatus = GetExactStatus(response);
-
-            if (
-                response.StatusKey is { } statusKey
-                && exactStatus is null
-                && !statusKey.Equals("default", StringComparison.OrdinalIgnoreCase)
-                && !IsRangeStatusKey(statusKey)
-            )
+            if (statusCode is < 100 or > 599)
             {
                 throw new InvalidOperationException(
-                    $"{Method} {Route}: response status key '{statusKey}' is not an exact status, nXX range, or default."
+                    $"{Method} {Route}: response status {statusCode} is not a valid HTTP status code."
                 );
             }
 
-            if (exactStatus is < 100 or > 599)
-            {
-                throw new InvalidOperationException(
-                    $"{Method} {Route}: response status {exactStatus} is not a valid HTTP status code."
-                );
-            }
-
-            if (state.StatusSet && exactStatus == state.SuccessStatus)
-            {
-                throw new InvalidOperationException(
-                    $"Status {exactStatus} is already declared as the success status — success and error responses cannot share a status."
-                );
-            }
-
-            if (
-                state.ErrorResponses.Any(existing =>
-                    exactStatus is not null
-                        ? GetExactStatus(existing) == exactStatus
-                        : GetExactStatus(existing) is null
-                            && string.Equals(
-                                existing.EffectiveStatusKey,
-                                response.EffectiveStatusKey,
-                                StringComparison.OrdinalIgnoreCase
-                            )
-                )
-            )
-            {
-                throw new InvalidOperationException(
-                    $"Status {response.EffectiveStatusKey} is already declared via .Returns() — a status carries a single response shape. "
-                        + "For multiple shapes at one status, declare a [RivetUnion] type and return it once."
-                );
-            }
-
-            return state with
-            {
-                ErrorResponses = state.ErrorResponses.Add(response),
-            };
+            return AddErrorResponse(state, ResponseStatusKey.FromStatus(statusCode), responseType);
         });
 
-    private static int? GetExactStatus(RouteErrorResponse response)
+    private TSelf AddErrorResponse(string statusKey, Type? responseType) =>
+        Mutate(state =>
+            AddErrorResponse(
+                state,
+                ResponseStatusKey.Parse(statusKey)
+                    ?? throw new InvalidOperationException(
+                        $"{Method} {Route}: response status key '{statusKey}' is not an exact status, nXX range, or default."
+                    ),
+                responseType
+            )
+        );
+
+    private static RouteState AddErrorResponse(
+        RouteState state,
+        ResponseStatusKey status,
+        Type? responseType
+    )
     {
-        if (response.StatusKey is null)
+        if (state.StatusSet && status.Exact == state.SuccessStatus)
         {
-            return response.StatusCode;
+            throw new InvalidOperationException(
+                $"Status {status.Exact} is already declared as the success status — success and error responses cannot share a status."
+            );
         }
 
-        return response.StatusKey is [>= '1' and <= '5', >= '0' and <= '9', >= '0' and <= '9']
-            ? int.Parse(response.StatusKey)
-            : null;
-    }
+        if (
+            state.ErrorResponses.Any(existing =>
+                status.Exact is not null
+                    ? existing.Status.Exact == status.Exact
+                    : existing.Status.Exact is null
+                        && existing.Status.Key.Equals(
+                            status.Key,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+            )
+        )
+        {
+            throw new InvalidOperationException(
+                $"Status {status.Key} is already declared via .Returns() — a status carries a single response shape. "
+                    + "For multiple shapes at one status, declare a [RivetUnion] type and return it once."
+            );
+        }
 
-    private static bool IsRangeStatusKey(string statusKey) =>
-        statusKey is [>= '1' and <= '5', 'X' or 'x', 'X' or 'x'];
+        return state with
+        {
+            ErrorResponses = state.ErrorResponses.Add(new RouteErrorResponse(status, responseType)),
+        };
+    }
 
     public TSelf ResponseContent(int statusCode, string mediaType) =>
         AddResponseContent(statusCode.ToString(), mediaType, null, isBinary: false);
@@ -555,7 +531,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
 public sealed class RouteDefinition<TInput, TOutput>
     : RouteDefinitionBase<RouteDefinition<TInput, TOutput>>
 {
-    internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
+    internal RouteDefinition(string method, string route, int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
 
     public BoundRouteDefinition<TOutput> Bind(TInput input)
@@ -572,7 +548,7 @@ public sealed class RouteDefinition<TInput, TOutput>
 /// </summary>
 public sealed class RouteDefinition<TOutput> : RouteDefinitionBase<RouteDefinition<TOutput>>
 {
-    internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
+    internal RouteDefinition(string method, string route, int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
 
     public RivetResult Success(TOutput payload) =>
@@ -664,7 +640,7 @@ public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRout
 /// </summary>
 public sealed class RouteDefinition : RouteDefinitionBase<RouteDefinition>
 {
-    internal RouteDefinition(string method = "GET", string route = "", int defaultStatus = 200)
+    internal RouteDefinition(string method, string route, int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
 
     public RivetResult Success() => RivetTerminal.Success(Publish(null));

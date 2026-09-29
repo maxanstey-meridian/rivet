@@ -1,12 +1,29 @@
 namespace Rivet;
 
-// Builder methods whose arguments only Rivet.Tool reads, from the call syntax at generation
-// time. At runtime they record nothing; they still throw once the definition is published.
+// Builder methods whose arguments (all or some) only Rivet.Tool reads, from the call syntax at
+// generation time. At runtime they record nothing beyond what terminals validate against;
+// they still throw once the definition is published.
 // Their parameters are deliberately unused, so the local .editorconfig turns IDE0060 off for
 // this file only. Parameter names are part of the Tool contract (named arguments): don't rename.
 public abstract partial class RouteDefinitionBase<TSelf>
 {
     private TSelf Marker() => Mutate(static state => state);
+
+    public TSelf Returns<TResponse>(int statusCode) =>
+        AddErrorResponse(statusCode, typeof(TResponse));
+
+    public TSelf Returns<TResponse>(int statusCode, string? description) =>
+        AddErrorResponse(statusCode, typeof(TResponse));
+
+    public TSelf Returns<TResponse>(string statusKey, string? description = null) =>
+        AddErrorResponse(statusKey, typeof(TResponse));
+
+    public TSelf Returns(int statusCode) => AddErrorResponse(statusCode, null);
+
+    public TSelf Returns(int statusCode, string? description) => AddErrorResponse(statusCode, null);
+
+    public TSelf Returns(string statusKey, string? description = null) =>
+        AddErrorResponse(statusKey, null);
 
     public TSelf Summary(string summary) => Marker();
 

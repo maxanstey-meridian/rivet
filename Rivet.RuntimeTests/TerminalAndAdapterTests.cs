@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
@@ -649,14 +650,61 @@ public sealed class TerminalAndAdapterTests
         Assert.Equal("collie", json.GetProperty("breed").GetString());
     }
 
-    [Fact]
-    public void Unregistered_polymorphic_subtype_is_rejected_at_terminal_construction()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Resolver_configured_polymorphic_subtype_is_accepted(bool mvc)
     {
-        var route = Define.Get<UnregisteredAnimal>("/animal");
+        // BUG-11: polymorphism configured through the serializer's resolver, not attributes.
+        var result = Define.Get<Vehicle>("/vehicle").Success(new Car("v1", 4));
 
-        Assert.Throws<RivetContractViolationException>(() =>
-            route.Success(new UnregisteredDog("Fido"))
-        );
+        var response = await ExecuteAsync(result, mvc, services: RegisterCarPolymorphism);
+        var json = JsonDocument.Parse(response.Body).RootElement;
+
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal("car", json.GetProperty("$type").GetString());
+        Assert.Equal(4, json.GetProperty("doors").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Media_type_parameters_do_not_split_a_declared_representation(bool mvc)
+    {
+        var route = Define
+            .Get<string>("/greeting")
+            .ResponseContent<string>(200, "text/plain; charset=utf-8")
+            .ResponseContent<string>(200, "text/plain");
+
+        var response = await ExecuteAsync(route.Success("hello"), mvc);
+
+        Assert.StartsWith("text/plain", response.ContentType);
+        Assert.Equal("hello", Encoding.UTF8.GetString(response.Body));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task File_content_type_selection_ignores_media_type_parameters(bool mvc)
+    {
+        var route = Define.Get("/report").ResponseBinaryContent(200, "text/csv; charset=utf-8");
+
+        var response = await ExecuteAsync(route.File([1], contentType: "text/csv"), mvc);
+
+        Assert.Equal("text/csv", response.ContentType);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Unregistered_polymorphic_subtype_is_rejected_before_the_response_is_written(
+        bool mvc
+    )
+    {
+        // The check needs the host's serializer options, so it runs in the adapter.
+        var result = Define.Get<UnregisteredAnimal>("/animal").Success(new UnregisteredDog("Fido"));
+
+        await Assert.ThrowsAsync<RivetContractViolationException>(() => ExecuteAsync(result, mvc));
     }
 
     [Fact]
@@ -762,14 +810,16 @@ public sealed class TerminalAndAdapterTests
     private static async Task<ResponseObservation> ExecuteAsync(
         RivetResult result,
         bool mvc,
-        Func<HttpContext, Task>? configure = null
+        Func<HttpContext, Task>? configure = null,
+        Action<IServiceCollection>? services = null
     )
     {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddOptions();
-        services.AddControllers();
-        await using var provider = services.BuildServiceProvider();
+        var collection = new ServiceCollection();
+        collection.AddLogging();
+        collection.AddOptions();
+        collection.AddControllers();
+        services?.Invoke(collection);
+        await using var provider = collection.BuildServiceProvider();
 
         var context = new DefaultHttpContext { RequestServices = provider };
         context.Response.Body = new MemoryStream();
@@ -826,6 +876,37 @@ public sealed class TerminalAndAdapterTests
     public abstract record UnregisteredAnimal;
 
     public sealed record UnregisteredDog(string Name) : UnregisteredAnimal;
+
+    public record Vehicle(string Id);
+
+    public sealed record Car(string Id, int Doors) : Vehicle(Id);
+
+    private static void RegisterCarPolymorphism(IServiceCollection services)
+    {
+        static void AddCar(JsonTypeInfo typeInfo)
+        {
+            if (typeInfo.Type == typeof(Vehicle))
+            {
+                typeInfo.PolymorphismOptions = new JsonPolymorphismOptions
+                {
+                    DerivedTypes = { new JsonDerivedType(typeof(Car), "car") },
+                };
+            }
+        }
+
+        services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
+            options.SerializerOptions.TypeInfoResolver = new DefaultJsonTypeInfoResolver
+            {
+                Modifiers = { AddCar },
+            }
+        );
+        services.Configure<Microsoft.AspNetCore.Mvc.JsonOptions>(options =>
+            options.JsonSerializerOptions.TypeInfoResolver = new DefaultJsonTypeInfoResolver
+            {
+                Modifiers = { AddCar },
+            }
+        );
+    }
 
     private sealed record ResponseObservation(
         int StatusCode,

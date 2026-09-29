@@ -11,80 +11,131 @@ public static class RivetResultExtensions
     public static IActionResult ToActionResult(this RivetResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
-        return result switch
-        {
-            RivetBodyResult body => new RivetActionResult(
-                body.StatusCode,
-                body.HasBody,
-                ToMvc(body)
-            ),
-            RivetFileResult file => new RivetActionResult(file.StatusCode, true, ToMvc(file)),
-            _ => throw new ArgumentOutOfRangeException(nameof(result)),
-        };
+        return new RivetActionResult(result);
     }
 
     public static IResult ToResult(this RivetResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
-        return result switch
+        return new RivetMinimalResult(result);
+    }
+
+    // MVC and Minimal API resolve their JSON options from different registrations.
+    private sealed class RivetActionResult(RivetResult result) : IActionResult
+    {
+        public Task ExecuteResultAsync(ActionContext context)
         {
-            RivetBodyResult body => new RivetMinimalResult(
-                body.StatusCode,
-                body.HasBody,
-                ToMinimal(body)
-            ),
-            RivetFileResult file => new RivetMinimalResult(file.StatusCode, true, ToMinimal(file)),
+            var httpContext = context.HttpContext;
+            if (!BeginResponse(httpContext.Response, result))
+            {
+                return Task.CompletedTask;
+            }
+
+            return result switch
+            {
+                RivetBodyResult { HasBody: false } => Task.CompletedTask,
+                RivetBodyResult { IsJson: true } body => WriteJsonAsync(
+                    httpContext,
+                    body,
+                    httpContext
+                        .RequestServices.GetRequiredService<
+                            IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>
+                        >()
+                        .Value.JsonSerializerOptions
+                ),
+                RivetBodyResult body => new ContentResult
+                {
+                    ContentType = body.ContentType,
+                    Content = (string?)body.Value,
+                }.ExecuteResultAsync(context),
+                RivetFileResult file => ToMvc(file).ExecuteResultAsync(context),
+                _ => throw new ArgumentOutOfRangeException(nameof(context)),
+            };
+        }
+    }
+
+    private sealed class RivetMinimalResult(RivetResult result) : IResult
+    {
+        public Task ExecuteAsync(HttpContext httpContext)
+        {
+            if (!BeginResponse(httpContext.Response, result))
+            {
+                return Task.CompletedTask;
+            }
+
+            return result switch
+            {
+                RivetBodyResult { HasBody: false } => Task.CompletedTask,
+                RivetBodyResult { IsJson: true } body => WriteJsonAsync(
+                    httpContext,
+                    body,
+                    httpContext
+                        .RequestServices.GetRequiredService<
+                            IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>
+                        >()
+                        .Value.SerializerOptions
+                ),
+                RivetBodyResult body => Results
+                    .Text((string?)body.Value, body.ContentType)
+                    .ExecuteAsync(httpContext),
+                RivetFileResult file => ToMinimal(file).ExecuteAsync(httpContext),
+                _ => throw new ArgumentOutOfRangeException(nameof(httpContext)),
+            };
+        }
+    }
+
+    private static Task WriteJsonAsync(
+        HttpContext httpContext,
+        RivetBodyResult body,
+        JsonSerializerOptions options
+    )
+    {
+        RivetTerminal.EnsureDeclaredRuntimeType(body, options);
+        return httpContext.Response.WriteAsJsonAsync(
+            body.Value,
+            body.PayloadType!,
+            options,
+            body.ContentType,
+            httpContext.RequestAborted
+        );
+    }
+
+    /// <summary>
+    /// Checks the host has not already committed a conflicting response, then sets the
+    /// declared status. Returns false when the response has started and there is nothing
+    /// left to write.
+    /// </summary>
+    private static bool BeginResponse(HttpResponse response, RivetResult result)
+    {
+        var (statusCode, hasBody) = result switch
+        {
+            RivetBodyResult body => (body.StatusCode, body.HasBody),
+            RivetFileResult file => (file.StatusCode, true),
             _ => throw new ArgumentOutOfRangeException(nameof(result)),
         };
-    }
 
-    private static IActionResult ToMvc(RivetBodyResult result)
-    {
-        if (!result.HasBody)
+        if (response.HasStarted)
         {
-            return new StatusCodeResult(result.StatusCode);
-        }
+            if (!hasBody && response.StatusCode == statusCode)
+            {
+                return false;
+            }
 
-        if (IsJson(result.ContentType))
-        {
-            return new RivetMvcJsonResult(
-                result.Value,
-                result.PayloadType!,
-                result.ContentType!,
-                result.StatusCode
+            throw new RivetContractViolationException(
+                $"The host response has already started with status {response.StatusCode}; "
+                    + $"Rivet cannot execute status {statusCode}{(hasBody ? " with a body" : "")}."
             );
         }
 
-        return new ContentResult
+        if (response.StatusCode != StatusCodes.Status200OK && response.StatusCode != statusCode)
         {
-            StatusCode = result.StatusCode,
-            ContentType = result.ContentType,
-            Content = (string?)result.Value,
-        };
-    }
-
-    private static IResult ToMinimal(RivetBodyResult result)
-    {
-        if (!result.HasBody)
-        {
-            return Results.StatusCode(result.StatusCode);
-        }
-
-        if (IsJson(result.ContentType))
-        {
-            return new RivetJsonResult(
-                result.Value,
-                result.PayloadType!,
-                result.ContentType!,
-                result.StatusCode
+            throw new RivetContractViolationException(
+                $"The host established status {response.StatusCode}, but the Rivet result declares {statusCode}."
             );
         }
 
-        return Results.Text(
-            (string?)result.Value,
-            contentType: result.ContentType,
-            statusCode: result.StatusCode
-        );
+        response.StatusCode = statusCode;
+        return true;
     }
 
     private static IActionResult ToMvc(RivetFileResult result)
@@ -133,123 +184,4 @@ public static class RivetResultExtensions
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(result)),
         };
-
-    private sealed class RivetJsonResult(
-        object? value,
-        Type payloadType,
-        string contentType,
-        int statusCode
-    ) : IResult
-    {
-        public Task ExecuteAsync(HttpContext httpContext)
-        {
-            var options = httpContext
-                .RequestServices.GetRequiredService<
-                    IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>
-                >()
-                .Value.SerializerOptions;
-            httpContext.Response.StatusCode = statusCode;
-            httpContext.Response.ContentType = contentType;
-            return JsonSerializer.SerializeAsync(
-                httpContext.Response.Body,
-                value,
-                payloadType,
-                options,
-                httpContext.RequestAborted
-            );
-        }
-    }
-
-    private sealed class RivetMvcJsonResult(
-        object? value,
-        Type payloadType,
-        string contentType,
-        int statusCode
-    ) : IActionResult
-    {
-        public Task ExecuteResultAsync(ActionContext context)
-        {
-            var options = context
-                .HttpContext.RequestServices.GetRequiredService<
-                    IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>
-                >()
-                .Value.JsonSerializerOptions;
-            context.HttpContext.Response.StatusCode = statusCode;
-            context.HttpContext.Response.ContentType = contentType;
-            return JsonSerializer.SerializeAsync(
-                context.HttpContext.Response.Body,
-                value,
-                payloadType,
-                options,
-                context.HttpContext.RequestAborted
-            );
-        }
-    }
-
-    private static bool IsJson(string? contentType) =>
-        contentType is not null
-        && (
-            contentType
-                .Split(';', 2)[0]
-                .Trim()
-                .Equals("application/json", StringComparison.OrdinalIgnoreCase)
-            || contentType
-                .Split(';', 2)[0]
-                .Trim()
-                .EndsWith("+json", StringComparison.OrdinalIgnoreCase)
-        );
-
-    private static void ValidateResponseState(HttpResponse response, int statusCode, bool hasBody)
-    {
-        if (response.HasStarted)
-        {
-            if (!hasBody && response.StatusCode == statusCode)
-            {
-                return;
-            }
-
-            throw new RivetContractViolationException(
-                $"The host response has already started with status {response.StatusCode}; "
-                    + $"Rivet cannot execute status {statusCode}{(hasBody ? " with a body" : "")}."
-            );
-        }
-
-        if (response.StatusCode != StatusCodes.Status200OK && response.StatusCode != statusCode)
-        {
-            throw new RivetContractViolationException(
-                $"The host established status {response.StatusCode}, but the Rivet result declares {statusCode}."
-            );
-        }
-    }
-
-    private sealed class RivetActionResult(int statusCode, bool hasBody, IActionResult inner)
-        : IActionResult
-    {
-        public Task ExecuteResultAsync(ActionContext context)
-        {
-            ValidateResponseState(context.HttpContext.Response, statusCode, hasBody);
-            if (context.HttpContext.Response.HasStarted)
-            {
-                return Task.CompletedTask;
-            }
-
-            context.HttpContext.Response.StatusCode = statusCode;
-            return inner.ExecuteResultAsync(context);
-        }
-    }
-
-    private sealed class RivetMinimalResult(int statusCode, bool hasBody, IResult inner) : IResult
-    {
-        public Task ExecuteAsync(HttpContext httpContext)
-        {
-            ValidateResponseState(httpContext.Response, statusCode, hasBody);
-            if (httpContext.Response.HasStarted)
-            {
-                return Task.CompletedTask;
-            }
-
-            httpContext.Response.StatusCode = statusCode;
-            return inner.ExecuteAsync(httpContext);
-        }
-    }
 }
