@@ -1,16 +1,43 @@
 # Contributing to Rivet
 
+## Prerequisites
+
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) — `global.json` pins 10.0.100 and rolls forward to later feature bands.
+- .NET 8 and 9 runtimes — `Rivet.RuntimeTests` runs on net8.0, net9.0 and net10.0; the tool and most samples target net9.0.
+- Node.js and [pnpm](https://pnpm.io/installation) — the repo pins pnpm 10.24.0 through `packageManager`.
+- [go-task](https://taskfile.dev/installation/) (`task`).
+- Python 3 — `task test` and `task test:functions` run Python checks.
+- [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local) (`func`) — only for the Functions sample and `task test:functions`.
+
 ## Quick start
 
 ```bash
-git clone https://github.com/user/rivet.git
+git clone https://github.com/maxanstey-meridian/rivet.git
 cd rivet
+task install   # dotnet tool restore + pnpm install (root, docs, Rivet.Tests/js)
 dotnet build
 dotnet test
 dotnet build samples/ContractApi/ContractApi.csproj
 ```
 
+Run `task install` before the first `dotnet test`. The test suite shells out to the node tooling vendored
+in `Rivet.Tests/js` (spectral, openapi-typescript, openapi-fetch, tsc); without it about 30 tests fail
+with "Node tool not found" or "openapi-fetch not installed".
+
 The samples project catches real-world issues (name collisions, missing usings) that unit tests miss.
+
+### Tasks
+
+| Task                  | Runs                                                                              |
+|-----------------------|-----------------------------------------------------------------------------------|
+| `task install`        | `dotnet tool restore` and every `pnpm install` the build and tests need           |
+| `task check`          | Build, full test suite, every sample, docs build                                  |
+| `task format`         | Analyzer fixes, then CSharpier                                                    |
+| `task format:check`   | The same, verify-only                                                             |
+| `task test:functions` | The Functions sample against a real Azure Functions host (Core Tools v4 required) |
+| `task ci`             | `task check` plus `task test:functions`                                           |
+
+Run `task check` and `task format:check` before opening a PR. There is no PR CI yet, so these are the gate.
 
 ## Architecture at a glance
 

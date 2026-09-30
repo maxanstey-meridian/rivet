@@ -8,6 +8,10 @@
 - CLI: `--help` and `-h` print usage to stdout and exit 0. Before, they printed usage after `error: unknown flag` and exited 1.
 - Tooling: the Taskfile runs `pnpm` directly instead of `corepack pnpm` (Node 25+ no longer ships corepack), and `docs/package.json` pins the same `packageManager` as the root so a newer global pnpm does not rewrite `docs/pnpm-workspace.yaml` or fail on esbuild's build script.
 
+### Docs
+
+- CONTRIBUTING: a Prerequisites section, the real clone URL, `task install` as the first step (a fresh clone failed about 30 tests until `Rivet.Tests/js` had its node tooling), and the Taskfile tasks.
+
 ## 0.45.0 — 2026-09-29 (breaking)
 
 - `Rivet.Attributes`: removed the unused `RouteDefinitionBase.IsFileUpload` getter.
