@@ -4,8 +4,6 @@ export default defineConfig({
   title: "Rivet",
   description: "C# in, OpenAPI 3.1 out — contract-first APIs for .NET",
   base: "/rivet/",
-  // Implementation plans are contributor records, not site pages.
-  srcExclude: ["plans/**"],
   head: [["link", { rel: "icon", href: "/rivet/logo.png" }]],
 
   themeConfig: {
