@@ -16,11 +16,17 @@ catch (RivetUserException exception)
 
 static async Task<int> Run(string[] args)
 {
+    if (CliParser.IsHelpRequest(args))
+    {
+        CliParser.PrintUsage(Console.Out);
+        return 0;
+    }
+
     var options = CliParser.ParseArgs(args);
 
     if (options is null)
     {
-        CliParser.PrintUsage();
+        CliParser.PrintUsage(Console.Error);
         return 1;
     }
 

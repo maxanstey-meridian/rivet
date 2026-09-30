@@ -324,7 +324,9 @@ public sealed class CliParserTests
     [Fact]
     public void PrintUsage_IncludesMetadataFlags()
     {
-        var output = CompilationHelper.CaptureStdErr(CliParser.PrintUsage);
+        using var writer = new StringWriter();
+        CliParser.PrintUsage(writer);
+        var output = writer.ToString();
 
         Assert.Contains("--title", output);
         Assert.Contains("--version", output);
@@ -334,7 +336,9 @@ public sealed class CliParserTests
     [Fact]
     public void PrintUsage_IncludesFromFlag()
     {
-        var output = CompilationHelper.CaptureStdErr(CliParser.PrintUsage);
+        using var writer = new StringWriter();
+        CliParser.PrintUsage(writer);
+        var output = writer.ToString();
 
         Assert.Contains("--from", output);
     }

@@ -201,8 +201,11 @@ internal static class CliParser
         value.StartsWith('/')
         || (Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https");
 
-    public static void PrintUsage() =>
-        Console.Error.WriteLine(
+    /// <summary>Help wins over every other argument, so a partial command line plus --help still shows usage.</summary>
+    public static bool IsHelpRequest(string[] args) => args.Any(arg => arg is "--help" or "-h");
+
+    public static void PrintUsage(TextWriter writer) =>
+        writer.WriteLine(
             """
             Rivet — C# contracts to OpenAPI 3.1
 
@@ -234,6 +237,7 @@ internal static class CliParser
                                          exit 1 on drift (CI gate for committed openapi.json)
               --routes                   List all discovered endpoints (method, route, handler)
               -q, --quiet                Suppress codegen output (useful with --check)
+              -h, --help                 Show this help
             """
         );
 }

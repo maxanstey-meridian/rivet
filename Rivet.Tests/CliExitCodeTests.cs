@@ -8,6 +8,7 @@ namespace Rivet.Tests;
 /// - A failed --check exits nonzero with and without --output, including the
 ///   supported --routes combination; successful file writing cannot clear the failure.
 /// - Valid coverage exits 0 in the corresponding modes.
+/// - --help/-h prints usage and exits 0; no arguments is a usage error.
 /// </summary>
 public sealed class CliExitCodeTests
 {
@@ -69,6 +70,32 @@ public sealed class CliExitCodeTests
         var sourcePath = Path.Combine(work.FullName, name);
         await File.WriteAllTextAsync(sourcePath, source);
         return sourcePath;
+    }
+
+    [Theory]
+    [InlineData("--help")]
+    [InlineData("-h")]
+    [InlineData("--project", "Api.csproj", "--help")]
+    public void Help_Prints_Usage_To_Stdout_And_Exits_Zero(params string[] args)
+    {
+        using var work = new TempDir();
+
+        var result = CliRunner.RunCli(work.FullName, args);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Usage:", result.StdOut);
+        Assert.Equal("", result.StdErr);
+    }
+
+    [Fact]
+    public void No_Arguments_Prints_Usage_And_Exits_One()
+    {
+        using var work = new TempDir();
+
+        var result = CliRunner.RunCli(work.FullName, []);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Usage:", result.StdErr);
     }
 
     [Fact]

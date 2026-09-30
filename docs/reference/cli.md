@@ -79,7 +79,8 @@ dotnet rivet --project path/to/Api.csproj --routes
 mismatches — see [Contract Coverage](/guides/contract-coverage)); any warning
 exits with code `1`, with or without `--output`. `--routes` lists every discovered
 endpoint (method, route, handler) and exits. `-q`/`--quiet` suppresses generation
-output (useful with `--check` in CI).
+output (useful with `--check` in CI). `-h`/`--help` prints usage to stdout and
+exits `0`, whatever else is on the command line.
 
 ### Drift gate (`--verify`)
 
