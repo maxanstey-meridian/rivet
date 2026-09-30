@@ -16,7 +16,17 @@ TypeScript types, a typed fetch client, Zod schemas, rendered docs.
 [oRPC](https://orpc.unnoq.com) gives you this when your server is TypeScript.
 Rivet gives you the same DX when your server is .NET.
 
+## Prerequisites
+
+- .NET 8 SDK or later for your API project (`Rivet.Attributes` targets net8.0, net9.0 and net10.0).
+- .NET 9 runtime for the `dotnet-rivet` tool. On a machine with only a newer runtime, add `--allow-roll-forward` to `dotnet tool install`.
+- Node.js, only for the TypeScript steps under [Consume](#consume).
+
+## Install
+
 ```bash
+dotnet new webapi -n Api --use-controllers   # or skip this and use an existing ASP.NET Core project
+cd Api
 dotnet add package Rivet.Attributes
 dotnet tool install --global dotnet-rivet
 ```
@@ -31,6 +41,13 @@ explicitly declare (routes, `[FromBody]`/`[FromQuery]`/... bindings,
 from a reconstruction of MVC's model-binding defaults:
 
 ```csharp
+using Microsoft.AspNetCore.Mvc;
+using Rivet;
+
+public sealed record TaskDetailDto(Guid Id, string Title);
+
+public sealed record NotFoundDto(string Message);
+
 [ApiController]
 [Route("api/tasks")]
 public sealed class TasksController : ControllerBase
@@ -39,7 +56,10 @@ public sealed class TasksController : ControllerBase
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(TaskDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(NotFoundDto), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Get(Guid id, CancellationToken ct) { ... }
+    public IActionResult Get(Guid id) =>
+        id == Guid.Empty
+            ? NotFound(new NotFoundDto("Task not found"))
+            : Ok(new TaskDetailDto(id, "Write the docs"));
 }
 ```
 
@@ -52,6 +72,18 @@ A contract is plain C#: routes, inputs, outputs, and error responses in one
 place, as data:
 
 ```csharp
+using Rivet;
+
+public sealed record MemberDto(Guid Id, string Email);
+
+public sealed record PagedResult<T>(IReadOnlyList<T> Items, int TotalCount);
+
+public sealed record InviteMemberRequest(string Email);
+
+public sealed record InviteMemberResponse(Guid Id);
+
+public sealed record ValidationErrorDto(string Message);
+
 [RivetContract]
 public static class MembersContract
 {
@@ -71,14 +103,30 @@ then construct the response through the contract. The compiler enforces the inpu
 and output types; Rivet validates the selected response at runtime:
 
 ```csharp
-[HttpPost]
-public async Task<IActionResult> Invite([FromBody] InviteMemberRequest request, CancellationToken ct)
-{
-    var endpoint = MembersContract.Invite.Bind(request);
-    var response = await memberService.Invite(request, ct);
+using Microsoft.AspNetCore.Mvc;
+using Rivet;
 
-    // Must be InviteMemberResponse — compiler-enforced
-    return endpoint.Success(response).ToActionResult();
+public interface IMemberService
+{
+    Task<InviteMemberResponse> Invite(InviteMemberRequest request, CancellationToken ct);
+}
+
+[ApiController]
+[Route("api/members")]
+public sealed class MembersController(IMemberService memberService) : ControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> Invite(
+        [FromBody] InviteMemberRequest request,
+        CancellationToken ct
+    )
+    {
+        var endpoint = MembersContract.Invite.Bind(request);
+        var response = await memberService.Invite(request, ct);
+
+        // Must be InviteMemberResponse — compiler-enforced
+        return endpoint.Success(response).ToActionResult();
+    }
 }
 ```
 
@@ -87,7 +135,7 @@ Either way — annotated endpoints, contracts, or a mix — the spec comes out t
 ## Generate
 
 ```bash
-dotnet rivet --project path/to/Api.csproj --output ./generated --security admin=bearer
+dotnet rivet --project Api.csproj --output ./generated --security admin=bearer
 ```
 
 Writes `./generated/openapi.json`, derived from the compiled C# via the Roslyn
@@ -98,6 +146,13 @@ brands are opt-in via `[RivetScalar]`, enums are numeric unless a type-level
 validation attributes, polymorphic hierarchies (`oneOf` + discriminator),
 dictionary key types, headers, descriptions, and examples all flow into the
 spec.
+
+`admin=bearer` defines the bearer scheme that `.Secure("admin")` names. The first
+`--security` is also the document-wide default, so every endpoint without
+`.Anonymous()` requires it, `GET /api/tasks/{id}` included. Drop the flag and the
+`.Secure("admin")` call for an unauthenticated API, or see the
+[CLI reference](https://maxanstey-meridian.github.io/rivet/reference/cli) for
+multiple schemes.
 
 ## Consume
 
@@ -113,6 +168,7 @@ import createClient from "openapi-fetch";
 import type { paths } from "./api/schema";
 
 const api = createClient<paths>({ baseUrl: "https://api.example.com" });
+const taskId = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 
 // Path, params, body, and per-status responses all inferred.
 const { data, error } = await api.GET("/api/tasks/{id}", {

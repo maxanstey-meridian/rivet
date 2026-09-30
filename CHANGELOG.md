@@ -11,6 +11,9 @@
 ### Docs
 
 - CONTRIBUTING: a Prerequisites section, the real clone URL, `task install` as the first step (a fresh clone failed about 30 tests until `Rivet.Tests/js` had its node tooling), and the Taskfile tasks.
+- README: a Prerequisites section, a `dotnet new webapi` step before `dotnet add package`, and C# snippets that compile as pasted (`using` directives, the DTOs they use, a complete controller). The `--security admin=bearer` example now says the first scheme is the document-wide default, so it secures every endpoint that is not `.Anonymous()`.
+- Getting Started installs `Rivet.Attributes` without `--version "*"`, matching the README.
+- Removed stale references: the FunctionsApi sample's "0.41.0" and `Rivet.Tests/js`'s nonexistent `ZodValidatorEmitterTests`.
 
 ## 0.45.0 — 2026-09-29 (breaking)
 

@@ -5,7 +5,7 @@ Rivet reads your C# types and endpoints with Roslyn and emits an OpenAPI 3.1 spe
 ## Install
 
 ```bash
-dotnet add package Rivet.Attributes --version "*"
+dotnet add package Rivet.Attributes
 dotnet tool install --global dotnet-rivet
 ```
 
