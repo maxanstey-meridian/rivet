@@ -132,6 +132,12 @@ internal static class CompilationLoader
                 "/usr/local/share/dotnet/x64",
                 "/opt/homebrew/share/dotnet",
                 "/opt/homebrew/opt/dotnet/libexec",
+                "/usr/share/dotnet",
+                "/usr/lib/dotnet",
+                Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    ".dotnet"
+                ),
             }
         )
         {

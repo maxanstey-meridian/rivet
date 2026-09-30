@@ -4,7 +4,7 @@
 
 ### Fixes
 
-- Release binaries: the `rivet-<rid>.tar.gz` binaries are no longer single-file. `--project` crashed because the MSBuild build host was bundled away from `BuildHost-netcore/`, and loose `.cs` files crashed resolving framework references. The tarball is now the flat self-contained publish directory (still `rivet-<rid>` at the top level). The release workflow runs the extracted binary in every input mode on linux-x64 and osx-arm64 before uploading.
+- Release binaries: the `rivet-<rid>.tar.gz` binaries are no longer single-file. `--project` crashed because the MSBuild build host was bundled away from `BuildHost-netcore/`, and loose `.cs` files crashed resolving framework references. The tarball is now the whole self-contained publish directory, with `rivet-<rid>` still at its root. On Linux, the binary also looks for an SDK in `/usr/share/dotnet`, `/usr/lib/dotnet` and `~/.dotnet` when `DOTNET_ROOT` is unset, so `--project` works with a distribution-packaged or user-local SDK. The release workflow runs the extracted binary in every input mode on linux-x64 and osx-arm64 before uploading.
 - CLI: `--help` and `-h` print usage to stdout and exit 0. Before, they printed usage after `error: unknown flag` and exited 1.
 - Tooling: the Taskfile runs `pnpm` directly instead of `corepack pnpm` (Node 25+ no longer ships corepack), and `docs/package.json` pins the same `packageManager` as the root so a newer global pnpm does not rewrite `docs/pnpm-workspace.yaml` or fail on esbuild's build script.
 

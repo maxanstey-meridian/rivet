@@ -19,7 +19,7 @@ Rivet gives you the same DX when your server is .NET.
 ## Prerequisites
 
 - .NET 8 SDK or later for your API project (`Rivet.Attributes` targets net8.0, net9.0 and net10.0).
-- .NET 9 runtime for the `dotnet-rivet` tool. On a machine with only a newer runtime, add `--allow-roll-forward` to `dotnet tool install`.
+- .NET 9 or later for the `dotnet-rivet` tool: the SDK, or both the .NET and ASP.NET Core runtimes.
 - Node.js, only for the TypeScript steps under [Consume](#consume).
 
 ## Install
@@ -100,7 +100,8 @@ public static class MembersContract
 
 At the transport boundary, bind the declared input, run ordinary application code,
 then construct the response through the contract. The compiler enforces the input
-and output types; Rivet validates the selected response at runtime:
+and output types; Rivet validates the selected response at runtime. `IMemberService`
+stands in for your application code; register an implementation before calling it:
 
 ```csharp
 using Microsoft.AspNetCore.Mvc;
