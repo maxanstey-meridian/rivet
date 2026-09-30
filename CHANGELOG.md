@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Release binaries: the `rivet-<rid>.tar.gz` binaries are no longer single-file. `--project` crashed because the MSBuild build host was bundled away from `BuildHost-netcore/`, and loose `.cs` files crashed resolving framework references. The tarball is now the flat self-contained publish directory (still `rivet-<rid>` at the top level). The release workflow runs the extracted binary in every input mode on linux-x64 and osx-arm64 before uploading.
+
 ## 0.45.0 — 2026-09-29 (breaking)
 
 - `Rivet.Attributes`: removed the unused `RouteDefinitionBase.IsFileUpload` getter.

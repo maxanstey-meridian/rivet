@@ -10,10 +10,15 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        rid: [osx-arm64, osx-x64, linux-x64, win-x64]
+        include:
+          # smoke: true where the runner can execute the rid natively.
+          - { rid: osx-arm64, os: macos-latest, smoke: true }
+          - { rid: osx-x64, os: macos-latest, smoke: false }
+          - { rid: linux-x64, os: ubuntu-latest, smoke: true }
+          - { rid: win-x64, os: ubuntu-latest, smoke: false }
 
     steps:
       - uses: actions/checkout@v4
@@ -38,18 +43,24 @@ jobs:
         run: |
           tar -czf rivet-${{ matrix.rid }}.tar.gz -C ./publish .
 
-      # Only linux-x64 can be smoke-tested on ubuntu-latest. macOS/Windows
-      # coverage comes from existing [Category=Local] tests run by devs natively.
-      - name: Smoke test — OpenAPI import (linux-x64 only)
-        if: matrix.rid == 'linux-x64'
+      # Runs the binary from the extracted tarball, as rivet-ts's downloader
+      # does, in every input mode: --project (out-of-process MSBuild build
+      # host), loose .cs files, --from contract JSON and --from-openapi.
+      - name: Smoke test extracted binary
+        if: matrix.smoke
         run: |
-          chmod +x ./publish/rivet-linux-x64
-          ./publish/rivet-linux-x64 --from-openapi Rivet.Tests/Fixtures/openapi-petstore-v3.json --namespace PetStore
-
-      - name: Smoke test — contract JSON (linux-x64 only)
-        if: matrix.rid == 'linux-x64'
-        run: |
-          ./publish/rivet-linux-x64 --from Rivet.Tests/Fixtures/contract-sample.json
+          set -euo pipefail
+          mkdir -p smoke/bin
+          tar -xzf rivet-${{ matrix.rid }}.tar.gz -C smoke/bin
+          rivet=./smoke/bin/rivet-${{ matrix.rid }}
+          dotnet restore samples/ContractApi/ContractApi.csproj
+          "$rivet" --project samples/ContractApi/ContractApi.csproj --security bearer --output smoke/project
+          "$rivet" --from-openapi Rivet.Tests/Fixtures/openapi-petstore-v3.json --namespace PetStore --output smoke/petstore
+          "$rivet" smoke/petstore --output smoke/files
+          "$rivet" --from Rivet.Tests/Fixtures/contract-sample.json --output smoke/from
+          test -s smoke/project/openapi.json
+          test -s smoke/files/openapi.json
+          test -s smoke/from/openapi.json
 
       - uses: actions/upload-artifact@v4
         with:

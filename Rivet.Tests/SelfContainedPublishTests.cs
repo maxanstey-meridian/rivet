@@ -129,6 +129,66 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     }
 
     [Fact]
+    public async Task SelfContained_Binary_EmitsFromProject()
+    {
+        Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
+
+        var sample = Path.Combine(
+            CliRunner.RepoRoot,
+            "samples",
+            "ContractApi",
+            "ContractApi.csproj"
+        );
+        using var outputDir = new TempDir();
+
+        var (exitCode, output) = await CliRunner.RunAsync(
+            _fixture.BinaryPath,
+            $"--project \"{sample}\" --security bearer --output \"{outputDir.FullName}\""
+        );
+
+        Assert.True(exitCode == 0, $"--project failed (exit {exitCode}):\n{output}");
+        Assert.True(File.Exists(Path.Combine(outputDir.FullName, "openapi.json")));
+    }
+
+    [Fact]
+    public async Task SelfContained_Binary_EmitsFromLooseSourceFiles()
+    {
+        Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
+
+        using var sourceDir = new TempDir();
+        using var outputDir = new TempDir();
+        var source = Path.Combine(sourceDir.FullName, "Contract.cs");
+        await File.WriteAllTextAsync(
+            source,
+            """
+            using System;
+            using Rivet;
+
+            namespace Smoke;
+
+            public sealed record TaskDto(Guid Id, string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> Get = Define.Get<TaskDto>("/api/tasks/{id}");
+            }
+            """
+        );
+
+        var (exitCode, output) = await CliRunner.RunAsync(
+            _fixture.BinaryPath,
+            $"\"{source}\" --output \"{outputDir.FullName}\""
+        );
+
+        Assert.True(exitCode == 0, $"loose-file mode failed (exit {exitCode}):\n{output}");
+        Assert.Contains(
+            "TaskDto",
+            await File.ReadAllTextAsync(Path.Combine(outputDir.FullName, "openapi.json"))
+        );
+    }
+
+    [Fact]
     public async Task SelfContained_Binary_InvalidFilePath_FailsGracefully()
     {
         Assert.True(_fixture.PublishExitCode == 0, "Publish must succeed first");
@@ -143,7 +203,7 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
     }
 
     [Fact]
-    public async Task DotnetPack_StillSucceeds_WithSingleFileConditional()
+    public async Task DotnetPack_Succeeds()
     {
         var repoRoot = CliRunner.RepoRoot;
         var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
@@ -157,8 +217,13 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
         Assert.True(exitCode == 0, $"dotnet pack failed (exit {exitCode}):\n{output}");
     }
 
+    /// <summary>
+    /// MSBuildWorkspace launches its build host from BuildHost-netcore/ beside
+    /// the binary; a single-file publish bundles the DLLs away and --project
+    /// crashes.
+    /// </summary>
     [Fact]
-    public async Task CrossCompile_ForRid_ProducesSingleFile()
+    public async Task CrossCompile_ForRid_ShipsMSBuildBuildHost()
     {
         var repoRoot = CliRunner.RepoRoot;
         var csproj = Path.Combine(repoRoot, "Rivet.Tool", "Rivet.Tool.csproj");
@@ -171,16 +236,14 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
         );
 
         Assert.True(exitCode == 0, $"Cross-compile failed (exit {exitCode}):\n{output}");
-
-        var files = Directory
-            .GetFiles(outDir.FullName)
-            .Where(f => !f.EndsWith(".pdb") && !f.EndsWith(".json"))
-            .ToArray();
-
         Assert.True(
-            files.Length <= 3,
-            $"Expected single-file output (≤3 non-pdb/json files) but found {files.Length}:\n"
-                + string.Join("\n", files.Select(Path.GetFileName))
+            File.Exists(
+                Path.Combine(
+                    outDir.FullName,
+                    "BuildHost-netcore",
+                    "Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.dll"
+                )
+            )
         );
     }
 }
@@ -201,7 +264,7 @@ public sealed class PublishFixture : IAsyncLifetime
 
         var (exitCode, output) = await CliRunner.RunAsync(
             "dotnet",
-            $"publish \"{csproj}\" -c Release -r {rid} --self-contained -p:PublishSingleFile=true -o \"{_publishDir.FullName}\"",
+            $"publish \"{csproj}\" -c Release -r {rid} --self-contained -o \"{_publishDir.FullName}\"",
             repoRoot
         );
 
