@@ -5,29 +5,29 @@ tasks:
         desc: Start docs dev server
         dir: docs
         cmds:
-            - corepack pnpm docs:dev
+            - pnpm docs:dev
 
     docs:dev:
         desc: Start docs dev server
         dir: docs
         cmds:
-            - corepack pnpm docs:dev
+            - pnpm docs:dev
 
     docs:build:
         desc: Build docs
         dir: docs
         cmds:
-            - corepack pnpm docs:build
+            - pnpm docs:build
 
     analyze:
         desc: Refresh GitNexus code intelligence index
         cmds:
-            - corepack pnpm analyze
+            - pnpm analyze
 
     gitnexus:status:
         desc: Show GitNexus index status
         cmds:
-            - corepack pnpm exec gitnexus status
+            - pnpm exec gitnexus status
 
     build:
         desc: Build solution
@@ -88,9 +88,9 @@ tasks:
             - dotnet pack ./Rivet.Tool/Rivet.Tool.csproj --configuration Release --output ./nupkg
 
     install:
-        desc: Install JavaScript dependencies
+        desc: Install .NET tools and JavaScript dependencies (run once after cloning)
         cmds:
             - dotnet tool restore
-            - corepack pnpm install --frozen-lockfile
-            - corepack pnpm --dir docs install --frozen-lockfile
-            - corepack pnpm --dir Rivet.Tests/js install --frozen-lockfile
+            - pnpm install --frozen-lockfile
+            - pnpm --dir docs install --frozen-lockfile
+            - pnpm --dir Rivet.Tests/js install --frozen-lockfile
