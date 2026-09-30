@@ -20,4 +20,4 @@ MIME selection, errors, methods, OpenAPI emission and implementation coverage.
 
 See [the Functions guide](../../docs/guides/azure-functions.md) for route conventions,
 configuration and coverage limitations. This sample references Rivet's source
-project and exercises features not yet included in the published 0.41.0 package.
+projects, so it can use features newer than the latest published package.
