@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.46.0 — 2026-10-03
+
+### Features
+
+- `Rivet.Attributes`: a file response declared with a media range (`.ProducesFile("*/*")`, `image/*`) now serves any concrete type inside it: `File(..., contentType: "application/pdf")` sends `application/pdf`. Before, a range only matched itself, so files whose type is known only at runtime (stored uploads) could not use the File terminal. An exact declaration wins over a range. A range rejects a type outside it, a wildcard or malformed runtime type, and an omitted `contentType`, which used to send the literal range as `Content-Type`.
+- `Rivet.Attributes`: `File(...)` takes `inline: true`, which sends `Content-Disposition: inline` and keeps the download name. Before, a download name always made the file an attachment.
+- `Rivet.Attributes`: every file response sends `X-Content-Type-Options: nosniff`.
+
+### Breaking
+
+- `Rivet.Attributes`: the six `File(...)` overloads gained the optional `inline` parameter. Source calls are unchanged; assemblies compiled against 0.45.x must be rebuilt.
+
 ## 0.45.1 — 2026-09-30
 
 ### Fixes
