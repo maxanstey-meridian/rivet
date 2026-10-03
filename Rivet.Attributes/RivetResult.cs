@@ -41,7 +41,8 @@ internal sealed class RivetFileResult(
     string? downloadName,
     bool enableRangeProcessing,
     DateTimeOffset? lastModified,
-    EntityTagHeaderValue? entityTag
+    EntityTagHeaderValue? entityTag,
+    bool inline
 ) : RivetResult
 {
     internal int StatusCode { get; } = statusCode;
@@ -51,4 +52,5 @@ internal sealed class RivetFileResult(
     internal bool EnableRangeProcessing { get; } = enableRangeProcessing;
     internal DateTimeOffset? LastModified { get; } = lastModified;
     internal EntityTagHeaderValue? EntityTag { get; } = entityTag;
+    internal bool Inline { get; } = inline;
 }

@@ -121,6 +121,84 @@ public sealed class FileMediaTypeTests
         );
     }
 
+    [Theory]
+    [InlineData(false, "*/*", "application/pdf")]
+    [InlineData(true, "*/*", "application/pdf")]
+    [InlineData(false, "image/*", "image/webp")]
+    [InlineData(true, "image/*", "image/webp")]
+    [InlineData(true, "*/*", "text/plain; charset=utf-8")]
+    public async Task A_declared_range_serves_the_concrete_runtime_type(
+        bool mvc,
+        string declared,
+        string runtime
+    )
+    {
+        var route = Define.File("/stored").ProducesFile(declared);
+        var context = await ExecuteAsync(route.File([1, 2], contentType: runtime), mvc);
+        Assert.Equal(runtime, context.Response.ContentType);
+        Assert.Equal([1, 2], ((MemoryStream)context.Response.Body).ToArray());
+    }
+
+    [Theory]
+    [InlineData("image/*", "application/pdf")]
+    [InlineData("image/*", "image/*")]
+    [InlineData("*/*", "*/*")]
+    [InlineData("*/*", "invalid")]
+    [InlineData("*/*", "image/png\r\nX-Test: injected")]
+    public void A_range_rejects_types_outside_it_and_wildcard_or_malformed_runtime_types(
+        string declared,
+        string runtime
+    )
+    {
+        var route = Define.File("/stored").ProducesFile(declared);
+        Assert.Throws<RivetContractViolationException>(() => route.File([1], contentType: runtime));
+    }
+
+    [Fact]
+    public void A_range_needs_the_runtime_type()
+    {
+        var route = Define.File("/stored").ProducesFile("*/*");
+        Assert.Throws<RivetContractViolationException>(() => route.File([1]));
+    }
+
+    [Fact]
+    public void An_exact_declaration_wins_over_a_range()
+    {
+        var route = Define
+            .File("/stored")
+            .ProducesFile("*/*")
+            .ResponseBinaryContent(200, "image/png");
+        Assert.NotNull(route.File([1], contentType: "image/png"));
+        Assert.NotNull(route.File([1], contentType: "image/gif"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Inline_keeps_the_file_name_and_every_file_is_nosniff(bool mvc)
+    {
+        var route = Define.File("/stored").ProducesFile("*/*");
+
+        var inline = await ExecuteAsync(
+            route.File([1], "photo one.png", contentType: "image/png", inline: true),
+            mvc
+        );
+        var inlineDisposition = inline.Response.Headers.ContentDisposition.ToString();
+        Assert.StartsWith("inline", inlineDisposition);
+        Assert.Contains("photo one.png", inlineDisposition);
+        Assert.Equal("nosniff", inline.Response.Headers.XContentTypeOptions.ToString());
+
+        var attachment = await ExecuteAsync(
+            route.File([1], "report.pdf", contentType: "application/pdf"),
+            mvc
+        );
+        Assert.StartsWith("attachment", attachment.Response.Headers.ContentDisposition.ToString());
+        Assert.Equal("nosniff", attachment.Response.Headers.XContentTypeOptions.ToString());
+
+        var bare = await ExecuteAsync(route.File([1], contentType: "image/png", inline: true), mvc);
+        Assert.Equal("inline", bare.Response.Headers.ContentDisposition.ToString());
+    }
+
     private static async Task<DefaultHttpContext> ExecuteAsync(RivetResult result, bool mvc)
     {
         var services = new ServiceCollection();

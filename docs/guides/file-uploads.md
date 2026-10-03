@@ -135,9 +135,39 @@ return Image.File(bytes, contentType: "image/jpeg").ToActionResult();
 ```
 
 The selector works with byte arrays, streams, physical paths, and bound file
-routes. It must match a declared binary success representation (case-insensitive
-comparison of the complete media-type string). It does not negotiate `Accept`
-or inspect file bytes. Omit it only when exactly one representation is declared;
+routes. It must match a declared binary success representation (case-insensitive,
+ignoring parameters such as `charset`). It does not negotiate `Accept` or inspect
+file bytes. Omit it only when exactly one concrete representation is declared;
 ambiguous and undeclared selections throw `RivetContractViolationException`.
-Existing positional download-name calls and binary signatures remain supported.
-This selector requires the updated source revision; it is not in NuGet 0.41.0.
+
+## Files whose type is only known at runtime
+
+Stored uploads can be any allowed type. Declare a media range and pass the concrete
+type each response serves:
+
+```csharp
+public static readonly FileRouteDefinition<FileInput> Download = Define
+    .File<FileInput>("/files/{id}")
+    .ProducesFile("*/*");
+
+return Download.Bind(input).File(stream, file.Name, contentType: file.ContentType).ToActionResult();
+```
+
+A declared range (`*/*`, `image/*`) admits any concrete type inside it, and that type
+is what reaches the wire. An exact declaration wins over a range. A range rejects a
+type outside it, a wildcard or malformed runtime type, and an omitted `contentType`.
+
+## Inline files and sniffing
+
+Every file response carries `X-Content-Type-Options: nosniff`: the contract states the
+type, so the browser must not guess another. A download name normally makes the file
+an attachment. Pass `inline: true` to show it in the browser and keep the name:
+
+```csharp
+return Download.Bind(input)
+    .File(stream, file.Name, contentType: file.ContentType, inline: true)
+    .ToActionResult();
+```
+
+Choosing which types are safe to show inline (for example, not `image/svg+xml`, which
+runs script) is the application's decision.

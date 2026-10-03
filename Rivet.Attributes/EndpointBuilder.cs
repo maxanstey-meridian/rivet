@@ -548,7 +548,8 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
         bool enableRangeProcessing = false,
         DateTimeOffset? lastModified = null,
         string? entityTag = null,
-        string? contentType = null
+        string? contentType = null,
+        bool inline = false
     ) =>
         RivetTerminal.File(
             Publish(SuccessPayloadType),
@@ -557,7 +558,8 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
             enableRangeProcessing,
             lastModified,
             entityTag,
-            contentType
+            contentType,
+            inline
         );
 
     public RivetResult File(
@@ -566,7 +568,8 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
         bool enableRangeProcessing = false,
         DateTimeOffset? lastModified = null,
         string? entityTag = null,
-        string? contentType = null
+        string? contentType = null,
+        bool inline = false
     ) =>
         RivetTerminal.File(
             Publish(SuccessPayloadType),
@@ -575,7 +578,8 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
             enableRangeProcessing,
             lastModified,
             entityTag,
-            contentType
+            contentType,
+            inline
         );
 
     public RivetResult File(
@@ -584,7 +588,8 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
         bool enableRangeProcessing = false,
         DateTimeOffset? lastModified = null,
         string? entityTag = null,
-        string? contentType = null
+        string? contentType = null,
+        bool inline = false
     ) =>
         RivetTerminal.PhysicalFile(
             Publish(SuccessPayloadType),
@@ -593,7 +598,8 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
             enableRangeProcessing,
             lastModified,
             entityTag,
-            contentType
+            contentType,
+            inline
         );
 }
 

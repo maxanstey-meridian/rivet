@@ -19,6 +19,22 @@ internal sealed record ResponseRepresentation(
     /// <summary>Representations are matched on the media type without parameters.</summary>
     public string Key { get; } = KeyOf(MediaType);
 
+    /// <summary>A declared range such as <c>image/*</c> or <c>*/*</c>, not one concrete type.</summary>
+    public bool IsRange { get; } =
+        MediaTypeHeaderValue.TryParse(MediaType, out var parsed)
+        && (parsed.MatchesAllTypes || parsed.MatchesAllSubTypes);
+
+    /// <summary>Whether this declared range admits the concrete runtime type.</summary>
+    public bool Covers(string mediaType) =>
+        IsRange
+        && IsConcrete(mediaType)
+        && MediaTypeHeaderValue.Parse(mediaType).IsSubsetOf(MediaTypeHeaderValue.Parse(MediaType));
+
+    public static bool IsConcrete(string? mediaType) =>
+        MediaTypeHeaderValue.TryParse(mediaType, out var parsed)
+        && !parsed.MatchesAllTypes
+        && !parsed.MatchesAllSubTypes;
+
     public static string KeyOf(string mediaType) =>
         MediaTypeHeaderValue.TryParse(mediaType, out var parsed)
             ? parsed.MediaType.Value ?? mediaType
@@ -93,7 +109,8 @@ public abstract class BoundRouteDefinitionBase
         bool enableRangeProcessing = false,
         DateTimeOffset? lastModified = null,
         string? entityTag = null,
-        string? contentType = null
+        string? contentType = null,
+        bool inline = false
     ) =>
         RivetTerminal.File(
             Contract,
@@ -102,7 +119,8 @@ public abstract class BoundRouteDefinitionBase
             enableRangeProcessing,
             lastModified,
             entityTag,
-            contentType
+            contentType,
+            inline
         );
 
     public RivetResult File(
@@ -111,7 +129,8 @@ public abstract class BoundRouteDefinitionBase
         bool enableRangeProcessing = false,
         DateTimeOffset? lastModified = null,
         string? entityTag = null,
-        string? contentType = null
+        string? contentType = null,
+        bool inline = false
     ) =>
         RivetTerminal.File(
             Contract,
@@ -120,7 +139,8 @@ public abstract class BoundRouteDefinitionBase
             enableRangeProcessing,
             lastModified,
             entityTag,
-            contentType
+            contentType,
+            inline
         );
 
     public RivetResult File(
@@ -129,7 +149,8 @@ public abstract class BoundRouteDefinitionBase
         bool enableRangeProcessing = false,
         DateTimeOffset? lastModified = null,
         string? entityTag = null,
-        string? contentType = null
+        string? contentType = null,
+        bool inline = false
     ) =>
         RivetTerminal.PhysicalFile(
             Contract,
@@ -138,7 +159,8 @@ public abstract class BoundRouteDefinitionBase
             enableRangeProcessing,
             lastModified,
             entityTag,
-            contentType
+            contentType,
+            inline
         );
 }
 
@@ -219,7 +241,8 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType
+        string? contentType,
+        bool inline
     )
     {
         if (content is null)
@@ -234,7 +257,8 @@ internal static class RivetTerminal
             enableRangeProcessing,
             lastModified,
             entityTag,
-            contentType
+            contentType,
+            inline
         );
     }
 
@@ -245,7 +269,8 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType
+        string? contentType,
+        bool inline
     )
     {
         if (content is null)
@@ -270,7 +295,8 @@ internal static class RivetTerminal
             enableRangeProcessing,
             lastModified,
             entityTag,
-            contentType
+            contentType,
+            inline
         );
     }
 
@@ -281,7 +307,8 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType
+        string? contentType,
+        bool inline
     )
     {
         if (string.IsNullOrWhiteSpace(physicalPath))
@@ -301,7 +328,8 @@ internal static class RivetTerminal
             enableRangeProcessing,
             lastModified,
             entityTag,
-            contentType
+            contentType,
+            inline
         );
     }
 
@@ -312,7 +340,8 @@ internal static class RivetTerminal
         bool enableRangeProcessing,
         DateTimeOffset? lastModified,
         string? entityTag,
-        string? contentType
+        string? contentType,
+        bool inline
     )
     {
         var response = RequireSuccess(contract);
@@ -338,6 +367,8 @@ internal static class RivetTerminal
             );
         }
 
+        // An exact declaration wins; otherwise a declared media range (image/*, */*) admits
+        // any concrete type inside it, for files whose type is only known at runtime.
         var representation = contentType is null
             ? response.Binary[0]
             : response.Binary.FirstOrDefault(item =>
@@ -346,10 +377,19 @@ internal static class RivetTerminal
                     StringComparison.OrdinalIgnoreCase
                 )
             )
+                ?? response.Binary.FirstOrDefault(item => item.Covers(contentType))
                 ?? throw Violation(
                     contract,
                     $"does not declare binary/file success content type '{contentType}'"
                 );
+        if (representation.IsRange && !ResponseRepresentation.IsConcrete(contentType))
+        {
+            throw Violation(
+                contract,
+                $"declares the media range '{representation.MediaType}'; File(...) needs the concrete contentType it serves"
+            );
+        }
+
         if (!representation.IsWellFormed)
         {
             throw Violation(
@@ -377,7 +417,8 @@ internal static class RivetTerminal
             downloadName,
             enableRangeProcessing,
             lastModified,
-            parsedEntityTag
+            parsedEntityTag,
+            inline
         );
     }
 

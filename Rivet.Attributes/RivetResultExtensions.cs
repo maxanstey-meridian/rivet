@@ -48,7 +48,8 @@ public static class RivetResultExtensions
                     ContentType = body.ContentType,
                     Content = (string?)body.Value,
                 }.ExecuteResultAsync(context),
-                RivetFileResult file => ToMvc(file).ExecuteResultAsync(context),
+                RivetFileResult file => ToMvc(WriteFileHeaders(httpContext.Response, file))
+                    .ExecuteResultAsync(context),
                 _ => throw new ArgumentOutOfRangeException(nameof(context)),
             };
         }
@@ -78,7 +79,8 @@ public static class RivetResultExtensions
                 RivetBodyResult body => Results
                     .Text((string?)body.Value, body.ContentType)
                     .ExecuteAsync(httpContext),
-                RivetFileResult file => ToMinimal(file).ExecuteAsync(httpContext),
+                RivetFileResult file => ToMinimal(WriteFileHeaders(httpContext.Response, file))
+                    .ExecuteAsync(httpContext),
                 _ => throw new ArgumentOutOfRangeException(nameof(httpContext)),
             };
         }
@@ -138,6 +140,33 @@ public static class RivetResultExtensions
         return true;
     }
 
+    /// <summary>
+    /// The contract owns the file's type, so the browser must not sniff another one. An
+    /// inline file keeps its name in an inline disposition; ASP.NET's download name would
+    /// force an attachment.
+    /// </summary>
+    private static RivetFileResult WriteFileHeaders(HttpResponse response, RivetFileResult file)
+    {
+        response.Headers.XContentTypeOptions = "nosniff";
+        if (file.Inline)
+        {
+            var disposition = new Microsoft.Net.Http.Headers.ContentDispositionHeaderValue(
+                "inline"
+            );
+            if (file.DownloadName is not null)
+            {
+                disposition.SetHttpFileName(file.DownloadName);
+            }
+
+            response.Headers.ContentDisposition = disposition.ToString();
+        }
+
+        return file;
+    }
+
+    private static string? AttachmentName(RivetFileResult result) =>
+        result.Inline ? null : result.DownloadName;
+
     private static IActionResult ToMvc(RivetFileResult result)
     {
         FileResult file = result.Source switch
@@ -148,7 +177,7 @@ public static class RivetResultExtensions
             _ => throw new ArgumentOutOfRangeException(nameof(result)),
         };
 
-        file.FileDownloadName = result.DownloadName ?? string.Empty;
+        file.FileDownloadName = AttachmentName(result) ?? string.Empty;
         file.EnableRangeProcessing = result.EnableRangeProcessing;
         file.LastModified = result.LastModified;
         file.EntityTag = result.EntityTag;
@@ -161,7 +190,7 @@ public static class RivetResultExtensions
             RivetFileBytes bytes => Results.Bytes(
                 bytes.Content,
                 result.ContentType,
-                result.DownloadName,
+                AttachmentName(result),
                 result.EnableRangeProcessing,
                 result.LastModified,
                 result.EntityTag
@@ -169,7 +198,7 @@ public static class RivetResultExtensions
             RivetFileStream stream => Results.Stream(
                 stream.Content,
                 result.ContentType,
-                result.DownloadName,
+                AttachmentName(result),
                 result.LastModified,
                 result.EntityTag,
                 result.EnableRangeProcessing
@@ -177,7 +206,7 @@ public static class RivetResultExtensions
             RivetPhysicalFile physical => TypedResults.PhysicalFile(
                 physical.Path,
                 result.ContentType,
-                result.DownloadName,
+                AttachmentName(result),
                 result.LastModified,
                 result.EntityTag,
                 result.EnableRangeProcessing
