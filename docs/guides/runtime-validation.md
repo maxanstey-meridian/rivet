@@ -53,6 +53,9 @@ normally, and constructs a contract-owned response:
   established a conflicting status, they throw `RivetContractViolationException`.
   An MVC result filter can read the status (`IStatusCodeActionResult`) and the payload
   (`RivetActionResult.Value`) of what `.ToActionResult()` returned, but not change them.
+  For a file that status is the declared one: a range or conditional request can still
+  turn it into a 206, 304, 412 or 416 on the way out, so read
+  `HttpContext.Response.StatusCode` in `OnResultExecuted` when you need what was sent.
 
 ### The failure envelope
 

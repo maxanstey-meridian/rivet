@@ -20,7 +20,7 @@ public static class RivetResultExtensions
         return new RivetMinimalResult(result);
     }
 
-    // MVC and Minimal API resolve their JSON options from different registrations.
+    // Minimal APIs read their JSON options from the Http.Json registration, not MVC's.
     private sealed class RivetMinimalResult(RivetResult result) : IResult
     {
         public Task ExecuteAsync(HttpContext httpContext)

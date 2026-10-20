@@ -25,7 +25,12 @@ public sealed class RivetActionResult : IActionResult, IStatusCodeActionResult
         };
     }
 
-    /// <summary>The status the contract declared for this response.</summary>
+    /// <summary>
+    /// The status the contract declared for this response. For a file, range and conditional
+    /// requests can make the host answer 206, 304, 412 or 416 instead; a filter that needs the
+    /// status actually sent reads <c>HttpContext.Response.StatusCode</c> in
+    /// <c>OnResultExecuted</c>.
+    /// </summary>
     public int StatusCode { get; }
 
     int? IStatusCodeActionResult.StatusCode => StatusCode;

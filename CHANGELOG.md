@@ -4,7 +4,7 @@
 
 ### Features
 
-- `Rivet.Attributes`: `.ToActionResult()` returns the public `RivetActionResult`, so an MVC result filter can read what a handler returned. It implements `IStatusCodeActionResult`, and `Value` is the payload passed to `Success(...)` or `Error(...)` (`null` for a bodyless response or a file). Before, the result was private and gave a filter neither its status nor its body. Both are read-only: Rivet still writes the response, and status, headers and body on the wire are unchanged. `.ToActionResult()` still returns `IActionResult`.
+- `Rivet.Attributes`: `.ToActionResult()` now hands back a public `RivetActionResult` (still typed as `IActionResult`), so an MVC result filter can read what a handler returned. It implements `IStatusCodeActionResult`, and `Value` is the payload passed to `Success(...)` or `Error(...)` (`null` for a bodyless response or a file). Before, the result was private and gave a filter neither its status nor its body. Both are read-only: Rivet still writes the response, and status, headers and body on the wire are unchanged. For a file, `StatusCode` is the declared status; a range or conditional request can still make the host send 206, 304, 412 or 416.
 
 ## 0.46.0 — 2026-10-03
 
