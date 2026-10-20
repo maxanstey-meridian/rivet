@@ -51,6 +51,8 @@ normally, and constructs a contract-owned response:
   `.ToResult()` adapters write body, content type, file metadata, and status through
   MVC or minimal APIs. If the host response has already started incompatibly or has
   established a conflicting status, they throw `RivetContractViolationException`.
+  An MVC result filter can read the status (`IStatusCodeActionResult`) and the payload
+  (`RivetActionResult.Value`) of what `.ToActionResult()` returned, but not change them.
 
 ### The failure envelope
 

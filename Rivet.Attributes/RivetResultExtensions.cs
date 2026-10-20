@@ -21,40 +21,6 @@ public static class RivetResultExtensions
     }
 
     // MVC and Minimal API resolve their JSON options from different registrations.
-    private sealed class RivetActionResult(RivetResult result) : IActionResult
-    {
-        public Task ExecuteResultAsync(ActionContext context)
-        {
-            var httpContext = context.HttpContext;
-            if (!BeginResponse(httpContext.Response, result))
-            {
-                return Task.CompletedTask;
-            }
-
-            return result switch
-            {
-                RivetBodyResult { HasBody: false } => Task.CompletedTask,
-                RivetBodyResult { IsJson: true } body => WriteJsonAsync(
-                    httpContext,
-                    body,
-                    httpContext
-                        .RequestServices.GetRequiredService<
-                            IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>
-                        >()
-                        .Value.JsonSerializerOptions
-                ),
-                RivetBodyResult body => new ContentResult
-                {
-                    ContentType = body.ContentType,
-                    Content = (string?)body.Value,
-                }.ExecuteResultAsync(context),
-                RivetFileResult file => ToMvc(WriteFileHeaders(httpContext.Response, file))
-                    .ExecuteResultAsync(context),
-                _ => throw new ArgumentOutOfRangeException(nameof(context)),
-            };
-        }
-    }
-
     private sealed class RivetMinimalResult(RivetResult result) : IResult
     {
         public Task ExecuteAsync(HttpContext httpContext)
@@ -86,7 +52,7 @@ public static class RivetResultExtensions
         }
     }
 
-    private static Task WriteJsonAsync(
+    internal static Task WriteJsonAsync(
         HttpContext httpContext,
         RivetBodyResult body,
         JsonSerializerOptions options
@@ -107,7 +73,7 @@ public static class RivetResultExtensions
     /// declared status. Returns false when the response has started and there is nothing
     /// left to write.
     /// </summary>
-    private static bool BeginResponse(HttpResponse response, RivetResult result)
+    internal static bool BeginResponse(HttpResponse response, RivetResult result)
     {
         var (statusCode, hasBody) = result switch
         {
@@ -145,7 +111,7 @@ public static class RivetResultExtensions
     /// inline file keeps its name in an inline disposition; ASP.NET's download name would
     /// force an attachment.
     /// </summary>
-    private static RivetFileResult WriteFileHeaders(HttpResponse response, RivetFileResult file)
+    internal static RivetFileResult WriteFileHeaders(HttpResponse response, RivetFileResult file)
     {
         response.Headers.XContentTypeOptions = "nosniff";
         if (file.Inline)
@@ -167,7 +133,7 @@ public static class RivetResultExtensions
     private static string? AttachmentName(RivetFileResult result) =>
         result.Inline ? null : result.DownloadName;
 
-    private static IActionResult ToMvc(RivetFileResult result)
+    internal static IActionResult ToMvc(RivetFileResult result)
     {
         FileResult file = result.Source switch
         {

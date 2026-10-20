@@ -5,6 +5,7 @@ using System.Text.Json.Serialization.Metadata;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -788,6 +789,25 @@ public sealed class TerminalAndAdapterTests
 
         Assert.Equal("preserved", response.CustomHeader);
         Assert.Contains("session=value", response.SetCookie);
+    }
+
+    // An MVC result filter gets the returned result as an IActionResult; it can read the
+    // declared status the way it reads any MVC result's, and the payload before it is written.
+    [Fact]
+    public void An_mvc_result_filter_can_read_the_status_and_body()
+    {
+        var problem = new ExactProblem("missing");
+        IActionResult error = Define
+            .Get<Response>("/items")
+            .Returns<ExactProblem>(404)
+            .Error(404, problem)
+            .ToActionResult();
+        IActionResult file = Define.File("/report").File([1]).ToActionResult();
+
+        Assert.Equal(404, Assert.IsAssignableFrom<IStatusCodeActionResult>(error).StatusCode);
+        Assert.Same(problem, Assert.IsType<RivetActionResult>(error).Value);
+        Assert.Equal(200, Assert.IsAssignableFrom<IStatusCodeActionResult>(file).StatusCode);
+        Assert.Null(Assert.IsType<RivetActionResult>(file).Value);
     }
 
     private static Task<ResponseObservation> ExecuteAsync(
