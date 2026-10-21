@@ -150,7 +150,11 @@ public static class RivetResultExtensions
         return file;
     }
 
-    private static IResult ToMinimal(RivetFileResult result) =>
+    /// <summary>
+    /// MVC has no callback <see cref="FileResult"/>, so <see cref="RivetActionResult"/> runs
+    /// this one for a writer as well.
+    /// </summary>
+    internal static IResult ToMinimal(RivetFileResult result) =>
         result.Source switch
         {
             RivetFileBytes bytes => Results.Bytes(
@@ -176,6 +180,13 @@ public static class RivetResultExtensions
                 result.LastModified,
                 result.EntityTag,
                 result.EnableRangeProcessing
+            ),
+            RivetFileWriter writer => Results.Stream(
+                writer.Writer,
+                result.ContentType,
+                AttachmentName(result),
+                result.LastModified,
+                result.EntityTag
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(result)),
         };

@@ -65,6 +65,7 @@ public static class Diagnostics
     public const string UnsupportedEnumConverter = "RIV1108";
     public const string ConflictingResponseDeclaration = "RIV1107";
     public const string DuplicateResponseHeader = "RIV1109";
+    public const string UnbindableEnumParameter = "RIV1110";
 
     // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
     // rivet/php sibling runtime. Native Rivet diagnostics must not use them.
@@ -112,6 +113,7 @@ public static class Diagnostics
     public const string CoverageHttpMethodMismatch = "RIV4002";
     public const string CoverageRouteMismatch = "RIV4003";
     public const string CoverageOrphanedBinding = "RIV4004";
+    public const string CoverageUnbindableEnumParameter = "RIV4005";
 
     /// <summary>
     /// Registry of every diagnostic ID with a one-line trigger description.
@@ -181,6 +183,8 @@ public static class Diagnostics
             "Two enum members produce the same wire value (the declared converter's casing or duplicate [JsonStringEnumMemberName] pins) — generation fails instead of emitting an incorrect numeric schema.",
         [ConflictingResponseDeclaration] =
             "An endpoint declares the same response status twice with different bodies ([ProducesResponseType]/.Returns vs a mapped Results<> branch) — one status carries exactly one shape; generation fails instead of silently letting the attribute win.",
+        [UnbindableEnumParameter] =
+            "A [RivetEndpoint]/[RivetClient] MVC action binds a string-wire enum from route, query, header or form, and an advertised wire value differs from its member name by more than case — MVC's enum binder ignores the JSON converter and would refuse it; generation fails.",
         [TaggedUnionComponentCollision] =
             "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
         [UndefinedSecurityScheme] =
@@ -245,6 +249,8 @@ public static class Diagnostics
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",
         [CoverageOrphanedBinding] =
             "Contract endpoint is bound in a route handler but no terminal result from that binding is returned.",
+        [CoverageUnbindableEnumParameter] =
+            "A handler binds a string-wire enum from route, query, header or form, and the host's enum parser (minimal API: exact member name; MVC: member name ignoring case) would refuse an advertised wire value.",
     };
 
     /// <summary>

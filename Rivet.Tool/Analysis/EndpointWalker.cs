@@ -96,6 +96,11 @@ public static class EndpointWalker
 
         var name = Naming.ToCamelCase(method.Name);
         var parameters = ExtractParams(wkt, method, typeWalker, route);
+        if (!isContract)
+        {
+            RejectUnbindableEnumParameters(wkt, method);
+        }
+
         var responses = ExtractAllResponseTypes(wkt, method, typeWalker, normalize: !isContract)
             .ToList();
         if (responses.Count == 0)
@@ -710,6 +715,32 @@ public static class EndpointWalker
         }
 
         return parameters;
+    }
+
+    /// <summary>
+    /// RIV1110: an annotated MVC action is the spec's source, so every enum it binds from
+    /// route, query, header or form, directly or as a member of a complex parameter with an
+    /// explicit [FromQuery]/[FromRoute]/[FromForm]/[FromHeader] (whose schema advertises the
+    /// member's values), must accept each advertised wire value. MVC's enum
+    /// model binder ignores the JSON converter and matches member names ignoring case.
+    /// Contract-first endpoints are checked by --check (RIV4005) instead, where the
+    /// implementing handler and its host are visible.
+    /// </summary>
+    private static void RejectUnbindableEnumParameters(WellKnownTypes wkt, IMethodSymbol method)
+    {
+        var (path, unbindable) = method
+            .Parameters.SelectMany(param =>
+                EnumParameterBinding.FindUnbindableValues(wkt, param, ParameterBindingHost.Mvc)
+            )
+            .FirstOrDefault();
+        if (unbindable is not null)
+        {
+            throw new RivetUserException(
+                $"error {Diagnostics.UnbindableEnumParameter}: endpoint "
+                    + $"'{MethodOwner(method)}.{method.Name}': "
+                    + EnumParameterBinding.Explain(ParameterBindingHost.Mvc, path, unbindable)
+            );
+        }
     }
 
     /// <summary>

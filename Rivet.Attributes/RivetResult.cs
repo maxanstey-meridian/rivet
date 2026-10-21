@@ -34,6 +34,9 @@ internal sealed record RivetFileStream(Stream Content) : RivetFileSource;
 
 internal sealed record RivetPhysicalFile(string Path) : RivetFileSource;
 
+/// <summary>A body the handler writes into the response as it goes.</summary>
+internal sealed record RivetFileWriter(Func<Stream, Task> Writer) : RivetFileSource;
+
 internal sealed class RivetFileResult(
     int statusCode,
     RivetFileSource source,

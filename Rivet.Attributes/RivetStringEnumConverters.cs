@@ -31,22 +31,33 @@ internal sealed class RivetLowerAllNamingPolicy : JsonNamingPolicy
 /// The declared failures are refusal, not fallback: the contract tool refuses a
 /// policy casing that collides two members into one wire value (RIV1106), and
 /// never silently falls back to numeric when a policy is declared.
+///
+/// The read side refuses integers: a bare <c>0</c> always throws
+/// <see cref="JsonException"/> (a 400 from ASP.NET), and so does a numeric
+/// string such as <c>"0"</c> from .NET 9 on (.NET 8's System.Text.Json still
+/// reads it as the value). It is not an exact match on the advertised names:
+/// System.Text.Json also reads the C# member name in any casing, whatever the
+/// policy. The built-in <see cref="JsonStringEnumConverter{TEnum}"/> keeps
+/// STJ's default and accepts integers as well.
+///
+/// None of this applies to route, query, header or form values. ASP.NET binds
+/// those itself and never consults a JSON converter.
 /// </remarks>
 public sealed class RivetLowerCaseEnumConverter<T>()
-    : JsonStringEnumConverter<T>(new RivetLowerAllNamingPolicy())
+    : JsonStringEnumConverter<T>(new RivetLowerAllNamingPolicy(), allowIntegerValues: false)
     where T : struct, Enum;
 
 /// <summary>camelCase enum wire values — "DarkGreen" → "darkGreen".</summary>
 public sealed class RivetCamelCaseEnumConverter<T>()
-    : JsonStringEnumConverter<T>(JsonNamingPolicy.CamelCase)
+    : JsonStringEnumConverter<T>(JsonNamingPolicy.CamelCase, allowIntegerValues: false)
     where T : struct, Enum;
 
 /// <summary>snake_case enum wire values — "RestrictedByway2A" → "restricted_byway2_a".</summary>
 public sealed class RivetSnakeCaseEnumConverter<T>()
-    : JsonStringEnumConverter<T>(JsonNamingPolicy.SnakeCaseLower)
+    : JsonStringEnumConverter<T>(JsonNamingPolicy.SnakeCaseLower, allowIntegerValues: false)
     where T : struct, Enum;
 
 /// <summary>kebab-case enum wire values — "RestrictedByway2A" → "restricted-byway2-a".</summary>
 public sealed class RivetKebabCaseEnumConverter<T>()
-    : JsonStringEnumConverter<T>(JsonNamingPolicy.KebabCaseLower)
+    : JsonStringEnumConverter<T>(JsonNamingPolicy.KebabCaseLower, allowIntegerValues: false)
     where T : struct, Enum;

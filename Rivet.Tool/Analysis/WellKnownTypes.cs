@@ -63,6 +63,10 @@ public sealed class WellKnownTypes(Compilation c)
         c.GetTypeByMetadataName(Mvc + "FromHeaderAttribute");
     public INamedTypeSymbol? FromServices { get; } =
         c.GetTypeByMetadataName(Mvc + "FromServicesAttribute");
+    public INamedTypeSymbol? ModelBinder { get; } =
+        c.GetTypeByMetadataName(Mvc + "ModelBinderAttribute");
+    public INamedTypeSymbol? AsParameters { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Http.AsParametersAttribute");
     public INamedTypeSymbol? Consumes { get; } = c.GetTypeByMetadataName(Mvc + "ConsumesAttribute");
     public INamedTypeSymbol? ProducesResponseType { get; } =
         c.GetTypeByMetadataName(Mvc + "ProducesResponseTypeAttribute");

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.48.0 — 2026-10-21
+
+### Features
+
+- `Rivet.Attributes`: `File(Func<Stream, Task> writer, ...)` serves a file the handler writes as it goes, such as a live transcode piping into the response. Every `File(...)` rule still applies before the writer runs: a declared binary success, a content type the contract covers, a concrete type for a media range, and a well-formed entity tag. `nosniff` and the inline disposition are sent as for any file. There is no `enableRangeProcessing`, because a body written as it goes has no byte ranges. Works with `.ToResult()` and `.ToActionResult()`, and `--check` counts it like any other `File(...)`.
+
+### Fixes
+
+- CLI: `--check` accepts a contract field's `.Route` as a minimal-API route, as in `app.MapGet(MembersContract.Health.Route, ...)`, which the Contracts guide has always recommended. Before, any route that wasn't a compile-time constant was reported as `RouteMismatch`, so you had to keep a `const string` next to every contract route. `MapGroup` prefixes still count, so a grouped route that doesn't match the contract is still reported.
+- Tests: each target framework's tests run on that framework's runtime. A repo-wide `RollForward=LatestMajor` had been running the net8.0 and net9.0 runs on .NET 10, which hid that .NET 8 still reads `"0"` for a strict enum. Only the CLI rolls forward now, so it still runs on whatever newer .NET a consumer has.
+
+### Breaking
+
+- `Rivet.Attributes`: `RivetLowerCaseEnumConverter`, `RivetCamelCaseEnumConverter`, `RivetSnakeCaseEnumConverter` and `RivetKebabCaseEnumConverter` refuse integers. A JSON `0` for one of these enums is now a `JsonException` (a 400 from ASP.NET) on every runtime instead of being read as the member with that value, and so is a numeric string `"0"` from .NET 9 on (.NET 8's System.Text.Json still reads it). The C# member name is still read in any casing, as System.Text.Json always has. An enum with no converter is still an integer, and System.Text.Json's own `JsonStringEnumConverter` is unchanged. Route, query, header and form parameters are bound by ASP.NET, not by these converters, so this doesn't change them. An app that registered a global strict `JsonStringEnumConverter` to get this behaviour can drop it only if every enum it serializes carries a Rivet converter: a global converter also turns enums with no converter into strings, and dropping it makes those integers on the wire.
+- CLI: an enum parameter bound from the route, query, header or form now has to be bindable with every wire value the spec lists. The spec has always advertised the converter's names for it, but ASP.NET binds these values itself: minimal APIs need each name to equal the member name exactly, MVC needs it to equal ignoring case. So a camelCase or lowercase converter was a spec of 400s on a minimal API, and snake, kebab or a rename that changes more than the casing was one on both hosts. `--check` now refuses that with `RIV4005` for a handler implementing a contract (Azure Functions handlers aren't checked), and generation refuses it with `RIV1110` for a `[RivetEndpoint]` MVC action. Use a plain enum, the built-in `JsonStringEnumConverter<T>` with no renames, or bind a `string` and parse it yourself. A contract on its own isn't checked at generation, because generation can't see how the handler binds.
+
+### Docs
+
+- Contract Coverage: a "Helpers are fine" section. The spec comes from the contract, so an `.Error(...)` or a 404 guard can live in a shared helper, and `--check` only needs each handler to return one terminal on its contract.
+- Limitations: an "Enum parameters are bound by ASP.NET" section, with what each host accepts for an enum in the route, query, header or form, what Rivet checks, and the three ways to fix a failing check. The converter docs no longer claim a JSON body accepts exactly the spec's names: integers are refused, other casings of the member name aren't.
+
 ## 0.47.0 — 2026-10-20
 
 ### Features

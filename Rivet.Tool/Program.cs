@@ -86,10 +86,18 @@ static async Task<int> Run(string[] args)
                 CoverageWarningKind.HttpMethodMismatch => Diagnostics.CoverageHttpMethodMismatch,
                 CoverageWarningKind.RouteMismatch => Diagnostics.CoverageRouteMismatch,
                 CoverageWarningKind.OrphanedBinding => Diagnostics.CoverageOrphanedBinding,
+                CoverageWarningKind.UnbindableEnumParameter =>
+                    Diagnostics.CoverageUnbindableEnumParameter,
                 _ => throw new InvalidOperationException(
                     $"Unmapped coverage warning kind: {w.Kind}"
                 ),
             };
+            if (w.Kind == CoverageWarningKind.UnbindableEnumParameter)
+            {
+                Console.Error.WriteLine($"error {id}: {w.Message}");
+                continue;
+            }
+
             Diagnostics.Warn(
                 id,
                 $"[{w.Kind}] {w.ContractName}.{w.FieldName}: expected {w.Expected}, got {w.Actual}"

@@ -803,11 +803,17 @@ public sealed class TerminalAndAdapterTests
             .Error(404, problem)
             .ToActionResult();
         IActionResult file = Define.File("/report").File([1]).ToActionResult();
+        IActionResult writer = Define
+            .File("/live")
+            .File(output => Task.CompletedTask)
+            .ToActionResult();
 
         Assert.Equal(404, Assert.IsAssignableFrom<IStatusCodeActionResult>(error).StatusCode);
         Assert.Same(problem, Assert.IsType<RivetActionResult>(error).Value);
         Assert.Equal(200, Assert.IsAssignableFrom<IStatusCodeActionResult>(file).StatusCode);
         Assert.Null(Assert.IsType<RivetActionResult>(file).Value);
+        Assert.Equal(200, Assert.IsAssignableFrom<IStatusCodeActionResult>(writer).StatusCode);
+        Assert.Null(Assert.IsType<RivetActionResult>(writer).Value);
     }
 
     private static Task<ResponseObservation> ExecuteAsync(

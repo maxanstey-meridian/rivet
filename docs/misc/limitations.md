@@ -17,7 +17,11 @@ Verified limits of the current tool, so you don't discover them in production.
   response headers happen through ordinary ASP.NET APIs before returning a
   matching bodyless terminal. Rivet preserves an already-started matching
   response and rejects status conflicts; native framework results never pass
-  through the contract.
+  through the contract. A body that's produced as it's sent (a live transcode) is
+  still a Rivet file: `.File(writer, ...)` takes a `Func<Stream, Task>`, checked
+  before the writer runs. It can't serve ranges, and once the writer has sent
+  bytes the status is on the wire: an exception after that can only cut the
+  response short.
 
 ## Generation
 
@@ -42,6 +46,76 @@ Verified limits of the current tool, so you don't discover them in production.
 - `info.title`, `info.version`, and `servers` come from the `--title`, `--version`,
   and `--server` flags (defaults: `"API"` / `"1.0.0"` / no `servers` block); there
   is no flag for `info.contact`, `info.description`, or `info.license`.
+
+## Enum parameters are bound by ASP.NET
+
+Rivet's enum converters are JSON converters, and only a JSON body goes through one.
+An enum in the route, the query string, a header or a form field is parsed by ASP.NET,
+which has never heard of `RivetCamelCaseEnumConverter`. The spec still lists the
+converter's names for that parameter, because an enum has one schema wherever it
+appears. So the real question is whether the host will take those names, and the two
+hosts don't agree.
+
+Minimal APIs call `Enum.TryParse`: case-sensitive, and happy to take a number. MVC
+uses `EnumConverter`, which ignores case, then refuses a number that isn't a member.
+For a member called `RestrictedByway2A`:
+
+| Sent | Minimal API | MVC |
+|---|---|---|
+| `RestrictedByway2A`, the member name | binds | binds |
+| `restrictedByway2A` (camelCase), `restrictedbyway2a` (lowercase) | 400 | binds |
+| `restricted_byway2_a` (snake), `restricted-byway2-a` (kebab) | 400 | 400 |
+| `0`, `+1`, ` 1` | binds | binds |
+| `99`, which isn't a member | binds, as an undefined value | 400 |
+| `1,2` | 400 | binds as `1 \| 2`, `[Flags]` or not |
+
+It's the same on .NET 8, 9 and 10, and the same for route, query, header and form.
+`Rivet.RuntimeTests` pins this for route and query values against real Kestrel
+hosts, so a framework release that changes it fails the tests.
+
+Read down the second row and the trouble is plain: a camelCase or lowercase converter
+works on an MVC action and is a 400 on a minimal API. Snake and kebab are a 400 on
+both, and so is a `[JsonStringEnumMemberName]` that changes more than the casing.
+Rather than publish a spec whose own values get refused, Rivet refuses the
+combination:
+
+- **`RIV4005`** (`--check`): a handler implementing a contract binds an enum from the
+  route, query, header or form, and not every wire value will bind on that host.
+  Minimal APIs need each value to equal its member name exactly; MVC needs it to
+  equal ignoring case. Azure Functions handlers aren't checked.
+- **`RIV1110`** (generation): the same rule for a `[RivetEndpoint]` MVC action.
+
+A contract on its own gets no check at generation, because generation can't see
+how the handler binds. `--check` is where a contract-first API finds out.
+
+The fixes, simplest first:
+
+1. **A plain enum.** The spec says integer, and both hosts bind integers.
+2. **The built-in `JsonStringEnumConverter<T>`, with no renames.** The wire names are
+   the member names, which both hosts accept.
+3. **Bind a `string` and parse it yourself.** The handler owns the parsing, so it can
+   honour exactly the names the spec lists. A contract still advertises the enum;
+   on a `[RivetEndpoint]` action the parameter's type is the spec, so it becomes a
+   plain string.
+
+What the table also shows is that the hosts accept more than the spec lists:
+integers, other casings on MVC, the `1,2` trick. That's ASP.NET's behaviour, and
+Rivet doesn't promise it or turn it off. The promise runs one way: every value the
+spec advertises binds. A client that sends anything else and gets a 200 is leaning
+on the framework, not the contract.
+
+### JSON bodies are a little loose too
+
+In a JSON body, the Rivet converters refuse integers, but they aren't an exact
+match on the spec's names. System.Text.Json also reads the C# member name in any
+casing, whatever the policy, so `"RestrictedByway2A"` and `"RESTRICTEDBYWAY2A"` get
+through a camelCase converter alongside `"restrictedByway2A"`.
+
+A bare `0` is refused on every runtime. A numeric string `"0"` is refused from
+.NET 9 on, but .NET 8's System.Text.Json still reads it as the member with that
+value, `allowIntegerValues: false` or not. .NET 9 fixed it upstream. Rivet doesn't
+drag in a newer System.Text.Json package to paper over it, so if that matters to
+you, run on .NET 9 or later.
 
 ## Importer (`--from-openapi`)
 

@@ -40,6 +40,17 @@ parameters follow the model binder instead: a nullable parameter is optional.
   construction (the same `JsonNamingPolicy` instance drives both). A per-member
   `[JsonStringEnumMemberName]` overrides the converter's casing. When the casing
   produces the same wire value for two members (`RIV1106`), generation fails — loudly, never with a wrong string union.
+  On the way in, the family refuses integers: a JSON `0` is a 400, and so is a
+  numeric string `"0"` from .NET 9 on (.NET 8 still reads it; see
+  [Limitations](/misc/limitations#enum-parameters-are-bound-by-asp-net)). It isn't
+  an exact match on the spec's names, though. System.Text.Json also reads the C#
+  member name in any casing, so `"RestrictedByway2A"` and `"RESTRICTEDBYWAY2A"` get
+  through a camelCase converter too. The bare built-in `JsonStringEnumConverter<T>`
+  keeps STJ's default and quietly accepts integers its string spec never mentions.
+  All of this is the JSON body only: route, query, header and form values are bound
+  by ASP.NET, which never asks the converter. An enum parameter still gets the
+  converter's names in the spec, so Rivet checks the host can bind them (`RIV4005`,
+  `RIV1110`).
 - **Nullable members** (`string?`, `int?`) → 3.1 type arrays
   (`"type": ["string", "null"]`); nullable `$ref`s use a null branch. They stay in
   `required`; add `[RivetOptional]` for a property clients may omit.

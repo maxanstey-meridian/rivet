@@ -162,6 +162,24 @@ public abstract class BoundRouteDefinitionBase
             contentType,
             inline
         );
+
+    public RivetResult File(
+        Func<Stream, Task> writer,
+        string? downloadName = null,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null,
+        string? contentType = null,
+        bool inline = false
+    ) =>
+        RivetTerminal.File(
+            Contract,
+            writer,
+            downloadName,
+            lastModified,
+            entityTag,
+            contentType,
+            inline
+        );
 }
 
 public sealed class BoundRouteDefinition<TOutput> : BoundRouteDefinitionBase
@@ -326,6 +344,37 @@ internal static class RivetTerminal
             new RivetPhysicalFile(physicalPath),
             downloadName,
             enableRangeProcessing,
+            lastModified,
+            entityTag,
+            contentType,
+            inline
+        );
+    }
+
+    /// <summary>
+    /// A body written as it goes has no byte ranges, so range processing is never enabled.
+    /// The contract checks run here, before the writer does.
+    /// </summary>
+    internal static RivetResult File(
+        EndpointContract contract,
+        Func<Stream, Task> writer,
+        string? downloadName,
+        DateTimeOffset? lastModified,
+        string? entityTag,
+        string? contentType,
+        bool inline
+    )
+    {
+        if (writer is null)
+        {
+            throw Violation(contract, "received a null file writer");
+        }
+
+        return CreateFile(
+            contract,
+            new RivetFileWriter(writer),
+            downloadName,
+            enableRangeProcessing: false,
             lastModified,
             entityTag,
             contentType,

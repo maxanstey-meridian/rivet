@@ -101,10 +101,59 @@ public sealed class StringEnumConverterTests
     }
 #endif
 
+    // The spec Rivet emits for these enums is a string union, so the converters
+    // refuse integers: a bare 0 always, and a numeric string "0" (which STJ would
+    // otherwise read as an integer value) from .NET 9 on. They still read the C#
+    // member name in any casing; that's STJ, and the spec doesn't advertise it.
+    public static TheoryData<Type> RivetConvertedEnums =>
+        [typeof(Colour), typeof(ColourSnake), typeof(ColourKebab), typeof(ColourLower)];
+
+    [Theory]
+    [MemberData(nameof(RivetConvertedEnums))]
+    public void Rivet_Converters_Refuse_A_Json_Integer(Type enumType)
+    {
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("0", enumType));
+    }
+
+#if NET9_0_OR_GREATER
+    [Theory]
+    [MemberData(nameof(RivetConvertedEnums))]
+    public void Rivet_Converters_Refuse_A_Numeric_String(Type enumType)
+    {
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("\"0\"", enumType));
+    }
+#else
+    // .NET 8's System.Text.Json reads a numeric string as the enum value even with
+    // allowIntegerValues: false; .NET 9 fixed it. Pinned rather than patched with a
+    // newer STJ package, so moving off .NET 8 shows up here.
+    [Theory]
+    [MemberData(nameof(RivetConvertedEnums))]
+    public void Rivet_Converters_Still_Read_A_Numeric_String_On_Net8(Type enumType)
+    {
+        Assert.Equal(0, Convert.ToInt32(JsonSerializer.Deserialize("\"0\"", enumType)));
+    }
+#endif
+
+    [Theory]
+    [MemberData(nameof(RivetConvertedEnums))]
+    public void Rivet_Converters_Read_The_Member_Name_In_Any_Casing(Type enumType)
+    {
+        foreach (var json in new[] { "\"RestrictedByway2A\"", "\"RESTRICTEDBYWAY2A\"" })
+        {
+            Assert.Equal(3, Convert.ToInt32(JsonSerializer.Deserialize(json, enumType)));
+        }
+    }
+
     [Fact]
     public void Built_In_Converter_Keeps_The_Exact_Member_Names()
     {
         Assert.Equal("\"DarkGreen\"", JsonSerializer.Serialize(ColourExact.DarkGreen));
+    }
+
+    [Fact]
+    public void Built_In_Converter_Keeps_STJs_Lenient_Integer_Default()
+    {
+        Assert.Equal(ColourExact.Level3, JsonSerializer.Deserialize<ColourExact>("1"));
     }
 }
 

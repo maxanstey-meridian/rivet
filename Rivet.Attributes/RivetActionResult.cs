@@ -66,6 +66,9 @@ public sealed class RivetActionResult : IActionResult, IStatusCodeActionResult
                 ContentType = body.ContentType,
                 Content = (string?)body.Value,
             }.ExecuteResultAsync(context),
+            RivetFileResult { Source: RivetFileWriter } file => RivetResultExtensions
+                .ToMinimal(RivetResultExtensions.WriteFileHeaders(httpContext.Response, file))
+                .ExecuteAsync(httpContext),
             RivetFileResult file => RivetResultExtensions
                 .ToMvc(RivetResultExtensions.WriteFileHeaders(httpContext.Response, file))
                 .ExecuteResultAsync(context),

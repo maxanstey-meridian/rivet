@@ -540,6 +540,63 @@ public sealed class CoverageCheckerTests
     }
 
     [Fact]
+    public void Error_branch_through_a_helper_keeps_the_handler_covered()
+    {
+        // docs/guides/contract-coverage.md promises that error terminals may live in
+        // helpers: the handler's own returned .Success(...) is all --check needs.
+        var lookupContract = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskLookup(string Id);
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskLookup, TaskDto> GetTask =
+                    Define.Get<TaskLookup, TaskDto>("/api/tasks/{id}").Returns(404);
+            }
+            """;
+
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGet("/api/tasks/{id}", (string id) =>
+                    {
+                        var endpoint = TasksContract.GetTask.Bind(new TaskLookup(id));
+                        if (id == "missing")
+                        {
+                            return NotFound(endpoint).ToResult();
+                        }
+
+                        return endpoint.Success(new TaskDto(id)).ToResult();
+                    });
+                }
+
+                private static RivetResult NotFound(BoundRouteDefinitionBase endpoint) =>
+                    endpoint.Error(404);
+            }
+            """;
+
+        var warnings = RunCheck(lookupContract, implementation);
+
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
     public void Discarded_terminal_expression_in_endpoint_is_not_coverage()
     {
         var implementation = """
@@ -1763,6 +1820,168 @@ public sealed class CoverageCheckerTests
         Assert.Contains("unresolved route", warning.Actual);
     }
 
+    // ---------------------------------------------------------------
+    // A contract field's .Route as the Map* route: resolved to the field's
+    // template, then prefixed, normalised and compared like a constant.
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public void Contract_Route_Reference_Is_Coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGet(TasksContract.ListTasks.Route, () =>
+                        TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "ListTasks");
+    }
+
+    [Fact]
+    public void Contract_Route_Reference_Through_A_Local_Is_Coverage()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    var definition = TasksContract.ListTasks;
+                    app.MapGet(definition.Route, () =>
+                        definition.Success(new TaskDto("1", "Test")).ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "ListTasks");
+    }
+
+    [Fact]
+    public void Contract_Route_Reference_Under_A_Group_Gets_The_Prefix()
+    {
+        // The contract owns the full path, so a group prefix it doesn't declare is a
+        // mismatch even when the rest of the route came from the contract itself.
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGroup("/v2").MapGet(TasksContract.ListTasks.Route, () =>
+                        TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListTasks" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        Assert.Equal("/api/tasks", warning.Expected);
+        Assert.Equal("/v2/api/tasks", warning.Actual);
+    }
+
+    [Fact]
+    public void Another_Fields_Route_Is_Compared_By_Value()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGet(TasksContract.DownloadTask.Route, () =>
+                        TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListTasks" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        Assert.Equal("/api/tasks", warning.Expected);
+        Assert.Equal("/api/tasks/{id}/download", warning.Actual);
+    }
+
+    [Fact]
+    public void Contract_Route_Reference_With_A_Constraint_Is_Coverage()
+    {
+        // The field's RouteTemplate has the constraint stripped and the runtime .Route
+        // keeps it. Both normalise to the same route, so the reference still verifies.
+        var constrainedContract = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
+            }
+            """;
+
+        var implementation = """
+            using System;
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGet(TasksContract.GetTask.Route, (Guid id) =>
+                        TasksContract.GetTask.Success(new TaskDto(id.ToString())).ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(constrainedContract, implementation);
+
+        Assert.Empty(warnings);
+    }
+
     [Fact]
     public void Nonconstant_MapMethods_Methods_Are_Reported_Unresolved()
     {
@@ -1886,5 +2105,36 @@ public sealed class CoverageCheckerTests
         // the Actual text states the unresolved cause instead of a resolved route.
         Assert.Contains("unresolved route", warning.Actual);
         Assert.Contains("no route template", warning.Actual);
+    }
+
+    [Fact]
+    public void Streaming_file_writer_is_coverage()
+    {
+        // The writer overload is still File(...), and a lambda converts to none of the
+        // other overloads' parameter types, so this compiles without ambiguity.
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGet(
+                        "/api/tasks/{id}/download",
+                        () => TasksContract.DownloadTask
+                            .File(async output => await output.WriteAsync(new byte[] { 1, 2, 3 }))
+                            .ToResult()
+                    );
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "DownloadTask");
     }
 }

@@ -1,6 +1,5 @@
 <Project>
     <PropertyGroup>
-        <RollForward>LatestMajor</RollForward>
         <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
         <AnalysisLevel>latest</AnalysisLevel>
         <NoWarn>$(NoWarn);EnableGenerateDocumentationFile</NoWarn>

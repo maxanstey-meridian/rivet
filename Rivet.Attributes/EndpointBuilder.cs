@@ -601,6 +601,24 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
             contentType,
             inline
         );
+
+    public RivetResult File(
+        Func<Stream, Task> writer,
+        string? downloadName = null,
+        DateTimeOffset? lastModified = null,
+        string? entityTag = null,
+        string? contentType = null,
+        bool inline = false
+    ) =>
+        RivetTerminal.File(
+            Publish(SuccessPayloadType),
+            writer,
+            downloadName,
+            lastModified,
+            entityTag,
+            contentType,
+            inline
+        );
 }
 
 /// <summary>

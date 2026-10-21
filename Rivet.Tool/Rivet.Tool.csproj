@@ -41,6 +41,9 @@
         <NoWarn>$(NoWarn);NU1701</NoWarn>
         <OutputType>Exe</OutputType>
         <TargetFramework>net9.0</TargetFramework>
+        <!-- The tool runs on whichever newer .NET a consumer has installed. Test projects
+             don't roll forward, so each target framework runs on its own runtime. -->
+        <RollForward>LatestMajor</RollForward>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <UseAppHost Condition="'$(SelfContained)' != 'true'">false</UseAppHost>

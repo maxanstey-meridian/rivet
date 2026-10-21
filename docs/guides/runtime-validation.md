@@ -14,8 +14,10 @@ These hold whenever you regenerate the spec (`dotnet rivet --project … --outpu
 - Constraint attributes (`[Range]`, `[StringLength]`, `[MinLength]`, `[MaxLength]`, `[Length]`,
   `[RegularExpression]`, `[RivetConstraints]`, ...) are emitted as JSON Schema
   constraints (`minimum`, `maxLength`, `pattern`, `multipleOf`, ...).
-- `--check` verifies that every contract field has an implementation and that the
-  implementation's route and HTTP method match the declaration.
+- `--check` verifies that every contract field has an implementation, that the
+  implementation's route and HTTP method match the declaration, and that an enum it
+  binds from the route, query, header or form can take every value the spec lists
+  (`RIV4005`).
 
 ## Runtime guarantees (contract responses)
 
@@ -45,8 +47,9 @@ normally, and constructs a contract-owned response:
   response and takes its content type from the declaration. With multiple binary
   representations, pass `contentType:` to select one explicitly; undeclared
   selections fail. It accepts `byte[]`, a
-  readable `Stream`, or an absolute physical path; range-enabled streams must be
-  seekable. Input-bearing file definitions first use `.Bind(input)`.
+  readable `Stream`, an absolute physical path, or a `Func<Stream, Task>` writer that
+  fills the response as it goes; range-enabled streams must be seekable, and a writer
+  never serves ranges. Input-bearing file definitions first use `.Bind(input)`.
 - **Host adapters preserve the result.** The first-party `.ToActionResult()` and
   `.ToResult()` adapters write body, content type, file metadata, and status through
   MVC or minimal APIs. If the host response has already started incompatibly or has

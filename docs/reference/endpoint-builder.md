@@ -56,6 +56,23 @@ All return the definition for chaining.
 - `.File(content, ...)` constructs a declared binary response from `byte[]`,
   `Stream`, or an absolute physical path. It carries the contract content type and
   optional download name, range processing, last-modified value, and entity tag.
+- `.File(writer, ...)` takes a `Func<Stream, Task>` instead, for a body that only
+  exists while it's being sent: the writer gets the response stream and fills it.
+  Same contract checks, run before the writer starts, and the same headers. There's
+  no `enableRangeProcessing`, because bytes written as they go have no ranges to
+  serve, so a player that wants to seek asks for a new stream (say, a start time in
+  the query) rather than a `Range`. For cancellation, close over
+  `HttpContext.RequestAborted`:
+
+  ```csharp
+  app.MapGet(MediaContract.Live.Route, (Guid id, HttpContext http) =>
+      MediaContract.Live
+          .File(
+              output => transcoder.RunAsync(id, output, http.RequestAborted),
+              contentType: "video/mp4"
+          )
+          .ToResult());
+  ```
 - All terminals return `RivetResult`. Use the first-party `.ToActionResult()` for
   MVC or `.ToResult()` for minimal APIs at the host boundary. Application execution
   remains ordinary C# outside the contract response API.

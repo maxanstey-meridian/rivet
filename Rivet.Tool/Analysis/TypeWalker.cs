@@ -1382,7 +1382,7 @@ public sealed class TypeWalker
                         .OfType<IFieldSymbol>()
                         .Where(f => f.HasConstantValue)
                         .ToList();
-                    var (isStringEnum, enumNamingPolicy) = GetEnumWireShape(namedType);
+                    var (isStringEnum, enumNamingPolicy) = GetEnumWireShape(_types, namedType);
                     IReadOnlyList<string>? stringMembers = null;
                     if (isStringEnum)
                     {
@@ -1397,7 +1397,7 @@ public sealed class TypeWalker
                             );
                         }
                         var candidates = fields
-                            .Select(f => EnumWireValue(f, enumNamingPolicy))
+                            .Select(f => EnumWireValue(_types, f, enumNamingPolicy))
                             .ToList();
                         if (candidates.Distinct(StringComparer.Ordinal).Count() != candidates.Count)
                         {
@@ -1412,7 +1412,9 @@ public sealed class TypeWalker
                             var collidingMembers = string.Join(
                                 ", ",
                                 fields
-                                    .Where(f => EnumWireValue(f, enumNamingPolicy) == colliding)
+                                    .Where(f =>
+                                        EnumWireValue(_types, f, enumNamingPolicy) == colliding
+                                    )
                                     .Select(f => f.Name)
                             );
                             throw new RivetUserException(
@@ -1538,6 +1540,27 @@ public sealed class TypeWalker
     }
 
     /// <summary>
+    /// The string wire value of each member of a string-wire enum, in declaration order,
+    /// derived exactly as the emitted string union is; null for a numeric-wire enum.
+    /// Throws RIV1108 for a converter Rivet cannot represent, as generation does.
+    /// </summary>
+    internal static IReadOnlyList<(IFieldSymbol Member, string WireValue)>? StringEnumWireValues(
+        WellKnownTypes types,
+        INamedTypeSymbol enumType
+    )
+    {
+        var (isString, policy) = GetEnumWireShape(types, enumType);
+        return isString
+            ? enumType
+                .GetMembers()
+                .OfType<IFieldSymbol>()
+                .Where(f => f.HasConstantValue)
+                .Select(f => (f, EnumWireValue(types, f, policy)))
+                .ToList()
+            : null;
+    }
+
+    /// <summary>
     /// The wire value of one enum member: an explicit
     /// [JsonStringEnumMemberName("original")] wins; otherwise the casing the
     /// declared converter names applies; without either, the wire value is the
@@ -1545,8 +1568,12 @@ public sealed class TypeWalker
     /// writes the CLR name verbatim, so Rivet must not camel-case it
     /// (acceptance:string-enum-preserves-member-name).
     /// </summary>
-    private string EnumWireValue(IFieldSymbol field, RivetNamingPolicy? policy) =>
-        field.GetAttribute(_types.JsonStringEnumMemberName).StringArgument()
+    private static string EnumWireValue(
+        WellKnownTypes types,
+        IFieldSymbol field,
+        RivetNamingPolicy? policy
+    ) =>
+        field.GetAttribute(types.JsonStringEnumMemberName).StringArgument()
         ?? (policy is null ? field.Name : Naming.ToPolicyCase(field.Name, policy.Value));
 
     /// <summary>
@@ -1558,10 +1585,13 @@ public sealed class TypeWalker
     /// its casing in the class name (attribute args cannot hold a naming
     /// policy). Null when the enum is numeric-wire.
     /// </summary>
-    private (bool IsString, RivetNamingPolicy? Policy) GetEnumWireShape(INamedTypeSymbol type)
+    private static (bool IsString, RivetNamingPolicy? Policy) GetEnumWireShape(
+        WellKnownTypes types,
+        INamedTypeSymbol type
+    )
     {
         var converters = type.GetAttributes()
-            .Where(a => IsJsonConverterAttribute(a.AttributeClass))
+            .Where(a => IsJsonConverterAttribute(types, a.AttributeClass))
             .ToArray();
         if (converters.Length == 0)
         {
@@ -1569,7 +1599,7 @@ public sealed class TypeWalker
         }
         if (
             converters.Length != 1
-            || !converters[0].Is(_types.JsonConverter)
+            || !converters[0].Is(types.JsonConverter)
             || converters[0].ConstructorArguments is not [{ Value: INamedTypeSymbol converterType }]
         )
         {
@@ -1769,11 +1799,11 @@ public sealed class TypeWalker
         return null;
     }
 
-    private bool IsJsonConverterAttribute(INamedTypeSymbol? type)
+    private static bool IsJsonConverterAttribute(WellKnownTypes types, INamedTypeSymbol? type)
     {
         for (; type is not null; type = type.BaseType)
         {
-            if (SymbolEqualityComparer.Default.Equals(type, _types.JsonConverter))
+            if (SymbolEqualityComparer.Default.Equals(type, types.JsonConverter))
             {
                 return true;
             }
@@ -1811,9 +1841,10 @@ public sealed class TypeWalker
                 .Any(a =>
                     a.AttributeClass?.ContainingNamespace.ToDisplayString()
                         == "System.Text.Json.Serialization"
-                    || IsJsonConverterAttribute(a.AttributeClass)
+                    || IsJsonConverterAttribute(_types, a.AttributeClass)
                 )
-            || symbol.GetAttributes().Count(a => IsJsonConverterAttribute(a.AttributeClass)) != 1
+            || symbol.GetAttributes().Count(a => IsJsonConverterAttribute(_types, a.AttributeClass))
+                != 1
             || !symbol.InstanceConstructors.Any(c =>
                 c.DeclaredAccessibility == Accessibility.Public
                 && c.Parameters.Length == 1

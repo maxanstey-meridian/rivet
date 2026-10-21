@@ -101,8 +101,9 @@ requests.
 
 Run the application operation normally, then construct the response with `.File(...)`.
 Rivet takes the content type from the contract and provides overloads for `byte[]`,
-`Stream`, and an absolute physical path. Input-bearing file definitions first use
-`.Bind(input)`. Errors use `.Error(...)` and must be declared via `.Returns(...)`:
+`Stream`, an absolute physical path, and a [writer](#files-written-as-they-go).
+Input-bearing file definitions first use `.Bind(input)`. Errors use `.Error(...)` and
+must be declared via `.Returns(...)`:
 
 ```csharp
 [HttpGet("{id}/avatar")]
@@ -117,6 +118,32 @@ public async Task<IActionResult> Avatar(Guid id)
 bridges. Range processing can produce `206`; stream *contents* are never inspected,
 and handlers that bypass the contract terminals are unchecked. See [Runtime
 Validation](/guides/runtime-validation).
+
+## Files written as they go
+
+Some bodies don't exist until you send them: ffmpeg transcoding into the response, a
+zip assembled entry by entry. Hand `.File(...)` a writer instead of content and Rivet
+gives it the response stream once the contract checks have passed:
+
+```csharp
+public static readonly FileRouteDefinition<ClipInput> Live = Define
+    .File<ClipInput>("/clips/{id}/live")
+    .ProducesFile("video/*");
+
+return Live.Bind(input)
+    .File(
+        output => transcoder.RunAsync(input.Id, output, HttpContext.RequestAborted),
+        contentType: "video/mp4"
+    )
+    .ToActionResult();
+```
+
+The content type, download name, `inline` and `nosniff` rules are the ones every other
+file follows, and a bad content type throws before the writer runs, so ffmpeg never
+starts for a response Rivet was going to refuse. What you give up is ranges: there's
+no `enableRangeProcessing`, because a stream that's still being made can't jump to
+byte 4,000,000. Seeking is your API's business, typically a start offset in the query
+that begins a fresh stream.
 
 ## Choosing a binary response MIME type
 

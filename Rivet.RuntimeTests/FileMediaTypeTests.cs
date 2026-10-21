@@ -199,6 +199,85 @@ public sealed class FileMediaTypeTests
         Assert.Equal("inline", bare.Response.Headers.ContentDisposition.ToString());
     }
 
+    // A writer is a file whose body is produced while it is sent, such as a live transcode.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_writer_streams_its_bytes_with_the_declared_type_and_nosniff(bool mvc)
+    {
+        var route = Define.File("/live").ProducesFile("video/mp4");
+        var context = await ExecuteAsync(
+            route.File(async output => await output.WriteAsync(new byte[] { 1, 2, 3 })),
+            mvc
+        );
+        Assert.Equal("video/mp4", context.Response.ContentType);
+        Assert.Equal([1, 2, 3], ((MemoryStream)context.Response.Body).ToArray());
+        Assert.Equal("nosniff", context.Response.Headers.XContentTypeOptions.ToString());
+        Assert.Equal(string.Empty, context.Response.Headers.AcceptRanges.ToString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_writer_serves_the_concrete_type_inside_a_declared_range(bool mvc)
+    {
+        var route = Define.File("/live").ProducesFile("video/*");
+        var context = await ExecuteAsync(
+            route.File(
+                output => output.WriteAsync(new byte[] { 1 }).AsTask(),
+                contentType: "video/mp4"
+            ),
+            mvc
+        );
+        Assert.Equal("video/mp4", context.Response.ContentType);
+        Assert.Throws<RivetContractViolationException>(() =>
+            route.File(output => Task.CompletedTask)
+        );
+    }
+
+    [Fact]
+    public void A_writer_outside_the_declaration_is_rejected_before_it_runs()
+    {
+        var called = false;
+        Task Write(Stream output)
+        {
+            called = true;
+            return Task.CompletedTask;
+        }
+
+        Assert.Throws<RivetContractViolationException>(() =>
+            Define.File("/live").ProducesFile("video/*").File(Write, contentType: "audio/mpeg")
+        );
+        Assert.Throws<RivetContractViolationException>(() =>
+            Define.Get<string>("/json").File(Write)
+        );
+        Assert.False(called);
+    }
+
+    [Fact]
+    public void A_null_writer_is_rejected()
+    {
+        var exception = Assert.Throws<RivetContractViolationException>(() =>
+            Define.File("/live").File((Func<Stream, Task>)null!)
+        );
+        Assert.Contains("null file writer", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_writer_keeps_an_inline_name(bool mvc)
+    {
+        var route = Define.File("/live").ProducesFile("video/mp4");
+        var context = await ExecuteAsync(
+            route.File(output => Task.CompletedTask, "clip one.mp4", inline: true),
+            mvc
+        );
+        var disposition = context.Response.Headers.ContentDisposition.ToString();
+        Assert.StartsWith("inline", disposition);
+        Assert.Contains("clip one.mp4", disposition);
+    }
+
     private static async Task<DefaultHttpContext> ExecuteAsync(RivetResult result, bool mvc)
     {
         var services = new ServiceCollection();

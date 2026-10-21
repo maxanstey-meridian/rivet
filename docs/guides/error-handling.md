@@ -49,6 +49,10 @@ minimal APIs. Register `RivetContractViolationHandler` to surface violations as
 For the exact scope, see
 [Runtime Validation](/guides/runtime-validation).
 
+An `.Error(...)` doesn't have to be written out in every handler. A helper that takes the
+bound endpoint works the same way, as [Helpers are fine](/guides/contract-coverage#helpers-are-fine)
+shows.
+
 ## On the consumer side
 
 `openapi-fetch` surfaces declared errors as a typed `{ data, error, response }`

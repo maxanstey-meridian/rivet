@@ -11,6 +11,7 @@ public enum CoverageWarningKind
     OrphanedBinding,
     HttpMethodMismatch,
     RouteMismatch,
+    UnbindableEnumParameter,
 }
 
 public sealed record CoverageWarning(
@@ -19,7 +20,8 @@ public sealed record CoverageWarning(
     string FieldName,
     string? Expected,
     string? Actual,
-    Location? Location
+    Location? Location,
+    string? Message = null
 );
 
 public static class CoverageChecker
@@ -98,6 +100,7 @@ public static class CoverageChecker
                     wkt,
                     adapterType,
                     invocation,
+                    fieldMap,
                     functionsRoutePrefix
                 );
                 if (!context.IsEndpoint)
@@ -120,7 +123,7 @@ public static class CoverageChecker
             }
         }
 
-        return BuildWarnings(fieldMap, implementations, bindings, consumedBindings);
+        return BuildWarnings(wkt, fieldMap, implementations, bindings, consumedBindings);
     }
 
     // Matched on the receiver's type, not the method's declaring type: Error and File are
@@ -182,6 +185,29 @@ public static class CoverageChecker
                 : null,
             _ => null,
         };
+
+    /// <summary>
+    /// The template a Map* route argument holds: a compile-time constant, or a contract
+    /// field's .Route read through any value <see cref="ResolveContractReference"/>
+    /// resolves. The field's RouteTemplate is its Define… literal with route constraints
+    /// stripped, and NormalizeRoute strips them from every Map* route, so it compares
+    /// exactly as the literal would.
+    /// </summary>
+    private static string? ResolveRouteArgument(
+        WellKnownTypes wkt,
+        IOperation pattern,
+        IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap
+    ) =>
+        pattern.ConstantValue is { HasValue: true, Value: string constant } ? constant
+        : WithoutImplicitConversions(pattern)
+            is IPropertyReferenceOperation
+            {
+                Property: { Name: "Route", ContainingType: var declaringType },
+            } route
+        && IsOneOf(declaringType.OriginalDefinition, wkt.RouteDefinitionBase)
+        && ResolveContractReference(wkt, route.Instance, fieldMap, []) is { } reference
+            ? fieldMap[reference.Field].RouteTemplate
+        : null;
 
     /// <summary>
     /// The single value a local holds at <paramref name="use"/>, or null when it cannot
@@ -277,6 +303,7 @@ public static class CoverageChecker
     }
 
     private static IReadOnlyList<CoverageWarning> BuildWarnings(
+        WellKnownTypes wkt,
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap,
         IReadOnlyDictionary<IFieldSymbol, List<TerminalImplementation>> implementations,
         IReadOnlyList<ContractBinding> bindings,
@@ -301,8 +328,19 @@ public static class CoverageChecker
                 continue;
             }
 
+            var checkedHandlers = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
             foreach (var implementation in fieldImplementations)
             {
+                if (
+                    implementation.Context is { Handler: { } handler, BindingHost: { } host }
+                    && checkedHandlers.Add(handler)
+                )
+                {
+                    warnings.AddRange(
+                        UnbindableEnumParameters(wkt, field, endpoint, handler, host)
+                    );
+                }
+
                 if (
                     implementation.Context.HttpMethods.Count > 0
                     && !implementation.Context.HttpMethods.Contains(
@@ -368,10 +406,52 @@ public static class CoverageChecker
         return warnings;
     }
 
+    /// <summary>
+    /// RIV4005: each handler parameter the host binds from route, query, header or form
+    /// (or member of an [AsParameters] / explicitly sourced complex parameter) whose enum
+    /// advertises a wire value the host's enum parser refuses. Minimal APIs and MVC both
+    /// bind an unattributed enum from route or query, so only [FromBody], [FromServices]
+    /// and an explicit [ModelBinder] exempt a parameter. A handler binding a string and
+    /// parsing it itself is never reported: it binds no enum.
+    /// </summary>
+    private static IEnumerable<CoverageWarning> UnbindableEnumParameters(
+        WellKnownTypes wkt,
+        IFieldSymbol field,
+        TsEndpointDefinition endpoint,
+        IMethodSymbol handler,
+        ParameterBindingHost host
+    )
+    {
+        foreach (var parameter in handler.Parameters)
+        {
+            foreach (
+                var (path, unbindable) in EnumParameterBinding.FindUnbindableValues(
+                    wkt,
+                    parameter,
+                    host
+                )
+            )
+            {
+                yield return new CoverageWarning(
+                    CoverageWarningKind.UnbindableEnumParameter,
+                    field.ContainingType.Name,
+                    field.Name,
+                    Expected: unbindable.WireValue,
+                    Actual: unbindable.MemberName,
+                    Location: parameter.Locations.FirstOrDefault(),
+                    Message: $"{field.ContainingType.Name}.{field.Name} "
+                        + $"({endpoint.HttpMethod} {endpoint.RouteTemplate}): "
+                        + EnumParameterBinding.Explain(host, path, unbindable)
+                );
+            }
+        }
+    }
+
     private static EndpointContext ResolveImplementation(
         WellKnownTypes wkt,
         INamedTypeSymbol? adapterType,
         IInvocationOperation terminal,
+        IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap,
         string functionsRoutePrefix
     )
     {
@@ -392,7 +472,7 @@ public static class CoverageChecker
             return function;
         }
 
-        return TryResolveMinimalApi(wkt, adapterType, terminal);
+        return TryResolveMinimalApi(wkt, adapterType, terminal, fieldMap);
     }
 
     /// <summary>
@@ -439,7 +519,7 @@ public static class CoverageChecker
         // report it through the RouteError channel so BuildWarnings emits a warning
         // (the requested check exits nonzero), mirroring the minimal-API unresolved
         // reporting. The route itself comes from the same resolver extraction uses.
-        return route is null
+        var context = route is null
             ? new EndpointContext(
                 true,
                 [httpMethod],
@@ -447,12 +527,14 @@ public static class CoverageChecker
                 RouteError: "unresolved route: the action declares no route template and the controller declares no [Route]"
             )
             : new EndpointContext(true, [httpMethod], route);
+        return context with { Handler = method, BindingHost = ParameterBindingHost.Mvc };
     }
 
     private static EndpointContext TryResolveMinimalApi(
         WellKnownTypes wkt,
         INamedTypeSymbol adapterType,
-        IInvocationOperation terminal
+        IInvocationOperation terminal,
+        IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap
     )
     {
         if (
@@ -502,7 +584,11 @@ public static class CoverageChecker
                     [],
                     null,
                     RouteError: "unresolved HTTP method(s): MapMethods arguments are not compile-time constants"
-                );
+                )
+                {
+                    Handler = handler.Symbol,
+                    BindingHost = ParameterBindingHost.MinimalApi,
+                };
             }
 
             methods = constantMethods;
@@ -518,10 +604,10 @@ public static class CoverageChecker
         {
             routeError = "unresolved route: Map* call has no route argument";
         }
-        else if (pattern.ConstantValue is not { HasValue: true, Value: string template })
+        else if (ResolveRouteArgument(wkt, pattern, fieldMap) is not { } template)
         {
-            // An unresolvable receiver or nonconstant route stays unresolved rather
-            // than inventing a prefix.
+            // Interpolation, concatenation, method calls and a .Route on anything but
+            // a contract field stay unresolved rather than guessing a route.
             routeError = "unresolved route: route template is not a compile-time constant";
         }
         else
@@ -543,7 +629,11 @@ public static class CoverageChecker
             methods.Select(value => value.ToUpperInvariant()).ToArray(),
             route,
             routeError
-        );
+        )
+        {
+            Handler = handler.Symbol,
+            BindingHost = ParameterBindingHost.MinimalApi,
+        };
     }
 
     /// <summary>
@@ -777,6 +867,11 @@ public static class CoverageChecker
 
     private sealed record ContractReference(IFieldSymbol Field, SyntaxNode? Binding);
 
+    /// <summary>
+    /// A resolved implementation. <see cref="Handler"/> and <see cref="BindingHost"/> are set
+    /// for minimal-API and MVC handlers only: Azure Functions binds its own parameters, and
+    /// its enum binding is unmeasured, so Functions handlers carry neither.
+    /// </summary>
     private sealed record EndpointContext(
         bool IsEndpoint,
         IReadOnlyList<string> HttpMethods,
@@ -785,5 +880,9 @@ public static class CoverageChecker
     )
     {
         public static readonly EndpointContext None = new(false, [], null);
+
+        public IMethodSymbol? Handler { get; init; }
+
+        public ParameterBindingHost? BindingHost { get; init; }
     }
 }
