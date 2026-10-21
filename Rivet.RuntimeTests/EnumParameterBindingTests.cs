@@ -264,6 +264,15 @@ public sealed class EnumParameterBindingTests(EnumParameterBindingTests.Hosts ho
     }
 
     [Fact]
+    public async Task Minimal_lowercase_get_still_reads_an_unattributed_enum_array_from_a_json_body()
+    {
+        // ASP.NET matches body-less verbs case-sensitively, so "get" keeps inferred bodies:
+        // routing still serves the GET, but the array comes from its JSON body.
+        await AssertArray("minimal", JsonGet("/array/methods-lower"), "DarkGreen,Level3");
+        await AssertArrayRefused("minimal", Get("/array/methods-lower?kinds=DarkGreen"));
+    }
+
+    [Fact]
     public async Task Mvc_api_controller_reads_an_unattributed_enum_array_from_a_json_body()
     {
         // [ApiController] treats a collection as complex and infers [FromBody].
@@ -271,10 +280,34 @@ public sealed class EnumParameterBindingTests(EnumParameterBindingTests.Hosts ho
     }
 
     [Fact]
-    public async Task Minimal_get_with_an_unattributed_enum_list_fails_at_startup()
+    public async Task Mvc_without_api_controller_reads_an_unattributed_enum_array_from_the_query()
     {
-        // A List<T> is inferred as a body, which a GET doesn't allow: building the endpoint,
-        // which startup does, throws.
+        // Without [ApiController] nothing infers [FromBody]: the array binds from the value
+        // providers, so the enum binder matches member names ignoring case and refuses the
+        // snake-case name. Nothing turns a model-state error into a 400 either: the action
+        // still runs and checks ModelState itself, and its marker body proves the 400 is
+        // the action's, not the framework's.
+        await AssertArray(
+            "mvc",
+            Get("/array/plain?kinds=DarkGreen&kinds=level3"),
+            "DarkGreen,Level3"
+        );
+        await AssertArray("mvc", Get("/array/plain?kinds=darkGreen"), "DarkGreen");
+
+        var response = await hosts.SendAsync("mvc", Get("/array/plain?kinds=dark_green"));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(
+            PlainEnumBindingController.InvalidModelState,
+            await response.Content.ReadAsStringAsync()
+        );
+    }
+
+    [Fact]
+    public async Task Minimal_get_with_an_unattributed_enum_list_fails_when_the_endpoints_are_built()
+    {
+        // A List<T> is inferred as a body, which a GET doesn't allow: building the endpoint
+        // throws. Routing builds endpoints when it first initialises (the first request), not
+        // at StartAsync, so this reads the data sources directly.
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
         await using var app = builder.Build();
@@ -291,8 +324,12 @@ public sealed class EnumParameterBindingTests(EnumParameterBindingTests.Hosts ho
 
     private static HttpRequestMessage Get(string path) => new(HttpMethod.Get, path);
 
-    private static HttpRequestMessage JsonPost(string path) =>
-        new(HttpMethod.Post, path)
+    private static HttpRequestMessage JsonPost(string path) => JsonBody(HttpMethod.Post, path);
+
+    private static HttpRequestMessage JsonGet(string path) => JsonBody(HttpMethod.Get, path);
+
+    private static HttpRequestMessage JsonBody(HttpMethod method, string path) =>
+        new(method, path)
         {
             Content = new StringContent(
                 """["darkGreen","level3"]""",
@@ -463,6 +500,11 @@ public sealed class EnumParameterBindingTests(EnumParameterBindingTests.Hosts ho
                     ["GET", "POST"],
                     (Colour[] kinds) => string.Join(",", kinds)
                 );
+                app.MapMethods(
+                    "/array/methods-lower",
+                    ["get"],
+                    (Colour[] kinds) => string.Join(",", kinds)
+                );
             }
 
             await app.StartAsync();
@@ -560,4 +602,17 @@ public sealed class EnumBindingController : ControllerBase
 
     [HttpPost("/array/post")]
     public string ArrayPost(Colour[] kinds) => string.Join(",", kinds);
+}
+
+/// <summary>
+/// No [ApiController], so no inferred [FromBody] and no automatic 400 on a model-state
+/// error: the action reports the binder's verdict itself.
+/// </summary>
+public sealed class PlainEnumBindingController : ControllerBase
+{
+    public const string InvalidModelState = "the action ran with an invalid model state";
+
+    [HttpGet("/array/plain")]
+    public IActionResult ArrayPlain(Colour[] kinds) =>
+        ModelState.IsValid ? Ok(string.Join(",", kinds)) : BadRequest(InvalidModelState);
 }

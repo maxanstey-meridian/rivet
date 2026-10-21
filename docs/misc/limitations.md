@@ -82,12 +82,18 @@ combination:
 - **`RIV4005`** (`--check`): a handler implementing a contract binds an enum from the
   route, query, header or form, and not every wire value will bind on that host.
   Minimal APIs need each value to equal its member name exactly; MVC needs it to
-  equal ignoring case. Azure Functions handlers aren't checked. A parameter the
-  host reads as a JSON body is left alone, and Rivet works that out the way ASP.NET
-  does. On a minimal API an unattributed array comes from the query when the
-  endpoint is mapped to a body-less verb such as GET, and any other unattributed
-  collection is a body. On MVC an unattributed collection or complex type is a body
-  only under `[ApiController]`.
+  equal ignoring case. Azure Functions handlers aren't checked.
+
+  A parameter the host reads as a JSON body is left alone. On a minimal API an
+  unattributed array comes from the query when the endpoint is mapped to a body-less
+  verb such as GET, written in capitals the way `MapGet` passes it (a `MapMethods`
+  `"get"` still infers a body), and any other unattributed collection is a body. On
+  MVC an unattributed collection or complex type is a body under `[ApiController]`.
+  Without it, a collection is checked as it stands and a complex type member by
+  member. Two `[ApiController]` cases look like a body to Rivet but are bound piece
+  by piece, so they go unchecked: a complex type whose members carry their own
+  binding source (a `[FromQuery]` property, an `IFormFile`), and an app that sets
+  `SuppressInferBindingSourcesForParameters`.
 - **`RIV1110`** (generation): the same rule for a `[RivetEndpoint]` or `[RivetClient]`
   action. A static `[RivetEndpoint]` is a minimal-API handler and gets the exact rule.
 

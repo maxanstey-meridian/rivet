@@ -34,7 +34,8 @@ internal static class EnumParameterBinding
     /// <summary>
     /// The verbs that normally carry no body. A minimal-API endpoint mapping any of these
     /// turns off inferred bodies (RouteEndpointDataSource.ShouldDisableInferredBodyParameters),
-    /// compared ordinally on the uppercased verbs.
+    /// compared ordinally on the verbs as written: MapGet and friends pass the uppercase
+    /// constants, but a MapMethods "get" matches none of them and still infers a body.
     /// </summary>
     private static readonly HashSet<string> BodylessMethods = new(
         ["GET", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"],
@@ -42,9 +43,9 @@ internal static class EnumParameterBinding
     );
 
     /// <summary>
-    /// True when a minimal API mapped to <paramref name="httpMethods"/> infers a JSON body
-    /// for an unattributed array: none of its verbs is body-less. An endpoint with no known
-    /// verbs accepts any request, so it infers a body too.
+    /// True when a minimal API mapped to <paramref name="httpMethods"/> (as written, not
+    /// case-normalised) infers a JSON body for an unattributed array: none of its verbs is
+    /// body-less. An endpoint with no known verbs accepts any request, so it infers a body too.
     /// </summary>
     public static bool MinimalApiInfersBody(IEnumerable<string> httpMethods) =>
         !httpMethods.Any(BodylessMethods.Contains);
@@ -158,8 +159,9 @@ internal static class EnumParameterBinding
     /// True when an unattributed enum collection never reaches the enum parser. A minimal
     /// API infers a <c>T[]</c> as a JSON body when <paramref name="infersBody"/>, and from the
     /// query otherwise. Any other collection, <c>List&lt;T&gt;</c> included, it infers as a
-    /// body, and on a body-less verb ASP.NET refuses the endpoint at startup ("Body was
-    /// inferred but the method does not allow inferred body parameters"): either way there
+    /// body, and on a body-less verb ASP.NET refuses the endpoint when the endpoints are built
+    /// (on the first request: "Body was inferred but the method does not allow inferred body
+    /// parameters"): either way there
     /// is nothing to check. MVC treats every collection as complex, inferring [FromBody] only
     /// under [ApiController] and otherwise binding it from route, query and form. An explicit
     /// [FromQuery], [FromRoute], [FromHeader] or [FromForm] still binds it.
@@ -198,16 +200,6 @@ internal static class EnumParameterBinding
                 && (
                     !infersBody
                     || parameter.GetAttributes().Any(attribute => IsExplicitSource(wkt, attribute))
-                    // [ApiController] doesn't infer a body for a type whose members name
-                    // their own binding source; it binds that type member by member.
-                    || BoundMembers(type)
-                        .Any(member =>
-                            member.Attributes.Any(attribute =>
-                                IsExplicitSource(wkt, attribute)
-                                || attribute.Is(wkt.FromBody)
-                                || attribute.Is(wkt.FromServices)
-                            )
-                        )
                 );
 
     private static bool IsExplicitSource(WellKnownTypes wkt, AttributeData attribute) =>

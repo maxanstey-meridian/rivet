@@ -478,10 +478,11 @@ public sealed class EnumParameterBindingCheckTests
     }
 
     [Fact]
-    public void Minimal_Api_Get_Unattributed_Enum_List_Is_Refused_At_Startup_So_Not_Reported()
+    public void Minimal_Api_Get_Unattributed_Enum_List_Is_Refused_When_Endpoints_Are_Built_So_Not_Reported()
     {
         // Only a T[] is inferred from the query. A List<T> is inferred as a body, which a GET
-        // doesn't allow, so ASP.NET refuses the endpoint at startup: nothing binds to check.
+        // doesn't allow, so ASP.NET refuses the endpoint when the endpoints are built (on the
+        // first request): nothing binds to check.
         var warnings = RunCheck(
             Contract,
             StreetKind(Camel),
@@ -519,6 +520,35 @@ public sealed class EnumParameterBindingCheckTests
         var warning = AssertReported(warnings);
         Assert.Equal("List", warning.FieldName);
         Assert.Contains("minimal API parameter 'kinds'", warning.Message);
+    }
+
+    [Fact]
+    public void Minimal_Api_MapMethods_Lowercase_Get_Unattributed_Enum_Array_Is_Not_Reported()
+    {
+        // ASP.NET matches the body-less verbs ordinally on the verbs as written, so "get"
+        // isn't GET there: inferred bodies stay on and the array is a JSON body. Routing
+        // still serves GET requests, so the method matches the contract.
+        const string handler = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class StreetEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapMethods("/api/streets", new[] { "get" }, (StreetKind[] kinds) =>
+                        StreetsContract.List.Success(new StreetDto("1")).ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, StreetKind(Camel), handler);
+
+        AssertNotReported(warnings);
     }
 
     [Fact]
@@ -782,23 +812,6 @@ public sealed class EnumParameterBindingCheckTests
             StreetKind(Snake),
             StreetRequest(),
             MvcHandler("StreetRequest request", apiController: false)
-        );
-
-        var warning = AssertReported(warnings);
-        Assert.Equal("restricted_byway", warning.Expected);
-        Assert.Contains("MVC parameter 'request.Kind'", warning.Message);
-    }
-
-    [Fact]
-    public void Mvc_Complex_Parameter_With_A_Sourced_Member_Is_Reported()
-    {
-        // A member naming its own source stops [ApiController] inferring a body, so MVC
-        // binds the type member by member and Kind comes from the value providers.
-        var warnings = RunCheck(
-            Contract,
-            StreetKind(Snake),
-            StreetRequest("StreetKind Kind, [FromQuery] int? Page"),
-            MvcHandler("StreetRequest request")
         );
 
         var warning = AssertReported(warnings);

@@ -639,12 +639,15 @@ public static class CoverageChecker
                 : TransportIdentity.NormalizeRoute($"{groupPrefix.Prefix}/{template.Trim('/')}");
         }
 
+        // The method-mismatch check compares verbs case-blind, but body inference reads them
+        // as written: ASP.NET matches the body-less verbs ordinally, so a MapMethods "get"
+        // still infers a body.
         var verbs = methods.Select(value => value.ToUpperInvariant()).ToArray();
         return new EndpointContext(true, verbs, route, routeError)
         {
             Handler = handler.Symbol,
             BindingHost = ParameterBindingHost.MinimalApi,
-            InfersBody = EnumParameterBinding.MinimalApiInfersBody(verbs),
+            InfersBody = EnumParameterBinding.MinimalApiInfersBody(methods),
         };
     }
 
