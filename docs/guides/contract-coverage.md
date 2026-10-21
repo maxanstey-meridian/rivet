@@ -28,7 +28,7 @@ way: the contract owns the full path, so a group prefix it doesn't declare is a
 | Finding | Meaning |
 |---|---|
 | `MissingImplementation` | No contract response terminal found for the contract field. |
-| `OrphanedBinding` | The contract was bound in a route handler, but no terminal result from that binding is returned. |
+| `OrphanedBinding` | The contract was bound in a route handler, but the handler neither returns a terminal built from that binding nor passes the binding to a helper whose answer it returns. |
 | `HttpMethodMismatch` | The implementing endpoint uses a different HTTP method than the contract declares. |
 | `RouteMismatch` | The implementing endpoint's route does not match the contract's route template. |
 | `UnbindableEnumParameter` | The handler binds an enum from the route, query, header or form (directly, or as a member of an `[AsParameters]` or explicitly `[FromQuery]`-style complex parameter), and its host would refuse one of the enum's advertised wire values. See [below](#enum-parameters-the-host-can-t-bind). |
@@ -98,10 +98,22 @@ static RivetResult NotFound(BoundRouteDefinitionBase endpoint) =>
 ```
 
 Both fields declare `.Returns<ErrorDto>(404)`. The helper doesn't care which endpoint
-it's answering for, because the bound endpoint carries its own contract. The one thing a
-helper can't do is hold a handler's *only* terminal. A handler that never returns one of
-its own isn't tied to any field, so if nothing else implements that field, `--check`
-reports it as `MissingImplementation`.
+it's answering for, because the bound endpoint carries its own contract.
+
+Handing the bound endpoint to a helper also counts as using it, so the binding isn't
+orphaned. That holds when the helper call is part of what the handler returns, at any
+depth: `NotFound(endpoint).ToResult()`, your own extension in a `Match` arm such as
+`refused: r => endpoint.Refuse(r)`, or one wrapped in another helper, as in
+`Done(endpoint.Refuse(r))`. It holds for a refusal arm that binds its own input and passes
+it straight on, too. The returned path is the same one terminals follow (see
+[below](#how-a-handler-can-return-its-terminal)). A helper call whose answer is thrown
+away, or one in a lambda the handler never returns, still leaves the binding orphaned.
+
+What a helper can't do is hold a handler's *only* terminal. Using the binding and covering
+the field are different things: `--check` gives a field credit only for a terminal the
+handler returns through `.ToResult()` or `.ToActionResult()` itself. A handler whose every
+answer comes from helpers isn't tied to any field, so if nothing else implements that
+field, `--check` reports it as `MissingImplementation`, binding or no binding.
 
 ## How a handler can return its terminal
 
@@ -139,7 +151,7 @@ A lambda held in a local isn't followed either, even if you later pass it to `Ma
 minimal API the handler is the lambda you hand to `MapGet` and friends, not the `Match` arm
 inside it, so that's whose route and parameters get checked.
 
-Helpers still don't count. A terminal handed to a helper to adapt, as in
+Helpers still don't count towards coverage. A terminal handed to a helper to adapt, as in
 `Done(endpoint.Success(task))`, or built inside one, as in `NotFound(endpoint)`, belongs to
 the helper, not the handler.
 

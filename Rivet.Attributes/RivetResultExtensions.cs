@@ -45,7 +45,7 @@ public static class RivetResultExtensions
                 RivetBodyResult body => Results
                     .Text((string?)body.Value, body.ContentType)
                     .ExecuteAsync(httpContext),
-                RivetFileResult file => ToMinimal(WriteFileHeaders(httpContext.Response, file))
+                RivetFileResult file => ToFileResult(WriteFileHeaders(httpContext.Response, file))
                     .ExecuteAsync(httpContext),
                 _ => throw new ArgumentOutOfRangeException(nameof(httpContext)),
             };
@@ -133,28 +133,12 @@ public static class RivetResultExtensions
     private static string? AttachmentName(RivetFileResult result) =>
         result.Inline ? null : result.DownloadName;
 
-    internal static IActionResult ToMvc(RivetFileResult result)
-    {
-        FileResult file = result.Source switch
-        {
-            RivetFileBytes bytes => new FileContentResult(bytes.Content, result.ContentType),
-            RivetFileStream stream => new FileStreamResult(stream.Content, result.ContentType),
-            RivetPhysicalFile physical => new PhysicalFileResult(physical.Path, result.ContentType),
-            _ => throw new ArgumentOutOfRangeException(nameof(result)),
-        };
-
-        file.FileDownloadName = AttachmentName(result) ?? string.Empty;
-        file.EnableRangeProcessing = result.EnableRangeProcessing;
-        file.LastModified = result.LastModified;
-        file.EntityTag = result.EntityTag;
-        return file;
-    }
-
     /// <summary>
-    /// MVC has no callback <see cref="FileResult"/>, so <see cref="RivetActionResult"/> runs
-    /// this one for a writer as well.
+    /// The one file path for both hosts: <see cref="RivetActionResult"/> runs this result on
+    /// MVC too, so ranges, validators and disposition can't drift between them. MVC has no
+    /// callback file result, and its replaceable file executors are bypassed.
     /// </summary>
-    internal static IResult ToMinimal(RivetFileResult result) =>
+    internal static IResult ToFileResult(RivetFileResult result) =>
         result.Source switch
         {
             RivetFileBytes bytes => Results.Bytes(

@@ -66,6 +66,7 @@ public static class CoverageChecker
         );
         var bindings = new List<ContractBinding>();
         var consumedBindings = new HashSet<SyntaxNode>();
+        var bindingHandlers = new HashSet<SyntaxNode>();
 
         foreach (var tree in compilation.SyntaxTrees)
         {
@@ -85,6 +86,13 @@ public static class CoverageChecker
                 )
                 {
                     bindings.Add(new ContractBinding(bound.Field, syntax));
+                    if (
+                        RouteHandler(wkt, invocation, functionsRoutePrefix) is { } handler
+                        && bindingHandlers.Add(handler.Syntax)
+                    )
+                    {
+                        consumedBindings.UnionWith(BindingsPassedOnReturn(wkt, handler, fieldMap));
+                    }
                 }
 
                 if (
@@ -550,18 +558,7 @@ public static class CoverageChecker
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap
     )
     {
-        // The handler is the lambda handed to Map*, not the nearest one: a terminal in a
-        // Match arm sits in a lambda of its own inside it.
-        var (handler, mapCall) = Ancestors(terminal)
-            .OfType<IAnonymousFunctionOperation>()
-            .Select(lambda => (lambda, call: ArgumentOf(lambda)))
-            .FirstOrDefault(candidate =>
-                candidate.call is { } call
-                && SymbolEqualityComparer.Default.Equals(
-                    call.TargetMethod.ContainingType,
-                    wkt.EndpointRouteBuilderExtensions
-                )
-            );
+        var (handler, mapCall) = MapHandler(wkt, terminal);
         if (
             handler is null
             || mapCall is null
@@ -649,6 +646,85 @@ public static class CoverageChecker
             BindingHost = ParameterBindingHost.MinimalApi,
             InfersBody = EnumParameterBinding.MinimalApiInfersBody(methods),
         };
+    }
+
+    /// <summary>
+    /// The lambda handed to Map* that <paramref name="operation"/> sits in, and that Map*
+    /// call. It's the Map* lambda, not the nearest one: a terminal in a Match arm sits in a
+    /// lambda of its own inside it.
+    /// </summary>
+    private static (IAnonymousFunctionOperation? Handler, IInvocationOperation? MapCall) MapHandler(
+        WellKnownTypes wkt,
+        IOperation operation
+    ) =>
+        Ancestors(operation)
+            .OfType<IAnonymousFunctionOperation>()
+            .Select(lambda => (lambda, call: ArgumentOf(lambda)))
+            .FirstOrDefault(candidate =>
+                candidate.call is { } call
+                && SymbolEqualityComparer.Default.Equals(
+                    call.TargetMethod.ContainingType,
+                    wkt.EndpointRouteBuilderExtensions
+                )
+            );
+
+    /// <summary>
+    /// The route handler <paramref name="operation"/> sits in: the lambda handed to Map*,
+    /// or else its method when that's an MVC action or an Azure Function.
+    /// </summary>
+    private static IOperation? RouteHandler(
+        WellKnownTypes wkt,
+        IOperation operation,
+        string functionsRoutePrefix
+    )
+    {
+        if (MapHandler(wkt, operation).Handler is { } lambda)
+        {
+            return lambda;
+        }
+
+        var method = operation
+            .Syntax.Ancestors()
+            .OfType<MethodDeclarationSyntax>()
+            .FirstOrDefault();
+        return
+            method is not null
+            && operation.SemanticModel is { } semanticModel
+            && semanticModel.GetDeclaredSymbol(method) is IMethodSymbol symbol
+            && (
+                TryResolveController(wkt, symbol).IsEndpoint
+                || TryResolveFunction(wkt, symbol, functionsRoutePrefix).IsEndpoint
+            )
+            ? semanticModel.GetOperation(method)
+            : null;
+    }
+
+    /// <summary>
+    /// The bindings <paramref name="handler"/> passes as an argument, an extension method's
+    /// receiver included, to a call within a value it returns, as in
+    /// <c>return Done(endpoint.Refuse(r))</c>: directly, or through a local holding one.
+    /// The returned values are <see cref="ReturnedValues"/>'s, so Match arms count; inside
+    /// them only nested call arguments are searched, never a lambda. Passing a binding makes
+    /// it used, so it isn't orphaned, but it never covers a field: that still takes a
+    /// terminal the handler returns through the adapter itself.
+    /// </summary>
+    private static IEnumerable<SyntaxNode> BindingsPassedOnReturn(
+        WellKnownTypes wkt,
+        IOperation handler,
+        IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap
+    )
+    {
+        return ReturnedValues(handler).SelectMany(Passed);
+
+        IEnumerable<SyntaxNode> Passed(IOperation value) =>
+            WithoutImplicitConversions(value) is IInvocationOperation call
+                ? call.Arguments.SelectMany(argument =>
+                    ResolveContractReference(wkt, argument.Value, fieldMap, [])
+                        is { Binding: { } binding }
+                        ? [binding]
+                        : Passed(argument.Value)
+                )
+                : [];
     }
 
     /// <summary>

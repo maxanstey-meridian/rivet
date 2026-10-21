@@ -52,7 +52,9 @@ normally, and constructs a contract-owned response:
   never serves ranges. Input-bearing file definitions first use `.Bind(input)`.
 - **Host adapters preserve the result.** The first-party `.ToActionResult()` and
   `.ToResult()` adapters write body, content type, file metadata, and status through
-  MVC or minimal APIs. If the host response has already started incompatibly or has
+  MVC or minimal APIs. Files take one path on both hosts: ASP.NET's minimal-API file
+  results, so ranges, conditional requests and disposition behave identically, and
+  an MVC app's replacement file-result executors aren't used. If the host response has already started incompatibly or has
   established a conflicting status, they throw `RivetContractViolationException`.
   An MVC result filter can read the status (`IStatusCodeActionResult`) and the payload
   (`RivetActionResult.Value`) of what `.ToActionResult()` returned, but not change them.

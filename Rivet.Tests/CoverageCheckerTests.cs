@@ -2489,6 +2489,161 @@ public sealed class CoverageCheckerTests
         Assert.DoesNotContain(warnings, warning => warning.FieldName == "CreateTask");
     }
 
+    // ---------------------------------------------------------------
+    // A binding handed to a helper on the returned path is used, so it
+    // isn't orphaned, but it covers nothing: coverage still needs a
+    // terminal the handler returns itself.
+    // ---------------------------------------------------------------
+
+    private const string BindingHelpers = """
+        using System.Threading.Tasks;
+        using Microsoft.AspNetCore.Http;
+        using Microsoft.AspNetCore.Mvc;
+        using Rivet;
+
+        namespace Test;
+
+        // The consumer's own helpers over a bound endpoint, one of each per host.
+        public static class Respond
+        {
+            public static IActionResult Refuse(this BoundRouteDefinitionBase endpoint, int status) =>
+                endpoint.Error(status).ToActionResult();
+
+            public static IResult RefuseResult(this BoundRouteDefinitionBase endpoint, int status) =>
+                endpoint.Error(status).ToResult();
+
+            public static Task<IActionResult> Done(IActionResult result) => Task.FromResult(result);
+
+            public static Task<IResult> DoneResult(IResult result) => Task.FromResult(result);
+
+            public static RivetResult NotFound(BoundRouteDefinitionBase endpoint) =>
+                endpoint.Error(404);
+        }
+        """;
+
+    /// <summary>
+    /// A POST /api/tasks handler (see <see cref="TasksHandler"/>) whose body writes
+    /// <c>REFUSE</c> and <c>DONE</c> for the host's <c>Respond</c> helpers.
+    /// </summary>
+    private static IReadOnlyList<CoverageWarning> RunWithHelpers(string host, string body)
+    {
+        var (refuse, done) = host == "mvc" ? ("Refuse", "Done") : ("RefuseResult", "DoneResult");
+        var handler = TasksHandler(
+            host,
+            body.Replace("REFUSE", refuse).Replace("DONE", done),
+            verb: "Post"
+        );
+        return RunCheck(Contract, OutcomeTypes, BindingHelpers, handler);
+    }
+
+    private static bool IsCreateTaskOrphan(CoverageWarning warning) =>
+        warning is { Kind: CoverageWarningKind.OrphanedBinding, FieldName: "CreateTask" };
+
+    [Theory]
+    [InlineData("mvc", "return endpoint.REFUSE(404);")]
+    [InlineData("minimal", "return endpoint.REFUSE(404);")]
+    [InlineData("mvc", "return await Respond.DONE(endpoint.REFUSE(404));")]
+    [InlineData("minimal", "return await Respond.DONE(endpoint.REFUSE(404));")]
+    [InlineData("mvc", "return Respond.NotFound(endpoint).ADAPT();")]
+    [InlineData("minimal", "return Respond.NotFound(endpoint).ADAPT();")]
+    public void Bind_passed_to_a_returned_helper_is_not_orphaned_but_is_not_coverage(
+        string host,
+        string returned
+    )
+    {
+        var body = $$"""
+            var endpoint = TasksContract.CreateTask.Bind(new TaskInput("Test"));
+            {{returned}}
+            """;
+
+        var warnings = RunWithHelpers(host, body);
+
+        Assert.DoesNotContain(warnings, IsCreateTaskOrphan);
+        AssertMissingWarning(warnings, "CreateTask");
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Bind_passed_to_a_helper_in_a_match_arm_is_not_orphaned(string host)
+    {
+        var body = """
+            var endpoint = TasksContract.CreateTask.Bind(new TaskInput("Test"));
+            var outcome = await tasks.Find();
+            return outcome.Match(
+                found: _ => endpoint.REFUSE(409),
+                missing: _ => endpoint.REFUSE(404)
+            );
+            """;
+
+        var warnings = RunWithHelpers(host, body);
+
+        Assert.DoesNotContain(warnings, IsCreateTaskOrphan);
+        AssertMissingWarning(warnings, "CreateTask");
+    }
+
+    [Theory]
+    [InlineData(
+        "mvc",
+        "reason => TasksContract.CreateTask.Bind(new TaskInput(reason)).REFUSE(422)"
+    )]
+    [InlineData(
+        "minimal",
+        "reason => TasksContract.CreateTask.Bind(new TaskInput(reason)).REFUSE(422)"
+    )]
+    [InlineData(
+        "mvc",
+        "reason => { var refused = TasksContract.CreateTask.Bind(new TaskInput(reason)); return refused.REFUSE(422); }"
+    )]
+    [InlineData(
+        "minimal",
+        "reason => { var refused = TasksContract.CreateTask.Bind(new TaskInput(reason)); return refused.REFUSE(422); }"
+    )]
+    public void Second_bind_in_a_refusal_arm_passed_to_a_helper_is_not_orphaned(
+        string host,
+        string missingArm
+    )
+    {
+        // CaseBridge's shape: the refusal can't bind the input the success arm does, so it
+        // binds its own and hands it straight to the Refuse helper.
+        var body = $$"""
+            var endpoint = TasksContract.CreateTask.Bind(new TaskInput("Test"));
+            var outcome = await tasks.Find();
+            return outcome.Match(
+                found: task => endpoint.Success(task).ADAPT(),
+                missing: {{missingArm}}
+            );
+            """;
+
+        var warnings = RunWithHelpers(host, body);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "CreateTask");
+    }
+
+    [Theory]
+    [InlineData("mvc", "endpoint.REFUSE(404);")]
+    [InlineData("minimal", "endpoint.REFUSE(404);")]
+    [InlineData("mvc", "System.Func<string, object> refuse = _ => endpoint.REFUSE(404);")]
+    [InlineData("minimal", "System.Func<string, object> refuse = _ => endpoint.REFUSE(404);")]
+    public void Bind_passed_to_a_helper_off_the_returned_path_is_orphaned(
+        string host,
+        string statement
+    )
+    {
+        // A helper call whose result is thrown away, or one inside a lambda held in a
+        // local the handler never returns, doesn't use the binding.
+        var body = $$"""
+            var endpoint = TasksContract.CreateTask.Bind(new TaskInput("Test"));
+            {{statement}}
+            return TasksContract.HeadTasks.Success().ADAPT();
+            """;
+
+        var warnings = RunWithHelpers(host, body);
+
+        Assert.Single(warnings, IsCreateTaskOrphan);
+        AssertMissingWarning(warnings, "CreateTask");
+    }
+
     [Theory]
     [InlineData("mvc")]
     [InlineData("minimal")]

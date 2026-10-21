@@ -591,8 +591,8 @@ public sealed class TerminalAndAdapterTests
         Assert.Contains("Mon, 13 Jul 2026 10:30:00 GMT", response.LastModified);
     }
 
-    // On MVC a writer runs through the minimal-API result, not ToMvc, so its validators
-    // need their own pin.
+    // A writer goes through its own Results.Stream overload, so its validators need their
+    // own pin.
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -644,6 +644,96 @@ public sealed class TerminalAndAdapterTests
         Assert.Equal(StatusCodes.Status304NotModified, response.StatusCode);
         Assert.Empty(response.Body);
         Assert.False(called);
+    }
+
+    // Both hosts send every file through one path; this pins each stored source against
+    // ranges, conditional requests, validators and disposition, MVC included.
+    [Theory]
+    [InlineData("bytes", false)]
+    [InlineData("bytes", true)]
+    [InlineData("stream", false)]
+    [InlineData("stream", true)]
+    [InlineData("physical", false)]
+    [InlineData("physical", true)]
+    public async Task Every_file_source_honours_ranges_preconditions_and_disposition(
+        string source,
+        bool mvc
+    )
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllTextAsync(path, "abcdef");
+            var lastModified = new DateTimeOffset(2026, 7, 13, 10, 30, 0, TimeSpan.Zero);
+            var route = Define.File("/file").ProducesFile("text/plain");
+            RivetResult Serve(string? name = null, bool inline = false) =>
+                source switch
+                {
+                    "bytes" => route.File(
+                        Encoding.UTF8.GetBytes("abcdef"),
+                        name,
+                        true,
+                        lastModified,
+                        "\"v1\"",
+                        inline: inline
+                    ),
+                    "stream" => route.File(
+                        new MemoryStream(Encoding.UTF8.GetBytes("abcdef")),
+                        name,
+                        true,
+                        lastModified,
+                        "\"v1\"",
+                        inline: inline
+                    ),
+                    _ => route.File(path, name, true, lastModified, "\"v1\"", inline: inline),
+                };
+            Task<ResponseObservation> Get(
+                Action<HttpRequest> request,
+                RivetResult? result = null
+            ) =>
+                ExecuteAsync(
+                    result ?? Serve(),
+                    mvc,
+                    context =>
+                    {
+                        context.Request.Method = HttpMethods.Get;
+                        request(context.Request);
+                    }
+                );
+
+            var range = await Get(request => request.Headers.Range = "bytes=1-3");
+            Assert.Equal(StatusCodes.Status206PartialContent, range.StatusCode);
+            Assert.Equal("bcd", Encoding.UTF8.GetString(range.Body));
+            Assert.Equal("bytes 1-3/6", range.ContentRange);
+            Assert.Equal("bytes", range.AcceptRanges);
+            Assert.Equal("\"v1\"", range.ETag);
+            Assert.Contains("Mon, 13 Jul 2026 10:30:00 GMT", range.LastModified);
+
+            var unsatisfiable = await Get(request => request.Headers.Range = "bytes=20-30");
+            Assert.Equal(StatusCodes.Status416RangeNotSatisfiable, unsatisfiable.StatusCode);
+            Assert.Equal("bytes */6", unsatisfiable.ContentRange);
+
+            var notModified = await Get(request => request.Headers.IfNoneMatch = "\"v1\"");
+            Assert.Equal(StatusCodes.Status304NotModified, notModified.StatusCode);
+            Assert.Empty(notModified.Body);
+
+            var failed = await Get(request => request.Headers.IfMatch = "\"v2\"");
+            Assert.Equal(StatusCodes.Status412PreconditionFailed, failed.StatusCode);
+            Assert.Empty(failed.Body);
+
+            var inline = await Get(_ => { }, Serve("one.txt", inline: true));
+            Assert.StartsWith("inline", inline.ContentDisposition);
+            Assert.Contains("one.txt", inline.ContentDisposition);
+            Assert.Equal("abcdef", Encoding.UTF8.GetString(inline.Body));
+
+            var attachment = await Get(_ => { }, Serve("one.txt"));
+            Assert.StartsWith("attachment", attachment.ContentDisposition);
+            Assert.Contains("one.txt", attachment.ContentDisposition);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Theory]
