@@ -248,7 +248,7 @@ public static class Diagnostics
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",
         [CoverageOrphanedBinding] =
-            "Contract endpoint is bound in a route handler but no terminal result from that binding is returned.",
+            "Contract endpoint is bound in a route handler, but the handler neither returns a terminal built from that binding nor passes the binding to a helper whose answer it returns.",
         [CoverageUnbindableEnumParameter] =
             "A handler binds a string-wire enum from route, query, header or form, and the host's enum parser (minimal API: exact member name; MVC: member name ignoring case) would refuse an advertised wire value.",
     };

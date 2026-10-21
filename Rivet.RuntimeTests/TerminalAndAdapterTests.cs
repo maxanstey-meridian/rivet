@@ -491,57 +491,6 @@ public sealed class TerminalAndAdapterTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Byte_file_delegates_range_processing_to_the_host(bool mvc)
-    {
-        var result = Define
-            .File("/file")
-            .ProducesFile("text/plain")
-            .File(Encoding.UTF8.GetBytes("abcdef"), enableRangeProcessing: true);
-
-        var response = await ExecuteAsync(
-            result,
-            mvc,
-            context =>
-            {
-                context.Request.Method = HttpMethods.Get;
-                context.Request.Headers.Range = "bytes=1-3";
-            }
-        );
-
-        Assert.Equal(StatusCodes.Status206PartialContent, response.StatusCode);
-        Assert.Equal("bcd", Encoding.UTF8.GetString(response.Body));
-        Assert.Equal("bytes 1-3/6", response.ContentRange);
-        Assert.Equal("bytes", response.AcceptRanges);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Unsatisfiable_file_range_returns_416(bool mvc)
-    {
-        var result = Define
-            .File("/file")
-            .ProducesFile("text/plain")
-            .File(Encoding.UTF8.GetBytes("abcdef"), enableRangeProcessing: true);
-
-        var response = await ExecuteAsync(
-            result,
-            mvc,
-            context =>
-            {
-                context.Request.Method = HttpMethods.Get;
-                context.Request.Headers.Range = "bytes=20-30";
-            }
-        );
-
-        Assert.Equal(StatusCodes.Status416RangeNotSatisfiable, response.StatusCode);
-        Assert.Equal("bytes */6", response.ContentRange);
-        Assert.Empty(response.Body);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
     public async Task Stream_file_transfers_ownership_to_the_host(bool mvc)
     {
         var stream = new TrackingStream(Encoding.UTF8.GetBytes("stream"));
@@ -551,44 +500,6 @@ public sealed class TerminalAndAdapterTests
 
         Assert.Equal("stream", Encoding.UTF8.GetString(response.Body));
         Assert.True(stream.IsDisposed);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Physical_file_is_sent_by_the_host(bool mvc)
-    {
-        var path = Path.GetTempFileName();
-        try
-        {
-            await File.WriteAllTextAsync(path, "physical");
-            var result = Define.File("/file").ProducesFile("text/plain").File(path, "physical.txt");
-
-            var response = await ExecuteAsync(result, mvc);
-
-            Assert.Equal("physical", Encoding.UTF8.GetString(response.Body));
-            Assert.Contains("physical.txt", response.ContentDisposition);
-        }
-        finally
-        {
-            File.Delete(path);
-        }
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task File_validators_are_emitted_by_the_host(bool mvc)
-    {
-        var lastModified = new DateTimeOffset(2026, 7, 13, 10, 30, 0, TimeSpan.Zero);
-        var result = Define
-            .File("/file")
-            .File([1, 2, 3], lastModified: lastModified, entityTag: "\"v1\"");
-
-        var response = await ExecuteAsync(result, mvc);
-
-        Assert.Equal("\"v1\"", response.ETag);
-        Assert.Contains("Mon, 13 Jul 2026 10:30:00 GMT", response.LastModified);
     }
 
     // A writer goes through its own Results.Stream overload, so its validators need their
@@ -712,6 +623,7 @@ public sealed class TerminalAndAdapterTests
             var unsatisfiable = await Get(request => request.Headers.Range = "bytes=20-30");
             Assert.Equal(StatusCodes.Status416RangeNotSatisfiable, unsatisfiable.StatusCode);
             Assert.Equal("bytes */6", unsatisfiable.ContentRange);
+            Assert.Empty(unsatisfiable.Body);
 
             var notModified = await Get(request => request.Headers.IfNoneMatch = "\"v1\"");
             Assert.Equal(StatusCodes.Status304NotModified, notModified.StatusCode);

@@ -409,7 +409,7 @@ public static class CoverageChecker
                     CoverageWarningKind.OrphanedBinding,
                     binding.Field.ContainingType.Name,
                     binding.Field.Name,
-                    Expected: "returned terminal implementation",
+                    Expected: "returned terminal, or a returned helper taking the binding",
                     Actual: "(none)",
                     Location: binding.Invocation.GetLocation()
                 )
@@ -701,10 +701,11 @@ public static class CoverageChecker
 
     /// <summary>
     /// The bindings <paramref name="handler"/> passes as an argument, an extension method's
-    /// receiver included, to a call within a value it returns, as in
-    /// <c>return Done(endpoint.Refuse(r))</c>: directly, or through a local holding one.
-    /// The returned values are <see cref="ReturnedValues"/>'s, so Match arms count; inside
-    /// them only nested call arguments are searched, never a lambda. Passing a binding makes
+    /// receiver included (classic or extension block), to a call within a value it returns, as in
+    /// <c>return Done(endpoint.Refuse(r))</c>. The returned values are
+    /// <see cref="ReturnedValues"/>'s, so Match arms count. Inside them each call argument
+    /// is searched through what <see cref="LeavesOf"/> looks through and through a local
+    /// holding a call, but never into a lambda, so <c>Ok(items.Select(...))</c> doesn't count. Passing a binding makes
     /// it used, so it isn't orphaned, but it never covers a field: that still takes a
     /// terminal the handler returns through the adapter itself.
     /// </summary>
@@ -714,17 +715,42 @@ public static class CoverageChecker
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap
     )
     {
+        HashSet<ILocalSymbol> visitedLocals = [];
         return ReturnedValues(handler).SelectMany(Passed);
 
         IEnumerable<SyntaxNode> Passed(IOperation value) =>
-            WithoutImplicitConversions(value) is IInvocationOperation call
-                ? call.Arguments.SelectMany(argument =>
-                    ResolveContractReference(wkt, argument.Value, fieldMap, [])
-                        is { Binding: { } binding }
+            LeavesOf(value)
+                .SelectMany(leaf =>
+                    leaf switch
+                    {
+                        IInvocationOperation call => PassedValues(call).SelectMany(Argument),
+                        // Marked only once resolved: a use outside the declaring block may not
+                        // resolve where a later one does.
+                        ILocalReferenceOperation local
+                            when ProvenanceValue(local) is { } provenance
+                                && visitedLocals.Add(local.Local) => Passed(provenance),
+                        _ => [],
+                    }
+                );
+
+        IEnumerable<SyntaxNode> Argument(IOperation value) =>
+            LeavesOf(value)
+                .SelectMany(leaf =>
+                    ResolveContractReference(wkt, leaf, fieldMap, []) is { Binding: { } binding }
                         ? [binding]
-                        : Passed(argument.Value)
-                )
-                : [];
+                        : Passed(leaf)
+                );
+
+        // A C# 14 extension block's receiver is the call's instance, not its first argument.
+        static IEnumerable<IOperation> PassedValues(IInvocationOperation call) =>
+            call
+                .Arguments.Select(argument => argument.Value)
+                .Concat(
+                    call
+                        is { TargetMethod.ContainingType.IsExtension: true, Instance: { } receiver }
+                        ? [receiver]
+                        : []
+                );
     }
 
     /// <summary>
@@ -877,23 +903,34 @@ public static class CoverageChecker
     /// deeper, as in <c>Ok(items.Select(item => ...))</c>, isn't followed.
     /// </summary>
     private static IEnumerable<IOperation> ValuesOf(IOperation? expression) =>
+        LeavesOf(expression)
+            .SelectMany(leaf =>
+                leaf is IInvocationOperation invocation
+                    ? invocation
+                        .Arguments.Select(argument => LambdaOf(argument.Value))
+                        .OfType<IAnonymousFunctionOperation>()
+                        .SelectMany(ReturnedValues)
+                        .Prepend(invocation)
+                    : [leaf]
+            );
+
+    /// <summary>
+    /// <see cref="ValuesOf"/> without following lambdas: each switch arm and conditional
+    /// branch, and the operand of an <c>await</c> (through <c>ConfigureAwait</c>) or a cast.
+    /// </summary>
+    private static IEnumerable<IOperation> LeavesOf(IOperation? expression) =>
         WithoutImplicitConversions(expression) switch
         {
             null => [],
             ISwitchExpressionOperation switchExpression => switchExpression.Arms.SelectMany(arm =>
-                ValuesOf(arm.Value)
+                LeavesOf(arm.Value)
             ),
-            IConditionalOperation conditional => ValuesOf(conditional.WhenTrue)
-                .Concat(ValuesOf(conditional.WhenFalse)),
-            IAwaitOperation awaited => ValuesOf(awaited.Operation),
-            IConversionOperation conversion => ValuesOf(conversion.Operand),
+            IConditionalOperation conditional => LeavesOf(conditional.WhenTrue)
+                .Concat(LeavesOf(conditional.WhenFalse)),
+            IAwaitOperation awaited => LeavesOf(awaited.Operation),
+            IConversionOperation conversion => LeavesOf(conversion.Operand),
             IInvocationOperation { TargetMethod.Name: "ConfigureAwait", Instance: { } awaitable } =>
-                ValuesOf(awaitable),
-            IInvocationOperation invocation => invocation
-                .Arguments.Select(argument => LambdaOf(argument.Value))
-                .OfType<IAnonymousFunctionOperation>()
-                .SelectMany(ReturnedValues)
-                .Prepend(invocation),
+                LeavesOf(awaitable),
             var value => [value],
         };
 

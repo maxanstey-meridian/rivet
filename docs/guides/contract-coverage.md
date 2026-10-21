@@ -104,10 +104,13 @@ Handing the bound endpoint to a helper also counts as using it, so the binding i
 orphaned. That holds when the helper call is part of what the handler returns, at any
 depth: `NotFound(endpoint).ToResult()`, your own extension in a `Match` arm such as
 `refused: r => endpoint.Refuse(r)`, or one wrapped in another helper, as in
-`Done(endpoint.Refuse(r))`. It holds for a refusal arm that binds its own input and passes
-it straight on, too. The returned path is the same one terminals follow (see
-[below](#how-a-handler-can-return-its-terminal)). A helper call whose answer is thrown
-away, or one in a lambda the handler never returns, still leaves the binding orphaned.
+`Done(endpoint.Refuse(r))`. An arm that binds its own input and hands it straight over
+counts too, as in `missing: reason => TasksContract.CreateTask.Bind(new(reason)).Refuse(422)`.
+`--check` looks through the same things it does for terminals (see
+[below](#how-a-handler-can-return-its-terminal)): an `await`, a cast, a `switch` or `?:`,
+and a local holding the helper's answer. A helper call whose answer is thrown away, or one
+inside a lambda that the returned call doesn't take directly, still leaves the binding
+orphaned.
 
 What a helper can't do is hold a handler's *only* terminal. Using the binding and covering
 the field are different things: `--check` gives a field credit only for a terminal the
@@ -153,7 +156,8 @@ inside it, so that's whose route and parameters get checked.
 
 Helpers still don't count towards coverage. A terminal handed to a helper to adapt, as in
 `Done(endpoint.Success(task))`, or built inside one, as in `NotFound(endpoint)`, belongs to
-the helper, not the handler.
+the helper, not the handler. The first one is also an `OrphanedBinding` unless the handler
+uses `endpoint` some other way: it hands the helper a terminal, not the bound endpoint.
 
 ## Exit code
 

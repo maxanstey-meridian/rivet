@@ -2518,19 +2518,31 @@ public sealed class CoverageCheckerTests
 
             public static RivetResult NotFound(BoundRouteDefinitionBase endpoint) =>
                 endpoint.Error(404);
+
+            public static T Later<T>(System.Func<T> make) => make();
+
+            extension(BoundRouteDefinitionBase endpoint)
+            {
+                public IActionResult Deny(int status) => endpoint.Error(status).ToActionResult();
+
+                public IResult DenyResult(int status) => endpoint.Error(status).ToResult();
+            }
         }
         """;
 
     /// <summary>
     /// A POST /api/tasks handler (see <see cref="TasksHandler"/>) whose body writes
-    /// <c>REFUSE</c> and <c>DONE</c> for the host's <c>Respond</c> helpers.
+    /// <c>REFUSE</c>, <c>DONE</c> and <c>DENY</c> for the host's <c>Respond</c> helpers.
     /// </summary>
     private static IReadOnlyList<CoverageWarning> RunWithHelpers(string host, string body)
     {
-        var (refuse, done) = host == "mvc" ? ("Refuse", "Done") : ("RefuseResult", "DoneResult");
+        var (refuse, done, deny) =
+            host == "mvc"
+                ? ("Refuse", "Done", "Deny")
+                : ("RefuseResult", "DoneResult", "DenyResult");
         var handler = TasksHandler(
             host,
-            body.Replace("REFUSE", refuse).Replace("DONE", done),
+            body.Replace("REFUSE", refuse).Replace("DONE", done).Replace("DENY", deny),
             verb: "Post"
         );
         return RunCheck(Contract, OutcomeTypes, BindingHelpers, handler);
@@ -2546,13 +2558,43 @@ public sealed class CoverageCheckerTests
     [InlineData("minimal", "return await Respond.DONE(endpoint.REFUSE(404));")]
     [InlineData("mvc", "return Respond.NotFound(endpoint).ADAPT();")]
     [InlineData("minimal", "return Respond.NotFound(endpoint).ADAPT();")]
+    [InlineData("mvc", "return endpoint.DENY(404);")]
+    [InlineData("minimal", "return endpoint.DENY(404);")]
+    [InlineData("mvc", "return (await Task.FromResult(Respond.NotFound(endpoint))).ADAPT();")]
+    [InlineData("minimal", "return (await Task.FromResult(Respond.NotFound(endpoint))).ADAPT();")]
+    [InlineData(
+        "mvc",
+        "return await Respond.DONE(input.Title == \"\" ? endpoint.REFUSE(404) : endpoint.REFUSE(410));"
+    )]
+    [InlineData(
+        "minimal",
+        "return await Respond.DONE(input.Title == \"\" ? endpoint.REFUSE(404) : endpoint.REFUSE(410));"
+    )]
+    [InlineData(
+        "mvc",
+        "return await Respond.DONE(input.Title switch { \"\" => endpoint.REFUSE(404), _ => endpoint.REFUSE(410) });"
+    )]
+    [InlineData(
+        "minimal",
+        "return await Respond.DONE(input.Title switch { \"\" => endpoint.REFUSE(404), _ => endpoint.REFUSE(410) });"
+    )]
+    [InlineData("mvc", "var answer = Respond.NotFound(endpoint); return answer.ADAPT();")]
+    [InlineData("minimal", "var answer = Respond.NotFound(endpoint); return answer.ADAPT();")]
+    [InlineData("mvc", "return Respond.REFUSE(input.Title == \"\" ? endpoint : endpoint, 404);")]
+    [InlineData(
+        "minimal",
+        "return Respond.REFUSE(input.Title == \"\" ? endpoint : endpoint, 404);"
+    )]
+    [InlineData("mvc", "return Respond.NotFound((BoundRouteDefinitionBase)endpoint).ADAPT();")]
+    [InlineData("minimal", "return Respond.NotFound((BoundRouteDefinitionBase)endpoint).ADAPT();")]
     public void Bind_passed_to_a_returned_helper_is_not_orphaned_but_is_not_coverage(
         string host,
         string returned
     )
     {
         var body = $$"""
-            var endpoint = TasksContract.CreateTask.Bind(new TaskInput("Test"));
+            var input = new TaskInput("Test");
+            var endpoint = TasksContract.CreateTask.Bind(input);
             {{returned}}
             """;
 
@@ -2560,6 +2602,102 @@ public sealed class CoverageCheckerTests
 
         Assert.DoesNotContain(warnings, IsCreateTaskOrphan);
         AssertMissingWarning(warnings, "CreateTask");
+    }
+
+    [Theory]
+    [InlineData("mvc", "IActionResult")]
+    [InlineData("minimal", "Microsoft.AspNetCore.Http.IResult")]
+    public void Helper_answer_in_a_local_assigned_later_is_found_past_an_unresolved_use(
+        string host,
+        string resultType
+    )
+    {
+        // The first return sits outside the local's declaring block, so its value can't be
+        // known there; the second can, and must still be followed.
+        var body = $$"""
+            var endpoint = TasksContract.CreateTask.Bind(new TaskInput("Test"));
+            {{resultType}} answer;
+            answer = endpoint.REFUSE(404);
+            if (System.DateTime.Now.Second == 0)
+            {
+                return answer;
+            }
+
+            return answer;
+            """;
+
+        var warnings = RunWithHelpers(host, body);
+
+        Assert.DoesNotContain(warnings, IsCreateTaskOrphan);
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Bind_passed_to_a_helper_in_a_buried_lambda_is_orphaned(string host)
+    {
+        // The returned call's arguments are searched, but a lambda inside them is never
+        // entered, the same as for terminals.
+        var body = """
+            var endpoint = TasksContract.CreateTask.Bind(new TaskInput("Test"));
+            return await Respond.DONE(Respond.Later(() => endpoint.REFUSE(404)));
+            """;
+
+        var warnings = RunWithHelpers(host, body);
+
+        Assert.Single(warnings, IsCreateTaskOrphan);
+    }
+
+    [Fact]
+    public void Bind_passed_to_a_returned_helper_in_a_function_is_not_orphaned()
+    {
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Microsoft.Azure.Functions.Worker;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed class TaskFunctions
+            {
+                [Function("create-task")]
+                public IActionResult Run(
+                    [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "tasks")] object request
+                )
+                {
+                    var endpoint = TasksContract.CreateTask.Bind(new TaskInput("Test"));
+                    return endpoint.Refuse(404);
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, AzureAttributes, BindingHelpers, implementation);
+
+        Assert.DoesNotContain(warnings, IsCreateTaskOrphan);
+        AssertMissingWarning(warnings, "CreateTask");
+    }
+
+    [Fact]
+    public void Bind_passed_to_a_helper_outside_a_route_handler_is_orphaned()
+    {
+        // Only a handler's returned path uses a binding; a plain method returning a helper
+        // call over one isn't answering any request.
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public static class Refusals
+            {
+                public static IActionResult Wrap(TaskInput input) =>
+                    Respond.Refuse(TasksContract.CreateTask.Bind(input), 404);
+            }
+            """;
+
+        var warnings = RunCheck(Contract, BindingHelpers, implementation);
+
+        Assert.Single(warnings, IsCreateTaskOrphan);
     }
 
     [Theory]
