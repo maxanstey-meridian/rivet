@@ -541,22 +541,22 @@ public static class CoverageChecker
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap
     )
     {
+        // The handler is the lambda handed to Map*, not the nearest one: a terminal in a
+        // Match arm sits in a lambda of its own inside it.
+        var (handler, mapCall) = Ancestors(terminal)
+            .OfType<IAnonymousFunctionOperation>()
+            .Select(lambda => (lambda, ArgumentOf(lambda)))
+            .FirstOrDefault(candidate =>
+                candidate.Item2 is { } call
+                && SymbolEqualityComparer.Default.Equals(
+                    call.TargetMethod.ContainingType,
+                    wkt.EndpointRouteBuilderExtensions
+                )
+            );
         if (
-            Ancestors(terminal)
-                .FirstOrDefault(operation =>
-                    operation is IAnonymousFunctionOperation or ILocalFunctionOperation
-                )
-                is not IAnonymousFunctionOperation handler
+            handler is null
+            || mapCall is null
             || !IsReturnedThroughAdapter(terminal, handler, "ToResult", adapterType)
-            || Ancestors(handler)
-                .FirstOrDefault(operation =>
-                    operation is not (IDelegateCreationOperation or IConversionOperation)
-                )
-                is not IArgumentOperation { Parent: IInvocationOperation mapCall }
-            || !SymbolEqualityComparer.Default.Equals(
-                mapCall.TargetMethod.ContainingType,
-                wkt.EndpointRouteBuilderExtensions
-            )
         )
         {
             return EndpointContext.None;
@@ -735,9 +735,9 @@ public static class CoverageChecker
 
     /// <summary>
     /// True when <paramref name="function"/> returns, from a reachable return of its own,
-    /// the named Rivet adapter applied to <paramref name="terminal"/> (directly or through
-    /// a local holding it). The adapter call may be the returned value itself, a switch
-    /// expression arm or a conditional branch.
+    /// the named Rivet adapter applied to <paramref name="terminal"/>. Both the returned
+    /// value and the adapter's receiver are expanded by <see cref="ValuesOf"/>, and the
+    /// receiver also through a local holding it.
     /// </summary>
     private static bool IsReturnedThroughAdapter(
         IInvocationOperation terminal,
@@ -746,74 +746,98 @@ public static class CoverageChecker
         INamedTypeSymbol adapterType
     )
     {
-        foreach (var returned in OwnDescendants(function).OfType<IReturnOperation>())
-        {
-            if (
-                returned.Kind != OperationKind.Return
-                || !returned.IsImplicit
-                    && returned.SemanticModel?.AnalyzeControlFlow(returned.Syntax)
-                        is not { Succeeded: true, StartPointIsReachable: true }
-            )
-            {
-                continue;
-            }
-
-            foreach (var candidate in ReturnedValues(returned.ReturnedValue))
-            {
-                if (
-                    candidate is IInvocationOperation { Arguments: [var receiver, ..] } adapter
-                    && adapter.TargetMethod.Name == adapterName
-                    && SymbolEqualityComparer.Default.Equals(
-                        adapter.TargetMethod.ContainingType,
-                        adapterType
-                    )
-                    && ResolvesTo(receiver.Value, terminal)
+        return ReturnedValues(function)
+            .Any(candidate =>
+                candidate is IInvocationOperation { Arguments: [var receiver, ..] } adapter
+                && adapter.TargetMethod.Name == adapterName
+                && SymbolEqualityComparer.Default.Equals(
+                    adapter.TargetMethod.ContainingType,
+                    adapterType
                 )
-                {
-                    return true;
-                }
-            }
-        }
+                && ResolvesTo(receiver.Value, terminal, [])
+            );
 
-        return false;
-
-        static bool ResolvesTo(IOperation receiver, IInvocationOperation terminal) =>
-            WithoutImplicitConversions(receiver) switch
-            {
-                { } value when IsSameSyntax(value.Syntax, terminal.Syntax) => true,
-                ILocalReferenceOperation local => WithoutImplicitConversions(ProvenanceValue(local))
-                    is { } value
-                    && IsSameSyntax(value.Syntax, terminal.Syntax),
-                _ => false,
-            };
+        static bool ResolvesTo(
+            IOperation receiver,
+            IInvocationOperation terminal,
+            HashSet<ILocalSymbol> visitedLocals
+        ) =>
+            ValuesOf(receiver)
+                .Any(value =>
+                    IsSameSyntax(value.Syntax, terminal.Syntax)
+                    || value is ILocalReferenceOperation local
+                        && visitedLocals.Add(local.Local)
+                        && ProvenanceValue(local) is { } provenance
+                        && ResolvesTo(provenance, terminal, visitedLocals)
+                );
     }
 
-    private static IEnumerable<IOperation> ReturnedValues(IOperation? returned)
+    /// <summary>The values <paramref name="function"/> returns from its own reachable returns.</summary>
+    private static IEnumerable<IOperation> ReturnedValues(IOperation function) =>
+        OwnDescendants(function)
+            .OfType<IReturnOperation>()
+            .Where(returned =>
+                returned.Kind == OperationKind.Return
+                && (
+                    returned.IsImplicit
+                    || returned.SemanticModel?.AnalyzeControlFlow(returned.Syntax)
+                        is { Succeeded: true, StartPointIsReachable: true }
+                )
+            )
+            .SelectMany(returned => ValuesOf(returned.ReturnedValue));
+
+    /// <summary>
+    /// The values an expression can produce: itself, each switch arm and conditional
+    /// branch (recursively), and whatever a lambda passed as an argument inside it
+    /// returns, such as the arms of <c>outcome.Match(ok => ..., error => ...)</c>.
+    /// </summary>
+    private static IEnumerable<IOperation> ValuesOf(IOperation? expression)
     {
-        switch (WithoutImplicitConversions(returned))
+        switch (WithoutImplicitConversions(expression))
         {
             case null:
                 yield break;
             case ISwitchExpressionOperation switchExpression:
                 yield return switchExpression;
-                foreach (var arm in switchExpression.Arms)
+                foreach (var value in switchExpression.Arms.SelectMany(arm => ValuesOf(arm.Value)))
                 {
-                    yield return WithoutImplicitConversions(arm.Value)!;
+                    yield return value;
                 }
                 break;
             case IConditionalOperation conditional:
                 yield return conditional;
-                yield return WithoutImplicitConversions(conditional.WhenTrue)!;
-                if (conditional.WhenFalse is { } whenFalse)
+                foreach (
+                    var value in ValuesOf(conditional.WhenTrue)
+                        .Concat(ValuesOf(conditional.WhenFalse))
+                )
                 {
-                    yield return WithoutImplicitConversions(whenFalse)!;
+                    yield return value;
                 }
                 break;
             case var value:
                 yield return value;
+                foreach (
+                    var returned in OwnDescendants(value)
+                        .OfType<IAnonymousFunctionOperation>()
+                        .Where(lambda => ArgumentOf(lambda) is not null)
+                        .SelectMany(ReturnedValues)
+                )
+                {
+                    yield return returned;
+                }
                 break;
         }
     }
+
+    /// <summary>The invocation a lambda is passed to as an argument, if it is one.</summary>
+    private static IInvocationOperation? ArgumentOf(IAnonymousFunctionOperation lambda) =>
+        Ancestors(lambda)
+            .FirstOrDefault(operation =>
+                operation is not (IDelegateCreationOperation or IConversionOperation)
+            )
+            is IArgumentOperation { Parent: IInvocationOperation invocation }
+            ? invocation
+            : null;
 
     /// <summary>Descendants of a function body, excluding nested functions' bodies.</summary>
     private static IEnumerable<IOperation> OwnDescendants(IOperation operation)

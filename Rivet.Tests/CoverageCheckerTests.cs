@@ -2168,4 +2168,373 @@ public sealed class CoverageCheckerTests
 
         Assert.DoesNotContain(warnings, warning => warning.FieldName == "DownloadTask");
     }
+
+    // ---------------------------------------------------------------
+    // Lambda arms (outcome.Match(...)) and an adapter around a switch,
+    // a conditional or a local holding one. Each shape runs on an MVC
+    // action and a minimal-API handler.
+    // ---------------------------------------------------------------
+
+    private const string OutcomeTypes = """
+        using System;
+        using System.Threading.Tasks;
+
+        namespace Test;
+
+        public sealed class Outcome
+        {
+            public bool Found { get; }
+
+            public T Match<T>(Func<TaskDto, T> found, Func<string, T> missing) =>
+                throw new NotImplementedException();
+
+            public Task<T> MatchAsync<T>(
+                Func<TaskDto, Task<T>> found,
+                Func<string, Task<T>> missing
+            ) => throw new NotImplementedException();
+        }
+
+        public sealed class TaskService
+        {
+            public Task<Outcome> Find() => throw new NotImplementedException();
+        }
+        """;
+
+    /// <summary>
+    /// A GET /api/tasks handler with <paramref name="body"/> as its block body, where
+    /// <c>tasks</c> is a <c>TaskService</c>. The body writes <c>ADAPT</c> for the host's
+    /// adapter: <c>ToActionResult</c> on MVC, <c>ToResult</c> on a minimal API.
+    /// </summary>
+    private static string TasksHandler(string host, string body) =>
+        host == "mvc"
+            ? $$"""
+                using System.Threading.Tasks;
+                using Microsoft.AspNetCore.Mvc;
+                using Rivet;
+
+                namespace Test;
+
+                [Route("api/tasks")]
+                public sealed class TasksController(TaskService tasks) : ControllerBase
+                {
+                    [HttpGet]
+                    public async Task<IActionResult> List()
+                    {
+                        {{body.Replace("ADAPT", "ToActionResult")}}
+                    }
+                }
+                """
+            : $$"""
+                using System.Threading.Tasks;
+                using Microsoft.AspNetCore.Builder;
+                using Microsoft.AspNetCore.Routing;
+                using Rivet;
+
+                namespace Test;
+
+                public static class TaskEndpoints
+                {
+                    public static void Map(IEndpointRouteBuilder app)
+                    {
+                        app.MapGet("/api/tasks", async (TaskService tasks) =>
+                        {
+                            {{body.Replace("ADAPT", "ToResult")}}
+                        });
+                    }
+                }
+                """;
+
+    private static void AssertCovered(IReadOnlyList<CoverageWarning> warnings) =>
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "ListTasks");
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Match_lambda_arms_are_coverage(string host)
+    {
+        var body = """
+            var outcome = await tasks.Find();
+            return outcome.Match(
+                found: task => TasksContract.ListTasks.Success(task).ADAPT(),
+                missing: _ => TasksContract.ListTasks.Error(404).ADAPT()
+            );
+            """;
+
+        AssertCovered(RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)));
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Async_match_block_lambda_arms_are_coverage(string host)
+    {
+        var body = """
+            var endpoint = TasksContract.ListTasks;
+            return await (await tasks.Find()).MatchAsync(
+                async task =>
+                {
+                    await Task.Yield();
+                    return endpoint.Success(task).ADAPT();
+                },
+                async _ => endpoint.Error(404).ADAPT()
+            );
+            """;
+
+        AssertCovered(RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)));
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Terminal_in_a_lambda_nested_two_calls_deep_is_coverage(string host)
+    {
+        var body = """
+            var outcome = await tasks.Find();
+            return outcome.Match(
+                found: task => outcome.Match(
+                    found: _ => TasksContract.ListTasks.Success(task).ADAPT(),
+                    missing: _ => TasksContract.ListTasks.Error(404).ADAPT()
+                ),
+                missing: _ => TasksContract.ListTasks.Error(404).ADAPT()
+            );
+            """;
+
+        AssertCovered(RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)));
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Adapter_around_a_switch_is_coverage(string host)
+    {
+        var body = """
+            var outcome = await tasks.Find();
+            return (
+                outcome.Found switch
+                {
+                    true => TasksContract.ListTasks.Success(new TaskDto("1", "Test")),
+                    false => TasksContract.ListTasks.Error(404),
+                }
+            ).ADAPT();
+            """;
+
+        AssertCovered(RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)));
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Adapter_around_a_conditional_is_coverage(string host)
+    {
+        var body = """
+            var outcome = await tasks.Find();
+            return (
+                outcome.Found
+                    ? TasksContract.ListTasks.Success(new TaskDto("1", "Test"))
+                    : TasksContract.ListTasks.Error(404)
+            ).ADAPT();
+            """;
+
+        AssertCovered(RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)));
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Local_holding_a_switch_then_adapted_is_coverage(string host)
+    {
+        var body = """
+            var outcome = await tasks.Find();
+            var response = outcome.Found switch
+            {
+                true => TasksContract.ListTasks.Success(new TaskDto("1", "Test")),
+                false => TasksContract.ListTasks.Error(404),
+            };
+            return response.ADAPT();
+            """;
+
+        AssertCovered(RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)));
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Adapter_around_a_match_is_coverage(string host)
+    {
+        var body = """
+            var outcome = await tasks.Find();
+            return outcome
+                .Match(
+                    found: task => TasksContract.ListTasks.Success(task),
+                    missing: _ => TasksContract.ListTasks.Error(404)
+                )
+                .ADAPT();
+            """;
+
+        AssertCovered(RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)));
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Lambda_arm_that_is_never_returned_is_not_coverage(string host)
+    {
+        var body = """
+            var outcome = await tasks.Find();
+            outcome.Match(
+                found: task => TasksContract.ListTasks.Success(task).ADAPT(),
+                missing: _ => TasksContract.ListTasks.Error(404).ADAPT()
+            );
+            System.Func<TaskDto, object> unused = task => TasksContract.ListTasks.Success(task).ADAPT();
+            return TasksContract.HeadTasks.Success().ADAPT();
+            """;
+
+        AssertMissingWarning(
+            RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)),
+            "ListTasks"
+        );
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Unreachable_return_in_a_lambda_arm_is_not_coverage(string host)
+    {
+        var body = """
+            var outcome = await tasks.Find();
+            return outcome.Match(
+                found: task =>
+                {
+                    if (false)
+                    {
+                        return TasksContract.ListTasks.Success(task).ADAPT();
+                    }
+
+                    return TasksContract.HeadTasks.Success().ADAPT();
+                },
+                missing: _ => TasksContract.HeadTasks.Success().ADAPT()
+            );
+            """;
+
+        AssertMissingWarning(
+            RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)),
+            "ListTasks"
+        );
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Helper_call_inside_a_lambda_arm_is_not_coverage(string host)
+    {
+        var helper = """
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            public static class Respond
+            {
+                public static IActionResult Done(RivetResult result) => result.ToActionResult();
+
+                public static IResult DoneResult(RivetResult result) => result.ToResult();
+            }
+            """;
+        var done = host == "mvc" ? "Done" : "DoneResult";
+        var body = $$"""
+            var outcome = await tasks.Find();
+            return outcome.Match(
+                found: task => Respond.{{done}}(TasksContract.ListTasks.Success(task)),
+                missing: _ => Respond.{{done}}(TasksContract.ListTasks.Error(404))
+            );
+            """;
+
+        AssertMissingWarning(
+            RunCheck(Contract, OutcomeTypes, helper, TasksHandler(host, body)),
+            "ListTasks"
+        );
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Match_arm_on_another_contract_field_is_not_coverage_for_this_one(string host)
+    {
+        var otherContract = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class OtherContract
+            {
+                public static readonly RouteDefinition<TaskDto> ListOthers =
+                    Define.Get<TaskDto>("/api/others");
+            }
+            """;
+        var body = """
+            var outcome = await tasks.Find();
+            return outcome.Match(
+                found: task => OtherContract.ListOthers.Success(task).ADAPT(),
+                missing: _ => OtherContract.ListOthers.Error(404).ADAPT()
+            );
+            """;
+
+        var warnings = RunCheck(Contract, otherContract, OutcomeTypes, TasksHandler(host, body));
+
+        AssertMissingWarning(warnings, "ListTasks");
+        Assert.Contains(
+            warnings,
+            warning =>
+                warning.Kind == CoverageWarningKind.RouteMismatch
+                && warning.FieldName == "ListOthers"
+                && warning.Actual == "/api/tasks"
+        );
+    }
+
+    [Fact]
+    public void Enum_binding_reads_the_map_lambda_not_the_match_arm()
+    {
+        // The terminal sits in a Match arm, but the parameters ASP.NET binds are the
+        // Map* lambda's, so that is the handler RIV4005 reads.
+        var state = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [JsonConverter(typeof(RivetCamelCaseEnumConverter<TaskState>))]
+            public enum TaskState
+            {
+                Open,
+                InProgress,
+            }
+            """;
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGet("/api/tasks", async (TaskState state, TaskService tasks) =>
+                        (await tasks.Find()).Match(
+                            found: task => TasksContract.ListTasks.Success(task).ToResult(),
+                            missing: _ => TasksContract.ListTasks.Error(404).ToResult()
+                        ));
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, state, OutcomeTypes, implementation);
+
+        var warning = Assert.Single(warnings, warning => warning.FieldName == "ListTasks");
+        Assert.Equal(CoverageWarningKind.UnbindableEnumParameter, warning.Kind);
+        Assert.Contains("'state'", warning.Message);
+    }
 }

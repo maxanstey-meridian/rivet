@@ -103,6 +103,42 @@ helper can't do is hold a handler's *only* terminal. A handler that never return
 its own isn't tied to any field, so if nothing else implements that field, `--check`
 reports it as `MissingImplementation`.
 
+## How a handler can return its terminal
+
+"Return a terminal" covers the ways handlers actually get written. `--check` follows the
+value from the handler's `return` to the `.ToResult()` or `.ToActionResult()` call, and from
+there back to the terminal. All of these count:
+
+```csharp
+// An adapter on each arm of a switch or ?:
+return found ? endpoint.Success(task).ToResult() : endpoint.Error(404).ToResult();
+
+// One adapter around the whole switch or ?:
+return (result switch
+{
+    Found found => endpoint.Success(found.Task),
+    NotFound => endpoint.Error(404),
+}).ToResult();
+
+// A local holding the terminal (or a switch of them), adapted on the way out
+var response = result switch { /* ... */ };
+return response.ToResult();
+
+// Lambda arms, such as a result type's Match, sync or async
+return outcome.Match(
+    found: task => endpoint.Success(task).ToResult(),
+    missing: _ => endpoint.Error(404).ToResult());
+```
+
+The lambda only counts if its result is what the handler returns. A `Match` whose answer
+is thrown away, or a lambda parked in a local that's never returned, isn't an
+implementation. In a minimal API the handler is the lambda you hand to `MapGet` and
+friends, not the `Match` arm inside it, so that's whose route and parameters get checked.
+
+The helper rule doesn't change. A terminal built inside a helper method, such as
+`return Done(endpoint.Success(task));` or `return NotFound(endpoint);`, is the helper's
+business, so it never counts as the handler's own.
+
 ## Exit code
 
 When `--check` is used, any finding makes the command exit with code `1` — suitable for CI,
