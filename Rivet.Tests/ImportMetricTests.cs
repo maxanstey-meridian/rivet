@@ -62,11 +62,6 @@ public sealed class ImportMetricTests
             Diagnostics.ImportAliasCycleBroken => "alias-unresolvable",
             Diagnostics.ImportAliasTargetMissing => "alias-unresolvable",
             Diagnostics.ImportUnresolvableAliasReference => "alias-unresolvable",
-            // Added with Phase 4 / I5: a schema declaring BOTH `properties` and
-            // `additionalProperties` keeps one side and drops the other — previously silent
-            // in both directions, now each drop emits a named warning.
-            Diagnostics.ImportDeclaredPropertiesDropped => "properties-dropped",
-            Diagnostics.ImportAdditionalPropertiesDropped => "additional-properties-dropped",
             // Added with Phase 4 / I12: multi-scheme document security collapses to the first
             // scheme — previously silent, now a named warning.
             Diagnostics.ImportSecuritySchemesDropped => "security-schemes-dropped",

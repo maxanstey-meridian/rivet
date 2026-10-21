@@ -75,27 +75,6 @@ must have a row here, and every row here must be a registered ID.
 block but does not register those sibling-runtime diagnostics as native Rivet
 diagnostics.
 
-### Retired IDs
-
-Retired IDs are never reused; they keep a tombstone here instead of a table row.
-
-- ~~`RIV1005`~~ (`FromHeaderParameterExcluded`) — retired in P2 wave 5. `[FromHeader]`
-  parameters used to be excluded from the contract with this warning; they now map to a
-  first-class header parameter source (`in: header` in the emitted spec), so the
-  diagnostic no longer exists.
-- ~~`RIV1011`~~ (`UnsupportedChar`) — retired in P2 wave 6. `char` used to emit an
-  untyped (empty) schema with this warning; it now maps to a length-1 `string` schema
-  (`minLength`/`maxLength: 1` — the System.Text.Json wire shape) with
-  `x-rivet-csharp-type: char`, so the diagnostic no longer exists.
-- ~~`RIV1012`~~ (`UnsupportedObject`) — retired in P2 wave 6. `object` used to emit an
-  untyped (empty) schema with this warning; the untyped schema *is* the honest spec for
-  "any JSON value", so `object`/`object?` now map to it deliberately and silently, and
-  the diagnostic no longer exists.
-- ~~`RIV1105`~~ (`RivetEnumNamingPolicyWithoutStringConverter`) — retired in the
-  converter-family wave (0.44.0). The casing convention now lives in the enum's
-  `[JsonConverter]` declaration itself (`RivetCamelCaseEnumConverter<T>` family), so a
-  policy cannot exist without a string wire and the dangling-marker case is unexpressible.
-
 ## RIV2xxx — emission
 
 | ID | Severity | Trigger | Remediation |
@@ -125,7 +104,6 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV3001` | Warning | Alias schema is part of a `$ref` cycle — replaced with an empty schema; consumers resolve to an untyped object. | Break the cycle in the source spec, or type the affected members after scaffolding. |
 | `RIV3002` | Warning | Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented. | Review the scaffold's `.Secure(...)` calls; multi-scheme semantics are out of scope. |
 | `RIV3003` | Warning | TRACE operation dropped — the HTTP method has no contract representation. | No action; TRACE is out of scope for the contract model. |
-| `RIV3004` | Retired | Reserved diagnostic ID. Mixed named objects now retain typed properties plus extension data. | No action. |
 | `RIV3005` | Warning | `discriminator` with no reversible polymorphic shape (plain object without `oneOf`, or `oneOf` whose `mapping` is absent/unusable) — imported without dispatch semantics. | Model the polymorphism as a `oneOf` with a complete `discriminator.mapping` whose variants carry the tag property, or accept the non-polymorphic import. |
 | `RIV3006` | Warning | Alias schema references a missing schema — consumers fall back to `JsonElement`. | Fix the dangling `$ref` in the source spec, or type the member after scaffolding. |
 | `RIV3008` | Warning | Reference to an unresolvable alias schema (cycle or missing target) — using `JsonElement`. | Fix the alias it references (see `RIV3001`/`RIV3006`). |
@@ -133,7 +111,6 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV3010` | Warning | Unhandled JSON Schema `type` — mapped to `JsonElement`. | Type the member by hand in the scaffolded C#. |
 | `RIV3011` | Warning | Array schema without `items` — mapped to `List<JsonElement>`. | Add `items` to the source spec, or type the list element after scaffolding. |
 | `RIV3012` | Warning | Enum constraint that cannot become a C# enum (single-value, mixed/float, out-of-int32-range) — degraded to a primitive. | Accept the primitive, or hand-model the constraint in the scaffolded C#. |
-| `RIV3013` | Retired | Reserved diagnostic ID. Mixed inline objects now retain typed properties plus extension data. | No action. |
 | `RIV3014` | Warning | Dictionary `propertyNames` schema has no C# dictionary-key representation — imported with `string` keys. | Reference a string enum / string-backed brand or use a string key schema in the source spec, or type the dictionary key by hand after scaffolding. |
 | `RIV3015` | Warning | Named scalar component uses const, composition, heterogeneous leaves, or a non-flat enum outside bounded scalar preservation. | Replace it with one primitive leaf (optionally nullable) or a flat string/Int32 enum; the existing fallback mapping is retained. |
 | `RIV3020` | Warning | Parameter has an empty name, so the invalid parameter is dropped while the operation and its other parameters are preserved. | Give the source parameter a non-empty OpenAPI name. |
@@ -151,3 +128,33 @@ prefix. The test-suite ratchet categories these map to are listed in the
 | `RIV4003` | Warning | Implementation route differs from the contract's. | Align the implementation's route with the contract. |
 | `RIV4004` | Warning | A contract endpoint is bound in a route handler, but the handler neither returns a terminal built from that binding nor passes the binding to a helper whose answer it returns. | Return a `Success`, `Error`, or `File` terminal through the correct host adapter, pass the bound endpoint to a helper whose answer the handler returns, or remove the unused `Bind`. |
 | `RIV4005` | Error | A handler implementing a contract endpoint binds a string-wire enum from route, query, header or form, directly or as a member (one level deep) of a minimal-API `[AsParameters]` type, an MVC complex type with explicit `[FromQuery]`/`[FromRoute]`/`[FromForm]`/`[FromHeader]`, or an unattributed MVC complex type on a controller without `[ApiController]`, and the host would refuse an advertised wire value. That covers an enum, `T?` or a collection of either. `[FromBody]`, `[FromServices]` and, on MVC, `[ModelBinder]` exempt it. An unattributed collection is a JSON body (on MVC, under `[ApiController]`), except an array on a minimal-API endpoint mapped to a body-less verb such as GET, written in capitals the way `MapGet` passes it. Minimal APIs parse with `Enum.TryParse`, which needs the exact member name; MVC ignores case. Either way the JSON converter is ignored. Azure Functions handlers are not checked. | Use a plain enum (integers on the wire), the built-in `JsonStringEnumConverter<T>` without renames, or bind a `string` and parse it in the handler. On MVC, camel-case and lowercase policies also bind. |
+
+## Retired IDs
+
+Retired IDs are never reused; they keep a tombstone here instead of a table row.
+
+- ~~`RIV1005`~~ (`FromHeaderParameterExcluded`) — retired in P2 wave 5. `[FromHeader]`
+  parameters used to be excluded from the contract with this warning; they now map to a
+  first-class header parameter source (`in: header` in the emitted spec), so the
+  diagnostic no longer exists.
+- ~~`RIV1011`~~ (`UnsupportedChar`) — retired in P2 wave 6. `char` used to emit an
+  untyped (empty) schema with this warning; it now maps to a length-1 `string` schema
+  (`minLength`/`maxLength: 1` — the System.Text.Json wire shape) with
+  `x-rivet-csharp-type: char`, so the diagnostic no longer exists.
+- ~~`RIV1012`~~ (`UnsupportedObject`) — retired in P2 wave 6. `object` used to emit an
+  untyped (empty) schema with this warning; the untyped schema *is* the honest spec for
+  "any JSON value", so `object`/`object?` now map to it deliberately and silently, and
+  the diagnostic no longer exists.
+- ~~`RIV1105`~~ (`RivetEnumNamingPolicyWithoutStringConverter`) — retired in the
+  converter-family wave (0.44.0). The casing convention now lives in the enum's
+  `[JsonConverter]` declaration itself (`RivetCamelCaseEnumConverter<T>` family), so a
+  policy cannot exist without a string wire and the dangling-marker case is unexpressible.
+- ~~`RIV3004`~~ (`ImportAdditionalPropertiesDropped`) — retired in 0.42.0. A named object
+  declaring both `properties` and `additionalProperties` used to lose its extension data
+  with this warning; it now keeps typed properties plus extension data, so nothing is
+  dropped.
+- ~~`RIV3007`~~ (`ImportAliasRefCycle`) — retired in 0.45.0. Nothing ever emitted it: alias
+  `$ref` cycles are broken before mapping and reported as `RIV3001`.
+- ~~`RIV3013`~~ (`ImportDeclaredPropertiesDropped`) — retired in 0.42.0. An inline object
+  declaring both `properties` and `additionalProperties` used to lose its typed properties
+  with this warning; it now keeps both, so nothing is dropped.

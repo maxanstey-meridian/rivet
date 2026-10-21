@@ -96,7 +96,7 @@ public sealed class DiagnosticsTests
     public void Registry_And_Docs_Table_List_The_Same_Ids()
     {
         // Descriptions differ on purpose (the page explains, the registry is one line), so
-        // only the IDs are compared: a row per ID, and no row for an ID Rivet can't emit.
+        // only the IDs are compared: a row per ID, and no row for an unregistered ID.
         var page = File.ReadAllText(CliRunner.RepoPath("docs", "reference", "diagnostics.md"));
         var documented = Regex
             .Matches(page, @"^\| `(RIV\d{4})`", RegexOptions.Multiline)

@@ -88,7 +88,9 @@ public static class Diagnostics
     public const string ImportAliasCycleBroken = "RIV3001";
     public const string ImportSecuritySchemesDropped = "RIV3002";
     public const string ImportOperationMethodDropped = "RIV3003";
-    public const string ImportAdditionalPropertiesDropped = "RIV3004";
+
+    // RIV3004 (ImportAdditionalPropertiesDropped) retired: mixed named objects keep typed
+    // properties plus extension data. The number is never reused.
     public const string ImportDiscriminatorDropped = "RIV3005";
     public const string ImportAliasTargetMissing = "RIV3006";
 
@@ -99,7 +101,9 @@ public static class Diagnostics
     public const string ImportUnsupportedSchemaType = "RIV3010";
     public const string ImportArrayMissingItems = "RIV3011";
     public const string ImportEnumConstraintDropped = "RIV3012";
-    public const string ImportDeclaredPropertiesDropped = "RIV3013";
+
+    // RIV3013 (ImportDeclaredPropertiesDropped) retired: mixed inline objects keep typed
+    // properties plus extension data. The number is never reused.
     public const string ImportDictionaryKeyDropped = "RIV3014";
     public const string ImportNamedScalarAlgebraUnsupported = "RIV3015";
     public const string ImportEmptyParameterNameDropped = "RIV3020";
@@ -214,8 +218,6 @@ public static class Diagnostics
             "Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented.",
         [ImportOperationMethodDropped] =
             "TRACE operation dropped — the HTTP method has no contract representation.",
-        [ImportAdditionalPropertiesDropped] =
-            "Retired diagnostic ID: mixed named objects now retain typed properties and extension data.",
         [ImportDiscriminatorDropped] =
             "Discriminator with no reversible polymorphic shape (plain object without oneOf, or oneOf whose mapping is absent/unusable) — imported without dispatch semantics.",
         [ImportAliasTargetMissing] =
@@ -228,8 +230,6 @@ public static class Diagnostics
         [ImportArrayMissingItems] = "Array schema without 'items' — mapped to List<JsonElement>.",
         [ImportEnumConstraintDropped] =
             "Enum constraint that cannot become a C# enum (single-value, mixed/float, out-of-int32-range) — degraded to a primitive.",
-        [ImportDeclaredPropertiesDropped] =
-            "Retired diagnostic ID: mixed inline objects now retain typed properties and extension data.",
         [ImportDictionaryKeyDropped] =
             "Dictionary 'propertyNames' schema has no C# dictionary-key representation — imported with string keys.",
         [ImportNamedScalarAlgebraUnsupported] =
