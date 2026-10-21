@@ -37,7 +37,7 @@ internal static class EnumParameterBinding
     /// compared ordinally on the verbs as written: MapGet and friends pass the uppercase
     /// constants, but a MapMethods "get" matches none of them and still infers a body.
     /// </summary>
-    private static readonly HashSet<string> BodylessMethods = new(
+    private static readonly HashSet<string> _bodylessMethods = new(
         ["GET", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"],
         StringComparer.Ordinal
     );
@@ -48,7 +48,7 @@ internal static class EnumParameterBinding
     /// body-less. An endpoint with no known verbs accepts any request, so it infers a body too.
     /// </summary>
     public static bool MinimalApiInfersBody(IEnumerable<string> httpMethods) =>
-        !httpMethods.Any(BodylessMethods.Contains);
+        !httpMethods.Any(_bodylessMethods.Contains);
 
     /// <summary>
     /// True when MVC infers [FromBody] for an action's unattributed complex parameters and
