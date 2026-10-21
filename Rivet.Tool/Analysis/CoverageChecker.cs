@@ -468,16 +468,19 @@ public static class CoverageChecker
             return EndpointContext.None;
         }
 
-        var controller = TryResolveController(wkt, adapterType, terminal);
-        if (controller.IsEndpoint)
+        if (ReturningMethod(terminal, "ToActionResult", adapterType) is { } method)
         {
-            return controller;
-        }
+            var controller = TryResolveController(wkt, method);
+            if (controller.IsEndpoint)
+            {
+                return controller;
+            }
 
-        var function = TryResolveFunction(wkt, adapterType, terminal, functionsRoutePrefix);
-        if (function.IsEndpoint)
-        {
-            return function;
+            var function = TryResolveFunction(wkt, method, functionsRoutePrefix);
+            if (function.IsEndpoint)
+            {
+                return function;
+            }
         }
 
         return TryResolveMinimalApi(wkt, adapterType, terminal, fieldMap);
@@ -505,17 +508,10 @@ public static class CoverageChecker
             : null;
     }
 
-    private static EndpointContext TryResolveController(
-        WellKnownTypes wkt,
-        INamedTypeSymbol adapterType,
-        IInvocationOperation terminal
-    )
+    private static EndpointContext TryResolveController(WellKnownTypes wkt, IMethodSymbol method)
     {
         // MVC never routes a static method; a static handler is a minimal API's.
-        if (
-            ReturningMethod(terminal, "ToActionResult", adapterType) is not { } method
-            || method.IsStatic
-        )
+        if (method.IsStatic)
         {
             return EndpointContext.None;
         }
@@ -558,9 +554,9 @@ public static class CoverageChecker
         // Match arm sits in a lambda of its own inside it.
         var (handler, mapCall) = Ancestors(terminal)
             .OfType<IAnonymousFunctionOperation>()
-            .Select(lambda => (lambda, ArgumentOf(lambda)))
+            .Select(lambda => (lambda, call: ArgumentOf(lambda)))
             .FirstOrDefault(candidate =>
-                candidate.Item2 is { } call
+                candidate.call is { } call
                 && SymbolEqualityComparer.Default.Equals(
                     call.TargetMethod.ContainingType,
                     wkt.EndpointRouteBuilderExtensions
@@ -705,15 +701,11 @@ public static class CoverageChecker
 
     private static EndpointContext TryResolveFunction(
         WellKnownTypes wkt,
-        INamedTypeSymbol adapterType,
-        IInvocationOperation terminal,
+        IMethodSymbol method,
         string functionsRoutePrefix
     )
     {
-        if (
-            wkt.HttpTrigger is null
-            || ReturningMethod(terminal, "ToActionResult", adapterType) is not { } method
-        )
+        if (wkt.HttpTrigger is null)
         {
             return EndpointContext.None;
         }
@@ -798,47 +790,43 @@ public static class CoverageChecker
             .SelectMany(returned => ValuesOf(returned.ReturnedValue));
 
     /// <summary>
-    /// The values an expression can produce: itself, each switch arm and conditional
-    /// branch (recursively), and whatever a lambda passed as an argument inside it
-    /// returns, such as the arms of <c>outcome.Match(ok => ..., error => ...)</c>.
+    /// The leaf values an expression can produce: each switch arm and conditional branch
+    /// (recursively), the operand of an <c>await</c> (through <c>ConfigureAwait</c>) or a
+    /// cast, and for an invocation, the
+    /// invocation itself plus whatever each lambda passed straight to it returns, such
+    /// as the arms of <c>outcome.Match(ok => ..., error => ...)</c>. A lambda buried
+    /// deeper, as in <c>Ok(items.Select(item => ...))</c>, isn't followed.
     /// </summary>
-    private static IEnumerable<IOperation> ValuesOf(IOperation? expression)
-    {
-        switch (WithoutImplicitConversions(expression))
+    private static IEnumerable<IOperation> ValuesOf(IOperation? expression) =>
+        WithoutImplicitConversions(expression) switch
         {
-            case null:
-                yield break;
-            case ISwitchExpressionOperation switchExpression:
-                yield return switchExpression;
-                foreach (var value in switchExpression.Arms.SelectMany(arm => ValuesOf(arm.Value)))
-                {
-                    yield return value;
-                }
-                break;
-            case IConditionalOperation conditional:
-                yield return conditional;
-                foreach (
-                    var value in ValuesOf(conditional.WhenTrue)
-                        .Concat(ValuesOf(conditional.WhenFalse))
-                )
-                {
-                    yield return value;
-                }
-                break;
-            case var value:
-                yield return value;
-                foreach (
-                    var returned in OwnDescendants(value)
-                        .OfType<IAnonymousFunctionOperation>()
-                        .Where(lambda => ArgumentOf(lambda) is not null)
-                        .SelectMany(ReturnedValues)
-                )
-                {
-                    yield return returned;
-                }
-                break;
-        }
-    }
+            null => [],
+            ISwitchExpressionOperation switchExpression => switchExpression.Arms.SelectMany(arm =>
+                ValuesOf(arm.Value)
+            ),
+            IConditionalOperation conditional => ValuesOf(conditional.WhenTrue)
+                .Concat(ValuesOf(conditional.WhenFalse)),
+            IAwaitOperation awaited => ValuesOf(awaited.Operation),
+            IConversionOperation conversion => ValuesOf(conversion.Operand),
+            IInvocationOperation { TargetMethod.Name: "ConfigureAwait", Instance: { } awaitable } =>
+                ValuesOf(awaitable),
+            IInvocationOperation invocation => invocation
+                .Arguments.Select(argument => LambdaOf(argument.Value))
+                .OfType<IAnonymousFunctionOperation>()
+                .SelectMany(ReturnedValues)
+                .Prepend(invocation),
+            var value => [value],
+        };
+
+    /// <summary>The lambda an argument value is, through its delegate creation.</summary>
+    private static IAnonymousFunctionOperation? LambdaOf(IOperation value) =>
+        value switch
+        {
+            IAnonymousFunctionOperation lambda => lambda,
+            IDelegateCreationOperation creation => LambdaOf(creation.Target),
+            IConversionOperation conversion => LambdaOf(conversion.Operand),
+            _ => null,
+        };
 
     /// <summary>The invocation a lambda is passed to as an argument, if it is one.</summary>
     private static IInvocationOperation? ArgumentOf(IAnonymousFunctionOperation lambda) =>

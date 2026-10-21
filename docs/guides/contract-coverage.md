@@ -130,14 +130,18 @@ return outcome.Match(
     missing: _ => endpoint.Error(404).ToResult());
 ```
 
-The lambda only counts if its result is what the handler returns. A `Match` whose answer
-is thrown away, or a lambda parked in a local that's never returned, isn't an
-implementation. In a minimal API the handler is the lambda you hand to `MapGet` and
-friends, not the `Match` arm inside it, so that's whose route and parameters get checked.
+A lambda counts when it's passed straight to the call the handler returns, such as `Match`
+or `MatchAsync`, awaited or not, including a `Match` that one of those arms returns. A lambda
+buried in an argument doesn't. In
+`return Results.Ok(items.Select(t => endpoint.Success(t).ToResult()));` the response is
+the `Ok`, not the terminal inside `Select`. Nor does a `Match` whose answer is thrown away.
+A lambda held in a local isn't followed either, even if you later pass it to `Match`. In a
+minimal API the handler is the lambda you hand to `MapGet` and friends, not the `Match` arm
+inside it, so that's whose route and parameters get checked.
 
-The helper rule doesn't change. A terminal built inside a helper method, such as
-`return Done(endpoint.Success(task));` or `return NotFound(endpoint);`, is the helper's
-business, so it never counts as the handler's own.
+Helpers still don't count. A terminal handed to a helper to adapt, as in
+`Done(endpoint.Success(task))`, or built inside one, as in `NotFound(endpoint)`, belongs to
+the helper, not the handler.
 
 ## Exit code
 

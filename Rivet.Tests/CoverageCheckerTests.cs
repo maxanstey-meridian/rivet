@@ -2198,14 +2198,26 @@ public sealed class CoverageCheckerTests
         {
             public Task<Outcome> Find() => throw new NotImplementedException();
         }
+
+        // Stand-ins for LINQ's Select and First, which the test compilation doesn't reference.
+        public static class TaskSequence
+        {
+            public static System.Collections.Generic.IEnumerable<T> Select<T>(
+                this TaskDto[] items,
+                Func<TaskDto, T> selector
+            ) => throw new NotImplementedException();
+
+            public static T First<T>(this System.Collections.Generic.IEnumerable<T> items) =>
+                throw new NotImplementedException();
+        }
         """;
 
     /// <summary>
-    /// A GET /api/tasks handler with <paramref name="body"/> as its block body, where
-    /// <c>tasks</c> is a <c>TaskService</c>. The body writes <c>ADAPT</c> for the host's
-    /// adapter: <c>ToActionResult</c> on MVC, <c>ToResult</c> on a minimal API.
+    /// A /api/tasks handler for <paramref name="verb"/> with <paramref name="body"/> as its
+    /// block body, where <c>tasks</c> is a <c>TaskService</c>. The body writes <c>ADAPT</c>
+    /// for the host's adapter: <c>ToActionResult</c> on MVC, <c>ToResult</c> on a minimal API.
     /// </summary>
-    private static string TasksHandler(string host, string body) =>
+    private static string TasksHandler(string host, string body, string verb = "Get") =>
         host == "mvc"
             ? $$"""
                 using System.Threading.Tasks;
@@ -2217,7 +2229,7 @@ public sealed class CoverageCheckerTests
                 [Route("api/tasks")]
                 public sealed class TasksController(TaskService tasks) : ControllerBase
                 {
-                    [HttpGet]
+                    [Http{{verb}}]
                     public async Task<IActionResult> List()
                     {
                         {{body.Replace("ADAPT", "ToActionResult")}}
@@ -2236,7 +2248,7 @@ public sealed class CoverageCheckerTests
                 {
                     public static void Map(IEndpointRouteBuilder app)
                     {
-                        app.MapGet("/api/tasks", async (TaskService tasks) =>
+                        app.Map{{verb}}("/api/tasks", async (TaskService tasks) =>
                         {
                             {{body.Replace("ADAPT", "ToResult")}}
                         });
@@ -2276,7 +2288,7 @@ public sealed class CoverageCheckerTests
                     await Task.Yield();
                     return endpoint.Success(task).ADAPT();
                 },
-                async _ => endpoint.Error(404).ADAPT()
+                async _ => TasksContract.HeadTasks.Success().ADAPT()
             );
             """;
 
@@ -2286,8 +2298,41 @@ public sealed class CoverageCheckerTests
     [Theory]
     [InlineData("mvc")]
     [InlineData("minimal")]
+    public void Configure_await_on_a_match_is_coverage(string host)
+    {
+        var body = """
+            return await (await tasks.Find())
+                .MatchAsync(
+                    async task => TasksContract.ListTasks.Success(task).ADAPT(),
+                    async _ => TasksContract.HeadTasks.Success().ADAPT()
+                )
+                .ConfigureAwait(false);
+            """;
+
+        AssertCovered(RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)));
+    }
+
+    [Fact]
+    public void Cast_around_a_match_is_coverage()
+    {
+        var body = """
+            var outcome = await tasks.Find();
+            return (IActionResult)outcome.Match(
+                found: task => TasksContract.ListTasks.Success(task).ADAPT(),
+                missing: _ => TasksContract.HeadTasks.Success().ADAPT());
+            """;
+
+        AssertCovered(RunCheck(Contract, OutcomeTypes, TasksHandler("mvc", body)));
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
     public void Terminal_in_a_lambda_nested_two_calls_deep_is_coverage(string host)
     {
+        // A Match arm that returns a Match: each lambda is passed straight to the call
+        // its parent returns. The outer missing arm is on another field, so only the
+        // two-deep terminals can cover ListTasks.
         var body = """
             var outcome = await tasks.Find();
             return outcome.Match(
@@ -2295,7 +2340,7 @@ public sealed class CoverageCheckerTests
                     found: _ => TasksContract.ListTasks.Success(task).ADAPT(),
                     missing: _ => TasksContract.ListTasks.Error(404).ADAPT()
                 ),
-                missing: _ => TasksContract.ListTasks.Error(404).ADAPT()
+                missing: _ => TasksContract.HeadTasks.Success().ADAPT()
             );
             """;
 
@@ -2393,6 +2438,55 @@ public sealed class CoverageCheckerTests
             RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)),
             "ListTasks"
         );
+    }
+
+    [Theory]
+    [InlineData("mvc", "OK(items.Select(task => TasksContract.ListTasks.Success(task).ADAPT()))")]
+    [InlineData(
+        "minimal",
+        "OK(items.Select(task => TasksContract.ListTasks.Success(task).ADAPT()))"
+    )]
+    [InlineData(
+        "mvc",
+        "items.Select(task => TasksContract.ListTasks.Success(task).ADAPT()).First()"
+    )]
+    [InlineData(
+        "minimal",
+        "items.Select(task => TasksContract.ListTasks.Success(task).ADAPT()).First()"
+    )]
+    public void Lambda_buried_inside_a_returned_value_is_not_coverage(string host, string returned)
+    {
+        // The lambda goes to Select, an argument of Ok or the receiver of First, not to
+        // the call the handler returns, so the response never goes through the terminal.
+        var ok = host == "mvc" ? "Ok" : "Microsoft.AspNetCore.Http.Results.Ok";
+        var body = $$"""
+            var items = new[] { new TaskDto("1", "Test") };
+            return {{returned.Replace("OK", ok)}};
+            """;
+
+        AssertMissingWarning(
+            RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)),
+            "ListTasks"
+        );
+    }
+
+    [Theory]
+    [InlineData("mvc")]
+    [InlineData("minimal")]
+    public void Bind_used_only_inside_match_arms_is_consumed(string host)
+    {
+        var body = """
+            var endpoint = TasksContract.CreateTask.Bind(new TaskInput("Test"));
+            var outcome = await tasks.Find();
+            return outcome.Match(
+                found: task => endpoint.Success(task).ADAPT(),
+                missing: _ => endpoint.Error(400).ADAPT()
+            );
+            """;
+
+        var warnings = RunCheck(Contract, OutcomeTypes, TasksHandler(host, body, verb: "Post"));
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "CreateTask");
     }
 
     [Theory]
