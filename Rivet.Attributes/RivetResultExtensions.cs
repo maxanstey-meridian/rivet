@@ -71,9 +71,22 @@ public static class RivetResultExtensions
     /// <summary>
     /// Checks the host has not already committed a conflicting response, then sets the
     /// declared status. Returns false when the response has started and there is nothing
-    /// left to write.
+    /// left to write. A refused stream file is disposed: the host never takes it over.
     /// </summary>
     internal static bool BeginResponse(HttpResponse response, RivetResult result)
+    {
+        try
+        {
+            return SetStatus(response, result);
+        }
+        catch when (result is RivetFileResult { Source: RivetFileStream stream })
+        {
+            stream.Content.Dispose();
+            throw;
+        }
+    }
+
+    private static bool SetStatus(HttpResponse response, RivetResult result)
     {
         var (statusCode, hasBody) = result switch
         {

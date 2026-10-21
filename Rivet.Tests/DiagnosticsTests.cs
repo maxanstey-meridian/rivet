@@ -6,7 +6,8 @@ namespace Rivet.Tests;
 
 /// <summary>
 /// Guards the diagnostic ID scheme: every ID Rivet can emit is registered in
-/// Rivet.Tool/Diagnostics.cs, unique, and in its stage's range. Also pins the diagnosed-unsupported
+/// Rivet.Tool/Diagnostics.cs, unique, in its stage's range, and has a row in
+/// docs/reference/diagnostics.md. Also pins the diagnosed-unsupported
 /// TypeWalker holes and the symbol-naming unknown-type emission warning folded
 /// into this wave (FABLE_GAPS §7 item 12).
 /// </summary>
@@ -88,6 +89,31 @@ public sealed class DiagnosticsTests
         Assert.True(
             undeclared.Count == 0,
             $"Registry entries with no declared const: {string.Join(", ", undeclared)}"
+        );
+    }
+
+    [Fact]
+    public void Registry_And_Docs_Table_List_The_Same_Ids()
+    {
+        // Descriptions differ on purpose (the page explains, the registry is one line), so
+        // only the IDs are compared: a row per ID, and no row for an ID Rivet can't emit.
+        var page = File.ReadAllText(CliRunner.RepoPath("docs", "reference", "diagnostics.md"));
+        var documented = Regex
+            .Matches(page, @"^\| `(RIV\d{4})`", RegexOptions.Multiline)
+            .Select(match => match.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
+        var registered = Diagnostics.Registry.Keys.ToHashSet(StringComparer.Ordinal);
+
+        var undocumented = registered.Except(documented).Order(StringComparer.Ordinal).ToList();
+        var unknown = documented.Except(registered).Order(StringComparer.Ordinal).ToList();
+
+        Assert.True(
+            undocumented.Count == 0,
+            $"Registry IDs with no row in docs/reference/diagnostics.md: {string.Join(", ", undocumented)}"
+        );
+        Assert.True(
+            unknown.Count == 0,
+            $"docs/reference/diagnostics.md rows for unregistered IDs: {string.Join(", ", unknown)}"
         );
     }
 

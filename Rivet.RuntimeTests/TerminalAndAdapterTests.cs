@@ -502,6 +502,28 @@ public sealed class TerminalAndAdapterTests
         Assert.True(stream.IsDisposed);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Refused_stream_file_is_disposed(bool mvc)
+    {
+        var stream = new TrackingStream(Encoding.UTF8.GetBytes("stream"));
+        var result = Define.File("/file").ProducesFile("text/plain").File(stream, "stream.txt");
+
+        await Assert.ThrowsAsync<RivetContractViolationException>(() =>
+            ExecuteAsync(
+                result,
+                mvc,
+                context =>
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                }
+            )
+        );
+
+        Assert.True(stream.IsDisposed);
+    }
+
     // A writer goes through its own Results.Stream overload, so its validators need their
     // own pin.
     [Theory]
