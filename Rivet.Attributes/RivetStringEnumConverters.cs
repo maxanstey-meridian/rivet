@@ -33,7 +33,7 @@ internal sealed class RivetLowerAllNamingPolicy : JsonNamingPolicy
 /// never silently falls back to numeric when a policy is declared.
 ///
 /// The read side refuses integers: a bare <c>0</c> always throws
-/// <see cref="JsonException"/> (a 400 from ASP.NET), and so does a numeric
+/// <see cref="JsonException"/>, and so does a numeric
 /// string such as <c>"0"</c> from .NET 9 on (.NET 8's System.Text.Json still
 /// reads it as the value). It is not an exact match on the advertised names:
 /// System.Text.Json also reads the C# member name in any casing, whatever the

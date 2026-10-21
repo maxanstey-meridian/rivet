@@ -17,7 +17,7 @@ These hold whenever you regenerate the spec (`dotnet rivet --project … --outpu
 - `--check` verifies that every contract field has an implementation, that the
   implementation's route and HTTP method match the declaration, and that an enum it
   binds from the route, query, header or form can take every value the spec lists
-  (`RIV4005`).
+  (`RIV4005`). Generation refuses the same for an annotated action (`RIV1110`).
 
 ## Runtime guarantees (contract responses)
 

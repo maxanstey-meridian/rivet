@@ -125,12 +125,16 @@ public sealed class StringEnumConverterTests
 #else
     // .NET 8's System.Text.Json reads a numeric string as the enum value even with
     // allowIntegerValues: false; .NET 9 fixed it. Pinned rather than patched with a
-    // newer STJ package, so moving off .NET 8 shows up here.
+    // newer STJ package, so moving off .NET 8 shows up here. "3" rather than "0": 0 is
+    // default(T), so reading it back wouldn't prove the string was read at all.
     [Theory]
     [MemberData(nameof(RivetConvertedEnums))]
     public void Rivet_Converters_Still_Read_A_Numeric_String_On_Net8(Type enumType)
     {
-        Assert.Equal(0, Convert.ToInt32(JsonSerializer.Deserialize("\"0\"", enumType)));
+        Assert.Equal(
+            Enum.Parse(enumType, "RestrictedByway2A"),
+            JsonSerializer.Deserialize("\"3\"", enumType)
+        );
     }
 #endif
 

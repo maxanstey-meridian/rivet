@@ -30,6 +30,9 @@ public sealed class EnumParameterBindingCheckTests
 
             public static readonly RouteDefinition<StreetDto> Get =
                 Define.Get<StreetDto>("/api/streets/{kind}");
+
+            public static readonly RouteDefinition<StreetDto> Create =
+                Define.Post<StreetDto>("/api/streets");
         }
         """;
 
@@ -68,9 +71,42 @@ public sealed class EnumParameterBindingCheckTests
         }
         """;
 
-    private static string Field(string route) => route.Contains('{') ? "Get" : "List";
+    private const string CaseOnlyRenamedColour = """
+        using System.Text.Json.Serialization;
 
-    private static string MinimalHandler(string parameters, string route = "/api/streets") =>
+        namespace Test;
+
+        [JsonConverter(typeof(JsonStringEnumConverter<StreetKind>))]
+        public enum StreetKind
+        {
+            Unknown,
+            [JsonStringEnumMemberName("darkgreen")]
+            DarkGreen,
+        }
+        """;
+
+    private const string StreetKindBinder = """
+        using System.Threading.Tasks;
+        using Microsoft.AspNetCore.Mvc.ModelBinding;
+
+        namespace Test;
+
+        public sealed class StreetKindBinder : IModelBinder
+        {
+            public Task BindModelAsync(ModelBindingContext bindingContext) => Task.CompletedTask;
+        }
+        """;
+
+    private static string Field(string route, string verb = "Get") =>
+        verb == "Post" ? "Create"
+        : route.Contains('{') ? "Get"
+        : "List";
+
+    private static string MinimalHandler(
+        string parameters,
+        string route = "/api/streets",
+        string verb = "Get"
+    ) =>
         $$"""
             using System.Collections.Generic;
             using Microsoft.AspNetCore.Builder;
@@ -85,8 +121,11 @@ public sealed class EnumParameterBindingCheckTests
             {
                 public static void Map(IEndpointRouteBuilder app)
                 {
-                    app.MapGet("{{route}}", ({{parameters}}) =>
-                        StreetsContract.{{Field(route)}}.Success(new StreetDto("1")).ToResult());
+                    app.Map{{verb}}("{{route}}", ({{parameters}}) =>
+                        StreetsContract.{{Field(
+                route,
+                verb
+            )}}.Success(new StreetDto("1")).ToResult());
                 }
             }
             """;
@@ -224,24 +263,105 @@ public sealed class EnumParameterBindingCheckTests
     public void Mvc_Custom_Model_Binder_Is_Not_Reported()
     {
         // An explicit [ModelBinder] replaces MVC's enum binder; parsing is the binder's job.
-        const string binder = """
-            using System.Threading.Tasks;
-            using Microsoft.AspNetCore.Mvc.ModelBinding;
-
-            namespace Test;
-
-            public sealed class StreetKindBinder : IModelBinder
-            {
-                public Task BindModelAsync(ModelBindingContext bindingContext) => Task.CompletedTask;
-            }
-            """;
-
         var warnings = RunCheck(
             Contract,
             StreetKind(Snake),
-            binder,
+            StreetKindBinder,
             MvcHandler("[ModelBinder(typeof(StreetKindBinder))] StreetKind kind")
         );
+
+        AssertNotReported(warnings);
+    }
+
+    [Fact]
+    public void Minimal_Api_Custom_Model_Binder_Is_Still_Reported()
+    {
+        // Minimal APIs ignore model binders and still call Enum.TryParse.
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Camel),
+            StreetKindBinder,
+            MinimalHandler("[ModelBinder(typeof(StreetKindBinder))] StreetKind kind")
+        );
+
+        Assert.Contains("minimal API parameter 'kind'", AssertReported(warnings).Message);
+    }
+
+    [Fact]
+    public void Minimal_Api_Header_Enum_Is_Reported()
+    {
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Camel),
+            MinimalHandler("[FromHeader] StreetKind kind")
+        );
+
+        Assert.Equal("unknown", AssertReported(warnings).Expected);
+    }
+
+    [Fact]
+    public void Minimal_Api_Form_Enum_Is_Reported()
+    {
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Camel),
+            MinimalHandler("[FromForm] StreetKind kind", verb: "Post")
+        );
+
+        var warning = AssertReported(warnings);
+        Assert.Equal("Create", warning.FieldName);
+        Assert.Equal("unknown", warning.Expected);
+    }
+
+    [Fact]
+    public void Mvc_Rename_That_Only_Changes_Case_Is_Not_Reported()
+    {
+        var warnings = RunCheck(Contract, CaseOnlyRenamedColour, MvcHandler("StreetKind kind"));
+
+        AssertNotReported(warnings);
+    }
+
+    [Fact]
+    public void Minimal_Api_Rename_That_Only_Changes_Case_Is_Reported()
+    {
+        var warnings = RunCheck(Contract, CaseOnlyRenamedColour, MinimalHandler("StreetKind kind"));
+
+        var warning = AssertReported(warnings);
+        Assert.Equal("darkgreen", warning.Expected);
+        Assert.Equal("DarkGreen", warning.Actual);
+    }
+
+    [Fact]
+    public void Enum_With_An_Unsupported_Converter_Does_Not_Abort_The_Check()
+    {
+        // Generation never walked this enum, so its converter is not --check's to refuse.
+        const string custom = """
+            using System;
+            using System.Text.Json;
+            using System.Text.Json.Serialization;
+
+            namespace Test;
+
+            [JsonConverter(typeof(StreetKindConverter))]
+            public enum StreetKind { Unknown, RestrictedByway }
+
+            public sealed class StreetKindConverter : JsonConverter<StreetKind>
+            {
+                public override StreetKind Read(
+                    ref Utf8JsonReader reader,
+                    Type typeToConvert,
+                    JsonSerializerOptions options
+                ) => StreetKind.Unknown;
+
+                public override void Write(
+                    Utf8JsonWriter writer,
+                    StreetKind value,
+                    JsonSerializerOptions options
+                ) => writer.WriteStringValue(value.ToString());
+            }
+            """;
+
+        var warnings = RunCheck(Contract, custom, MinimalHandler("StreetKind kind"));
 
         AssertNotReported(warnings);
     }
@@ -298,6 +418,53 @@ public sealed class EnumParameterBindingCheckTests
         var warnings = RunCheck(Contract, StreetKind(Camel), MinimalHandler("StreetKind[] kinds"));
 
         Assert.Contains("'kinds'", AssertReported(warnings).Message);
+    }
+
+    [Fact]
+    public void Minimal_Api_Post_Unattributed_Enum_Array_Is_Not_Reported()
+    {
+        // A verb that carries a body leaves inferred bodies on: the array is a JSON body.
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Camel),
+            MinimalHandler("StreetKind[] kinds", verb: "Post")
+        );
+
+        AssertNotReported(warnings, "Create");
+    }
+
+    [Fact]
+    public void Minimal_Api_Post_FromQuery_Enum_Array_Is_Reported()
+    {
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Camel),
+            MinimalHandler("[FromQuery] StreetKind[] kinds", verb: "Post")
+        );
+
+        Assert.Equal("Create", AssertReported(warnings).FieldName);
+    }
+
+    [Fact]
+    public void Minimal_Api_Unattributed_Enum_List_Is_Not_Reported()
+    {
+        // Only a T[] is inferred from the query; a List<T> is inferred as a body on any verb.
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Camel),
+            MinimalHandler("List<StreetKind> kinds")
+        );
+
+        AssertNotReported(warnings);
+    }
+
+    [Fact]
+    public void Mvc_Unattributed_Enum_Array_Is_Not_Reported()
+    {
+        // [ApiController] treats a collection as complex and infers [FromBody].
+        var warnings = RunCheck(Contract, StreetKind(Snake), MvcHandler("StreetKind[] kinds"));
+
+        AssertNotReported(warnings);
     }
 
     [Fact]
@@ -361,6 +528,33 @@ public sealed class EnumParameterBindingCheckTests
         );
 
         Assert.Contains("'request.Kind'", AssertReported(warnings).Message);
+    }
+
+    [Fact]
+    public void Minimal_Api_Get_AsParameters_Enum_Array_Member_Is_Reported()
+    {
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Camel),
+            StreetRequest("StreetKind[] Kinds"),
+            MinimalHandler("[AsParameters] StreetRequest request")
+        );
+
+        Assert.Contains("'request.Kinds'", AssertReported(warnings).Message);
+    }
+
+    [Fact]
+    public void Minimal_Api_Post_AsParameters_Enum_Array_Member_Is_Not_Reported()
+    {
+        // [AsParameters] members are inferred like parameters: on POST the array is a body.
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Camel),
+            StreetRequest("StreetKind[] Kinds"),
+            MinimalHandler("[AsParameters] StreetRequest request", verb: "Post")
+        );
+
+        AssertNotReported(warnings, "Create");
     }
 
     [Fact]
@@ -512,14 +706,42 @@ public sealed class EnumParameterBindingCheckTests
     }
 
     // ---------------------------------------------------------------
-    // RIV1110 — generation, [RivetEndpoint] MVC actions
+    // RIV1110 — generation, annotated endpoints: MVC actions and static
+    // minimal-API handlers
     // ---------------------------------------------------------------
+
+    private enum Annotation
+    {
+        RivetEndpoint,
+        RivetClient,
+        StaticRivetEndpoint,
+    }
 
     private static string AnnotatedAction(
         string converter,
-        string parameter = "[FromQuery] StreetKind kind"
-    ) =>
-        $$"""
+        string parameter = "[FromQuery] StreetKind kind",
+        Annotation annotation = Annotation.RivetEndpoint
+    )
+    {
+        var (owner, endpointAttribute, modifier) = annotation switch
+        {
+            Annotation.RivetClient => (
+                "[RivetClient]\n[Route(\"api/streets\")]\npublic sealed class StreetsController : ControllerBase",
+                "",
+                ""
+            ),
+            Annotation.StaticRivetEndpoint => (
+                "[Route(\"api/streets\")]\npublic static class StreetsController",
+                "[RivetEndpoint]",
+                "static "
+            ),
+            _ => (
+                "[Route(\"api/streets\")]\npublic sealed class StreetsController : ControllerBase",
+                "[RivetEndpoint]",
+                ""
+            ),
+        };
+        return $$"""
             using System;
             using System.Text.Json.Serialization;
             using Microsoft.AspNetCore.Mvc;
@@ -541,16 +763,16 @@ public sealed class EnumParameterBindingCheckTests
 
             public sealed record StreetRequest(StreetKind Kind, string? Name);
 
-            [Route("api/streets")]
-            public sealed class StreetsController : ControllerBase
+            {{owner}}
             {
-                [RivetEndpoint]
+                {{endpointAttribute}}
                 [HttpGet]
                 [ProducesResponseType(typeof(StreetDto), 200)]
-                public IActionResult List({{parameter}})
+                public {{modifier}}IActionResult List({{parameter}})
                     => throw new NotImplementedException();
             }
             """;
+    }
 
     private static void WalkEndpoints(string source)
     {
@@ -596,5 +818,31 @@ public sealed class EnumParameterBindingCheckTests
     public void Annotated_Action_With_Camel_Case_Enum_In_FromQuery_Record_Generates()
     {
         WalkEndpoints(AnnotatedAction(Camel, "[FromQuery] StreetRequest request"));
+    }
+
+    [Fact]
+    public void Client_Action_With_Snake_Case_Enum_Query_Fails_Generation()
+    {
+        var exception = Assert.Throws<RivetUserException>(() =>
+            WalkEndpoints(AnnotatedAction(Snake, annotation: Annotation.RivetClient))
+        );
+
+        Assert.StartsWith($"error {Diagnostics.UnbindableEnumParameter}:", exception.Message);
+        Assert.Contains("MVC parameter 'kind'", exception.Message);
+        Assert.Contains("'restricted_byway'", exception.Message);
+    }
+
+    [Fact]
+    public void Static_Endpoint_With_Camel_Case_Enum_Query_Fails_Generation()
+    {
+        // A static [RivetEndpoint] is a minimal-API handler: Enum.TryParse matches case too.
+        var exception = Assert.Throws<RivetUserException>(() =>
+            WalkEndpoints(AnnotatedAction(Camel, annotation: Annotation.StaticRivetEndpoint))
+        );
+
+        Assert.StartsWith($"error {Diagnostics.UnbindableEnumParameter}:", exception.Message);
+        Assert.Contains("minimal API parameter 'kind'", exception.Message);
+        Assert.Contains("Enum.TryParse", exception.Message);
+        Assert.Contains("'unknown'", exception.Message);
     }
 }

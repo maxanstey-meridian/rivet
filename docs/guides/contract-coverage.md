@@ -19,11 +19,13 @@ and a real-host test.
 A `Map*` route can be a string constant or the contract field's own `.Route`, as in
 `app.MapGet(MembersContract.Health.Route, …)`, and `MapGroup` prefixes count either
 way: the contract owns the full path, so a group prefix it doesn't declare is a
-`RouteMismatch`.
+`RouteMismatch`. Anything else (a variable, concatenation, interpolation, or a
+`MapGroup` prefix that isn't a constant) is reported as an unresolved
+`RouteMismatch`, because `--check` won't guess a route.
 
 `--check` reports five kinds of finding on stderr. The first four are warnings; `UnbindableEnumParameter` is an error (`RIV4005`):
 
-| Warning | Meaning |
+| Finding | Meaning |
 |---|---|
 | `MissingImplementation` | No contract response terminal found for the contract field. |
 | `OrphanedBinding` | The contract was bound in a route handler, but no terminal result from that binding is returned. |
@@ -103,7 +105,7 @@ reports it as `MissingImplementation`.
 
 ## Exit code
 
-When `--check` is used, any warning makes the command exit with code `1` — suitable for CI,
+When `--check` is used, any finding makes the command exit with code `1` — suitable for CI,
 both with and without `--output`: coverage runs before emission, so a failed check prints
-the warnings and writes nothing even when an output directory is requested. Combine with
+the findings and writes nothing even when an output directory is requested. Combine with
 `-q`/`--quiet` to suppress generation output in CI logs.

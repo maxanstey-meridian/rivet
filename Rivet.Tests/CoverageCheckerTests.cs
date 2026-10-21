@@ -1909,6 +1909,37 @@ public sealed class CoverageCheckerTests
     }
 
     [Fact]
+    public void Concatenated_Contract_Route_Is_Unresolved()
+    {
+        // Only a bare .Route on a contract field resolves; building on it does not.
+        var implementation = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapGet("/v2" + TasksContract.ListTasks.Route, () =>
+                        TasksContract.ListTasks.Success(new TaskDto("1", "Test")).ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(Contract, implementation);
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListTasks" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        Assert.Contains("unresolved route", warning.Actual);
+        Assert.Contains("contract field's .Route", warning.Actual);
+    }
+
+    [Fact]
     public void Another_Fields_Route_Is_Compared_By_Value()
     {
         var implementation = """

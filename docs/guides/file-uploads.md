@@ -121,21 +121,23 @@ Validation](/guides/runtime-validation).
 
 ## Files written as they go
 
-Some bodies don't exist until you send them: ffmpeg transcoding into the response, a
-zip assembled entry by entry. Hand `.File(...)` a writer instead of content and Rivet
-gives it the response stream once the contract checks have passed:
+Some bodies don't exist until you send them, like ffmpeg transcoding straight into
+the response. Hand `.File(...)` a writer instead of content and Rivet gives it the
+response stream once the contract checks have passed:
 
 ```csharp
 public static readonly FileRouteDefinition<ClipInput> Live = Define
     .File<ClipInput>("/clips/{id}/live")
     .ProducesFile("video/*");
 
-return Live.Bind(input)
-    .File(
-        output => transcoder.RunAsync(input.Id, output, HttpContext.RequestAborted),
-        contentType: "video/mp4"
-    )
-    .ToActionResult();
+[HttpGet("{id}/live")]
+public IActionResult Stream([FromRoute] ClipInput input) =>
+    Live.Bind(input)
+        .File(
+            output => transcoder.RunAsync(input.Id, output, HttpContext.RequestAborted),
+            contentType: "video/mp4"
+        )
+        .ToActionResult();
 ```
 
 The content type, download name, `inline` and `nosniff` rules are the ones every other
@@ -144,6 +146,12 @@ starts for a response Rivet was going to refuse. What you give up is ranges: the
 no `enableRangeProcessing`, because a stream that's still being made can't jump to
 byte 4,000,000. Seeking is your API's business, typically a start offset in the query
 that begins a fresh stream.
+
+Two things catch people out. The writer runs after your handler has returned, so
+anything it needs (a process, a database reader) has to be opened inside the writer,
+not in a `using` in the handler, which has already disposed it by then. And write with
+async APIs: Kestrel refuses synchronous writes to the response, so a library that
+writes synchronously throws partway through the body.
 
 ## Choosing a binary response MIME type
 
@@ -161,8 +169,8 @@ Select the actual representation per response:
 return Image.File(bytes, contentType: "image/jpeg").ToActionResult();
 ```
 
-The selector works with byte arrays, streams, physical paths, and bound file
-routes. It must match a declared binary success representation (case-insensitive,
+The selector works with byte arrays, streams, physical paths, writers, and bound
+file routes. It must match a declared binary success representation (case-insensitive,
 ignoring parameters such as `charset`). It does not negotiate `Accept` or inspect
 file bytes. Omit it only when exactly one concrete representation is declared;
 ambiguous and undeclared selections throw `RivetContractViolationException`.

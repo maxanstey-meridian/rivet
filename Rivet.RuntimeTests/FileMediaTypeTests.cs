@@ -121,6 +121,50 @@ public sealed class FileMediaTypeTests
         );
     }
 
+    // The bound writer overload, run on each bound variant. Two declared types make a
+    // dropped contentType a violation, and the entity tag has to come out as the ETag, so
+    // swapped arguments fail here.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Every_bound_variant_passes_a_writers_selection_and_entity_tag(bool mvc)
+    {
+        BoundRouteDefinitionBase[] bound =
+        [
+            Define
+                .Get<Input, string>("/file/{id}")
+                .ProducesFile("image/png")
+                .ResponseBinaryContent(200, "image/jpeg")
+                .Bind(new Input("1")),
+            Define
+                .Get("/file/{id}")
+                .Accepts<Input>()
+                .ProducesFile("image/png")
+                .ResponseBinaryContent(200, "image/jpeg")
+                .Bind(new Input("1")),
+            Define
+                .File<Input>("/file/{id}")
+                .ProducesFile("image/png")
+                .ResponseBinaryContent(200, "image/jpeg")
+                .Bind(new Input("1")),
+        ];
+
+        foreach (var route in bound)
+        {
+            var context = await ExecuteAsync(
+                route.File(
+                    output => output.WriteAsync(new byte[] { 7 }).AsTask(),
+                    entityTag: "\"v1\"",
+                    contentType: "image/jpeg"
+                ),
+                mvc
+            );
+            Assert.Equal("image/jpeg", context.Response.ContentType);
+            Assert.Equal("\"v1\"", context.Response.Headers.ETag.ToString());
+            Assert.Equal([7], ((MemoryStream)context.Response.Body).ToArray());
+        }
+    }
+
     [Theory]
     [InlineData(false, "*/*", "application/pdf")]
     [InlineData(true, "*/*", "application/pdf")]
@@ -275,6 +319,21 @@ public sealed class FileMediaTypeTests
         );
         var disposition = context.Response.Headers.ContentDisposition.ToString();
         Assert.StartsWith("inline", disposition);
+        Assert.Contains("clip one.mp4", disposition);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_writer_downloads_as_an_attachment_under_its_name(bool mvc)
+    {
+        var route = Define.File("/live").ProducesFile("video/mp4");
+        var context = await ExecuteAsync(
+            route.File(output => Task.CompletedTask, "clip one.mp4"),
+            mvc
+        );
+        var disposition = context.Response.Headers.ContentDisposition.ToString();
+        Assert.StartsWith("attachment", disposition);
         Assert.Contains("clip one.mp4", disposition);
     }
 

@@ -98,7 +98,7 @@ public static class EndpointWalker
         var parameters = ExtractParams(wkt, method, typeWalker, route);
         if (!isContract)
         {
-            RejectUnbindableEnumParameters(wkt, method);
+            RejectUnbindableEnumParameters(wkt, method, httpMethod);
         }
 
         var responses = ExtractAllResponseTypes(wkt, method, typeWalker, normalize: !isContract)
@@ -718,19 +718,26 @@ public static class EndpointWalker
     }
 
     /// <summary>
-    /// RIV1110: an annotated MVC action is the spec's source, so every enum it binds from
+    /// RIV1110: an annotated endpoint is the spec's source, so every enum it binds from
     /// route, query, header or form, directly or as a member of a complex parameter with an
     /// explicit [FromQuery]/[FromRoute]/[FromForm]/[FromHeader] (whose schema advertises the
-    /// member's values), must accept each advertised wire value. MVC's enum
-    /// model binder ignores the JSON converter and matches member names ignoring case.
+    /// member's values), must accept each advertised wire value. An instance method is an
+    /// MVC action, whose enum model binder matches member names ignoring case; a static
+    /// method is a minimal-API handler (MVC never treats one as an action), which calls
+    /// Enum.TryParse and matches them exactly. Neither honours the JSON converter.
     /// Contract-first endpoints are checked by --check (RIV4005) instead, where the
     /// implementing handler and its host are visible.
     /// </summary>
-    private static void RejectUnbindableEnumParameters(WellKnownTypes wkt, IMethodSymbol method)
+    private static void RejectUnbindableEnumParameters(
+        WellKnownTypes wkt,
+        IMethodSymbol method,
+        string httpMethod
+    )
     {
+        var host = method.IsStatic ? ParameterBindingHost.MinimalApi : ParameterBindingHost.Mvc;
         var (path, unbindable) = method
             .Parameters.SelectMany(param =>
-                EnumParameterBinding.FindUnbindableValues(wkt, param, ParameterBindingHost.Mvc)
+                EnumParameterBinding.FindUnbindableValues(wkt, param, host, [httpMethod])
             )
             .FirstOrDefault();
         if (unbindable is not null)
@@ -738,7 +745,7 @@ public static class EndpointWalker
             throw new RivetUserException(
                 $"error {Diagnostics.UnbindableEnumParameter}: endpoint "
                     + $"'{MethodOwner(method)}.{method.Name}': "
-                    + EnumParameterBinding.Explain(ParameterBindingHost.Mvc, path, unbindable)
+                    + EnumParameterBinding.Explain(host, path, unbindable)
             );
         }
     }

@@ -32,12 +32,13 @@ internal sealed record UnbindableEnumValue(
 internal static class EnumParameterBinding
 {
     /// <summary>
-    /// True when the parameter does not reach the host's enum parser: a JSON body
-    /// ([FromBody], read by System.Text.Json, which honours the converter), a service, or
-    /// an explicit custom [ModelBinder] on the parameter or its enum.
+    /// The verbs that normally carry no body. A minimal-API endpoint mapping only these
+    /// turns off inferred bodies (RequestDelegateFactory's DisableInferredFromBody).
     /// </summary>
-    public static bool IsExempt(WellKnownTypes wkt, IParameterSymbol parameter) =>
-        IsExempt(wkt, parameter.GetAttributes(), parameter.Type);
+    private static readonly HashSet<string> BodylessMethods = new(
+        ["GET", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"],
+        StringComparer.OrdinalIgnoreCase
+    );
 
     /// <summary>
     /// Every advertised enum wire value the host would refuse for a handler parameter, with
@@ -46,14 +47,25 @@ internal static class EnumParameterBinding
     /// member are checked one level deep: a minimal-API [AsParameters] type, and on MVC a
     /// complex type with an explicit [FromQuery], [FromRoute], [FromForm] or [FromHeader].
     /// An unattributed complex MVC parameter is left alone: [ApiController] infers a body.
+    /// <paramref name="httpMethods"/> are the endpoint's verbs, which decide whether a
+    /// minimal API infers an unattributed enum array from the query or the body.
     /// </summary>
     public static IEnumerable<(string Path, UnbindableEnumValue Value)> FindUnbindableValues(
         WellKnownTypes wkt,
         IParameterSymbol parameter,
-        ParameterBindingHost host
+        ParameterBindingHost host,
+        IReadOnlyCollection<string> httpMethods
     )
     {
-        if (IsExempt(wkt, parameter))
+        var arraysFromQuery =
+            host == ParameterBindingHost.MinimalApi
+            && httpMethods.Count > 0
+            && httpMethods.All(BodylessMethods.Contains);
+        var attributes = parameter.GetAttributes();
+        if (
+            IsExempt(wkt, attributes, parameter.Type, host)
+            || IsInferredBody(wkt, attributes, parameter.Type, arraysFromQuery)
+        )
         {
             yield break;
         }
@@ -72,10 +84,16 @@ internal static class EnumParameterBinding
             yield break;
         }
 
-        foreach (var (name, type, attributes) in BoundMembers(complex))
+        // An explicitly sourced MVC complex type hands its source to every member, so only
+        // [AsParameters] members are inferred one by one.
+        foreach (var (name, type, memberAttributes) in BoundMembers(complex))
         {
             if (
-                !IsExempt(wkt, attributes, type)
+                !IsExempt(wkt, memberAttributes, type, host)
+                && !(
+                    host == ParameterBindingHost.MinimalApi
+                    && IsInferredBody(wkt, memberAttributes, type, arraysFromQuery)
+                )
                 && FindUnbindableValue(wkt, type, host) is { } value
             )
             {
@@ -84,18 +102,47 @@ internal static class EnumParameterBinding
         }
     }
 
+    /// <summary>
+    /// True when the parameter does not reach the host's enum parser: a JSON body
+    /// ([FromBody], read by System.Text.Json, which honours the converter), a service, or
+    /// on MVC an explicit custom [ModelBinder] on the parameter or its enum. Minimal APIs
+    /// ignore model binders and still call Enum.TryParse.
+    /// </summary>
     private static bool IsExempt(
         WellKnownTypes wkt,
         IEnumerable<AttributeData> attributes,
-        ITypeSymbol type
+        ITypeSymbol type,
+        ParameterBindingHost host
     ) =>
         attributes.Any(attribute =>
             attribute.Is(wkt.FromBody)
             || attribute.Is(wkt.FromServices)
-            || IsModelBinder(wkt, attribute)
+            || host == ParameterBindingHost.Mvc && IsModelBinder(wkt, attribute)
         )
-        || BoundEnum(type) is { } enumType
+        || host == ParameterBindingHost.Mvc
+            && BoundEnum(type) is { } enumType
             && enumType.GetAttributes().Any(attribute => IsModelBinder(wkt, attribute));
+
+    /// <summary>
+    /// True when an unattributed enum collection is inferred as a JSON body. A minimal API
+    /// infers a <c>T[]</c> from the query only when <paramref name="arraysFromQuery"/> (every
+    /// verb carries no body), and any other collection, <c>List&lt;T&gt;</c> included, as a
+    /// body. MVC's [ApiController] treats every collection as complex and infers [FromBody].
+    /// An explicit [FromQuery], [FromRoute], [FromHeader] or [FromForm] still binds it.
+    /// </summary>
+    private static bool IsInferredBody(
+        WellKnownTypes wkt,
+        IEnumerable<AttributeData> attributes,
+        ITypeSymbol type,
+        bool arraysFromQuery
+    ) =>
+        BoundEnum(type) is not null
+        && (
+            type is IArrayTypeSymbol && !arraysFromQuery
+            || type is INamedTypeSymbol { TypeArguments: [var element] } collection
+                && IsEnumerableOf(collection, element)
+        )
+        && !attributes.Any(attribute => IsExplicitSource(wkt, attribute));
 
     private static bool BindsMemberByMember(
         WellKnownTypes wkt,
@@ -106,14 +153,13 @@ internal static class EnumParameterBinding
         host == ParameterBindingHost.MinimalApi
             ? parameter.HasAttribute(wkt.AsParameters)
             : type is { TypeKind: TypeKind.Class or TypeKind.Struct, SpecialType: SpecialType.None }
-                && parameter
-                    .GetAttributes()
-                    .Any(attribute =>
-                        attribute.Is(wkt.FromQuery)
-                        || attribute.Is(wkt.FromRoute)
-                        || attribute.Is(wkt.FromForm)
-                        || attribute.Is(wkt.FromHeader)
-                    );
+                && parameter.GetAttributes().Any(attribute => IsExplicitSource(wkt, attribute));
+
+    private static bool IsExplicitSource(WellKnownTypes wkt, AttributeData attribute) =>
+        attribute.Is(wkt.FromQuery)
+        || attribute.Is(wkt.FromRoute)
+        || attribute.Is(wkt.FromForm)
+        || attribute.Is(wkt.FromHeader);
 
     /// <summary>
     /// The members ASP.NET binds on a complex type: the parameters of its single public
@@ -185,9 +231,9 @@ internal static class EnumParameterBinding
     /// The first wire value, in declaration order, that the host refuses for the enum a
     /// non-body parameter of <paramref name="parameterType"/> binds (the enum itself,
     /// <c>T?</c>, or a collection of either); null when every value binds or the type
-    /// binds no string-wire enum.
+    /// binds no string-wire enum Rivet can represent.
     /// </summary>
-    public static UnbindableEnumValue? FindUnbindableValue(
+    private static UnbindableEnumValue? FindUnbindableValue(
         WellKnownTypes wkt,
         ITypeSymbol parameterType,
         ParameterBindingHost host

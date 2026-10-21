@@ -17,11 +17,11 @@ Verified limits of the current tool, so you don't discover them in production.
   response headers happen through ordinary ASP.NET APIs before returning a
   matching bodyless terminal. Rivet preserves an already-started matching
   response and rejects status conflicts; native framework results never pass
-  through the contract. A body that's produced as it's sent (a live transcode) is
-  still a Rivet file: `.File(writer, ...)` takes a `Func<Stream, Task>`, checked
-  before the writer runs. It can't serve ranges, and once the writer has sent
-  bytes the status is on the wire: an exception after that can only cut the
-  response short.
+  through the contract.
+- A body that's produced as it's sent (a live transcode) is still a Rivet file:
+  `.File(writer, ...)` takes a `Func<Stream, Task>`, checked before the writer
+  runs. It can't serve ranges, and once the writer has sent bytes the status is on
+  the wire: an exception after that can only cut the response short.
 
 ## Generation
 
@@ -65,15 +65,15 @@ For a member called `RestrictedByway2A`:
 | `RestrictedByway2A`, the member name | binds | binds |
 | `restrictedByway2A` (camelCase), `restrictedbyway2a` (lowercase) | 400 | binds |
 | `restricted_byway2_a` (snake), `restricted-byway2-a` (kebab) | 400 | 400 |
-| `0`, `+1`, ` 1` | binds | binds |
+| `0`, `+1`, ` 1` (a header loses the space before the host sees it) | binds | binds |
 | `99`, which isn't a member | binds, as an undefined value | 400 |
-| `1,2` | 400 | binds as `1 \| 2`, `[Flags]` or not |
+| `1,2` | 400 | binds as `1 \| 2` when that's a member, or always on a `[Flags]` enum; otherwise 400 |
 
 It's the same on .NET 8, 9 and 10, and the same for route, query, header and form.
-`Rivet.RuntimeTests` pins this for route and query values against real Kestrel
-hosts, so a framework release that changes it fails the tests.
+`Rivet.RuntimeTests` pins all four against real Kestrel hosts, so a framework release
+that changes it fails the tests.
 
-Read down the second row and the trouble is plain: a camelCase or lowercase converter
+Read across the second row and the trouble is plain: a camelCase or lowercase converter
 works on an MVC action and is a 400 on a minimal API. Snake and kebab are a 400 on
 both, and so is a `[JsonStringEnumMemberName]` that changes more than the casing.
 Rather than publish a spec whose own values get refused, Rivet refuses the
@@ -83,7 +83,8 @@ combination:
   route, query, header or form, and not every wire value will bind on that host.
   Minimal APIs need each value to equal its member name exactly; MVC needs it to
   equal ignoring case. Azure Functions handlers aren't checked.
-- **`RIV1110`** (generation): the same rule for a `[RivetEndpoint]` MVC action.
+- **`RIV1110`** (generation): the same rule for a `[RivetEndpoint]` or `[RivetClient]`
+  action. A static `[RivetEndpoint]` is a minimal-API handler and gets the exact rule.
 
 A contract on its own gets no check at generation, because generation can't see
 how the handler binds. `--check` is where a contract-first API finds out.
@@ -95,7 +96,7 @@ The fixes, simplest first:
    the member names, which both hosts accept.
 3. **Bind a `string` and parse it yourself.** The handler owns the parsing, so it can
    honour exactly the names the spec lists. A contract still advertises the enum;
-   on a `[RivetEndpoint]` action the parameter's type is the spec, so it becomes a
+   on an annotated action the parameter's type is the spec, so it becomes a
    plain string.
 
 What the table also shows is that the hosts accept more than the spec lists:

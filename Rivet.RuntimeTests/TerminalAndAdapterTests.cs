@@ -591,6 +591,61 @@ public sealed class TerminalAndAdapterTests
         Assert.Contains("Mon, 13 Jul 2026 10:30:00 GMT", response.LastModified);
     }
 
+    // On MVC a writer runs through the minimal-API result, not ToMvc, so its validators
+    // need their own pin.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Writer_validators_are_emitted_by_the_host(bool mvc)
+    {
+        var lastModified = new DateTimeOffset(2026, 7, 13, 10, 30, 0, TimeSpan.Zero);
+        var result = Define
+            .File("/file")
+            .File(
+                output => output.WriteAsync(new byte[] { 1, 2, 3 }).AsTask(),
+                lastModified: lastModified,
+                entityTag: "\"v1\""
+            );
+
+        var response = await ExecuteAsync(result, mvc);
+
+        Assert.Equal("\"v1\"", response.ETag);
+        Assert.Contains("Mon, 13 Jul 2026 10:30:00 GMT", response.LastModified);
+        Assert.Equal([1, 2, 3], response.Body);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_matching_if_none_match_answers_304_without_running_the_writer(bool mvc)
+    {
+        var called = false;
+        var result = Define
+            .File("/file")
+            .File(
+                output =>
+                {
+                    called = true;
+                    return output.WriteAsync(new byte[] { 1 }).AsTask();
+                },
+                entityTag: "\"v1\""
+            );
+
+        var response = await ExecuteAsync(
+            result,
+            mvc,
+            context =>
+            {
+                context.Request.Method = HttpMethods.Get;
+                context.Request.Headers.IfNoneMatch = "\"v1\"";
+            }
+        );
+
+        Assert.Equal(StatusCodes.Status304NotModified, response.StatusCode);
+        Assert.Empty(response.Body);
+        Assert.False(called);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

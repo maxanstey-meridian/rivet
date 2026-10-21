@@ -1541,16 +1541,17 @@ public sealed class TypeWalker
 
     /// <summary>
     /// The string wire value of each member of a string-wire enum, in declaration order,
-    /// derived exactly as the emitted string union is; null for a numeric-wire enum.
-    /// Throws RIV1108 for a converter Rivet cannot represent, as generation does.
+    /// derived exactly as the emitted string union is; null for a numeric-wire enum or a
+    /// converter Rivet cannot represent. Generation refuses that converter (RIV1108) when it
+    /// walks the enum; a caller inspecting enums generation may never walk must not abort.
     /// </summary>
     internal static IReadOnlyList<(IFieldSymbol Member, string WireValue)>? StringEnumWireValues(
         WellKnownTypes types,
         INamedTypeSymbol enumType
     )
     {
-        var (isString, policy) = GetEnumWireShape(types, enumType);
-        return isString
+        var (isString, policy, unsupported) = ReadEnumWireShape(types, enumType);
+        return isString && unsupported is null
             ? enumType
                 .GetMembers()
                 .OfType<IFieldSymbol>()
@@ -1583,19 +1584,38 @@ public sealed class TypeWalker
     /// declared fact — the built-in JsonStringEnumConverter keeps CLR names
     /// verbatim (no policy), and each Rivet*EnumConverter family member carries
     /// its casing in the class name (attribute args cannot hold a naming
-    /// policy). Null when the enum is numeric-wire.
+    /// policy). Null when the enum is numeric-wire. Throws RIV1108 for a converter
+    /// Rivet cannot represent.
     /// </summary>
     private static (bool IsString, RivetNamingPolicy? Policy) GetEnumWireShape(
         WellKnownTypes types,
         INamedTypeSymbol type
     )
     {
+        var (isString, policy, unsupported) = ReadEnumWireShape(types, type);
+        return unsupported is null
+            ? (isString, policy)
+            : throw new RivetUserException(
+                $"error {Diagnostics.UnsupportedEnumConverter}: {unsupported}"
+            );
+    }
+
+    /// <summary>
+    /// <see cref="GetEnumWireShape"/> without the throw: <c>Unsupported</c> carries why the
+    /// converter cannot be represented, or is null when it can.
+    /// </summary>
+    private static (
+        bool IsString,
+        RivetNamingPolicy? Policy,
+        string? Unsupported
+    ) ReadEnumWireShape(WellKnownTypes types, INamedTypeSymbol type)
+    {
         var converters = type.GetAttributes()
             .Where(a => IsJsonConverterAttribute(types, a.AttributeClass))
             .ToArray();
         if (converters.Length == 0)
         {
-            return (false, null);
+            return (false, null, null);
         }
         if (
             converters.Length != 1
@@ -1603,8 +1623,10 @@ public sealed class TypeWalker
             || converters[0].ConstructorArguments is not [{ Value: INamedTypeSymbol converterType }]
         )
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.UnsupportedEnumConverter}: enum '{type.Name}' must use one explicit [JsonConverter(typeof(...))] declaration; custom converter attributes are unsupported."
+            return (
+                false,
+                null,
+                $"enum '{type.Name}' must use one explicit [JsonConverter(typeof(...))] declaration; custom converter attributes are unsupported."
             );
         }
 
@@ -1616,20 +1638,20 @@ public sealed class TypeWalker
             )
         )
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.UnsupportedEnumConverter}: converter for enum '{type.Name}' must target that enum."
-            );
+            return (false, null, $"converter for enum '{type.Name}' must target that enum.");
         }
         return (converterType.ContainingNamespace.ToDisplayString(), converterType.Name) switch
         {
-            ("System.Text.Json.Serialization", "JsonStringEnumConverter") => (true, null),
-            ("System.Text.Json.Serialization", "JsonNumberEnumConverter") => (false, null),
-            ("Rivet", "RivetLowerCaseEnumConverter") => (true, RivetNamingPolicy.LowerCase),
-            ("Rivet", "RivetCamelCaseEnumConverter") => (true, RivetNamingPolicy.CamelCase),
-            ("Rivet", "RivetSnakeCaseEnumConverter") => (true, RivetNamingPolicy.SnakeCase),
-            ("Rivet", "RivetKebabCaseEnumConverter") => (true, RivetNamingPolicy.KebabCase),
-            _ => throw new RivetUserException(
-                $"error {Diagnostics.UnsupportedEnumConverter}: enum '{type.Name}' uses unsupported converter '{converterType.ToDisplayString()}'. Use a built-in enum converter or a Rivet enum policy converter."
+            ("System.Text.Json.Serialization", "JsonStringEnumConverter") => (true, null, null),
+            ("System.Text.Json.Serialization", "JsonNumberEnumConverter") => (false, null, null),
+            ("Rivet", "RivetLowerCaseEnumConverter") => (true, RivetNamingPolicy.LowerCase, null),
+            ("Rivet", "RivetCamelCaseEnumConverter") => (true, RivetNamingPolicy.CamelCase, null),
+            ("Rivet", "RivetSnakeCaseEnumConverter") => (true, RivetNamingPolicy.SnakeCase, null),
+            ("Rivet", "RivetKebabCaseEnumConverter") => (true, RivetNamingPolicy.KebabCase, null),
+            _ => (
+                false,
+                null,
+                $"enum '{type.Name}' uses unsupported converter '{converterType.ToDisplayString()}'. Use a built-in enum converter or a Rivet enum policy converter."
             ),
         };
     }

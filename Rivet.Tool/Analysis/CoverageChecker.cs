@@ -332,12 +332,13 @@ public static class CoverageChecker
             foreach (var implementation in fieldImplementations)
             {
                 if (
-                    implementation.Context is { Handler: { } handler, BindingHost: { } host }
+                    implementation.Context
+                        is { Handler: { } handler, BindingHost: { } host, HttpMethods: var methods }
                     && checkedHandlers.Add(handler)
                 )
                 {
                     warnings.AddRange(
-                        UnbindableEnumParameters(wkt, field, endpoint, handler, host)
+                        UnbindableEnumParameters(wkt, field, endpoint, handler, host, methods)
                     );
                 }
 
@@ -410,16 +411,18 @@ public static class CoverageChecker
     /// RIV4005: each handler parameter the host binds from route, query, header or form
     /// (or member of an [AsParameters] / explicitly sourced complex parameter) whose enum
     /// advertises a wire value the host's enum parser refuses. Minimal APIs and MVC both
-    /// bind an unattributed enum from route or query, so only [FromBody], [FromServices]
-    /// and an explicit [ModelBinder] exempt a parameter. A handler binding a string and
-    /// parsing it itself is never reported: it binds no enum.
+    /// bind an unattributed enum from route or query, so only [FromBody], [FromServices],
+    /// an MVC [ModelBinder] and an unattributed collection inferred as a body exempt a
+    /// parameter. A handler binding a string and parsing it itself is never reported: it
+    /// binds no enum.
     /// </summary>
     private static IEnumerable<CoverageWarning> UnbindableEnumParameters(
         WellKnownTypes wkt,
         IFieldSymbol field,
         TsEndpointDefinition endpoint,
         IMethodSymbol handler,
-        ParameterBindingHost host
+        ParameterBindingHost host,
+        IReadOnlyList<string> httpMethods
     )
     {
         foreach (var parameter in handler.Parameters)
@@ -428,7 +431,8 @@ public static class CoverageChecker
                 var (path, unbindable) in EnumParameterBinding.FindUnbindableValues(
                     wkt,
                     parameter,
-                    host
+                    host,
+                    httpMethods
                 )
             )
             {
@@ -608,7 +612,8 @@ public static class CoverageChecker
         {
             // Interpolation, concatenation, method calls and a .Route on anything but
             // a contract field stay unresolved rather than guessing a route.
-            routeError = "unresolved route: route template is not a compile-time constant";
+            routeError =
+                "unresolved route: the route is neither a compile-time constant nor a contract field's .Route";
         }
         else
         {

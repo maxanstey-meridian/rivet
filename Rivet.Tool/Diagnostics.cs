@@ -184,7 +184,7 @@ public static class Diagnostics
         [ConflictingResponseDeclaration] =
             "An endpoint declares the same response status twice with different bodies ([ProducesResponseType]/.Returns vs a mapped Results<> branch) — one status carries exactly one shape; generation fails instead of silently letting the attribute win.",
         [UnbindableEnumParameter] =
-            "A [RivetEndpoint]/[RivetClient] MVC action binds a string-wire enum from route, query, header or form, and an advertised wire value differs from its member name by more than case — MVC's enum binder ignores the JSON converter and would refuse it; generation fails.",
+            "A [RivetEndpoint]/[RivetClient] endpoint binds a string-wire enum from route, query, header or form, and the host's enum parser would refuse an advertised wire value — it ignores the JSON converter. An MVC action (instance method) refuses a value differing from its member name by more than case; a minimal-API handler (static method) refuses any difference; generation fails.",
         [TaggedUnionComponentCollision] =
             "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
         [UndefinedSecurityScheme] =

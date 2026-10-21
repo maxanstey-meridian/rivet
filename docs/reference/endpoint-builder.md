@@ -61,8 +61,9 @@ All return the definition for chaining.
   Same contract checks, run before the writer starts, and the same headers. There's
   no `enableRangeProcessing`, because bytes written as they go have no ranges to
   serve, so a player that wants to seek asks for a new stream (say, a start time in
-  the query) rather than a `Range`. For cancellation, close over
-  `HttpContext.RequestAborted`:
+  the query) rather than a `Range`. The writer runs after the handler returns, so
+  open what it needs inside it, and write asynchronously: Kestrel refuses synchronous
+  writes. For cancellation, close over `HttpContext.RequestAborted`:
 
   ```csharp
   app.MapGet(MediaContract.Live.Route, (Guid id, HttpContext http) =>
