@@ -32,39 +32,69 @@ internal sealed record UnbindableEnumValue(
 internal static class EnumParameterBinding
 {
     /// <summary>
-    /// The verbs that normally carry no body. A minimal-API endpoint mapping only these
-    /// turns off inferred bodies (RequestDelegateFactory's DisableInferredFromBody).
+    /// The verbs that normally carry no body. A minimal-API endpoint mapping any of these
+    /// turns off inferred bodies (RouteEndpointDataSource.ShouldDisableInferredBodyParameters),
+    /// compared ordinally on the uppercased verbs.
     /// </summary>
     private static readonly HashSet<string> BodylessMethods = new(
         ["GET", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"],
-        StringComparer.OrdinalIgnoreCase
+        StringComparer.Ordinal
     );
+
+    /// <summary>
+    /// True when a minimal API mapped to <paramref name="httpMethods"/> infers a JSON body
+    /// for an unattributed array: none of its verbs is body-less. An endpoint with no known
+    /// verbs accepts any request, so it infers a body too.
+    /// </summary>
+    public static bool MinimalApiInfersBody(IEnumerable<string> httpMethods) =>
+        !httpMethods.Any(BodylessMethods.Contains);
+
+    /// <summary>
+    /// True when MVC infers [FromBody] for an action's unattributed complex parameters and
+    /// collections: the controller is an API controller, through an IApiBehaviorMetadata
+    /// attribute such as [ApiController] on the class, a base class (the attribute is
+    /// inherited) or the assembly. Without one MVC binds them from route, query and form.
+    /// </summary>
+    public static bool MvcInfersBody(WellKnownTypes wkt, INamedTypeSymbol controller)
+    {
+        for (var type = controller; type is not null; type = type.BaseType)
+        {
+            if (type.GetAttributes().Any(attribute => IsApiBehavior(wkt, attribute)))
+            {
+                return true;
+            }
+        }
+
+        return controller
+            .ContainingAssembly.GetAttributes()
+            .Any(attribute => IsApiBehavior(wkt, attribute));
+    }
+
+    private static bool IsApiBehavior(WellKnownTypes wkt, AttributeData attribute) =>
+        wkt.ApiBehaviorMetadata is { } apiBehavior
+        && attribute.AttributeClass is { } attributeClass
+        && attributeClass.AllInterfaces.Contains(apiBehavior, SymbolEqualityComparer.Default);
 
     /// <summary>
     /// Every advertised enum wire value the host would refuse for a handler parameter, with
     /// the path naming it (<c>kind</c>, or <c>request.Kind</c> for a member). Besides a
     /// directly bound enum, the members of a complex parameter the host binds member by
     /// member are checked one level deep: a minimal-API [AsParameters] type, and on MVC a
-    /// complex type with an explicit [FromQuery], [FromRoute], [FromForm] or [FromHeader].
-    /// An unattributed complex MVC parameter is left alone: [ApiController] infers a body.
-    /// <paramref name="httpMethods"/> are the endpoint's verbs, which decide whether a
-    /// minimal API infers an unattributed enum array from the query or the body.
+    /// complex type with an explicit [FromQuery], [FromRoute], [FromForm] or [FromHeader],
+    /// or an unattributed one when MVC infers no body. <paramref name="infersBody"/> is
+    /// <see cref="MinimalApiInfersBody"/> or <see cref="MvcInfersBody"/> for the endpoint.
     /// </summary>
     public static IEnumerable<(string Path, UnbindableEnumValue Value)> FindUnbindableValues(
         WellKnownTypes wkt,
         IParameterSymbol parameter,
         ParameterBindingHost host,
-        IReadOnlyCollection<string> httpMethods
+        bool infersBody
     )
     {
-        var arraysFromQuery =
-            host == ParameterBindingHost.MinimalApi
-            && httpMethods.Count > 0
-            && httpMethods.All(BodylessMethods.Contains);
         var attributes = parameter.GetAttributes();
         if (
             IsExempt(wkt, attributes, parameter.Type, host)
-            || IsInferredBody(wkt, attributes, parameter.Type, arraysFromQuery)
+            || IsInferredBody(wkt, attributes, parameter.Type, host, infersBody)
         )
         {
             yield break;
@@ -78,21 +108,22 @@ internal static class EnumParameterBinding
 
         if (
             parameter.Type is not INamedTypeSymbol complex
-            || !BindsMemberByMember(wkt, parameter, complex, host)
+            || !BindsMemberByMember(wkt, parameter, complex, host, infersBody)
         )
         {
             yield break;
         }
 
-        // An explicitly sourced MVC complex type hands its source to every member, so only
-        // [AsParameters] members are inferred one by one.
+        // An MVC complex type binds every member from its own source (the parameter's
+        // explicit one, or the value providers), so only [AsParameters] members are
+        // inferred one by one.
         foreach (var (name, type, memberAttributes) in BoundMembers(complex))
         {
             if (
                 !IsExempt(wkt, memberAttributes, type, host)
                 && !(
                     host == ParameterBindingHost.MinimalApi
-                    && IsInferredBody(wkt, memberAttributes, type, arraysFromQuery)
+                    && IsInferredBody(wkt, memberAttributes, type, host, infersBody)
                 )
                 && FindUnbindableValue(wkt, type, host) is { } value
             )
@@ -124,36 +155,60 @@ internal static class EnumParameterBinding
             && enumType.GetAttributes().Any(attribute => IsModelBinder(wkt, attribute));
 
     /// <summary>
-    /// True when an unattributed enum collection is inferred as a JSON body. A minimal API
-    /// infers a <c>T[]</c> from the query only when <paramref name="arraysFromQuery"/> (every
-    /// verb carries no body), and any other collection, <c>List&lt;T&gt;</c> included, as a
-    /// body. MVC's [ApiController] treats every collection as complex and infers [FromBody].
-    /// An explicit [FromQuery], [FromRoute], [FromHeader] or [FromForm] still binds it.
+    /// True when an unattributed enum collection never reaches the enum parser. A minimal
+    /// API infers a <c>T[]</c> as a JSON body when <paramref name="infersBody"/>, and from the
+    /// query otherwise. Any other collection, <c>List&lt;T&gt;</c> included, it infers as a
+    /// body, and on a body-less verb ASP.NET refuses the endpoint at startup ("Body was
+    /// inferred but the method does not allow inferred body parameters"): either way there
+    /// is nothing to check. MVC treats every collection as complex, inferring [FromBody] only
+    /// under [ApiController] and otherwise binding it from route, query and form. An explicit
+    /// [FromQuery], [FromRoute], [FromHeader] or [FromForm] still binds it.
     /// </summary>
     private static bool IsInferredBody(
         WellKnownTypes wkt,
         IEnumerable<AttributeData> attributes,
         ITypeSymbol type,
-        bool arraysFromQuery
+        ParameterBindingHost host,
+        bool infersBody
     ) =>
         BoundEnum(type) is not null
         && (
-            type is IArrayTypeSymbol && !arraysFromQuery
+            type is IArrayTypeSymbol && infersBody
             || type is INamedTypeSymbol { TypeArguments: [var element] } collection
                 && IsEnumerableOf(collection, element)
+                && (host == ParameterBindingHost.MinimalApi || infersBody)
         )
         && !attributes.Any(attribute => IsExplicitSource(wkt, attribute));
 
+    /// <summary>
+    /// A minimal API binds [AsParameters] member by member. MVC does so for a complex type
+    /// with an explicit source, and for an unattributed one when no [ApiController] infers
+    /// it as a body.
+    /// </summary>
     private static bool BindsMemberByMember(
         WellKnownTypes wkt,
         IParameterSymbol parameter,
         INamedTypeSymbol type,
-        ParameterBindingHost host
+        ParameterBindingHost host,
+        bool infersBody
     ) =>
         host == ParameterBindingHost.MinimalApi
             ? parameter.HasAttribute(wkt.AsParameters)
             : type is { TypeKind: TypeKind.Class or TypeKind.Struct, SpecialType: SpecialType.None }
-                && parameter.GetAttributes().Any(attribute => IsExplicitSource(wkt, attribute));
+                && (
+                    !infersBody
+                    || parameter.GetAttributes().Any(attribute => IsExplicitSource(wkt, attribute))
+                    // [ApiController] doesn't infer a body for a type whose members name
+                    // their own binding source; it binds that type member by member.
+                    || BoundMembers(type)
+                        .Any(member =>
+                            member.Attributes.Any(attribute =>
+                                IsExplicitSource(wkt, attribute)
+                                || attribute.Is(wkt.FromBody)
+                                || attribute.Is(wkt.FromServices)
+                            )
+                        )
+                );
 
     private static bool IsExplicitSource(WellKnownTypes wkt, AttributeData attribute) =>
         attribute.Is(wkt.FromQuery)

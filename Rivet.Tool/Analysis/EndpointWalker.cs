@@ -734,10 +734,18 @@ public static class EndpointWalker
         string httpMethod
     )
     {
-        var host = method.IsStatic ? ParameterBindingHost.MinimalApi : ParameterBindingHost.Mvc;
+        var (host, infersBody) = method.IsStatic
+            ? (
+                ParameterBindingHost.MinimalApi,
+                EnumParameterBinding.MinimalApiInfersBody([httpMethod])
+            )
+            : (
+                ParameterBindingHost.Mvc,
+                EnumParameterBinding.MvcInfersBody(wkt, method.ContainingType)
+            );
         var (path, unbindable) = method
             .Parameters.SelectMany(param =>
-                EnumParameterBinding.FindUnbindableValues(wkt, param, host, [httpMethod])
+                EnumParameterBinding.FindUnbindableValues(wkt, param, host, infersBody)
             )
             .FirstOrDefault();
         if (unbindable is not null)

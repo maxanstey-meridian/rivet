@@ -333,12 +333,16 @@ public static class CoverageChecker
             {
                 if (
                     implementation.Context
-                        is { Handler: { } handler, BindingHost: { } host, HttpMethods: var methods }
+                        is {
+                            Handler: { } handler,
+                            BindingHost: { } host,
+                            InfersBody: var infersBody
+                        }
                     && checkedHandlers.Add(handler)
                 )
                 {
                     warnings.AddRange(
-                        UnbindableEnumParameters(wkt, field, endpoint, handler, host, methods)
+                        UnbindableEnumParameters(wkt, field, endpoint, handler, host, infersBody)
                     );
                 }
 
@@ -412,8 +416,8 @@ public static class CoverageChecker
     /// (or member of an [AsParameters] / explicitly sourced complex parameter) whose enum
     /// advertises a wire value the host's enum parser refuses. Minimal APIs and MVC both
     /// bind an unattributed enum from route or query, so only [FromBody], [FromServices],
-    /// an MVC [ModelBinder] and an unattributed collection inferred as a body exempt a
-    /// parameter. A handler binding a string and parsing it itself is never reported: it
+    /// an MVC [ModelBinder] and an unattributed collection or complex type inferred as a
+    /// body exempt a parameter. A handler binding a string and parsing it itself is never reported: it
     /// binds no enum.
     /// </summary>
     private static IEnumerable<CoverageWarning> UnbindableEnumParameters(
@@ -422,7 +426,7 @@ public static class CoverageChecker
         TsEndpointDefinition endpoint,
         IMethodSymbol handler,
         ParameterBindingHost host,
-        IReadOnlyList<string> httpMethods
+        bool infersBody
     )
     {
         foreach (var parameter in handler.Parameters)
@@ -432,7 +436,7 @@ public static class CoverageChecker
                     wkt,
                     parameter,
                     host,
-                    httpMethods
+                    infersBody
                 )
             )
             {
@@ -507,7 +511,11 @@ public static class CoverageChecker
         IInvocationOperation terminal
     )
     {
-        if (ReturningMethod(terminal, "ToActionResult", adapterType) is not { } method)
+        // MVC never routes a static method; a static handler is a minimal API's.
+        if (
+            ReturningMethod(terminal, "ToActionResult", adapterType) is not { } method
+            || method.IsStatic
+        )
         {
             return EndpointContext.None;
         }
@@ -531,7 +539,12 @@ public static class CoverageChecker
                 RouteError: "unresolved route: the action declares no route template and the controller declares no [Route]"
             )
             : new EndpointContext(true, [httpMethod], route);
-        return context with { Handler = method, BindingHost = ParameterBindingHost.Mvc };
+        return context with
+        {
+            Handler = method,
+            BindingHost = ParameterBindingHost.Mvc,
+            InfersBody = EnumParameterBinding.MvcInfersBody(wkt, method.ContainingType),
+        };
     }
 
     private static EndpointContext TryResolveMinimalApi(
@@ -592,6 +605,7 @@ public static class CoverageChecker
                 {
                     Handler = handler.Symbol,
                     BindingHost = ParameterBindingHost.MinimalApi,
+                    InfersBody = true,
                 };
             }
 
@@ -629,15 +643,12 @@ public static class CoverageChecker
                 : TransportIdentity.NormalizeRoute($"{groupPrefix.Prefix}/{template.Trim('/')}");
         }
 
-        return new EndpointContext(
-            true,
-            methods.Select(value => value.ToUpperInvariant()).ToArray(),
-            route,
-            routeError
-        )
+        var verbs = methods.Select(value => value.ToUpperInvariant()).ToArray();
+        return new EndpointContext(true, verbs, route, routeError)
         {
             Handler = handler.Symbol,
             BindingHost = ParameterBindingHost.MinimalApi,
+            InfersBody = EnumParameterBinding.MinimalApiInfersBody(verbs),
         };
     }
 
@@ -897,9 +908,10 @@ public static class CoverageChecker
     private sealed record ContractReference(IFieldSymbol Field, SyntaxNode? Binding);
 
     /// <summary>
-    /// A resolved implementation. <see cref="Handler"/> and <see cref="BindingHost"/> are set
-    /// for minimal-API and MVC handlers only: Azure Functions binds its own parameters, and
-    /// its enum binding is unmeasured, so Functions handlers carry neither.
+    /// A resolved implementation. <see cref="Handler"/>, <see cref="BindingHost"/> and
+    /// <see cref="InfersBody"/> are set for minimal-API and MVC handlers only: Azure Functions
+    /// binds its own parameters, and its enum binding is unmeasured, so Functions handlers
+    /// carry none of them.
     /// </summary>
     private sealed record EndpointContext(
         bool IsEndpoint,
@@ -913,5 +925,12 @@ public static class CoverageChecker
         public IMethodSymbol? Handler { get; init; }
 
         public ParameterBindingHost? BindingHost { get; init; }
+
+        /// <summary>
+        /// Whether the host infers a JSON body for an unattributed collection or complex
+        /// parameter: <see cref="EnumParameterBinding.MinimalApiInfersBody"/> or
+        /// <see cref="EnumParameterBinding.MvcInfersBody"/>.
+        /// </summary>
+        public bool InfersBody { get; init; }
     }
 }

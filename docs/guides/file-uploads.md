@@ -151,7 +151,8 @@ Two things catch people out. The writer runs after your handler has returned, so
 anything it needs (a process, a database reader) has to be opened inside the writer,
 not in a `using` in the handler, which has already disposed it by then. And write with
 async APIs: Kestrel refuses synchronous writes to the response, so a library that
-writes synchronously throws partway through the body.
+writes synchronously throws on its first synchronous write: a 500 if nothing has gone
+out yet, a body cut short if something has.
 
 ## Choosing a binary response MIME type
 

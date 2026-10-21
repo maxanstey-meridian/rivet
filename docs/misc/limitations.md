@@ -67,7 +67,7 @@ For a member called `RestrictedByway2A`:
 | `restricted_byway2_a` (snake), `restricted-byway2-a` (kebab) | 400 | 400 |
 | `0`, `+1`, ` 1` (a header loses the space before the host sees it) | binds | binds |
 | `99`, which isn't a member | binds, as an undefined value | 400 |
-| `1,2` | 400 | binds as `1 \| 2` when that's a member, or always on a `[Flags]` enum; otherwise 400 |
+| `1,2` | 400 | binds as `1 \| 2` when that's a member, or on a `[Flags]` enum when every bit is a defined flag; otherwise 400 |
 
 It's the same on .NET 8, 9 and 10, and the same for route, query, header and form.
 `Rivet.RuntimeTests` pins all four against real Kestrel hosts, so a framework release
@@ -82,7 +82,12 @@ combination:
 - **`RIV4005`** (`--check`): a handler implementing a contract binds an enum from the
   route, query, header or form, and not every wire value will bind on that host.
   Minimal APIs need each value to equal its member name exactly; MVC needs it to
-  equal ignoring case. Azure Functions handlers aren't checked.
+  equal ignoring case. Azure Functions handlers aren't checked. A parameter the
+  host reads as a JSON body is left alone, and Rivet works that out the way ASP.NET
+  does. On a minimal API an unattributed array comes from the query when the
+  endpoint is mapped to a body-less verb such as GET, and any other unattributed
+  collection is a body. On MVC an unattributed collection or complex type is a body
+  only under `[ApiController]`.
 - **`RIV1110`** (generation): the same rule for a `[RivetEndpoint]` or `[RivetClient]`
   action. A static `[RivetEndpoint]` is a minimal-API handler and gets the exact rule.
 

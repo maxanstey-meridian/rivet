@@ -231,6 +231,99 @@ public sealed class EnumParameterBindingTests(EnumParameterBindingTests.Hosts ho
         }
     }
 
+    // ---------------------------------------------------------------
+    // Unattributed enum arrays: query or body, by verb and host
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task Minimal_get_reads_an_unattributed_enum_array_from_the_query()
+    {
+        // A GET turns off inferred bodies, so the array is query input and Enum.TryParse
+        // refuses the converter's camelCase names.
+        await AssertArray(
+            "minimal",
+            Get("/array/get?kinds=DarkGreen&kinds=Level3"),
+            "DarkGreen,Level3"
+        );
+        await AssertArrayRefused("minimal", Get("/array/get?kinds=darkGreen"));
+    }
+
+    [Fact]
+    public async Task Minimal_post_reads_an_unattributed_enum_array_from_a_json_body()
+    {
+        // A POST leaves inferred bodies on: System.Text.Json reads the converter's names.
+        await AssertArray("minimal", JsonPost("/array/post"), "DarkGreen,Level3");
+    }
+
+    [Fact]
+    public async Task Minimal_get_and_post_reads_an_unattributed_enum_array_from_the_query()
+    {
+        // Any body-less verb among the mapped ones turns off inferred bodies for all of them.
+        await AssertArray("minimal", Get("/array/methods?kinds=DarkGreen"), "DarkGreen");
+        await AssertArrayRefused("minimal", Get("/array/methods?kinds=darkGreen"));
+    }
+
+    [Fact]
+    public async Task Mvc_api_controller_reads_an_unattributed_enum_array_from_a_json_body()
+    {
+        // [ApiController] treats a collection as complex and infers [FromBody].
+        await AssertArray("mvc", JsonPost("/array/post"), "DarkGreen,Level3");
+    }
+
+    [Fact]
+    public async Task Minimal_get_with_an_unattributed_enum_list_fails_at_startup()
+    {
+        // A List<T> is inferred as a body, which a GET doesn't allow: building the endpoint,
+        // which startup does, throws.
+        var builder = WebApplication.CreateBuilder();
+        builder.Logging.ClearProviders();
+        await using var app = builder.Build();
+        app.MapGet("/list", (List<Colour> kinds) => string.Join(",", kinds));
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints).ToList()
+        );
+        Assert.Contains(
+            "Body was inferred but the method does not allow inferred body parameters",
+            exception.Message
+        );
+    }
+
+    private static HttpRequestMessage Get(string path) => new(HttpMethod.Get, path);
+
+    private static HttpRequestMessage JsonPost(string path) =>
+        new(HttpMethod.Post, path)
+        {
+            Content = new StringContent(
+                """["darkGreen","level3"]""",
+                System.Text.Encoding.UTF8,
+                "application/json"
+            ),
+        };
+
+    private async Task AssertArray(string style, HttpRequestMessage request, string expected)
+    {
+        var description = $"{style} {request.Method} {request.RequestUri}";
+        var response = await hosts.SendAsync(style, request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK && body == expected,
+            $"{description}: expected 200 '{expected}', got {(int)response.StatusCode} '{body}'"
+        );
+    }
+
+    private async Task AssertArrayRefused(string style, HttpRequestMessage request)
+    {
+        var description = $"{style} {request.Method} {request.RequestUri}";
+        var response = await hosts.SendAsync(style, request);
+
+        Assert.True(
+            response.StatusCode == HttpStatusCode.BadRequest,
+            $"{description}: expected 400, got {(int)response.StatusCode} '{await response.Content.ReadAsStringAsync()}'"
+        );
+    }
+
     private static HttpRequestMessage Request(string converter, string location, string value)
     {
         switch (location)
@@ -363,6 +456,13 @@ public sealed class EnumParameterBindingTests(EnumParameterBindingTests.Hosts ho
                 Map<ColourLower>(app, "lower");
                 Map<Bits>(app, "bits");
                 Map<FlagBits>(app, "flags");
+                app.MapGet("/array/get", (Colour[] kinds) => string.Join(",", kinds));
+                app.MapPost("/array/post", (Colour[] kinds) => string.Join(",", kinds));
+                app.MapMethods(
+                    "/array/methods",
+                    ["GET", "POST"],
+                    (Colour[] kinds) => string.Join(",", kinds)
+                );
             }
 
             await app.StartAsync();
@@ -457,4 +557,7 @@ public sealed class EnumBindingController : ControllerBase
 
     [HttpPost("/flags/form")]
     public string FlagsForm([FromForm] EnumParameterBindingTests.FlagBits kind) => kind.ToString();
+
+    [HttpPost("/array/post")]
+    public string ArrayPost(Colour[] kinds) => string.Join(",", kinds);
 }

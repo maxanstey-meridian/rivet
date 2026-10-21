@@ -65,6 +65,11 @@ public sealed class WellKnownTypes(Compilation c)
         c.GetTypeByMetadataName(Mvc + "FromServicesAttribute");
     public INamedTypeSymbol? ModelBinder { get; } =
         c.GetTypeByMetadataName(Mvc + "ModelBinderAttribute");
+
+    // Implemented by [ApiController]: marks an API controller, whose unattributed complex
+    // parameters MVC infers as [FromBody].
+    public INamedTypeSymbol? ApiBehaviorMetadata { get; } =
+        c.GetTypeByMetadataName(Mvc + "Infrastructure.IApiBehaviorMetadata");
     public INamedTypeSymbol? AsParameters { get; } =
         c.GetTypeByMetadataName("Microsoft.AspNetCore.Http.AsParametersAttribute");
     public INamedTypeSymbol? Consumes { get; } = c.GetTypeByMetadataName(Mvc + "ConsumesAttribute");
