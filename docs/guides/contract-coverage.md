@@ -116,10 +116,11 @@ it when renamed (`?f.q=`), and header members never take one.
 
 A handler that can read the request itself is trusted to pick inputs out by hand: an
 `HttpContext` or `HttpRequest` parameter, a `BindAsync` type, a custom model binder, or a
-handler body that reads the request or route data through a property: a controller's
+handler body that reads the request or route data through a property (a controller's
 `Request` or `RouteData`, `ControllerContext.HttpContext.Request`, an
-`IHttpContextAccessor`'s `HttpContext.Request`, or `HttpContext.GetRouteValue`. Touching
-only `HttpContext.User`, `Response` or `RequestAborted` doesn't count. Helpers it
+`IHttpContextAccessor`'s `HttpContext.Request`), calls `HttpContext.GetRouteValue`, or
+hands the `HttpContext` or `HttpRequest` to another method (`HttpContext.GetTenantId()`).
+Touching only `HttpContext.User`, `Response` or `RequestAborted` doesn't count. Helpers it
 calls aren't followed. Such a handler is never told an input is unbound, though what it
 does bind is still checked. That's also the only way to read a cookie the contract
 declares: ASP.NET has no attribute that binds one, so `--check` reports a declared cookie

@@ -722,21 +722,25 @@ internal static class ParameterBindingSources
     /// True when an operation in a handler's body hands over the request or its route values
     /// without a parameter: a read of an HttpRequest-typed property (a controller's
     /// <c>Request</c>, <c>context.Request</c>, <c>accessor.HttpContext!.Request</c>) or a
-    /// RouteData-typed one (a controller's <c>RouteData</c>), or a call to
-    /// <c>HttpContext.GetRouteValue</c> or <c>GetRouteData</c>. Reading HttpContext alone
-    /// isn't: its User, RequestAborted and Response carry no input.
+    /// RouteData-typed one (a controller's <c>RouteData</c>), or an HttpContext or HttpRequest
+    /// passed to a call, even as <c>object</c>, since the callee may read anything from it. An
+    /// extension's receiver is an argument, so <c>HttpContext.GetRouteValue("id")</c> and an
+    /// app's own <c>HttpContext.GetTenantId()</c> both count. Reading the context's User,
+    /// RequestAborted or Response isn't: they carry no input.
     /// </summary>
     public static bool ReadsRequest(IOperation operation) =>
         operation switch
         {
+            IArgumentOperation { Value: var value } => (
+                value is IConversionOperation { IsImplicit: true } conversion
+                    ? conversion.Operand
+                    : value
+            ).Type
+                is { } type
+                && IsRequest(type),
             IPropertyReferenceOperation { Property.Type: var type } => FullName(type)
                 is "Microsoft.AspNetCore.Http.HttpRequest"
                     or "Microsoft.AspNetCore.Routing.RouteData",
-            IInvocationOperation
-            {
-                TargetMethod: { Name: "GetRouteValue" or "GetRouteData" } method,
-            } => FullName(method.ContainingType)
-                == "Microsoft.AspNetCore.Routing.RoutingHttpContextExtensions",
             _ => false,
         };
 

@@ -2082,25 +2082,36 @@ public sealed class TypeWalker
             );
         }
 
-        var (handling, source) =
-            ReadNumberHandling(member) is { } own ? (own, "the member")
-            : ReadNumberHandling(walkedType) is { } inherited
-                ? (inherited, $"type '{walkedType.ToDisplayString()}'")
-            : ((JsonNumberHandling?)null, "");
-        if (
-            handling is { } wire
-            && (wire & WireChangingNumberHandling) != 0
-            && IsNumberOrNumberCollection(GetMemberType(member))
-        )
+        if (StringsForNumbers(member, walkedType, GetMemberType(member)) is { } strings)
         {
             throw new RivetUserException(
                 $"error {Diagnostics.UnmodelledNumberHandling}: '{context}' is serialized with "
-                    + $"JsonNumberHandling.{wire} (from [JsonNumberHandling] on {source}), which puts strings "
-                    + "on the wire where the spec says number. Remove it (AllowReadingFromString alone is "
-                    + "fine: it only widens what the host reads), or pin a primitive-typed property with "
-                    + "[RivetSchemaType(\"string\")]."
+                    + $"{strings}, or pin a primitive-typed property with [RivetSchemaType(\"string\")]."
             );
         }
+    }
+
+    /// <summary>
+    /// RIV1112's finding for a member of <paramref name="memberType"/>: the wire-changing
+    /// [JsonNumberHandling] that reaches it from the member or from <paramref name="owner"/>,
+    /// described up to the fix's alternatives, or null when none does or the member carries no
+    /// number.
+    /// </summary>
+    private string? StringsForNumbers(ISymbol member, ITypeSymbol owner, ITypeSymbol memberType)
+    {
+        var (handling, source) =
+            ReadNumberHandling(member) is { } own ? (own, "the member")
+            : ReadNumberHandling(owner) is { } inherited
+                ? (inherited, $"type '{owner.ToDisplayString()}'")
+            : ((JsonNumberHandling?)null, "");
+        return
+            handling is { } wire
+            && (wire & WireChangingNumberHandling) != 0
+            && IsNumberOrNumberCollection(memberType)
+            ? $"JsonNumberHandling.{wire} (from [JsonNumberHandling] on {source}), which puts strings "
+                + "on the wire where the spec says number. Remove it (AllowReadingFromString alone is "
+                + "fine: it only widens what the host reads)"
+            : null;
     }
 
     /// <summary>
@@ -2166,26 +2177,14 @@ public sealed class TypeWalker
                 continue;
             }
 
-            var (handling, source) =
-                ReadNumberHandling(declared) is { } own ? (own, "the member")
-                : ReadNumberHandling(definition) is { } inherited
-                    ? (inherited, $"type '{definition.ToDisplayString()}'")
-                : ((JsonNumberHandling?)null, "");
-            if (
-                handling is { } wire
-                && (wire & WireChangingNumberHandling) != 0
-                && IsNumberOrNumberCollection(memberType)
-            )
+            if (StringsForNumbers(declared, definition, memberType) is { } strings)
             {
                 var site = context is null ? "" : $"'{context}' uses ";
                 throw new RivetUserException(
                     $"error {Diagnostics.UnmodelledNumberHandling}: {site}'{instantiation.ToDisplayString()}', "
                         + $"which binds '{definition.ToDisplayString()}.{declared.Name}' to "
-                        + $"'{memberType.ToDisplayString()}'. That member is serialized with "
-                        + $"JsonNumberHandling.{wire} (from [JsonNumberHandling] on {source}), which puts "
-                        + "strings on the wire where the spec says number. Remove it (AllowReadingFromString "
-                        + "alone is fine: it only widens what the host reads), or instantiate the type with "
-                        + "a non-number type argument."
+                        + $"'{memberType.ToDisplayString()}'. That member is serialized with {strings}, "
+                        + "or instantiate the type with a non-number type argument."
                 );
             }
 

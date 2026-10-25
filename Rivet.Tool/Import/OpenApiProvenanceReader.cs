@@ -85,7 +85,11 @@ internal static class OpenApiProvenanceReader
             return new ImportedOpenApiProvenance(document, operations);
         }
 
-        foreach (var path in paths.EnumerateObject())
+        foreach (
+            var path in paths
+                .EnumerateObject()
+                .Where(path => !OpenApiStructure.IsExtension(path.Name))
+        )
         {
             var pathServers = swagger2 ? null : ReadServersProperty(path.Value);
             foreach (var method in OpenApiImporter.OperationMethods)
@@ -320,7 +324,8 @@ internal static class OpenApiProvenanceReader
             foreach (var response in responseValues.EnumerateObject())
             {
                 if (
-                    response.Value.TryGetProperty("$ref", out _)
+                    OpenApiStructure.IsExtension(response.Name)
+                    || response.Value.TryGetProperty("$ref", out _)
                     || !response.Value.TryGetProperty("content", out var responseContent)
                 )
                 {
@@ -486,7 +491,10 @@ internal static class OpenApiProvenanceReader
         }
         return responses
             .EnumerateObject()
-            .Where(response => TryReadComponentReference(response.Value, "responses", out _))
+            .Where(response =>
+                !OpenApiStructure.IsExtension(response.Name)
+                && TryReadComponentReference(response.Value, "responses", out _)
+            )
             .Select(response =>
             {
                 TryReadComponentReference(response.Value, "responses", out var componentId);
@@ -508,7 +516,8 @@ internal static class OpenApiProvenanceReader
         foreach (var response in responses.EnumerateObject())
         {
             if (
-                response.Value.ValueKind != JsonValueKind.Object
+                OpenApiStructure.IsExtension(response.Name)
+                || response.Value.ValueKind != JsonValueKind.Object
                 || response.Value.TryGetProperty("$ref", out _)
                 || !response.Value.TryGetProperty("headers", out var headers)
                 || headers.ValueKind != JsonValueKind.Object
@@ -540,7 +549,8 @@ internal static class OpenApiProvenanceReader
     )
     {
         componentId = null;
-        return value.TryGetProperty("$ref", out var referenceValue)
+        return value.ValueKind == JsonValueKind.Object
+            && value.TryGetProperty("$ref", out var referenceValue)
             && referenceValue.ValueKind == JsonValueKind.String
             && referenceValue.GetString() is { } reference
             && JsonPointer.TryGetComponentName(reference, kind, out componentId);
@@ -565,7 +575,8 @@ internal static class OpenApiProvenanceReader
     }
 
     /// <summary>
-    /// The preserved extensions on every OpenAPI or schema object, walked by
+    /// The preserved extensions on every object that takes extensions (OpenAPI and schema
+    /// objects, components, paths, responses, callbacks), walked by
     /// <see cref="OpenApiStructure"/>'s rules so names and literal data are never read as owners.
     /// </summary>
     private static void ReadVendorExtensions(
@@ -602,10 +613,10 @@ internal static class OpenApiProvenanceReader
             return;
         }
 
-        var structural = OpenApiStructure.IsStructuralObject(shape);
+        var hasExtensions = OpenApiStructure.HasExtensions(shape);
         foreach (var property in value.EnumerateObject())
         {
-            if (structural && _preservedVendorExtensions.Contains(property.Name))
+            if (hasExtensions && _preservedVendorExtensions.Contains(property.Name))
             {
                 result.Add(
                     new OpenApiPreservedFieldProvenance(
@@ -700,8 +711,6 @@ internal static class OpenApiProvenanceReader
 
         return pointer switch
         {
-            "#/definitions" => "#/components/schemas",
-            "#/securityDefinitions" => "#/components/securitySchemes",
             _ when pointer.StartsWith("#/definitions/", StringComparison.Ordinal) =>
                 "#/components/schemas/" + pointer["#/definitions/".Length..],
             _ when pointer.StartsWith("#/securityDefinitions/", StringComparison.Ordinal) =>

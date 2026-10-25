@@ -637,14 +637,17 @@ public static partial class OpenApiImporter
         );
 
     /// <summary>
-    /// A reference to a response, parameter, example or other non-schema component is a
+    /// A reference to a whole response, parameter, example or other non-schema component is a
     /// Reference object, whose summary and description siblings OpenAPI 3.1 allows as they are.
+    /// A reference into a schema nested inside one (a response's media type schema, say) is a
+    /// schema reference like any other.
     /// </summary>
     private static bool IsSchemaReference(string reference) =>
         JsonPointer.FromUriFragment(reference) switch
         {
-            ["components", var kind, ..] => kind == "schemas",
-            ["parameters" or "responses" or "securityDefinitions", ..] => false,
+            ["components", "schemas", ..] => true,
+            ["components", _, _] => false,
+            ["parameters" or "responses" or "securityDefinitions", _] => false,
             _ => true,
         };
 

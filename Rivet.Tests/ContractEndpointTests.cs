@@ -1524,6 +1524,38 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void ResponseExampleJson_On_Typed_Second_Success_Of_File_Endpoint_Defaults_To_ApplicationJson()
+    {
+        // The emitter gives the file's media type to the first 2xx only; a typed 202 is JSON.
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record JobDto(string Id);
+
+            [RivetContract]
+            public static class DocumentsContract
+            {
+                public static readonly RouteDefinition Download =
+                    Define.Get("/api/documents/{id}")
+                        .ProducesFile("application/pdf")
+                        .Returns<JobDto>(202)
+                        .ResponseExampleJson(202, "{\"id\":\"job-1\"}", name: "job");
+            }
+            """;
+
+        var endpoints = Generate(source);
+
+        var ep = Assert.Single(endpoints);
+        var response = ep.Responses.First(r => r.StatusCode == 202);
+        var example = Assert.Single(response.Examples!);
+        Assert.Equal("application/json", example.MediaType);
+        Assert.Equal("""{"id":"job-1"}""", example.Json);
+    }
+
+    [Fact]
     public void ResponseExampleJson_On_File_Error_Response_Defaults_To_ApplicationJson()
     {
         var source = """

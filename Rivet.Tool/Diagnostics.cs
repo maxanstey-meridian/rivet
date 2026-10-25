@@ -154,7 +154,7 @@ public static class Diagnostics
         [EndpointFieldNotStaticReadonly] =
             "Contract endpoint field is not 'static readonly' — the runtime could serve a different definition than the initializer the spec is read from; generation fails.",
         [ContractExampleUndeclaredStatus] =
-            "Response example targets a status code the contract endpoint does not declare — the spec has no response to carry it; generation fails.",
+            "Response example targets a status code the contract endpoint does not declare, a media type its .ResponseContent status doesn't declare, or no media type when that status declares several — the spec has no response content to carry it; generation fails.",
         [RouteBoundJsonPropertyNameIgnored] =
             "[JsonPropertyName] on a route-bound property is ignored for route interpolation — the contract param keeps the route name.",
         [ControllerExampleUndeclaredStatus] =
@@ -216,7 +216,7 @@ public static class Diagnostics
         [InvalidSecurityDeclaration] =
             "A contract endpoint's security calls contradict each other (.Anonymous() alongside .Secure() or .OrAnonymous(), or .AndSecure() with no .Secure() alternative to join) — generation fails instead of guessing which one was meant.",
         [BindingInferenceUnreadable] =
-            "ApiBehaviorOptions.SuppressInferBindingSourcesForParameters is assigned a value that isn't a compile-time constant, so whether MVC infers binding sources can't be read; generation and --check stop. Read only when the project has an [ApiController] controller.",
+            "ApiBehaviorOptions.SuppressInferBindingSourcesForParameters is assigned a value that isn't a compile-time constant, so whether MVC infers binding sources can't be read; generation and --check stop. Read only when an annotated MVC action (generation) or a contract's MVC implementation (--check) is on an [ApiController] controller.",
         [AmbiguousJsonConstructor] =
             "A walked type has more than one [JsonConstructor] constructor — System.Text.Json refuses it at runtime, so there is no constructor choice for the spec to follow; generation fails.",
         [TaggedUnionComponentCollision] =

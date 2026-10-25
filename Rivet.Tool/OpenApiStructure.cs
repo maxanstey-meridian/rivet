@@ -59,6 +59,15 @@ internal static class OpenApiStructure
     public static bool IsStructuralObject(OpenApiShape shape) =>
         shape is OpenApiShape.Object or OpenApiShape.Example or OpenApiShape.Link;
 
+    /// <summary>
+    /// Whether an x- key in an object of this shape is a specification extension: true for
+    /// OpenAPI objects and for the components, paths, responses and callback objects, false
+    /// for name maps, where x- is just a name.
+    /// </summary>
+    public static bool HasExtensions(OpenApiShape shape) =>
+        IsStructuralObject(shape)
+        || shape is OpenApiShape.Components or OpenApiShape.ExtensibleObjectMap;
+
     /// <summary>The shape of an array's items: arrays in OpenAPI hold objects or literals, never maps.</summary>
     public const OpenApiShape ArrayItem = OpenApiShape.Object;
 

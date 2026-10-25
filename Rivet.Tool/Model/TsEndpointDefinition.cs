@@ -54,6 +54,27 @@ public sealed record TsEndpointDefinition(
 )
 {
     /// <summary>
+    /// The body properties a request carries: those no route value binds instead (a route
+    /// param's <see cref="TsEndpointParam.BodyPropertyName"/>) and that aren't readOnly, which
+    /// OpenAPI defines as never sent in a request. The emitter lowers a route-split body to
+    /// these, and ContractWalker reads a form body's field names from them.
+    /// </summary>
+    public static IReadOnlyList<TsPropertyDefinition> RequestBodyProperties(
+        IReadOnlyList<TsEndpointParam> parameters,
+        IReadOnlyList<TsPropertyDefinition> properties
+    )
+    {
+        var routeBound = parameters
+            .Where(param => param.Source == ParamSource.Route)
+            .Select(param => param.BodyPropertyName)
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        return properties
+            .Where(property => !routeBound.Contains(property.Name) && !property.IsReadOnly)
+            .ToList();
+    }
+
+    /// <summary>
     /// Every type on the endpoint surface, each with its site relative to the endpoint
     /// ("return", "response.200", "param.id", ...): the return type, each response's data
     /// type, content schemas and headers, then the params, request type and request contents.

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Rivet.Tool;
 using static Rivet.Tests.RoundTripDiffReport;
 
 namespace Rivet.Tests;
@@ -510,6 +511,41 @@ public sealed class RoundTripDiffTests
         Assert.Equal(0, excluded.ExitCode);
         Assert.Equal(0, FindingCount(preserved.DocumentFindings, "component-example"));
         Assert.Equal(1, FindingCount(preserved.DocumentFindings, "vendor-extension-preserve"));
+    }
+
+    /// <summary>
+    /// Every object that takes extensions owns a preserved one: the components and paths
+    /// objects, a responses map, a response or property named like a keyword. An x- key in a
+    /// name map (here a property) is a name, so a change to it is not extension drift.
+    /// </summary>
+    [Theory]
+    [InlineData("#/components", 1)]
+    [InlineData("#/paths", 1)]
+    [InlineData("#/paths/~1surface/post/responses", 1)]
+    [InlineData("#/paths/~1surface/post/responses/default", 1)]
+    [InlineData("#/components/schemas/Payload/properties/default", 1)]
+    [InlineData("#/components/schemas/Payload/properties", 0)]
+    public void Preserved_Extensions_Are_Owned_By_Every_Object_That_Takes_Extensions(
+        string owner,
+        int expected
+    )
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["paths"]!["/surface"]!["post"]!["responses"]!["default"] = JsonNode.Parse(
+            """{"description":"Other"}"""
+        );
+        original["components"]!["schemas"]!["Payload"]!["properties"]!["default"] = JsonNode.Parse(
+            """{"type":"string"}"""
+        );
+        Assert.True(JsonPointer.TryResolve(original, owner, out var target));
+        target["x-is-beta"] = true;
+        var reemitted = original.DeepClone().AsObject();
+        Assert.True(JsonPointer.TryResolve(reemitted, owner, out var reemittedTarget));
+        reemittedTarget["x-is-beta"] = false;
+
+        var result = RoundTripDiff.Run(original, reemitted);
+
+        Assert.Equal(expected, result.FindingCount("vendor-extension-preserve"));
     }
 
     [Theory]

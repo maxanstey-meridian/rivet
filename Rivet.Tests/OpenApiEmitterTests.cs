@@ -2056,7 +2056,8 @@ public sealed class OpenApiEmitterTests
     /// oneOf of it and {type: null} would match null on both branches, which oneOf rejects.
     /// The component is the one actually written at the name, followed through aliases.
     /// A synthetic brand is inlined, so a same-name scalar definition's nullability is not
-    /// its own and the site still adds null.
+    /// its own and the site still adds null. A generic alias is judged by its monomorphised
+    /// body: Maybe&lt;string&gt; = string | null admits null, Box&lt;string&gt; = string does not.
     /// </summary>
     [Theory]
     [InlineData("definition", BareValueRef)]
@@ -2070,6 +2071,11 @@ public sealed class OpenApiEmitterTests
     [InlineData("brandOnlyInBrands", BareValueRef)]
     [InlineData("enumOverDefinition", BareValueRef)]
     [InlineData("syntheticBrand", """{"type":["string","null"]}""")]
+    [InlineData("genericAliasOfNullable", """{"$ref":"#/components/schemas/Value_String"}""")]
+    [InlineData(
+        "genericAliasOfString",
+        """{"oneOf":[{"$ref":"#/components/schemas/Value_String"},{"type":"null"}]}"""
+    )]
     public void Nullable_Use_Of_A_Component_That_Admits_Null_Is_A_Bare_Ref(
         string component,
         string expected
@@ -2158,6 +2164,16 @@ public sealed class OpenApiEmitterTests
                 brands["Value"] = synthetic;
                 definitions["Value"] = nullableString;
                 inner = synthetic;
+                break;
+            case "genericAliasOfNullable":
+            case "genericAliasOfString":
+                TsType body = new TsType.TypeParam("T");
+                definitions["Value"] = new TsTypeDefinition(
+                    "Value",
+                    ["T"],
+                    component == "genericAliasOfNullable" ? new TsType.Nullable(body) : body
+                );
+                inner = new TsType.Generic("Value", [new TsType.Primitive("string")]);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(component), component, null);

@@ -315,9 +315,21 @@ public sealed class PreservedFieldProvenanceTests
     private static void AssertPreservedExtensions(JsonObject expected, JsonObject actual)
     {
         AssertExtension(expected, actual, "x-twilio");
+        AssertExtension(expected["paths"]!, actual["paths"]!, "x-github");
+        AssertExtension(expected["components"]!, actual["components"]!, "x-is-beta");
         var expectedOperation = expected["paths"]!["/things/{id}"]!["post"]!;
         var actualOperation = actual["paths"]!["/things/{id}"]!["post"]!;
         AssertExtension(expectedOperation, actualOperation, "x-ds-examples");
+        AssertExtension(
+            expectedOperation["responses"]!,
+            actualOperation["responses"]!,
+            "x-is-beta"
+        );
+        AssertExtension(
+            expectedOperation["responses"]!["default"]!,
+            actualOperation["responses"]!["default"]!,
+            "x-is-beta"
+        );
         AssertExtension(
             expectedOperation["parameters"]![0]!,
             actualOperation["parameters"]![0]!,
@@ -332,6 +344,11 @@ public sealed class PreservedFieldProvenanceTests
             expected["components"]!["schemas"]!["Payload"]!,
             actual["components"]!["schemas"]!["Payload"]!,
             "x-enum-elements"
+        );
+        AssertExtension(
+            expected["components"]!["schemas"]!["Payload"]!["properties"]!["default"]!,
+            actual["components"]!["schemas"]!["Payload"]!["properties"]!["default"]!,
+            "x-is-beta"
         );
     }
 
@@ -597,6 +614,7 @@ public sealed class PreservedFieldProvenanceTests
           "info": { "title": "Extensions", "version": "1" },
           "x-twilio": { "region": "eu", "flags": [true, null, 3.5] },
           "paths": {
+            "x-github": { "category": "things" },
             "/things/{id}": {
               "post": {
                 "operationId": "createThing",
@@ -609,16 +627,24 @@ public sealed class PreservedFieldProvenanceTests
                   "x-twilio": { "conditional": ["value"], "pii": false },
                   "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Payload" } } }
                 },
-                "responses": { "204": { "description": "Created" } }
+                "responses": {
+                  "x-is-beta": true,
+                  "204": { "description": "Created" },
+                  "default": { "description": "Other", "x-is-beta": false }
+                }
               }
             }
           },
           "components": {
+            "x-is-beta": true,
             "schemas": {
               "Payload": {
                 "type": "object",
                 "x-enum-elements": [{ "name": "Active", "value": "active", "description": "Active value" }],
-                "properties": { "value": { "type": "string" } },
+                "properties": {
+                  "value": { "type": "string" },
+                  "default": { "type": "string", "x-is-beta": true }
+                },
                 "required": ["value"]
               }
             }

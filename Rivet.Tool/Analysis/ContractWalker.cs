@@ -686,11 +686,10 @@ public static class ContractWalker
     )
     {
         var statusKey = call.StatusKey!;
-        var contents = responses
-            .FirstOrDefault(response =>
-                response.EffectiveStatusKey.Equals(statusKey, StringComparison.OrdinalIgnoreCase)
-            )
-            ?.Contents;
+        var response = responses.FirstOrDefault(candidate =>
+            candidate.EffectiveStatusKey.Equals(statusKey, StringComparison.OrdinalIgnoreCase)
+        );
+        var contents = response?.Contents;
         if (contents is not { Count: > 0 })
         {
             if (call.MediaType is not null)
@@ -698,8 +697,22 @@ public static class ContractWalker
                 return call.MediaType;
             }
 
+            // Mirrors the emitter: a typed body takes the success media type, and the file's
+            // media type goes only to the first 2xx response, and only when it has no type.
+            if (
+                fileContentType is not null
+                && response is { DataType: null }
+                && ReferenceEquals(
+                    response,
+                    responses.FirstOrDefault(candidate => candidate.StatusCode is >= 200 and < 300)
+                )
+            )
+            {
+                return fileContentType;
+            }
+
             return ParseStatusCode(statusKey) is >= 200 and < 300
-                ? fileContentType ?? successContentType ?? "application/json"
+                ? successContentType ?? "application/json"
                 : "application/json";
         }
 
@@ -1075,21 +1088,24 @@ public static class ContractWalker
                         // Normal body param
                         var tsType = requestBodyType ?? typeWalker.MapType(tInput);
                         parameters.Add(new TsEndpointParam("body", tsType, ParamSource.Body));
-                        // The emitter drops route-bound members only from TInput itself
-                        // (a [RivetRequestBody] type carries none) and read-only ones.
-                        bodyFieldNames = typeWalker
-                            .GetRequestProperties(declaredRequestBody?.BodyType ?? tInput)
-                            .Where(property =>
-                                (
-                                    requestBodyType is not null
-                                    || !routeMatchedProps.Contains(property.Name)
-                                ) && !property.HasAttribute(wkt.RivetReadOnly)
-                            )
-                            .Select(property =>
-                                typeWalker.GetJsonMemberName(property)
-                                ?? Naming.ToCamelCase(property.Name)
-                            )
-                            .ToList();
+                        // The fields the emitter lowers the body to, by the same rule.
+                        var bodyDefinitionName = (
+                            tsType is TsType.Nullable nullable ? nullable.Inner : tsType
+                        ) switch
+                        {
+                            TsType.TypeRef typeRef => typeRef.Name,
+                            TsType.Generic generic => generic.Name,
+                            _ => null,
+                        };
+                        bodyFieldNames =
+                            bodyDefinitionName is not null
+                            && typeWalker.Definitions.GetValueOrDefault(bodyDefinitionName)
+                                is { Type: null } definition
+                                ? TsEndpointDefinition
+                                    .RequestBodyProperties(parameters, definition.Properties)
+                                    .Select(property => property.Name)
+                                    .ToList()
+                                : [];
                     }
                 }
             }

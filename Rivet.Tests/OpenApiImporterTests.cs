@@ -6336,6 +6336,48 @@ public sealed class OpenApiImporterTests
         );
     }
 
+    [Theory]
+    [InlineData("#/components/parameters/Size/schema")]
+    [InlineData("#/components/responses/Sized/content/application~1json/schema")]
+    [InlineData("#/parameters/Size/schema")]
+    [InlineData("#/responses/Sized/schema")]
+    public void Schema_Reference_Into_A_Non_Schema_Component_Keeps_Its_Description(string target)
+    {
+        // Only a whole response or parameter is a Reference object. A schema inside one is a
+        // schema, so a description beside a reference to it is the property's own.
+        const string sized =
+            """{ "type": "object", "properties": { "n": { "type": "integer" } } }""";
+        var box =
+            $$"""{ "Box": { "type": "object", "properties": { "size": { "$ref": "{{target}}", "description": "The box size." } } } }""";
+        var spec = target.StartsWith("#/components/", StringComparison.Ordinal)
+            ? $$"""
+                {
+                  "openapi": "3.0.3",
+                  "info": { "title": "Nested", "version": "1.0.0" },
+                  "paths": {},
+                  "components": {
+                    "parameters": { "Size": { "name": "size", "in": "query", "schema": {{sized}} } },
+                    "responses": { "Sized": { "description": "Sized", "content": { "application/json": { "schema": {{sized}} } } } },
+                    "schemas": {{box}}
+                  }
+                }
+                """
+            : $$"""
+                {
+                  "swagger": "2.0",
+                  "info": { "title": "Nested", "version": "1.0.0" },
+                  "paths": {},
+                  "parameters": { "Size": { "name": "size", "in": "body", "schema": {{sized}} } },
+                  "responses": { "Sized": { "description": "Sized", "schema": {{sized}} } },
+                  "definitions": {{box}}
+                }
+                """;
+
+        var type = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Types/Box.cs");
+
+        Assert.Contains("[RivetDescription(\"The box size.\")]", type);
+    }
+
     [Fact]
     public void Description_Extensions_Reach_Keyword_Named_Properties_And_Skip_Non_Strings()
     {
@@ -7188,7 +7230,7 @@ public sealed class OpenApiImporterTests
     public void Component_Refs_With_Escaped_Slash_And_Tilde_Resolve()
     {
         // The description beside a response or example reference is a Reference object's own
-        // field, so it stays beside the reference rather than becoming a schema allOf.
+        // field, so it never becomes a schema allOf, and the response's overrides the component's.
         const string spec = """
             {
               "openapi": "3.1.0",
@@ -7198,7 +7240,7 @@ public sealed class OpenApiImporterTests
                   "get": {
                     "operationId": "getItem",
                     "responses": {
-                      "200": { "$ref": "#/components/responses/item~1ok", "description": "the item" },
+                      "200": { "$ref": "#/components/responses/item~1ok", "description": "the item, as referenced" },
                       "201": {
                         "description": "created",
                         "content": {
@@ -7230,10 +7272,44 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "DefaultContract.cs");
 
-        Assert.Contains("the item", contract);
+        Assert.Contains(".StatusKey(\"200\", \"the item, as referenced\")", contract);
         Assert.Contains(".ResponseContent<Item>(200, \"application/json\")", contract);
         Assert.DoesNotContain("unresolved-ref", contract);
         Assert.Contains("\"ex/one~two\"", contract);
+        Assert.DoesNotContain("allOf", CompilationHelper.FindFile(result, "RivetDocument.cs"));
+    }
+
+    [Fact]
+    public void Swagger2_Response_Ref_Keeps_Its_Own_Description()
+    {
+        const string spec = """
+            {
+              "swagger": "2.0",
+              "info": { "title": "T", "version": "1" },
+              "paths": {
+                "/items": {
+                  "get": {
+                    "operationId": "getItem",
+                    "produces": ["application/json"],
+                    "responses": { "200": { "$ref": "#/responses/ItemOk", "description": "the item, as referenced" } }
+                  }
+                }
+              },
+              "responses": {
+                "ItemOk": { "description": "the item", "schema": { "$ref": "#/definitions/Item" } }
+              },
+              "definitions": {
+                "Item": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+        var contract = CompilationHelper.FindFile(result, "DefaultContract.cs");
+
+        Assert.Contains(".StatusKey(\"200\", \"the item, as referenced\")", contract);
+        Assert.Contains(".ResponseContent<Item>(200, \"application/json\")", contract);
+        Assert.Empty(result.Warnings);
     }
 
     // ========== Inline schema identity ==========

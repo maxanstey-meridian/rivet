@@ -92,7 +92,9 @@ internal static class ContractInputBinding
             var matching = sameName
                 .Where(candidate => Accepts(input.Source).Contains(candidate.Source))
                 .ToList();
-            settled.UnionWith(sameName);
+            // A same-named input from another source (route {id} and form field id) stays
+            // unsettled, so forgetting it is still reported.
+            settled.UnionWith(matching.Count > 0 ? matching : sameName);
             if (matching.Count > 0)
             {
                 continue;

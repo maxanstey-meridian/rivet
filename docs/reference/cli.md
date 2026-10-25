@@ -24,8 +24,9 @@ dotnet rivet --project path/to/Api.csproj --output ./generated --openapi ../spec
 
 `--title`, `--version`, and `--server` set the spec's `info.title`, `info.version`,
 and `servers` entries; `--security` sets the default security scheme. All four are
-emit-time CLI data — they describe the deployment, not the contracts, and are not
-recovered by `--from-openapi` import.
+CLI data — they describe the deployment, not the contracts, and are not
+recovered by `--from-openapi` import. `--check` reads `--security` too, to know which
+apiKey headers and query parameters belong to security.
 
 ```bash
 dotnet rivet --project path/to/Api.csproj --output ./generated \
@@ -83,7 +84,8 @@ dotnet rivet --project path/to/Api.csproj --routes
 `--check` verifies contract coverage: missing implementations, route and method
 mismatches, inputs the handler binds somewhere other than where the contract declares
 them (`RIV4006`), and enum parameters the host can't bind (`RIV4005`) — see
-[Contract Coverage](/guides/contract-coverage). Any finding, warning or error, exits
+[Contract Coverage](/guides/contract-coverage). Pass it the same `--security` flags you
+generate with. Any finding, warning or error, exits
 with code `1`, with or without `--output`. `--routes` lists every discovered
 endpoint (method, route, handler) and exits. `-q`/`--quiet` suppresses generation
 output (useful with `--check` in CI). `-h`/`--help` prints usage to stdout and

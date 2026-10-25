@@ -46,8 +46,13 @@ public sealed class OpenApiEmitter
     /// <summary>Component schemas the producer preserved verbatim (generated document provenance).</summary>
     private readonly HashSet<string> _preservedSchemaNames = new(StringComparer.Ordinal);
 
-    /// <summary>Built on first use by <see cref="ComponentSources"/>.</summary>
-    private Dictionary<string, (ComponentSourceKind Kind, string Name)>? _componentSources;
+    /// <summary>
+    /// The one answer to which contract entry's schema lands at each component id, in the
+    /// order <see cref="BuildSchemas"/> writes them. Filled by <see cref="ResolveComponentSources"/>.
+    /// </summary>
+    private readonly Dictionary<string, ComponentSource> _componentSources = new(
+        StringComparer.Ordinal
+    );
 
     private OpenApiEmitter(
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
@@ -88,6 +93,7 @@ public sealed class OpenApiEmitter
             normalizedEndpoints,
             (documentInfo.Provenance?.ComponentSchemas ?? []).Select(schema => schema.Name)
         );
+        emitter.ResolveComponentSources(normalizedEndpoints);
         return emitter.EmitCore(normalizedEndpoints, security, documentInfo);
     }
 
@@ -114,7 +120,7 @@ public sealed class OpenApiEmitter
                 .ToHashSet(StringComparer.Ordinal),
             headerComponents.Select(component => component.Name).ToHashSet(StringComparer.Ordinal)
         );
-        var schemas = BuildSchemas(endpoints);
+        var schemas = BuildSchemas();
         foreach (var schema in documentInfo.Provenance?.ComponentSchemas ?? [])
         {
             schemas[schema.Name] = ParseSchemaObject(
@@ -1598,23 +1604,18 @@ public sealed class OpenApiEmitter
             return false;
         }
 
-        var matchedBodyNames = ep
-            .Params.Where(param => param.Source == ParamSource.Route)
-            .Select(param => param.BodyPropertyName)
-            .Where(name => name is not null)
-            .ToHashSet(StringComparer.Ordinal);
-        if (matchedBodyNames.Count == 0)
+        // Only a route-bound member forces an inline body. Without one the body $refs the
+        // component, whose readOnly members OpenAPI already keeps out of a request.
+        if (
+            !ep.Params.Any(param =>
+                param.Source == ParamSource.Route && param.BodyPropertyName is not null
+            )
+        )
         {
             return false;
         }
 
-        // Route-filtered lowering is request surface: a response-only property
-        // (serialized but never deserializable — derived readOnly, or an explicit
-        // [RivetReadOnly]) cannot appear in a request body; route-bound properties
-        // are excluded as before (they are bound by the route, not the JSON body).
-        bodyProperties = sourceProperties
-            .Where(prop => !matchedBodyNames.Contains(prop.Name) && !prop.IsReadOnly)
-            .ToList();
+        bodyProperties = TsEndpointDefinition.RequestBodyProperties(ep.Params, sourceProperties);
         return bodyProperties.Count != sourceProperties.Count;
     }
 
@@ -2450,6 +2451,7 @@ public sealed class OpenApiEmitter
             TsType.TypeRef reference => TypeReferenceAdmitsNull(reference.Name, visited),
             TsType.Brand brand => BrandAdmitsNull(brand, visited),
             TsType.Union union => union.Variants.Any(variant => AdmitsNull(variant, visited)),
+            TsType.Generic generic => ComponentAdmitsNull(MonomorphisedName(generic), visited),
             _ => false,
         };
 
@@ -2488,43 +2490,57 @@ public sealed class OpenApiEmitter
     {
         if (
             !visited.Add($"component:{componentId}")
-            || !ComponentSources.TryGetValue(componentId, out var source)
+            || !_componentSources.TryGetValue(componentId, out var source)
         )
         {
             return false;
         }
 
-        _definitions.TryGetValue(source.Name, out var scalarDefinition);
-        return source.Kind switch
+        switch (source)
         {
-            ComponentSourceKind.Definition => DefinitionAdmitsNull(scalarDefinition!, visited),
-            ComponentSourceKind.Brand => AdmitsNull(_brands[source.Name].Inner, visited)
-                || scalarDefinition?.ScalarMetadata?.IsNullable == true,
-            ComponentSourceKind.Enum => AdmitsNull(_enums[source.Name], visited)
-                || scalarDefinition?.Type is TsType.Nullable
-                || scalarDefinition?.ScalarMetadata?.IsNullable == true,
-            _ => throw new UnreachableException($"Unknown component source {source.Kind}."),
-        };
+            case ComponentSource.Definition(var name):
+                return DefinitionAdmitsNull(_definitions[name], visited);
+            case ComponentSource.Generic(var instance):
+                return _definitions.TryGetValue(instance.Name, out var template)
+                    && template.Type is { } body
+                    && AdmitsNull(
+                        TsType.ResolveTypeParams(body, TypeParameterMap(template, instance)),
+                        visited
+                    );
+            case ComponentSource.Brand(var name):
+                _definitions.TryGetValue(name, out var brandScalar);
+                return AdmitsNull(_brands[name].Inner, visited)
+                    || brandScalar?.ScalarMetadata?.IsNullable == true;
+            case ComponentSource.Enum(var name):
+                _definitions.TryGetValue(name, out var enumScalar);
+                return AdmitsNull(_enums[name], visited)
+                    || enumScalar?.Type is TsType.Nullable
+                    || enumScalar?.ScalarMetadata?.IsNullable == true;
+            default:
+                throw new UnreachableException($"Unknown component source {source}.");
+        }
     }
 
-    private enum ComponentSourceKind
+    /// <summary>A contract entry whose schema <see cref="BuildSchemas"/> writes as a component.</summary>
+    private abstract record ComponentSource
     {
-        Definition,
-        Brand,
-        Enum,
+        public sealed record Definition(string Name) : ComponentSource;
+
+        /// <summary>A monomorphised instantiation of a generic template.</summary>
+        public sealed record Generic(TsType.Generic Instance) : ComponentSource;
+
+        public sealed record Brand(string Name) : ComponentSource;
+
+        public sealed record Enum(string Name) : ComponentSource;
     }
 
     /// <summary>
-    /// The contract entry whose schema <see cref="BuildSchemas"/> leaves at each component id.
-    /// It writes definitions, then brands, then enums, so a later kind replaces an earlier
-    /// one at the same id; this reads them in the same order.
+    /// Decides the contract entry at each component id: definitions, then monomorphised
+    /// generics, then brands, then enums, a later kind replacing an earlier one at the same id.
+    /// Runs after <see cref="AssignComponentNames"/>, which names the generics.
     /// </summary>
-    private Dictionary<string, (ComponentSourceKind Kind, string Name)> ComponentSources =>
-        _componentSources ??= BuildComponentSources();
-
-    private Dictionary<string, (ComponentSourceKind Kind, string Name)> BuildComponentSources()
+    private void ResolveComponentSources(IReadOnlyList<TsEndpointDefinition> endpoints)
     {
-        var sources = new Dictionary<string, (ComponentSourceKind, string)>(StringComparer.Ordinal);
         foreach (var (name, definition) in _definitions)
         {
             if (
@@ -2532,17 +2548,21 @@ public sealed class OpenApiEmitter
                 && definition.Metadata?.Provenance != TsTypeProvenance.Synthetic
             )
             {
-                sources[definition.Metadata?.ComponentId ?? name] = (
-                    ComponentSourceKind.Definition,
-                    name
-                );
+                _componentSources[definition.Metadata?.ComponentId ?? name] =
+                    new ComponentSource.Definition(name);
             }
+        }
+        foreach (var (monoName, generic) in CollectMonomorphisedGenerics(endpoints))
+        {
+            _componentSources[monoName] = new ComponentSource.Generic(generic);
         }
         foreach (var (name, brand) in _brands)
         {
             if (brand.Metadata?.Provenance != TsTypeProvenance.Synthetic)
             {
-                sources[brand.Metadata?.ComponentId ?? name] = (ComponentSourceKind.Brand, name);
+                _componentSources[brand.Metadata?.ComponentId ?? name] = new ComponentSource.Brand(
+                    name
+                );
             }
         }
         foreach (var (name, enumType) in _enums)
@@ -2550,10 +2570,9 @@ public sealed class OpenApiEmitter
             var metadata = GetMetadata(enumType);
             if (metadata?.Provenance != TsTypeProvenance.Synthetic)
             {
-                sources[metadata?.ComponentId ?? name] = (ComponentSourceKind.Enum, name);
+                _componentSources[metadata?.ComponentId ?? name] = new ComponentSource.Enum(name);
             }
         }
-        return sources;
     }
 
     private static RivetUserException UnresolvedTypeParam(
@@ -2735,25 +2754,34 @@ public sealed class OpenApiEmitter
         return name;
     }
 
-    private JsonObject BuildSchemas(IReadOnlyList<TsEndpointDefinition> endpoints)
+    private JsonObject BuildSchemas()
     {
         var schemas = new JsonObject();
-
-        foreach (var (name, def) in _definitions)
+        foreach (var (componentId, source) in _componentSources)
         {
-            if (def.TypeParameters.Count > 0)
+            schemas[componentId] = source switch
             {
-                // Generic definitions are emitted as monomorphised variants — skip the template
-                continue;
-            }
-
-            if (def.Metadata?.Provenance != TsTypeProvenance.Synthetic)
-            {
-                schemas[def.Metadata?.ComponentId ?? name] = BuildDefinitionSchema(def);
-            }
+                ComponentSource.Definition(var name) => BuildDefinitionSchema(_definitions[name]),
+                ComponentSource.Generic(var instance) => BuildMonomorphisedSchema(
+                    componentId,
+                    instance
+                ),
+                ComponentSource.Brand(var name) => BuildBrandSchema(name),
+                ComponentSource.Enum(var name) => BuildEnumSchema(name),
+                _ => throw new UnreachableException($"Unknown component source {source}."),
+            };
         }
 
-        // Monomorphised generics: find all Generic type refs used across definitions and endpoints
+        return schemas;
+    }
+
+    /// <summary>
+    /// Every generic instantiation used across definitions and endpoints, by monomorphised name.
+    /// </summary>
+    private Dictionary<string, TsType.Generic> CollectMonomorphisedGenerics(
+        IReadOnlyList<TsEndpointDefinition> endpoints
+    )
+    {
         var genericInstances = new Dictionary<string, TsType.Generic>();
         CollectGenericInstances(endpoints, genericInstances);
 
@@ -2800,94 +2828,85 @@ public sealed class OpenApiEmitter
             }
         }
 
-        foreach (var (monoName, generic) in genericInstances)
-        {
-            if (!_definitions.TryGetValue(generic.Name, out var genericDef))
-            {
-                // A generic instantiation without its template has no properties to
-                // monomorphise. A free-form stand-in would advertise "any object" for a fixed
-                // wire shape, so the contract is refused, naming the producer's omission.
-                throw new RivetUserException(
-                    $"error {Diagnostics.GenericTemplateMissing}: generic '{generic.Name}' is instantiated as '{monoName}' "
-                        + "but the contract's types carry no template definition for it. "
-                        + $"Add a '{generic.Name}' definition with its typeParameters to the contract's types "
-                        + "(a --from producer must ship the template of every generic it instantiates)"
-                );
-            }
+        return genericInstances;
+    }
 
-            var typeParamMap = TypeParameterMap(genericDef, generic);
-            var monoSchema = genericDef.Type is not null
-                ? MapTsTypeToJsonSchema(
-                    TsType.ResolveTypeParams(genericDef.Type, typeParamMap),
-                    $"type '{genericDef.Name}'"
-                )
-                : BuildObjectSchema(
-                    genericDef
-                        .Properties.Select(prop =>
-                            prop with
-                            {
-                                Type = TsType.ResolveTypeParams(prop.Type, typeParamMap),
-                            }
-                        )
-                        .ToList(),
-                    typeName: genericDef.Name
-                );
-            monoSchema["x-rivet-generic"] = new JsonObject
-            {
-                ["name"] = generic.Name,
-                ["typeParams"] = StringArray(genericDef.TypeParameters),
-                ["args"] = ObjectOf(
-                    typeParamMap.Select(kv => (kv.Key, (JsonNode?)GetCSharpTypeName(kv.Value)))
-                ),
-            };
-            schemas[monoName] = monoSchema;
+    private JsonObject BuildMonomorphisedSchema(string monoName, TsType.Generic generic)
+    {
+        if (!_definitions.TryGetValue(generic.Name, out var genericDef))
+        {
+            // A generic instantiation without its template has no properties to
+            // monomorphise. A free-form stand-in would advertise "any object" for a fixed
+            // wire shape, so the contract is refused, naming the producer's omission.
+            throw new RivetUserException(
+                $"error {Diagnostics.GenericTemplateMissing}: generic '{generic.Name}' is instantiated as '{monoName}' "
+                    + "but the contract's types carry no template definition for it. "
+                    + $"Add a '{generic.Name}' definition with its typeParameters to the contract's types "
+                    + "(a --from producer must ship the template of every generic it instantiates)"
+            );
         }
 
-        // Brands as schemas with x-rivet-brand extension
-        foreach (var (name, brand) in _brands)
+        var typeParamMap = TypeParameterMap(genericDef, generic);
+        var monoSchema = genericDef.Type is not null
+            ? MapTsTypeToJsonSchema(
+                TsType.ResolveTypeParams(genericDef.Type, typeParamMap),
+                $"type '{genericDef.Name}'"
+            )
+            : BuildObjectSchema(
+                genericDef
+                    .Properties.Select(prop =>
+                        prop with
+                        {
+                            Type = TsType.ResolveTypeParams(prop.Type, typeParamMap),
+                        }
+                    )
+                    .ToList(),
+                typeName: genericDef.Name
+            );
+        monoSchema["x-rivet-generic"] = new JsonObject
         {
-            if (brand.Metadata?.Provenance == TsTypeProvenance.Synthetic)
-            {
-                continue;
-            }
-            var brandSchema = MapTsTypeToJsonSchema(brand.Inner, $"brand '{name}'");
-            brandSchema["x-rivet-brand"] = name;
-            if (brand.Description is not null)
-            {
-                brandSchema["description"] = brand.Description;
-            }
-            if (_definitions.TryGetValue(name, out var scalarDefinition))
-            {
-                EnrichScalarSchema(brandSchema, scalarDefinition.ScalarMetadata);
-            }
-            schemas[brand.Metadata?.ComponentId ?? name] = brandSchema;
-        }
+            ["name"] = generic.Name,
+            ["typeParams"] = StringArray(genericDef.TypeParameters),
+            ["args"] = ObjectOf(
+                typeParamMap.Select(kv => (kv.Key, (JsonNode?)GetCSharpTypeName(kv.Value)))
+            ),
+        };
+        return monoSchema;
+    }
 
-        // Enums as schemas
-        foreach (var (name, enumType) in _enums)
+    private JsonObject BuildBrandSchema(string name)
+    {
+        var brand = _brands[name];
+        var brandSchema = MapTsTypeToJsonSchema(brand.Inner, $"brand '{name}'");
+        brandSchema["x-rivet-brand"] = name;
+        if (brand.Description is not null)
         {
-            var metadata = GetMetadata(enumType);
-            if (metadata?.Provenance == TsTypeProvenance.Synthetic)
+            brandSchema["description"] = brand.Description;
+        }
+        if (_definitions.TryGetValue(name, out var scalarDefinition))
+        {
+            EnrichScalarSchema(brandSchema, scalarDefinition.ScalarMetadata);
+        }
+        return brandSchema;
+    }
+
+    private JsonObject BuildEnumSchema(string name)
+    {
+        var enumType = _enums[name];
+        var enumSchema = MapTsTypeToJsonSchema(enumType, $"enum '{name}'");
+        if (_definitions.TryGetValue(name, out var scalarDefinition))
+        {
+            if (scalarDefinition.Type is TsType.Nullable)
             {
-                continue;
-            }
-            var enumSchema = MapTsTypeToJsonSchema(enumType, $"enum '{name}'");
-            if (_definitions.TryGetValue(name, out var scalarDefinition))
-            {
-                if (scalarDefinition.Type is TsType.Nullable)
+                enumSchema["type"] = new JsonArray
                 {
-                    enumSchema["type"] = new JsonArray
-                    {
-                        enumType is TsType.IntUnion ? "integer" : "string",
-                        "null",
-                    };
-                }
-                EnrichScalarSchema(enumSchema, scalarDefinition.ScalarMetadata);
+                    enumType is TsType.IntUnion ? "integer" : "string",
+                    "null",
+                };
             }
-            schemas[metadata?.ComponentId ?? name] = enumSchema;
+            EnrichScalarSchema(enumSchema, scalarDefinition.ScalarMetadata);
         }
-
-        return schemas;
+        return enumSchema;
     }
 
     private JsonObject BuildDefinitionSchema(TsTypeDefinition def)

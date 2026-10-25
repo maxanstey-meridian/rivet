@@ -190,48 +190,37 @@ def resolve_once(document, value):
 def normalize_owner_pointer(document, pointer):
     if not str(document.get("swagger", "")).startswith("2."):
         return pointer
-    if pointer == "#/definitions":
-        return "#/components/schemas"
     if pointer.startswith("#/definitions/"):
         return "#/components/schemas/" + pointer[len("#/definitions/"):]
-    if pointer == "#/securityDefinitions":
-        return "#/components/securitySchemes"
     if pointer.startswith("#/securityDefinitions/"):
         return "#/components/securitySchemes/" + pointer[len("#/securityDefinitions/"):]
     return pointer
 
 
 def reviewed_extensions(document, disposition):
+    """The extensions with this disposition on every object that takes extensions, walked by
+    child_shape so names and literal data are never read as owners, as the import's
+    OpenApiProvenanceReader does."""
     result = {}
     swagger2 = str(document.get("swagger", "")).startswith("2.")
 
-    def visit(value, pointer, example_object=False):
-        if isinstance(value, dict):
-            for name, child in value.items():
-                if VENDOR_EXTENSION_DISPOSITIONS.get(name) == disposition:
-                    result[(normalize_owner_pointer(document, pointer), name)] = child
-                elif not swagger2 and name == "examples" and isinstance(child, dict):
-                    for example_name, example in child.items():
-                        visit(
-                            example,
-                            f"{pointer}/examples/{pointer_token(example_name)}",
-                            example_object=True,
-                        )
-                elif not (example_object and name == "value") and not name.startswith(
-                    "x-"
-                ) and name not in (
-                    "const",
-                    "default",
-                    "enum",
-                    "example",
-                    "examples",
-                ):
-                    visit(child, f"{pointer}/{pointer_token(name)}")
-        elif isinstance(value, list):
+    def visit(value, pointer, shape):
+        if isinstance(value, list):
             for index, child in enumerate(value):
-                visit(child, f"{pointer}/{index}")
+                visit(child, f"{pointer}/{index}", "object")
+            return
+        if not isinstance(value, dict):
+            return
+        extensible = has_extensions(shape)
+        for name, child in value.items():
+            if extensible and VENDOR_EXTENSION_DISPOSITIONS.get(name) == disposition:
+                result[(normalize_owner_pointer(document, pointer), name)] = child
+            else:
+                shape_of_child = child_shape(shape, name, child, swagger2)
+                if shape_of_child is not None:
+                    visit(child, f"{pointer}/{pointer_token(name)}", shape_of_child)
 
-    visit(document, "#")
+    visit(document, "#", "object")
     return result
 
 
@@ -572,6 +561,11 @@ STRUCTURAL_SHAPES = ("object", "example", "link")
 
 def is_extension(name):
     return name.startswith("x-")
+
+
+def has_extensions(shape):
+    """Whether an x- key in an object of this shape is an extension rather than a name."""
+    return shape in STRUCTURAL_SHAPES or shape in ("components", "extensible_object_map")
 
 
 def child_shape(owner, key, value, swagger2):

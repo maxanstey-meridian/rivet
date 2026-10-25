@@ -3123,6 +3123,12 @@ public sealed class CoverageCheckerTests
 
             [System.ComponentModel.TypeConverter(typeof(object))]
             public sealed class NoteCursor;
+
+            public static class NoteContextExtensions
+            {
+                public static string? GetTenantId(this HttpContext context) =>
+                    context.Items["tenant"] as string;
+            }
         }
 
         namespace System.ComponentModel
@@ -3490,6 +3496,7 @@ public sealed class CoverageCheckerTests
         "",
         "var id = Microsoft.AspNetCore.Routing.RoutingHttpContextExtensions.GetRouteValue(HttpContext, \"id\");"
     )]
+    [InlineData("mvc", "", "var tenant = HttpContext.GetTenantId();")]
     [InlineData(
         "minimal",
         "IHttpContextAccessor accessor",
@@ -3507,7 +3514,7 @@ public sealed class CoverageCheckerTests
                 ? MvcNotes("Get", "{id}", parameters, terminal, body: body)
                 : MinimalNotes("Get", "/api/notes/{id}", parameters, terminal, body);
 
-        Assert.Empty(InputMismatches(RunCheck(InputContract, handler), "Get"));
+        Assert.Empty(InputMismatches(RunCheck(InputContract, BindingTypes, handler), "Get"));
     }
 
     // The HttpContext's User, RequestAborted and Response carry no input, so touching them
@@ -3816,6 +3823,111 @@ public sealed class CoverageCheckerTests
                 : MinimalNotes("Post", "/api/notes/wrapped", parameters, terminal);
 
         Assert.Empty(InputMismatches(RunCheck(InputContract, handler), "SubmitWrapped"));
+    }
+
+    private const string FormBodyRuleContract = """
+        using Rivet;
+
+        namespace Test;
+
+        [RivetType]
+        public sealed record StampDto(string Id);
+
+        [RivetType]
+        public sealed record StampedForm(string Title, [property: RivetReadOnly] string? Stamp);
+
+        [RivetType]
+        public sealed record RouteNamedFields(string Id, string Title);
+
+        public sealed record RouteNamedEnvelope(string Id, RouteNamedFields Fields);
+
+        [RivetContract]
+        public static class StampsContract
+        {
+            public static readonly RouteDefinition<StampedForm, StampDto> Stamped =
+                Define.Post<StampedForm, StampDto>("/api/notes/stamped").FormEncoded();
+
+            [RivetRequestBody(typeof(RouteNamedFields))]
+            public static readonly RouteDefinition<RouteNamedEnvelope, StampDto> Named =
+                Define.Post<RouteNamedEnvelope, StampDto>("/api/notes/{id}/named").FormEncoded();
+        }
+        """;
+
+    // A readOnly member is never sent in a request, so it's no form field.
+    [Theory]
+    [InlineData("minimal", "[FromForm] string title", false)]
+    [InlineData("mvc", "[FromForm] string title", false)]
+    [InlineData("minimal", "[FromForm] string title, [FromForm] string? stamp", true)]
+    [InlineData("mvc", "[FromForm] string title, [FromForm] string? stamp", true)]
+    public void Form_encoded_body_read_only_member_is_not_a_form_field(
+        string host,
+        string parameters,
+        bool reported
+    )
+    {
+        const string terminal =
+            "StampsContract.Stamped.Bind(new StampedForm(title, null)).Success(new StampDto(\"1\"))";
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Post", "stamped", parameters, terminal)
+                : MinimalNotes("Post", "/api/notes/stamped", parameters, terminal);
+
+        var mismatches = InputMismatches(RunCheck(FormBodyRuleContract, handler), "Stamped");
+
+        if (reported)
+        {
+            var mismatch = Assert.Single(mismatches);
+            Assert.Equal("(not declared)", mismatch.Expected);
+            Assert.Equal("form field 'stamp'", mismatch.Actual);
+        }
+        else
+        {
+            Assert.Empty(mismatches);
+        }
+    }
+
+    // No route value binds a [RivetRequestBody] type's member, so its 'id' is a form field
+    // alongside the route's {id}, as the emitted body carries it. Were it not declared, the
+    // form binding would be told the contract has 'id' only as a route value.
+    [Theory]
+    [InlineData("minimal")]
+    [InlineData("mvc")]
+    public void Form_encoded_RivetRequestBody_member_named_like_a_route_value_is_a_form_field(
+        string host
+    )
+    {
+        const string parameters =
+            "string id, [FromForm(Name = \"id\")] string formId, [FromForm] string title";
+        const string terminal =
+            "StampsContract.Named.Bind(new RouteNamedEnvelope(id, new RouteNamedFields(formId, title)))"
+            + ".Success(new StampDto(\"1\"))";
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Post", "{id}/named", parameters, terminal)
+                : MinimalNotes("Post", "/api/notes/{id}/named", parameters, terminal);
+
+        Assert.Empty(InputMismatches(RunCheck(FormBodyRuleContract, handler), "Named"));
+    }
+
+    // Binding the route's {id} doesn't settle the same-named form field.
+    [Theory]
+    [InlineData("minimal")]
+    [InlineData("mvc")]
+    public void Form_field_named_like_a_bound_route_value_is_still_reported_unbound(string host)
+    {
+        const string parameters = "string id, [FromForm] string title";
+        const string terminal =
+            "StampsContract.Named.Bind(new RouteNamedEnvelope(id, new RouteNamedFields(id, title)))"
+            + ".Success(new StampDto(\"1\"))";
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Post", "{id}/named", parameters, terminal)
+                : MinimalNotes("Post", "/api/notes/{id}/named", parameters, terminal);
+
+        var mismatch = Assert.Single(
+            InputMismatches(RunCheck(FormBodyRuleContract, handler), "Named")
+        );
+        Assert.Equal(("form field 'id'", "(not bound)"), (mismatch.Expected, mismatch.Actual));
     }
 
     [Fact]
